@@ -93,14 +93,9 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "onereach-ai",
-        "repo": "desktop-app",
+        "owner": "wilsr7000",
+        "repo": "onereach_desktop",
         "releaseType": "release"
-      },
-      {
-        "provider": "generic",
-        "url": "https://example.com/updates/",
-        "channel": "latest"
       }
     ]
   },
@@ -111,6 +106,10 @@
   ],
   "author": "",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wilsr7000/onereach_desktop.git"
+  },
   "devDependencies": {
     "@electron/notarize": "^3.0.1",
     "electron": "^35.1.2",
