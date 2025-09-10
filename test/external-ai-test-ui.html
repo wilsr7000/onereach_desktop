@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>External AI Services Test Runner</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        
+        .category {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .category h2 {
+            margin: 0 0 15px 0;
+            color: #444;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .service-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 15px;
+        }
+        
+        .service-card {
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 15px;
+            background: #fafafa;
+            transition: all 0.2s;
+        }
+        
+        .service-card:hover {
+            background: #f0f0f0;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+        }
+        
+        .service-name {
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #333;
+        }
+        
+        .service-url {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 10px;
+            word-break: break-all;
+        }
+        
+        .test-results {
+            margin: 10px 0;
+            font-size: 13px;
+        }
+        
+        .test-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            margin: 3px 0;
+        }
+        
+        .test-status {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        
+        .test-status.pass { background: #4CAF50; }
+        .test-status.fail { background: #f44336; }
+        .test-status.pending { background: #ccc; }
+        .test-status.warning { background: #ff9800; }
+        
+        .buttons {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        
+        button {
+            padding: 6px 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+        
+        .btn-test {
+            background: #2196F3;
+            color: white;
+        }
+        
+        .btn-test:hover {
+            background: #1976D2;
+        }
+        
+        .btn-open {
+            background: #4CAF50;
+            color: white;
+        }
+        
+        .btn-open:hover {
+            background: #388E3C;
+        }
+        
+        .summary {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .summary-stats {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            margin-top: 15px;
+        }
+        
+        .stat-card {
+            text-align: center;
+            padding: 15px;
+            border-radius: 6px;
+            background: #f5f5f5;
+        }
+        
+        .stat-number {
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+        }
+        
+        .stat-label {
+            font-size: 13px;
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        .controls {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+        }
+        
+        .btn-primary {
+            background: #0099ff;
+            color: white;
+            padding: 10px 20px;
+            font-size: 14px;
+        }
+        
+        .btn-primary:hover {
+            background: #0077cc;
+        }
+        
+        .icon {
+            font-size: 20px;
+        }
+        
+        .chat { color: #34c759; }
+        .image { color: #ff9500; }
+        .video { color: #af52de; }
+        .audio { color: #ff2d55; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 External AI Services Test Runner</h1>
+        
+        <div class="controls">
+            <button class="btn-primary" onclick="testAll()">Test All Services</button>
+            <button class="btn-primary" onclick="saveResults()">Save Results</button>
+        </div>
+        
+        <div class="summary">
+            <h3>Test Summary</h3>
+            <div class="summary-stats">
+                <div class="stat-card">
+                    <div class="stat-number" id="total-services">0</div>
+                    <div class="stat-label">Total Services</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="tested-services">0</div>
+                    <div class="stat-label">Tested</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="passed-services">0</div>
+                    <div class="stat-label">Passed</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="failed-services">0</div>
+                    <div class="stat-label">Failed</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Chat Bots -->
+        <div class="category">
+            <h2><span class="icon chat">🤖</span> Chat Bots</h2>
+            <div class="service-grid" id="chatBots"></div>
+        </div>
+        
+        <!-- Image Creators -->
+        <div class="category">
+            <h2><span class="icon image">🎨</span> Image Creators</h2>
+            <div class="service-grid" id="imageCreators"></div>
+        </div>
+        
+        <!-- Video Creators -->
+        <div class="category">
+            <h2><span class="icon video">🎬</span> Video Creators</h2>
+            <div class="service-grid" id="videoCreators"></div>
+        </div>
+        
+        <!-- Audio Generators -->
+        <div class="category">
+            <h2><span class="icon audio">🎵</span> Audio Generators</h2>
+            <div class="service-grid" id="audioGenerators"></div>
+        </div>
+    </div>
+
+    <script>
+        const { ipcRenderer } = require('electron');
+        
+        // Service configurations
+        const services = {
+            chatBots: {
+                chatgpt: { name: 'ChatGPT', url: 'https://chat.openai.com/' },
+                claude: { name: 'Claude', url: 'https://claude.ai/' },
+                perplexity: { name: 'Perplexity', url: 'https://www.perplexity.ai/' },
+                gemini: { name: 'Google Gemini', url: 'https://gemini.google.com/' }
+            },
+            imageCreators: {
+                midjourney: { name: 'Midjourney', url: 'https://www.midjourney.com/' },
+                stableDiffusion: { name: 'Stable Diffusion', url: 'https://stablediffusionweb.com/' },
+                ideogram: { name: 'Ideogram', url: 'https://ideogram.ai/' },
+                dalle: { name: 'DALL-E 3', url: 'https://labs.openai.com/' },
+                firefly: { name: 'Adobe Firefly', url: 'https://firefly.adobe.com/' }
+            },
+            videoCreators: {
+                veo3: { name: 'Google Veo3', url: 'https://veo.google.com/' },
+                runway: { name: 'Runway', url: 'https://runwayml.com/' },
+                pika: { name: 'Pika', url: 'https://pika.art/' },
+                synthesia: { name: 'Synthesia', url: 'https://www.synthesia.io/' },
+                heygen: { name: 'HeyGen', url: 'https://www.heygen.com/' }
+            },
+            audioGenerators: {
+                suno: { name: 'Suno AI', url: 'https://suno.ai/' },
+                udio: { name: 'Udio', url: 'https://www.udio.com/' },
+                elevenlabs: { name: 'ElevenLabs', url: 'https://elevenlabs.io/' },
+                playht: { name: 'Play.ht', url: 'https://play.ht/' }
+            }
+        };
+        
+        const testResults = {};
+        
+        // Initialize UI
+        function initializeUI() {
+            let totalServices = 0;
+            
+            Object.entries(services).forEach(([category, categoryServices]) => {
+                const container = document.getElementById(category);
+                
+                Object.entries(categoryServices).forEach(([key, service]) => {
+                    totalServices++;
+                    const card = createServiceCard(category, key, service);
+                    container.appendChild(card);
+                });
+            });
+            
+            document.getElementById('total-services').textContent = totalServices;
+        }
+        
+        // Create service card
+        function createServiceCard(category, key, service) {
+            const card = document.createElement('div');
+            card.className = 'service-card';
+            card.id = `${category}-${key}`;
+            
+            card.innerHTML = `
+                <div class="service-name">${service.name}</div>
+                <div class="service-url">${service.url}</div>
+                <div class="test-results">
+                    <div class="test-item">
+                        <span class="test-status pending" id="${category}-${key}-url"></span>
+                        <span>URL Loads</span>
+                    </div>
+                    <div class="test-item">
+                        <span class="test-status pending" id="${category}-${key}-https"></span>
+                        <span>HTTPS Secure</span>
+                    </div>
+                    <div class="test-item">
+                        <span class="test-status pending" id="${category}-${key}-login"></span>
+                        <span>Login Available</span>
+                    </div>
+                    <div class="test-item">
+                        <span class="test-status pending" id="${category}-${key}-google"></span>
+                        <span>Google Login</span>
+                    </div>
+                    <div class="test-item">
+                        <span class="test-status pending" id="${category}-${key}-responsive"></span>
+                        <span>Page Responsive</span>
+                    </div>
+                </div>
+                <div class="buttons">
+                    <button class="btn-test" onclick="testService('${category}', '${key}')">Test</button>
+                    <button class="btn-open" onclick="openService('${service.url}', '${service.name}')">Open</button>
+                </div>
+            `;
+            
+            return card;
+        }
+        
+        // Test single service
+        async function testService(category, key) {
+            const service = services[category][key];
+            console.log(`Testing ${service.name}...`);
+            
+            const result = await ipcRenderer.invoke('test-service', category, key, service);
+            testResults[`${category}-${key}`] = result;
+            
+            // Update UI
+            updateTestStatus(`${category}-${key}-url`, result.tests.urlLoads);
+            updateTestStatus(`${category}-${key}-https`, result.tests.httpsSecure);
+            updateTestStatus(`${category}-${key}-login`, result.tests.loginVisible);
+            updateTestStatus(`${category}-${key}-google`, result.tests.googleLoginAvailable);
+            updateTestStatus(`${category}-${key}-responsive`, result.tests.pageResponsive);
+            
+            updateSummary();
+        }
+        
+        // Update test status indicator
+        function updateTestStatus(id, status) {
+            const element = document.getElementById(id);
+            if (element) {
+                element.classList.remove('pending', 'pass', 'fail', 'warning');
+                if (status === true) {
+                    element.classList.add('pass');
+                } else if (status === false) {
+                    element.classList.add('fail');
+                } else if (status === 'optional') {
+                    element.classList.add('warning');
+                } else {
+                    element.classList.add('pending');
+                }
+            }
+        }
+        
+        // Test all services
+        async function testAll() {
+            for (const [category, categoryServices] of Object.entries(services)) {
+                for (const [key, service] of Object.entries(categoryServices)) {
+                    await testService(category, key);
+                    // Small delay between tests
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+            }
+        }
+        
+        // Open service in new window
+        async function openService(url, name) {
+            await ipcRenderer.invoke('open-service', url, name);
+        }
+        
+        // Update summary statistics
+        function updateSummary() {
+            const tested = Object.keys(testResults).length;
+            let passed = 0;
+            let failed = 0;
+            
+            Object.values(testResults).forEach(result => {
+                const allPassed = result.tests.urlLoads && 
+                                 result.tests.httpsSecure && 
+                                 (result.tests.loginVisible || result.tests.loginVisible === 'optional');
+                if (allPassed) {
+                    passed++;
+                } else {
+                    failed++;
+                }
+            });
+            
+            document.getElementById('tested-services').textContent = tested;
+            document.getElementById('passed-services').textContent = passed;
+            document.getElementById('failed-services').textContent = failed;
+        }
+        
+        // Save test results
+        async function saveResults() {
+            const filepath = await ipcRenderer.invoke('save-results', testResults);
+            alert(`Results saved to: ${filepath}`);
+        }
+        
+        // Initialize on load
+        initializeUI();
+    </script>
+</body>
+</html> 

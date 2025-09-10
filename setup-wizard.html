@@ -1,0 +1,3641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' * https://*.onereach.ai https://*.api.onereach.ai; style-src 'self' 'unsafe-inline' * https://*.onereach.ai; style-src-elem 'self' 'unsafe-inline' * https://*.onereach.ai; script-src 'self' 'unsafe-inline' 'unsafe-eval' * https://*.onereach.ai; connect-src 'self' * https://*.onereach.ai https://*.api.onereach.ai; img-src 'self' data: blob: * https://*.onereach.ai; font-src 'self' data: * https://*.onereach.ai; media-src 'self' * https://*.onereach.ai; object-src 'none'; base-uri 'self'">
+    <title>Manage Your Digital Workers & Agents - Onereach.ai</title>
+    <style>
+        body {
+            background-color: #141414;
+            color: #ffffff;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            margin: 0;
+            padding: 20px;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .wizard-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: #1a1a1a;
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            min-height: 500px;
+            position: relative;
+        }
+
+        .step {
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .step.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        h2 {
+            font-size: 24px;
+            margin: 0 0 20px;
+            color: #fff;
+        }
+
+        .progress-bar {
+            height: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+            margin-bottom: 30px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .progress {
+            height: 100%;
+            background: #0099ff;
+            transition: width 0.3s ease;
+        }
+
+        .input-group {
+            margin-bottom: 24px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        input[type="text"], input[type="url"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            background-color: rgba(255, 255, 255, 0.03);
+            color: #ffffff;
+            font-size: 14px;
+            box-sizing: border-box;
+            transition: all 0.2s ease;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #0099ff;
+            background-color: rgba(255, 255, 255, 0.05);
+            box-shadow: 0 0 0 4px rgba(0, 153, 255, 0.1);
+        }
+
+        .button-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .button-container .right-buttons {
+            display: flex;
+            gap: 8px;
+        }
+
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            min-width: 100px;
+        }
+
+        .next-btn {
+            background-color: #0099ff;
+            color: white;
+        }
+
+        .next-btn:hover {
+            background-color: #0088ee;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 153, 255, 0.3);
+        }
+
+        .back-btn {
+            background-color: rgba(255, 255, 255, 0.06);
+            color: white;
+            border: 2px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .back-btn:hover {
+            background-color: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.12);
+        }
+
+        .gsx-links, .rss-feeds {
+            margin-top: 20px;
+        }
+
+        .gsx-links {
+            margin-top: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+            padding-right: 10px;
+        }
+
+        .gsx-links::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .gsx-links::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 3px;
+        }
+
+        .gsx-links::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(0, 0, 0, 0.2);
+            border-radius: 3px;
+        }
+
+        .gsx-links::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .link-item {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 12px;
+            background: rgba(255, 255, 255, 0.03);
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .add-btn {
+            width: 100%;
+            padding: 12px;
+            margin-top: 12px;
+            background-color: rgba(255, 255, 255, 0.06);
+            color: white;
+            border: 2px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .add-btn:hover {
+            background-color: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.12);
+        }
+
+        .validation-message {
+            color: #ff3b30;
+            font-size: 12px;
+            margin-top: 8px;
+            display: none;
+        }
+
+        .validation-message.show {
+            display: block;
+        }
+
+        .validation-message.success {
+            color: #34c759;
+        }
+
+        .environment-info {
+            margin-top: 16px;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .environment-info label {
+            font-weight: 500;
+            margin-right: 8px;
+        }
+
+        .info-row {
+            display: flex;
+            align-items: center;
+        }
+
+        .info-row label {
+            min-width: 120px;
+        }
+
+        .url-group {
+            position: relative;
+            margin-bottom: 20px;
+        }
+
+        .url-label-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 4px;
+        }
+
+        .info-icon {
+            cursor: help;
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 16px;
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .info-icon:hover::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            left: 24px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            white-space: nowrap;
+            z-index: 1000;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+        }
+
+        .preferences-container {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            margin-top: 20px;
+        }
+
+        .preference-group {
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 12px;
+            padding: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .checkbox-label {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            cursor: pointer;
+        }
+
+        .checkbox-label input[type="checkbox"] {
+            margin-top: 4px;
+            width: 18px;
+            height: 18px;
+            border-radius: 4px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            appearance: none;
+            -webkit-appearance: none;
+            cursor: pointer;
+            position: relative;
+            transition: all 0.2s ease;
+        }
+
+        .checkbox-label input[type="checkbox"]:checked {
+            background-color: #0099ff;
+            border-color: #0099ff;
+            box-shadow: 0 0 0 2px rgba(0, 153, 255, 0.2);
+        }
+
+        .checkbox-label input[type="checkbox"]:checked::after {
+            content: '✓';
+            position: absolute;
+            color: white;
+            font-size: 12px;
+            left: 3px;
+            top: 0px;
+        }
+
+        .checkbox-label span {
+            font-weight: 500;
+            font-size: 16px;
+            color: #ffffff;
+        }
+
+        .checkbox-label small {
+            display: block;
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 13px;
+            margin-top: 4px;
+        }
+
+        .checkbox-label:hover span {
+            color: #0099ff;
+        }
+
+        /* Apply same scrollbar style to the entire body */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(0, 0, 0, 0.2);
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .select-all-container {
+            margin-bottom: 16px;
+        }
+
+        .select-all-btn {
+            background: rgba(255, 255, 255, 0.06);
+            border: 2px solid rgba(255, 255, 255, 0.08);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s ease;
+        }
+
+        .select-all-btn:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.12);
+        }
+
+        .select-all-btn.all-selected {
+            background: #0099ff;
+            border-color: #0099ff;
+        }
+
+        .url-group .info-icon[data-tooltip] {
+            max-width: 300px;
+            white-space: normal;
+            line-height: 1.4;
+            position: relative;
+        }
+
+        .url-group .info-icon[data-tooltip]::after {
+            width: 280px;
+            white-space: pre-wrap;
+            line-height: 1.4;
+            padding: 10px;
+            border-radius: 6px;
+            background: rgba(0, 0, 0, 0.9);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+        }
+
+        #gsx-account-id {
+            font-family: monospace;
+            letter-spacing: 0.5px;
+        }
+
+        .gsx-info {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.6);
+            margin-top: 4px;
+            padding-left: 4px;
+        }
+
+        .environment-selector {
+            margin-bottom: 24px;
+            padding: 16px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        
+        .select-wrapper {
+            position: relative;
+            margin-top: 8px;
+        }
+        
+        .select-wrapper::after {
+            content: '▼';
+            font-size: 12px;
+            position: absolute;
+            right: 15px;
+            top: 12px;
+            color: rgba(255, 255, 255, 0.5);
+            pointer-events: none;
+        }
+        
+        select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            background-color: rgba(255, 255, 255, 0.03);
+            color: #ffffff;
+            font-size: 14px;
+            appearance: none;
+            -webkit-appearance: none;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        select:focus {
+            outline: none;
+            border-color: #0099ff;
+            background-color: rgba(255, 255, 255, 0.05);
+            box-shadow: 0 0 0 4px rgba(0, 153, 255, 0.1);
+        }
+
+        /* Custom GSX link styles */
+        .custom-link {
+            background-color: rgba(0, 153, 255, 0.05);
+            border: 1px dashed rgba(0, 153, 255, 0.2);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .custom-url, .custom-label {
+            flex: 1;
+            padding: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            color: #ffffff;
+        }
+
+        .save-custom-btn, .remove-custom-btn {
+            padding: 8px 12px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s ease;
+        }
+
+        .save-custom-btn {
+            background-color: #0099ff;
+            color: white;
+        }
+
+        .save-custom-btn:hover {
+            background-color: #0088ee;
+        }
+
+        .remove-custom-btn {
+            background-color: rgba(255, 0, 0, 0.2);
+            color: #ff3b30;
+            padding: 8px;
+            font-size: 14px;
+        }
+
+        .remove-custom-btn:hover {
+            background-color: rgba(255, 0, 0, 0.3);
+        }
+
+        /* Choice card styles */
+        .choice-container {
+            display: flex;
+            gap: 16px;
+            margin: 40px 0;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .choice-card {
+            flex: 1;
+            max-width: 260px;
+            min-width: 240px;
+            padding: 24px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 2px solid rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-align: center;
+        }
+
+        .choice-card:hover {
+            background: rgba(255, 255, 255, 0.06);
+            border-color: #0099ff;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(0, 153, 255, 0.2);
+        }
+
+        .choice-icon {
+            font-size: 42px;
+            margin-bottom: 14px;
+        }
+
+        .choice-card h3 {
+            font-size: 18px;
+            margin: 0 0 10px;
+            color: #ffffff;
+        }
+
+        .choice-card p {
+            margin: 0;
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        /* External agent styles */
+        .bot-type-selector {
+            margin-bottom: 24px;
+        }
+
+        .bot-type-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 12px;
+            margin-top: 12px;
+        }
+
+        .bot-type-btn {
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 2px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            color: #ffffff;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-size: 14px;
+        }
+
+        .bot-type-btn:hover {
+            background: rgba(255, 255, 255, 0.06);
+            border-color: rgba(255, 255, 255, 0.12);
+        }
+
+        .bot-type-btn.selected {
+            background: #0099ff;
+            border-color: #0099ff;
+            color: white;
+        }
+
+        .external-bot-info {
+            margin-top: 20px;
+            padding: 16px;
+            background: rgba(0, 153, 255, 0.1);
+            border: 1px solid rgba(0, 153, 255, 0.2);
+            border-radius: 12px;
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        /* Manager view styles */
+        .environments-list {
+            margin: 20px 0;
+            max-height: 400px;
+            overflow-y: auto;
+            padding-right: 10px;
+        }
+
+        .environments-list::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .environments-list::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 3px;
+        }
+
+        .environments-list::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(0, 0, 0, 0.2);
+            border-radius: 3px;
+        }
+
+        .environments-list::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .environment-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px;
+            margin-bottom: 12px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            transition: all 0.2s ease;
+        }
+
+        .environment-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: rgba(255, 255, 255, 0.12);
+        }
+
+        .environment-info {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .environment-item-info {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .environment-title {
+            font-size: 16px;
+            font-weight: 500;
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .environment-type {
+            font-size: 12px;
+            padding: 2px 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        .environment-type.idw {
+            background: rgba(0, 153, 255, 0.2);
+            color: #0099ff;
+        }
+
+        .environment-type.external {
+            background: rgba(52, 199, 89, 0.2);
+            color: #34c759;
+        }
+
+        .environment-type.image {
+            background: rgba(255, 149, 0, 0.2);
+            color: #ff9500;
+        }
+
+        .environment-type.video {
+            background: rgba(175, 82, 222, 0.2);
+            color: #af52de;
+        }
+
+        .environment-type.audio {
+            background: rgba(255, 45, 85, 0.2);
+            color: #ff2d55;
+        }
+
+        .environment-type.ui-design {
+            background: rgba(88, 86, 214, 0.2);
+            color: #5856d6;
+        }
+
+        .environment-details {
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        .environment-shortcut {
+            font-size: 11px;
+            color: #0099ff;
+            margin-top: 4px;
+            font-family: monospace;
+            background: rgba(0, 153, 255, 0.1);
+            padding: 2px 6px;
+            border-radius: 4px;
+            display: inline-block;
+        }
+
+        .environment-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .action-btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 8px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            background: rgba(255, 255, 255, 0.06);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .action-btn:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.12);
+        }
+
+        .action-btn.edit {
+            background: rgba(0, 153, 255, 0.1);
+            border-color: rgba(0, 153, 255, 0.2);
+            color: #0099ff;
+        }
+
+        .action-btn.edit:hover {
+            background: rgba(0, 153, 255, 0.2);
+            border-color: rgba(0, 153, 255, 0.3);
+        }
+
+        .action-btn.delete {
+            background: rgba(255, 59, 48, 0.1);
+            border-color: rgba(255, 59, 48, 0.2);
+            color: #ff3b30;
+        }
+
+        .action-btn.delete:hover {
+            background: rgba(255, 59, 48, 0.2);
+            border-color: rgba(255, 59, 48, 0.3);
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        .empty-state h3 {
+            font-size: 18px;
+            margin: 0 0 8px;
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .empty-state p {
+            margin: 0 0 20px;
+            font-size: 14px;
+        }
+
+        .add-button-container {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+
+        .primary-add-btn {
+            background-color: #0099ff;
+            color: white;
+            border: none;
+            border-radius: 12px;
+            padding: 12px 24px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .primary-add-btn:hover {
+            background-color: #0088ee;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 153, 255, 0.3);
+        }
+
+        /* Audio category tabs */
+        .audio-category-tabs {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+            margin-bottom: 24px;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 4px;
+            border-radius: 12px;
+        }
+
+        .category-tab {
+            flex: 1;
+            padding: 10px 16px;
+            background: transparent;
+            border: none;
+            border-radius: 8px;
+            color: rgba(255, 255, 255, 0.6);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-size: 14px;
+            white-space: nowrap;
+        }
+
+        .category-tab:hover {
+            background: rgba(255, 255, 255, 0.05);
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        .category-tab.active {
+            background: #0099ff;
+            color: white;
+            font-weight: 500;
+        }
+
+        .right-buttons {
+            display: flex;
+            gap: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="wizard-container">
+        <div class="progress-bar">
+            <div class="progress" style="width: 33%"></div>
+        </div>
+
+        <div class="step active" id="step0">
+            <h2>Manage Your Digital Workers & Agents</h2>
+            
+            <div class="environments-list" id="environments-list">
+                <!-- Will be populated with existing environments and agents -->
+            </div>
+            
+            <div class="add-button-container">
+                <button class="add-btn primary-add-btn" onclick="showAddChoice()">
+                    <span style="font-size: 20px; margin-right: 8px;">+</span>
+                    Add New Digital Worker or Agent
+                </button>
+            </div>
+            
+            <div class="button-container">
+                <button class="back-btn" onclick="closeWizard()">Close</button>
+            </div>
+        </div>
+
+        <div class="step" id="step-choice">
+            <h2>What would you like to add?</h2>
+            <div class="choice-container">
+                <div class="choice-card" onclick="chooseAddType('idw')">
+                    <div class="choice-icon">🏢</div>
+                    <h3>OneReach Digital Worker</h3>
+                    <p>Add a OneReach.ai IDW (Intelligent Digital Worker) with GSX access</p>
+                </div>
+                <div class="choice-card" onclick="chooseAddType('external')">
+                    <div class="choice-icon">🤖</div>
+                    <h3>External AI Agent</h3>
+                    <p>Add external AI services like ChatGPT, Claude, Perplexity, or other AI agents</p>
+                </div>
+                <div class="choice-card" onclick="chooseAddType('image')">
+                    <div class="choice-icon">🎨</div>
+                    <h3>AI Image Creator</h3>
+                    <p>Add AI image generation tools like Midjourney, DALL-E, Stable Diffusion, or others</p>
+                </div>
+                <div class="choice-card" onclick="chooseAddType('video')">
+                    <div class="choice-icon">🎬</div>
+                    <h3>AI Video Creator</h3>
+                    <p>Add AI video generation tools like Veo3, Runway, Pika, or others</p>
+                </div>
+                <div class="choice-card" onclick="chooseAddType('audio')">
+                    <div class="choice-icon">🎵</div>
+                    <h3>AI Audio Generator</h3>
+                    <p>Add AI audio tools for music, sound effects, or voice narration</p>
+                </div>
+                <div class="choice-card" onclick="chooseAddType('ui-design')">
+                    <div class="choice-icon">🎨</div>
+                    <h3>AI UI Design</h3>
+                    <p>Add AI-powered UI/UX design tools like Stitch, Figma AI, or other design assistants</p>
+                </div>
+            </div>
+            <div class="button-container">
+                <button class="back-btn" onclick="backToManager()">Back</button>
+            </div>
+        </div>
+
+        <div class="step" id="step1">
+            <h2>Setup Your Digital Worker</h2>
+            <div class="url-group">
+                <div class="url-label-container">
+                    <label for="idw-home-url">IDW Home URL</label>
+                    <span class="info-icon" data-tooltip="Your IDW dashboard/home page URL">ⓘ</span>
+                </div>
+                <input type="url" id="idw-home-url" 
+                       placeholder="Enter your IDW home URL (e.g., https://idw.edison.onereach.ai/idw-marvin-dev)" 
+                       oninput="validateIDWUrls()">
+                <div class="validation-message" id="idw-home-validation-message"></div>
+            </div>
+            
+            <div class="url-group">
+                <div class="url-label-container">
+                    <label for="idw-chat-url">Chat URL</label>
+                    <span class="info-icon" data-tooltip="The URL to your actual chat interface with your IDW">ⓘ</span>
+                </div>
+                <input type="url" id="idw-chat-url" 
+                       placeholder="Enter your chat URL (e.g., https://flow-desc.chat.edison.onereach.ai/...)" 
+                       oninput="validateIDWUrls()">
+                <div class="validation-message" id="idw-chat-validation-message"></div>
+            </div>
+
+            <div class="input-group">
+                <label for="gsx-account-id">GSX Account ID (optional):</label>
+                <input type="text" id="gsx-account-id" placeholder="e.g., 35254342-4a2e-475b-aec1-18547e517e29" oninput="validateGSXAccountId()">
+                <div class="validation-message" id="gsx-account-validation-message"></div>
+                <div class="gsx-info">Leave empty if you don't have a GSX account</div>
+            </div>
+            
+            <div class="input-group">
+                <label for="idw-global-shortcut">Global Shortcut (optional):</label>
+                <input type="text" id="idw-global-shortcut" placeholder="e.g., CmdOrCtrl+Shift+1" oninput="validateIDWShortcut()">
+                <div class="validation-message" id="idw-shortcut-validation-message"></div>
+                <div class="gsx-info">Set a keyboard shortcut to quickly open this IDW from anywhere</div>
+            </div>
+
+            <div class="environment-info" id="environment-info" style="display: none;">
+                <div class="info-row">
+                    <label>Environment:</label>
+                    <span id="detected-environment"></span>
+                </div>
+                <div class="info-row">
+                    <label>IDW Label:</label>
+                    <span id="detected-label"></span>
+                </div>
+            </div>
+            <div class="button-container">
+                <button class="back-btn" onclick="backToManager()">Back</button>
+                <div style="display: flex; gap: 8px;">
+                <button class="next-btn" id="idw-next-btn" onclick="validateAndProceed()" disabled>Next</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="step" id="step2">
+            <h2>Configure GSX Links</h2>
+            <div class="gsx-links">
+                <!-- GSX Links will be populated dynamically based on the environment -->
+            </div>
+            <button class="add-btn" onclick="addCustomGSXLink()">+ Add Custom GSX Link</button>
+            <div class="button-container">
+                <button class="back-btn" onclick="prevStep()">Back</button>
+                <button class="next-btn" onclick="finish()">Finish</button>
+            </div>
+        </div>
+
+
+
+        <!-- External Agent Setup Flow -->
+        <div class="step" id="step-external">
+            <h2>Add External AI Agent</h2>
+            <div class="bot-type-selector">
+                <label>Select Agent Type:</label>
+                <div class="bot-type-grid">
+                    <button class="bot-type-btn" onclick="selectBotType('chatgpt')">ChatGPT</button>
+                    <button class="bot-type-btn" onclick="selectBotType('claude')">Claude</button>
+                    <button class="bot-type-btn" onclick="selectBotType('perplexity')">Perplexity</button>
+                    <button class="bot-type-btn" onclick="selectBotType('gemini')">Google Gemini</button>
+                    <button class="bot-type-btn" onclick="selectBotType('custom')">Custom Agent</button>
+                </div>
+            </div>
+
+            <div class="url-group">
+                <div class="url-label-container">
+                    <label for="bot-name">Agent Name</label>
+                    <span class="info-icon" data-tooltip="Display name for this agent in the menu">ⓘ</span>
+                </div>
+                <input type="text" id="bot-name" 
+                       placeholder="e.g., ChatGPT, Claude, My Custom Agent" 
+                       oninput="validateExternalBot()">
+                <div class="validation-message" id="bot-name-validation-message"></div>
+            </div>
+
+            <div class="url-group">
+                <div class="url-label-container">
+                    <label for="bot-chat-url">Chat URL</label>
+                    <span class="info-icon" data-tooltip="The URL where you can chat with this agent">ⓘ</span>
+                </div>
+                <input type="url" id="bot-chat-url" 
+                       placeholder="e.g., https://chat.openai.com/" 
+                       oninput="validateExternalBot()">
+                <div class="validation-message" id="bot-chat-validation-message"></div>
+            </div>
+
+            <div class="url-group">
+                <div class="url-label-container">
+                    <label for="bot-api-url">API Documentation URL (Optional)</label>
+                    <span class="info-icon" data-tooltip="Link to the agent's API documentation or developer portal">ⓘ</span>
+                </div>
+                <input type="url" id="bot-api-url" 
+                       placeholder="e.g., https://platform.openai.com/docs/api-reference" 
+                       oninput="validateExternalBot()">
+                <div class="validation-message" id="bot-api-validation-message"></div>
+            </div>
+
+            <div class="input-group">
+                <label for="bot-global-shortcut">Global Shortcut (optional):</label>
+                <input type="text" id="bot-global-shortcut" placeholder="e.g., CmdOrCtrl+Shift+G" oninput="validateBotShortcut()">
+                <div class="validation-message" id="bot-shortcut-validation-message"></div>
+                <div class="gsx-info">Set a keyboard shortcut to quickly open this agent from anywhere</div>
+            </div>
+
+            <div class="external-bot-info" id="bot-type-info" style="display: none;">
+                <!-- Agent-specific information will be shown here -->
+            </div>
+
+            <div class="button-container">
+                <button class="back-btn" onclick="backToChoice()">Back</button>
+                <div class="right-buttons">
+                    <button class="remove-custom-btn" id="delete-bot-btn" style="display: none;" onclick="deleteCurrentBot()">Delete Agent</button>
+                    <button class="next-btn" id="external-bot-save-btn" onclick="saveExternalBot()" disabled>Save Agent</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Image Creator Setup Flow -->
+        <div class="step" id="step-image">
+            <h2>Add AI Image Creator</h2>
+            <div class="bot-type-selector">
+                <label>Select Image Creator:</label>
+                <div class="bot-type-grid">
+                    <button class="bot-type-btn" onclick="selectImageCreatorType('midjourney')">Midjourney</button>
+                    <button class="bot-type-btn" onclick="selectImageCreatorType('stable-diffusion')">Stable Diffusion</button>
+                    <button class="bot-type-btn" onclick="selectImageCreatorType('ideogram')">Ideogram</button>
+                    <button class="bot-type-btn" onclick="selectImageCreatorType('openai-image')">OpenAI Image</button>
+                    <button class="bot-type-btn" onclick="selectImageCreatorType('firefly')">Adobe Firefly</button>
+                    <button class="bot-type-btn" onclick="selectImageCreatorType('custom')">Custom</button>
+                </div>
+            </div>
+
+            <div class="url-group">
+                <div class="url-label-container">
+                    <label for="image-creator-name">Image Creator Name</label>
+                    <span class="info-icon" data-tooltip="Display name for this image creator in the menu">ⓘ</span>
+                </div>
+                <input type="text" id="image-creator-name" 
+                       placeholder="e.g., Midjourney, DALL-E, My Image Tool" 
+                       oninput="validateImageCreator()">
+                <div class="validation-message" id="image-creator-name-validation-message"></div>
+            </div>
+
+            <div class="url-group">
+                <div class="url-label-container">
+                    <label for="image-creator-url">Image Creator URL</label>
+                    <span class="info-icon" data-tooltip="The URL where you can create images with this tool">ⓘ</span>
+                </div>
+                <input type="url" id="image-creator-url" 
+                       placeholder="e.g., https://www.midjourney.com/" 
+                       oninput="validateImageCreator()">
+                <div class="validation-message" id="image-creator-url-validation-message"></div>
+            </div>
+
+            <div class="url-group">
+                <div class="url-label-container">
+                    <label for="image-creator-api-url">API Documentation URL (Optional)</label>
+                    <span class="info-icon" data-tooltip="Link to the image creator's API documentation or developer portal">ⓘ</span>
+                </div>
+                <input type="url" id="image-creator-api-url" 
+                       placeholder="e.g., https://docs.midjourney.com/" 
+                       oninput="validateImageCreator()">
+                <div class="validation-message" id="image-creator-api-validation-message"></div>
+            </div>
+
+            <div class="external-bot-info" id="image-creator-type-info" style="display: none;">
+                <!-- Image creator-specific information will be shown here -->
+            </div>
+
+            <div class="button-container">
+                <button class="back-btn" onclick="backToChoice()">Back</button>
+                <div class="right-buttons">
+                    <button class="remove-custom-btn" id="delete-image-creator-btn" style="display: none;" onclick="deleteCurrentImageCreator()">Delete</button>
+                    <button class="next-btn" id="image-creator-save-btn" onclick="saveImageCreator()" disabled>Save</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Video Creator Setup Flow -->
+        <div class="step" id="step-video">
+            <h2>Add AI Video Creator</h2>
+            <div class="bot-type-selector">
+                <label>Select Video Creator:</label>
+                <div class="bot-type-grid">
+                    <button class="bot-type-btn" onclick="selectVideoCreatorType('veo3')">Google Veo3</button>
+                    <button class="bot-type-btn" onclick="selectVideoCreatorType('flow')">Google Flow</button>
+                    <button class="bot-type-btn" onclick="selectVideoCreatorType('runway')">Runway</button>
+                    <button class="bot-type-btn" onclick="selectVideoCreatorType('pika')">Pika</button>
+                    <button class="bot-type-btn" onclick="selectVideoCreatorType('synthesia')">Synthesia</button>
+                    <button class="bot-type-btn" onclick="selectVideoCreatorType('heygen')">HeyGen</button>
+                    <button class="bot-type-btn" onclick="selectVideoCreatorType('custom')">Custom</button>
+                </div>
+            </div>
+
+            <div class="url-group">
+                <div class="url-label-container">
+                    <label for="video-creator-name">Video Creator Name</label>
+                    <span class="info-icon" data-tooltip="Display name for this video creator in the menu">ⓘ</span>
+                </div>
+                <input type="text" id="video-creator-name" 
+                       placeholder="e.g., Veo3, Runway, My Video Tool" 
+                       oninput="validateVideoCreator()">
+                <div class="validation-message" id="video-creator-name-validation-message"></div>
+            </div>
+
+            <div class="url-group">
+                <div class="url-label-container">
+                    <label for="video-creator-url">Video Creator URL</label>
+                    <span class="info-icon" data-tooltip="The URL where you can create videos with this tool">ⓘ</span>
+                </div>
+                <input type="url" id="video-creator-url" 
+                       placeholder="e.g., https://gemini.google.com/" 
+                       oninput="validateVideoCreator()">
+                <div class="validation-message" id="video-creator-url-validation-message"></div>
+            </div>
+
+            <div class="url-group">
+                <div class="url-label-container">
+                    <label for="video-creator-api-url">API Documentation URL (Optional)</label>
+                    <span class="info-icon" data-tooltip="Link to the video creator's API documentation or developer portal">ⓘ</span>
+                </div>
+                <input type="url" id="video-creator-api-url" 
+                       placeholder="e.g., https://developers.google.com/veo" 
+                       oninput="validateVideoCreator()">
+                <div class="validation-message" id="video-creator-api-validation-message"></div>
+            </div>
+
+            <div class="external-bot-info" id="video-creator-type-info" style="display: none;">
+                <!-- Video creator-specific information will be shown here -->
+            </div>
+
+            <div class="button-container">
+                <button class="back-btn" onclick="backToChoice()">Back</button>
+                <div class="right-buttons">
+                    <button class="remove-custom-btn" id="delete-video-creator-btn" style="display: none;" onclick="deleteCurrentVideoCreator()">Delete</button>
+                    <button class="next-btn" id="video-creator-save-btn" onclick="saveVideoCreator()" disabled>Save</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Audio Generator Setup Flow -->
+        <div class="step" id="step-audio">
+            <h2>Add AI Audio Generator</h2>
+            <div class="bot-type-selector">
+                <label>Select Audio Category:</label>
+                <div class="audio-category-tabs">
+                    <button class="category-tab active" onclick="selectAudioCategory('music')">🎵 Music</button>
+                    <button class="category-tab" onclick="selectAudioCategory('effects')">🔊 Sound Effects</button>
+                    <button class="category-tab" onclick="selectAudioCategory('narration')">🎙️ Narration & Voice</button>
+                    <button class="category-tab" onclick="selectAudioCategory('custom')">⚙️ Custom</button>
+                </div>
+            </div>
+
+            <div class="bot-type-selector">
+                <label id="audio-type-label">Select Music Generator:</label>
+                <div class="bot-type-grid" id="audio-type-grid">
+                    <!-- Buttons will be populated dynamically based on the category -->
+                </div>
+            </div>
+
+            <div class="url-group">
+                <div class="url-label-container">
+                    <label for="audio-generator-name">Audio Generator Name</label>
+                    <span class="info-icon" data-tooltip="Display name for this audio generator in the menu">ⓘ</span>
+                </div>
+                <input type="text" id="audio-generator-name" 
+                       placeholder="e.g., Suno AI, Udio, My Audio Tool" 
+                       oninput="validateAudioGenerator()">
+                <div class="validation-message" id="audio-generator-name-validation-message"></div>
+            </div>
+
+            <div class="url-group">
+                <div class="url-label-container">
+                    <label for="audio-generator-url">Audio Generator URL</label>
+                    <span class="info-icon" data-tooltip="The URL where you can generate audio with this tool">ⓘ</span>
+                </div>
+                <input type="url" id="audio-generator-url" 
+                       placeholder="e.g., https://www.suno.ai/" 
+                       oninput="validateAudioGenerator()">
+                <div class="validation-message" id="audio-generator-url-validation-message"></div>
+            </div>
+
+            <div class="url-group">
+                <div class="url-label-container">
+                    <label for="audio-generator-api-url">API Documentation URL (Optional)</label>
+                    <span class="info-icon" data-tooltip="Link to the audio generator's API documentation or developer portal">ⓘ</span>
+                </div>
+                <input type="url" id="audio-generator-api-url" 
+                       placeholder="e.g., https://docs.suno.ai/" 
+                       oninput="validateAudioGenerator()">
+                <div class="validation-message" id="audio-generator-api-validation-message"></div>
+            </div>
+
+            <div class="external-bot-info" id="audio-generator-type-info" style="display: none;">
+                <!-- Audio generator-specific information will be shown here -->
+            </div>
+
+            <div class="button-container">
+                <button class="back-btn" onclick="backToChoice()">Back</button>
+                <div class="right-buttons">
+                    <button class="remove-custom-btn" id="delete-audio-generator-btn" style="display: none;" onclick="deleteCurrentAudioGenerator()">Delete</button>
+                    <button class="next-btn" id="audio-generator-save-btn" onclick="saveAudioGenerator()" disabled>Save</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- UI Design Setup Flow -->
+        <div class="step" id="step-ui-design">
+            <h2>Add AI UI Design Tool</h2>
+            <div class="bot-type-selector">
+                <label>Select UI Design Tool:</label>
+                <div class="bot-type-grid">
+                    <button class="bot-type-btn" onclick="selectUIDesignType('stitch')">Stitch</button>
+                    <button class="bot-type-btn" onclick="selectUIDesignType('figma-ai')">Figma AI</button>
+                    <button class="bot-type-btn" onclick="selectUIDesignType('uizard')">Uizard</button>
+                    <button class="bot-type-btn" onclick="selectUIDesignType('galileo')">Galileo AI</button>
+                    <button class="bot-type-btn" onclick="selectUIDesignType('custom')">Custom</button>
+                </div>
+            </div>
+
+            <div class="url-group">
+                <div class="url-label-container">
+                    <label for="ui-design-name">UI Design Tool Name</label>
+                    <span class="info-icon" data-tooltip="Display name for this UI design tool in the menu">ⓘ</span>
+                </div>
+                <input type="text" id="ui-design-name" 
+                       placeholder="e.g., Stitch, Figma AI, My Design Tool" 
+                       oninput="validateUIDesign()">
+                <div class="validation-message" id="ui-design-name-validation-message"></div>
+            </div>
+
+            <div class="url-group">
+                <div class="url-label-container">
+                    <label for="ui-design-url">UI Design Tool URL</label>
+                    <span class="info-icon" data-tooltip="The URL where you can use this UI design tool">ⓘ</span>
+                </div>
+                <input type="url" id="ui-design-url" 
+                       placeholder="e.g., https://stitch.ai/" 
+                       oninput="validateUIDesign()">
+                <div class="validation-message" id="ui-design-url-validation-message"></div>
+            </div>
+
+            <div class="url-group">
+                <div class="url-label-container">
+                    <label for="ui-design-api-url">API Documentation URL (Optional)</label>
+                    <span class="info-icon" data-tooltip="Link to the UI design tool's API documentation or developer portal">ⓘ</span>
+                </div>
+                <input type="url" id="ui-design-api-url" 
+                       placeholder="e.g., https://docs.stitch.ai/" 
+                       oninput="validateUIDesign()">
+                <div class="validation-message" id="ui-design-api-validation-message"></div>
+            </div>
+
+            <div class="external-bot-info" id="ui-design-type-info" style="display: none;">
+                <!-- UI design tool-specific information will be shown here -->
+            </div>
+
+            <div class="button-container">
+                <button class="back-btn" onclick="backToChoice()">Back</button>
+                <div class="right-buttons">
+                    <button class="remove-custom-btn" id="delete-ui-design-btn" style="display: none;" onclick="deleteCurrentUIDesign()">Delete</button>
+                    <button class="next-btn" id="ui-design-save-btn" onclick="saveUIDesign()" disabled>Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Debug window.api availability
+        console.log('Setup wizard script starting...');
+        console.log('window.api available:', window.api !== undefined);
+        if (window.api) {
+            console.log('API methods:', Object.keys(window.api));
+        } else {
+            console.error('ERROR: window.api is not available!');
+        }
+
+        let validatedIDWData = null;
+        let selectedPreferences = [];
+        let allSelected = false;
+        let initializationCompleted = false;
+        let addType = 'idw'; // 'idw' or 'external' or 'image'
+        let selectedBotType = null;
+        let selectedImageCreatorType = null;
+        let selectedVideoCreatorType = null;
+        let selectedAudioCategory = null;
+        let selectedAudioGeneratorType = null;
+        let selectedUIDesignType = null;
+
+        // Predefined bot configurations
+        // Agent type configurations
+        const botConfigs = {
+            chatgpt: {
+                name: 'ChatGPT',
+                chatUrl: 'https://chat.openai.com/',
+                apiUrl: 'https://platform.openai.com/docs/api-reference',
+                info: 'OpenAI\'s ChatGPT - Advanced AI assistant with GPT-4 capabilities'
+            },
+            claude: {
+                name: 'Claude',
+                chatUrl: 'https://claude.ai/',
+                apiUrl: 'https://docs.anthropic.com/claude/reference/getting-started-with-the-api',
+                info: 'Anthropic\'s Claude - AI assistant focused on being helpful, harmless, and honest'
+            },
+            perplexity: {
+                name: 'Perplexity',
+                chatUrl: 'https://www.perplexity.ai/',
+                apiUrl: 'https://docs.perplexity.ai/',
+                info: 'Perplexity AI - Search-focused AI that provides sourced answers'
+            },
+            gemini: {
+                name: 'Google Gemini',
+                chatUrl: 'https://gemini.google.com/',
+                apiUrl: 'https://ai.google.dev/docs',
+                info: 'Google\'s Gemini - Multimodal AI model with advanced reasoning'
+            }
+        };
+
+        // Predefined image creator configurations
+        const imageCreatorConfigs = {
+            midjourney: {
+                name: 'Midjourney',
+                url: 'https://www.midjourney.com/',
+                apiUrl: 'https://docs.midjourney.com/',
+                info: 'Best for artistic and stylized image creation. High-quality artistic outputs, Discord-based interaction, popular among creatives.'
+            },
+            'stable-diffusion': {
+                name: 'Stable Diffusion',
+                url: 'https://stablediffusionweb.com/',
+                apiUrl: 'https://stability.ai/developers',
+                info: 'Best for open-source and highly customizable image generation. Supports local deployment, extensive customization, developer-friendly.'
+            },
+            ideogram: {
+                name: 'Ideogram',
+                url: 'https://ideogram.ai/',
+                apiUrl: 'https://ideogram.ai/api',
+                info: 'Best for creating images with clear and readable text. Specializes in generating images with legible text, ideal for graphic design.'
+            },
+            'openai-image': {
+                name: 'OpenAI Image (DALL-E 3)',
+                url: 'https://labs.openai.com/',
+                apiUrl: 'https://platform.openai.com/docs/guides/images',
+                info: 'Best for simple and intuitive text-to-image generation. Dedicated interface focused exclusively on images, excellent quality.'
+            },
+            firefly: {
+                name: 'Adobe Firefly',
+                url: 'https://firefly.adobe.com/',
+                apiUrl: 'https://developer.adobe.com/firefly-apis/docs/',
+                info: 'Best for commercial-safe AI image generation. Trained on Adobe Stock and licensed content, integrated with Creative Cloud, ideal for professional use.'
+            }
+        };
+
+        // Predefined video creator configurations
+        const videoCreatorConfigs = {
+            veo3: {
+                name: 'Google Veo3',
+                url: 'https://gemini.google.com/',
+                apiUrl: 'https://deepmind.google/models/veo/',
+                info: 'Google\'s advanced AI video generation model. Access through Gemini with AI Pro/Ultra subscription. Creates 4K videos with native audio generation.'
+            },
+            flow: {
+                name: 'Google Flow',
+                url: 'https://flow.google.com/',
+                apiUrl: 'https://deepmind.google/models/veo/',
+                info: 'Google\'s AI filmmaking tool powered by Veo3. Professional video creation with camera controls, scene builder, and asset management.'
+            },
+            runway: {
+                name: 'Runway',
+                url: 'https://runwayml.com/',
+                apiUrl: 'https://docs.runwayml.com/',
+                info: 'Professional video editing and generation platform. Offers Gen-2 for text/image to video, plus advanced editing tools.'
+            },
+            pika: {
+                name: 'Pika',
+                url: 'https://pika.art/',
+                apiUrl: 'https://docs.pika.art/',
+                info: 'User-friendly AI video generator. Specializes in creating animated videos from images and text with simple controls.'
+            },
+            synthesia: {
+                name: 'Synthesia',
+                url: 'https://www.synthesia.io/',
+                apiUrl: 'https://docs.synthesia.io/',
+                info: 'AI avatar video platform. Creates professional videos with realistic AI presenters speaking in multiple languages.'
+            },
+            heygen: {
+                name: 'HeyGen',
+                url: 'https://www.heygen.com/',
+                apiUrl: 'https://docs.heygen.com/docs',
+                info: 'AI spokesperson video creator. Generate videos with customizable AI avatars for marketing, training, and communication.'
+            }
+        };
+
+        // Predefined audio generator configurations
+        const audioGeneratorConfigs = {
+            music: {
+                suno: {
+                    name: 'Suno AI',
+                    url: 'https://suno.ai/',
+                    apiUrl: 'https://docs.suno.ai/',
+                    info: 'Create original music with AI. Generate songs in any style with vocals and instruments.'
+                },
+                udio: {
+                    name: 'Udio',
+                    url: 'https://www.udio.com/',
+                    apiUrl: 'https://docs.udio.com/',
+                    info: 'AI music generation platform. Create professional-quality music tracks from text descriptions.'
+                },
+                musicgen: {
+                    name: 'MusicGen',
+                    url: 'https://huggingface.co/spaces/facebook/MusicGen',
+                    apiUrl: 'https://github.com/facebookresearch/audiocraft',
+                    info: 'Generate music from text descriptions. Open-source model from Meta for creating instrumental music.'
+                },
+                mubert: {
+                    name: 'Mubert',
+                    url: 'https://mubert.com/',
+                    apiUrl: 'https://mubert.com/developers',
+                    info: 'AI-generated royalty-free music. Create endless streams of original music for any purpose.'
+                }
+            },
+            effects: {
+                elevenlabs_sfx: {
+                    name: 'ElevenLabs Sound Effects',
+                    url: 'https://elevenlabs.io/sound-effects',
+                    apiUrl: 'https://docs.elevenlabs.io/',
+                    info: 'AI-generated sound effects. Create custom sound effects from text descriptions.'
+                },
+                audiogen: {
+                    name: 'AudioGen',
+                    url: 'https://huggingface.co/spaces/facebook/AudioGen',
+                    apiUrl: 'https://github.com/facebookresearch/audiocraft',
+                    info: 'Generate sound effects with AI. Create environmental sounds and effects from text.'
+                },
+                sfxr: {
+                    name: 'sfxr',
+                    url: 'https://sfxr.me/',
+                    apiUrl: '',
+                    info: 'Retro sound effect generator. Create 8-bit style sound effects for games and projects.'
+                }
+            },
+            narration: {
+                elevenlabs: {
+                    name: 'ElevenLabs',
+                    url: 'https://elevenlabs.io/',
+                    apiUrl: 'https://docs.elevenlabs.io/',
+                    info: 'Natural AI voice generation. Industry-leading voice synthesis with emotional range and multiple languages.'
+                },
+                murf: {
+                    name: 'Murf AI',
+                    url: 'https://murf.ai/',
+                    apiUrl: 'https://murf.ai/resources/api-documentation/',
+                    info: 'Studio-quality AI voiceovers. Professional voice generation for videos, podcasts, and presentations.'
+                },
+                playht: {
+                    name: 'Play.ht',
+                    url: 'https://play.ht/',
+                    apiUrl: 'https://docs.play.ht/',
+                    info: 'Ultra-realistic AI voices. Convert text to speech with the most human-like AI voices available.'
+                },
+                speechify: {
+                    name: 'Speechify Studio',
+                    url: 'https://speechify.com/studio/',
+                    apiUrl: 'https://docs.speechify.com/',
+                    info: 'AI voice cloning and narration. Create custom voices and professional narrations.'
+                },
+                descript: {
+                    name: 'Descript',
+                    url: 'https://www.descript.com/',
+                    apiUrl: 'https://docs.descript.com/',
+                    info: 'AI voice synthesis and editing. All-in-one audio/video editing with AI voice capabilities.'
+                }
+            }
+        };
+
+        // Predefined UI design tool configurations
+        const uiDesignConfigs = {
+            stitch: {
+                name: 'Stitch',
+                url: 'https://stitch.ai/',
+                apiUrl: 'https://docs.stitch.ai/',
+                info: 'AI-powered UI design tool that generates complete design systems and components from text descriptions. Creates production-ready designs with code.'
+            },
+            'figma-ai': {
+                name: 'Figma AI',
+                url: 'https://www.figma.com/ai',
+                apiUrl: 'https://www.figma.com/developers',
+                info: 'Figma\'s built-in AI assistant for design generation, prototyping, and design system creation. Integrated with the popular design platform.'
+            },
+            uizard: {
+                name: 'Uizard',
+                url: 'https://uizard.io/',
+                apiUrl: 'https://docs.uizard.io/',
+                info: 'AI-powered design tool that converts sketches and wireframes into high-fidelity designs. Great for rapid prototyping and UI generation.'
+            },
+            galileo: {
+                name: 'Galileo AI',
+                url: 'https://www.galileo.ai/',
+                apiUrl: 'https://docs.galileo.ai/',
+                info: 'AI design assistant that creates UI designs from text descriptions. Generates complete design systems with components and layouts.'
+            }
+        };
+
+        // Function to choose add type
+        function chooseAddType(type) {
+            addType = type;
+                document.getElementById('step-choice').classList.remove('active');
+            
+            switch(type) {
+                case 'idw':
+                    document.getElementById('step1').classList.add('active');
+                    break;
+                case 'external':
+                document.getElementById('step-external').classList.add('active');
+                    break;
+                case 'image':
+                document.getElementById('step-image').classList.add('active');
+                    break;
+                case 'video':
+                document.getElementById('step-video').classList.add('active');
+                    break;
+                case 'audio':
+                document.getElementById('step-audio').classList.add('active');
+                    // Initialize with music category
+                    selectedAudioCategory = 'music';
+                    // Manually trigger the category selection to populate the grid
+                    setTimeout(() => {
+                        populateAudioGeneratorButtons('music');
+                    }, 100);
+                    break;
+                case 'ui-design':
+                    document.getElementById('step-ui-design').classList.add('active');
+                    break;
+            }
+        }
+
+        // Function to go back to choice screen
+        function backToChoice() {
+            // Hide all steps
+            document.querySelectorAll('.step').forEach(step => {
+                step.classList.remove('active');
+            });
+            // Show choice step
+            document.getElementById('step-choice').classList.add('active');
+        }
+
+        // Function to select bot type
+        function selectBotType(type) {
+            selectedBotType = type;
+            
+            // Update button states
+            document.querySelectorAll('.bot-type-btn').forEach(btn => {
+                btn.classList.remove('selected');
+            });
+            event.target.classList.add('selected');
+            
+            // Pre-fill form if it's a known bot type
+            if (botConfigs[type]) {
+                const config = botConfigs[type];
+                document.getElementById('bot-name').value = config.name;
+                document.getElementById('bot-chat-url').value = config.chatUrl;
+                document.getElementById('bot-api-url').value = config.apiUrl;
+                
+                // Show bot info
+                const infoDiv = document.getElementById('bot-type-info');
+                infoDiv.innerHTML = `<strong>${config.name}:</strong> ${config.info}`;
+                infoDiv.style.display = 'block';
+            } else {
+                // Clear form for custom agent
+                document.getElementById('bot-name').value = '';
+                document.getElementById('bot-chat-url').value = '';
+                document.getElementById('bot-api-url').value = '';
+                
+                const infoDiv = document.getElementById('bot-type-info');
+                infoDiv.innerHTML = '<strong>Custom Agent:</strong> Add any AI agent or service with a web interface';
+                infoDiv.style.display = 'block';
+            }
+            
+            // Validate
+            validateExternalBot();
+        }
+
+        // Function to validate external agent form
+        function validateExternalBot() {
+            const name = document.getElementById('bot-name').value.trim();
+            const chatUrl = document.getElementById('bot-chat-url').value.trim();
+            const apiUrl = document.getElementById('bot-api-url').value.trim();
+            
+            const nameValidation = document.getElementById('bot-name-validation-message');
+            const chatValidation = document.getElementById('bot-chat-validation-message');
+            const apiValidation = document.getElementById('bot-api-validation-message');
+            const saveButton = document.getElementById('external-bot-save-btn');
+            
+            let isValid = true;
+            
+            // Reset validation messages
+            nameValidation.className = 'validation-message';
+            chatValidation.className = 'validation-message';
+            apiValidation.className = 'validation-message';
+            
+            // Validate name
+            if (!name) {
+                nameValidation.textContent = 'Bot name is required';
+                nameValidation.classList.add('show');
+                isValid = false;
+            }
+            
+            // Validate chat URL
+            if (!chatUrl) {
+                chatValidation.textContent = 'Chat URL is required';
+                chatValidation.classList.add('show');
+                isValid = false;
+            } else {
+                try {
+                    new URL(chatUrl);
+                } catch (e) {
+                    chatValidation.textContent = 'Invalid URL format';
+                    chatValidation.classList.add('show');
+                    isValid = false;
+                }
+            }
+            
+            // Validate API URL if provided
+            if (apiUrl) {
+                try {
+                    new URL(apiUrl);
+                } catch (e) {
+                    apiValidation.textContent = 'Invalid URL format';
+                    apiValidation.classList.add('show');
+                    isValid = false;
+                }
+            }
+            
+            saveButton.disabled = !isValid;
+            return isValid;
+        }
+
+        // Function to save external agent
+        function saveExternalBot() {
+            if (!validateExternalBot()) return;
+            
+            const name = document.getElementById('bot-name').value.trim();
+            const chatUrl = document.getElementById('bot-chat-url').value.trim();
+            const apiUrl = document.getElementById('bot-api-url').value.trim();
+            const saveBtn = document.getElementById('external-bot-save-btn');
+            const botId = saveBtn.dataset.botId;
+            
+            // Load existing external agents
+            let externalBots = [];
+            try {
+                const botsJson = localStorage.getItem('externalBots');
+                if (botsJson) {
+                    externalBots = JSON.parse(botsJson);
+                }
+            } catch (error) {
+                console.error('Error loading external agents:', error);
+            }
+            
+            const globalShortcut = document.getElementById('bot-global-shortcut').value.trim();
+            
+            if (botId) {
+                // Update existing bot
+                const botIndex = externalBots.findIndex(bot => bot.id === botId);
+                if (botIndex >= 0) {
+                    externalBots[botIndex] = {
+                        ...externalBots[botIndex],
+                        name: name,
+                        chatUrl: chatUrl,
+                        apiUrl: apiUrl,
+                        globalShortcut: globalShortcut,
+                        updatedAt: new Date().toISOString()
+                    };
+                }
+            } else {
+                // Create new bot
+                const externalBot = {
+                    id: `external-${Date.now()}`,
+                    type: 'external',
+                    name: name,
+                    chatUrl: chatUrl,
+                    apiUrl: apiUrl,
+                    globalShortcut: globalShortcut,
+                    botType: selectedBotType || 'custom',
+                    createdAt: new Date().toISOString()
+                };
+                externalBots.push(externalBot);
+            }
+            
+            // Save to localStorage
+            localStorage.setItem('externalBots', JSON.stringify(externalBots));
+            
+            // Save to file via IPC
+            if (window.api && window.api.send) {
+                window.api.send('save-external-bots', externalBots);
+            }
+            
+            // Show success message
+            alert(`${name} has been ${botId ? 'updated' : 'added'} successfully!`);
+            
+            // Refresh menu
+            if (window.api && window.api.send) {
+                window.api.send('refresh-menu');
+            }
+            
+            // Return to manager view
+            backToManager();
+        }
+
+        // Function to select image creator type
+        function selectImageCreatorType(type) {
+            selectedImageCreatorType = type;
+            
+            // Update button states
+            document.querySelectorAll('#step-image .bot-type-btn').forEach(btn => {
+                btn.classList.remove('selected');
+            });
+            event.target.classList.add('selected');
+            
+            // Pre-fill form if it's a known image creator type
+            if (imageCreatorConfigs[type]) {
+                const config = imageCreatorConfigs[type];
+                document.getElementById('image-creator-name').value = config.name;
+                document.getElementById('image-creator-url').value = config.url;
+                document.getElementById('image-creator-api-url').value = config.apiUrl || '';
+                
+                // Show info
+                const infoDiv = document.getElementById('image-creator-type-info');
+                infoDiv.innerHTML = `<strong>${config.name}:</strong> ${config.info}`;
+                infoDiv.style.display = 'block';
+            } else {
+                // Clear form for custom image creator
+                document.getElementById('image-creator-name').value = '';
+                document.getElementById('image-creator-url').value = '';
+                document.getElementById('image-creator-api-url').value = '';
+                
+                const infoDiv = document.getElementById('image-creator-type-info');
+                infoDiv.innerHTML = '<strong>Custom Image Creator:</strong> Add any AI image generation tool with a web interface';
+                infoDiv.style.display = 'block';
+            }
+            
+            // Validate
+            validateImageCreator();
+        }
+
+        // Function to validate image creator form
+        function validateImageCreator() {
+            const name = document.getElementById('image-creator-name').value.trim();
+            const url = document.getElementById('image-creator-url').value.trim();
+            const apiUrl = document.getElementById('image-creator-api-url').value.trim();
+            
+            const nameValidation = document.getElementById('image-creator-name-validation-message');
+            const urlValidation = document.getElementById('image-creator-url-validation-message');
+            const apiValidation = document.getElementById('image-creator-api-validation-message');
+            const saveButton = document.getElementById('image-creator-save-btn');
+            
+            let isValid = true;
+            
+            // Reset validation messages
+            nameValidation.className = 'validation-message';
+            urlValidation.className = 'validation-message';
+            apiValidation.className = 'validation-message';
+            
+            // Validate name
+            if (!name) {
+                nameValidation.textContent = 'Image creator name is required';
+                nameValidation.classList.add('show');
+                isValid = false;
+            }
+            
+            // Validate URL
+            if (!url) {
+                urlValidation.textContent = 'Image creator URL is required';
+                urlValidation.classList.add('show');
+                isValid = false;
+            } else {
+                try {
+                    new URL(url);
+                } catch (e) {
+                    urlValidation.textContent = 'Invalid URL format';
+                    urlValidation.classList.add('show');
+                    isValid = false;
+                }
+            }
+            
+            // Validate API URL if provided
+            if (apiUrl) {
+                try {
+                    new URL(apiUrl);
+                } catch (e) {
+                    apiValidation.textContent = 'Invalid URL format';
+                    apiValidation.classList.add('show');
+                    isValid = false;
+                }
+            }
+            
+            saveButton.disabled = !isValid;
+            return isValid;
+        }
+
+        // Function to save image creator
+        function saveImageCreator() {
+            if (!validateImageCreator()) return;
+            
+            const name = document.getElementById('image-creator-name').value.trim();
+            const url = document.getElementById('image-creator-url').value.trim();
+            const apiUrl = document.getElementById('image-creator-api-url').value.trim();
+            const saveBtn = document.getElementById('image-creator-save-btn');
+            const creatorId = saveBtn.dataset.creatorId;
+            
+            // Load existing image creators
+            let imageCreators = [];
+            try {
+                const creatorsJson = localStorage.getItem('imageCreators');
+                if (creatorsJson) {
+                    imageCreators = JSON.parse(creatorsJson);
+                }
+            } catch (error) {
+                console.error('Error loading image creators:', error);
+            }
+            
+            if (creatorId) {
+                // Update existing image creator
+                const creatorIndex = imageCreators.findIndex(creator => creator.id === creatorId);
+                if (creatorIndex >= 0) {
+                    imageCreators[creatorIndex] = {
+                        ...imageCreators[creatorIndex],
+                        name: name,
+                        url: url,
+                        apiUrl: apiUrl,
+                        updatedAt: new Date().toISOString()
+                    };
+                }
+            } else {
+                // Create new image creator
+                const imageCreator = {
+                    id: `image-${Date.now()}`,
+                    type: 'image',
+                    name: name,
+                    url: url,
+                    apiUrl: apiUrl,
+                    creatorType: selectedImageCreatorType || 'custom',
+                    createdAt: new Date().toISOString()
+                };
+                imageCreators.push(imageCreator);
+            }
+            
+            // Save to localStorage
+            localStorage.setItem('imageCreators', JSON.stringify(imageCreators));
+            
+            // Save to file via IPC
+            if (window.api && window.api.send) {
+                window.api.send('save-image-creators', imageCreators);
+            }
+            
+            // Show success message
+            alert(`${name} has been ${creatorId ? 'updated' : 'added'} successfully!`);
+            
+            // Refresh menu
+            if (window.api && window.api.send) {
+                window.api.send('refresh-menu');
+            }
+            
+            // Return to manager view
+            backToManager();
+        }
+
+        // Function to delete current image creator
+        function deleteCurrentImageCreator() {
+            const saveBtn = document.getElementById('image-creator-save-btn');
+            const creatorId = saveBtn.dataset.creatorId;
+            
+            if (!creatorId) {
+                console.error('No creator ID found for deletion');
+                return;
+            }
+            
+            if (!confirm('Are you sure you want to delete this image creator?')) {
+                return;
+            }
+            
+            try {
+                // Get current image creators
+                const creatorsJson = localStorage.getItem('imageCreators');
+                if (creatorsJson) {
+                    let creators = JSON.parse(creatorsJson);
+                    
+                    // Find and remove the creator
+                    creators = creators.filter(creator => creator.id !== creatorId);
+                    
+                    // Save updated creators
+                    localStorage.setItem('imageCreators', JSON.stringify(creators));
+                    
+                    // Update main process
+                    if (window.api && window.api.send) {
+                        window.api.send('save-image-creators', creators);
+                        window.api.send('refresh-menu');
+                    }
+                    
+                    // Show success message
+                    alert('Image creator deleted successfully');
+                    
+                    // Return to manager view
+                    backToManager();
+                }
+            } catch (error) {
+                console.error('Error deleting image creator:', error);
+                alert('Error deleting image creator: ' + error.message);
+            }
+        }
+
+        // Function to select video creator type
+        function selectVideoCreatorType(type) {
+            selectedVideoCreatorType = type;
+            
+            // Update button states
+            document.querySelectorAll('#step-video .bot-type-btn').forEach(btn => {
+                btn.classList.remove('selected');
+            });
+            event.target.classList.add('selected');
+            
+            // Pre-fill form if it's a known video creator type
+            if (videoCreatorConfigs[type]) {
+                const config = videoCreatorConfigs[type];
+                document.getElementById('video-creator-name').value = config.name;
+                document.getElementById('video-creator-url').value = config.url;
+                document.getElementById('video-creator-api-url').value = config.apiUrl || '';
+                
+                // Show info
+                const infoDiv = document.getElementById('video-creator-type-info');
+                infoDiv.innerHTML = `<strong>${config.name}:</strong> ${config.info}`;
+                infoDiv.style.display = 'block';
+            } else {
+                // Clear form for custom video creator
+                document.getElementById('video-creator-name').value = '';
+                document.getElementById('video-creator-url').value = '';
+                document.getElementById('video-creator-api-url').value = '';
+                
+                const infoDiv = document.getElementById('video-creator-type-info');
+                infoDiv.innerHTML = '<strong>Custom Video Creator:</strong> Add any AI video generation tool with a web interface';
+                infoDiv.style.display = 'block';
+            }
+            
+            // Validate
+            validateVideoCreator();
+        }
+
+        // Function to select audio category
+        function selectAudioCategory(category) {
+            selectedAudioCategory = category;
+            
+            // Update category tabs
+            document.querySelectorAll('.category-tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Find the clicked tab and make it active
+            if (event && event.target) {
+            event.target.classList.add('active');
+            } else {
+                // If called programmatically, find the tab by category
+                document.querySelectorAll('.category-tab').forEach(tab => {
+                    if (tab.textContent.toLowerCase().includes(category)) {
+                        tab.classList.add('active');
+                    }
+                });
+            }
+            
+            // Update the label
+            const label = document.getElementById('audio-type-label');
+            const categoryLabels = {
+                'music': 'Select Music Generator:',
+                'effects': 'Select Sound Effect Generator:',
+                'narration': 'Select Voice/Narration Tool:',
+                'custom': 'Custom Audio Generator'
+            };
+            label.textContent = categoryLabels[category];
+            
+            // Populate the audio type grid
+            populateAudioGeneratorButtons(category);
+            
+            // Clear form and hide info
+                document.getElementById('audio-generator-name').value = '';
+                document.getElementById('audio-generator-url').value = '';
+                document.getElementById('audio-generator-api-url').value = '';
+                document.getElementById('audio-generator-type-info').style.display = 'none';
+            
+            // Validate
+            validateAudioGenerator();
+        }
+
+        // Function to select audio generator type
+        function selectAudioGeneratorType(type) {
+            selectedAudioGeneratorType = type;
+            
+            // Update button states
+            document.querySelectorAll('#audio-type-grid .bot-type-btn').forEach(btn => {
+                btn.classList.remove('selected');
+            });
+            event.target.classList.add('selected');
+            
+            // Get the config from the current category
+            const config = audioGeneratorConfigs[selectedAudioCategory][type];
+            if (config) {
+                document.getElementById('audio-generator-name').value = config.name;
+                document.getElementById('audio-generator-url').value = config.url;
+                document.getElementById('audio-generator-api-url').value = config.apiUrl || '';
+                
+                // Show info
+                const infoDiv = document.getElementById('audio-generator-type-info');
+                infoDiv.innerHTML = `<strong>${config.name}:</strong> ${config.info}`;
+                infoDiv.style.display = 'block';
+            }
+            
+            // Validate
+            validateAudioGenerator();
+        }
+
+        // Function to validate audio generator form
+        function validateAudioGenerator() {
+            const name = document.getElementById('audio-generator-name').value.trim();
+            const url = document.getElementById('audio-generator-url').value.trim();
+            const apiUrl = document.getElementById('audio-generator-api-url').value.trim();
+            
+            const nameValidation = document.getElementById('audio-generator-name-validation-message');
+            const urlValidation = document.getElementById('audio-generator-url-validation-message');
+            const apiValidation = document.getElementById('audio-generator-api-validation-message');
+            const saveButton = document.getElementById('audio-generator-save-btn');
+            
+            let isValid = true;
+            
+            // Reset validation messages
+            nameValidation.className = 'validation-message';
+            urlValidation.className = 'validation-message';
+            apiValidation.className = 'validation-message';
+            
+            // Validate name
+            if (!name) {
+                nameValidation.textContent = 'Audio generator name is required';
+                nameValidation.classList.add('show');
+                isValid = false;
+            }
+            
+            // Validate URL
+            if (!url) {
+                urlValidation.textContent = 'Audio generator URL is required';
+                urlValidation.classList.add('show');
+                isValid = false;
+            } else {
+                try {
+                    new URL(url);
+                } catch (e) {
+                    urlValidation.textContent = 'Invalid URL format';
+                    urlValidation.classList.add('show');
+                    isValid = false;
+                }
+            }
+            
+            // Validate API URL if provided
+            if (apiUrl) {
+                try {
+                    new URL(apiUrl);
+                } catch (e) {
+                    apiValidation.textContent = 'Invalid URL format';
+                    apiValidation.classList.add('show');
+                    isValid = false;
+                }
+            }
+            
+            saveButton.disabled = !isValid;
+            return isValid;
+        }
+
+        // Function to save video creator
+        function saveVideoCreator() {
+            if (!validateVideoCreator()) return;
+            
+            const name = document.getElementById('video-creator-name').value.trim();
+            const url = document.getElementById('video-creator-url').value.trim();
+            const apiUrl = document.getElementById('video-creator-api-url').value.trim();
+            const saveBtn = document.getElementById('video-creator-save-btn');
+            const creatorId = saveBtn.dataset.creatorId;
+            
+            // Load existing video creators
+            let videoCreators = [];
+            try {
+                const creatorsJson = localStorage.getItem('videoCreators');
+                if (creatorsJson) {
+                    videoCreators = JSON.parse(creatorsJson);
+                }
+            } catch (error) {
+                console.error('Error loading video creators:', error);
+            }
+            
+            if (creatorId) {
+                // Update existing video creator
+                const creatorIndex = videoCreators.findIndex(creator => creator.id === creatorId);
+                if (creatorIndex >= 0) {
+                    videoCreators[creatorIndex] = {
+                        ...videoCreators[creatorIndex],
+                        name: name,
+                        url: url,
+                        apiUrl: apiUrl,
+                        updatedAt: new Date().toISOString()
+                    };
+                }
+            } else {
+                // Create new video creator
+                const videoCreator = {
+                    id: `video-${Date.now()}`,
+                    type: 'video',
+                    name: name,
+                    url: url,
+                    apiUrl: apiUrl,
+                    creatorType: selectedVideoCreatorType || 'custom',
+                    createdAt: new Date().toISOString()
+                };
+                videoCreators.push(videoCreator);
+            }
+            
+            // Save to localStorage
+            localStorage.setItem('videoCreators', JSON.stringify(videoCreators));
+            
+            // Save to file via IPC
+            if (window.api && window.api.send) {
+                window.api.send('save-video-creators', videoCreators);
+            }
+            
+            // Show success message
+            alert(`${name} has been ${creatorId ? 'updated' : 'added'} successfully!`);
+            
+            // Refresh menu
+            if (window.api && window.api.send) {
+                window.api.send('refresh-menu');
+            }
+            
+            // Return to manager view
+            backToManager();
+        }
+
+        // Function to delete current video creator
+        function deleteCurrentVideoCreator() {
+            const saveBtn = document.getElementById('video-creator-save-btn');
+            const creatorId = saveBtn.dataset.creatorId;
+            
+            if (!creatorId) {
+                console.error('No creator ID found for deletion');
+                return;
+            }
+            
+            if (!confirm('Are you sure you want to delete this video creator?')) {
+                return;
+            }
+            
+            try {
+                // Get current video creators
+                const creatorsJson = localStorage.getItem('videoCreators');
+                if (creatorsJson) {
+                    let creators = JSON.parse(creatorsJson);
+                    
+                    // Find and remove the creator
+                    creators = creators.filter(creator => creator.id !== creatorId);
+                    
+                    // Save updated creators
+                    localStorage.setItem('videoCreators', JSON.stringify(creators));
+                    
+                    // Update main process
+                    if (window.api && window.api.send) {
+                        window.api.send('save-video-creators', creators);
+                        window.api.send('refresh-menu');
+                    }
+                    
+                    // Show success message
+                    alert('Video creator deleted successfully');
+                    
+                    // Return to manager view
+                    backToManager();
+                }
+            } catch (error) {
+                console.error('Error deleting video creator:', error);
+                alert('Error deleting video creator: ' + error.message);
+            }
+        }
+
+        // Function to save audio generator
+        function saveAudioGenerator() {
+            if (!validateAudioGenerator()) return;
+            
+            const name = document.getElementById('audio-generator-name').value.trim();
+            const url = document.getElementById('audio-generator-url').value.trim();
+            const apiUrl = document.getElementById('audio-generator-api-url').value.trim();
+            const saveBtn = document.getElementById('audio-generator-save-btn');
+            const generatorId = saveBtn.dataset.generatorId;
+            
+            // Load existing audio generators
+            let audioGenerators = [];
+            try {
+                const generatorsJson = localStorage.getItem('audioGenerators');
+                if (generatorsJson) {
+                    audioGenerators = JSON.parse(generatorsJson);
+                }
+            } catch (error) {
+                console.error('Error loading audio generators:', error);
+            }
+            
+            if (generatorId) {
+                // Update existing generator
+                const generatorIndex = audioGenerators.findIndex(gen => gen.id === generatorId);
+                if (generatorIndex >= 0) {
+                    audioGenerators[generatorIndex] = {
+                        ...audioGenerators[generatorIndex],
+                        name: name,
+                        url: url,
+                        apiUrl: apiUrl,
+                        category: selectedAudioCategory || 'custom',
+                        updatedAt: new Date().toISOString()
+                    };
+                }
+            } else {
+                // Create new generator
+                const audioGenerator = {
+                    id: `audio-${Date.now()}`,
+                    type: 'audio',
+                    name: name,
+                    url: url,
+                    apiUrl: apiUrl,
+                    category: selectedAudioCategory || 'custom',
+                    generatorType: selectedAudioGeneratorType || 'custom',
+                    createdAt: new Date().toISOString()
+                };
+                audioGenerators.push(audioGenerator);
+            }
+            
+            // Save to localStorage
+            localStorage.setItem('audioGenerators', JSON.stringify(audioGenerators));
+            
+            // Save to file via IPC
+            if (window.api && window.api.send) {
+                window.api.send('save-audio-generators', audioGenerators);
+                window.api.send('refresh-menu');
+            }
+            
+            // Show success message
+            alert(`${name} has been ${generatorId ? 'updated' : 'added'} successfully!`);
+            
+            // Return to manager view
+            backToManager();
+        }
+
+        // Function to delete current audio generator
+        function deleteCurrentAudioGenerator() {
+            const saveBtn = document.getElementById('audio-generator-save-btn');
+            const generatorId = saveBtn.dataset.generatorId;
+            
+            if (!generatorId) {
+                console.error('No generator ID found for deletion');
+                return;
+            }
+            
+            if (!confirm('Are you sure you want to delete this audio generator?')) {
+                return;
+            }
+            
+            try {
+                // Get current audio generators
+                const generatorsJson = localStorage.getItem('audioGenerators');
+                if (generatorsJson) {
+                    let generators = JSON.parse(generatorsJson);
+                    
+                    // Find and remove the generator
+                    generators = generators.filter(gen => gen.id !== generatorId);
+                    
+                    // Save updated generators
+                    localStorage.setItem('audioGenerators', JSON.stringify(generators));
+                    
+                    // Update main process
+                    if (window.api && window.api.send) {
+                        window.api.send('save-audio-generators', generators);
+                        window.api.send('refresh-menu');
+                    }
+                    
+                    // Show success message
+                    alert('Audio generator deleted successfully');
+                    
+                    // Return to manager view
+                    backToManager();
+                }
+            } catch (error) {
+                console.error('Error deleting audio generator:', error);
+                alert('Error deleting audio generator: ' + error.message);
+            }
+        }
+
+        // Function to validate video creator form
+        function validateVideoCreator() {
+            const name = document.getElementById('video-creator-name').value.trim();
+            const url = document.getElementById('video-creator-url').value.trim();
+            const apiUrl = document.getElementById('video-creator-api-url').value.trim();
+            
+            const nameValidation = document.getElementById('video-creator-name-validation-message');
+            const urlValidation = document.getElementById('video-creator-url-validation-message');
+            const apiValidation = document.getElementById('video-creator-api-validation-message');
+            const saveButton = document.getElementById('video-creator-save-btn');
+            
+            let isValid = true;
+            
+            // Reset validation messages
+            nameValidation.className = 'validation-message';
+            urlValidation.className = 'validation-message';
+            apiValidation.className = 'validation-message';
+            
+            // Validate name
+            if (!name) {
+                nameValidation.textContent = 'Video creator name is required';
+                nameValidation.classList.add('show');
+                isValid = false;
+            }
+            
+            // Validate URL
+            if (!url) {
+                urlValidation.textContent = 'Video creator URL is required';
+                urlValidation.classList.add('show');
+                isValid = false;
+            } else {
+                try {
+                    new URL(url);
+                } catch (e) {
+                    urlValidation.textContent = 'Invalid URL format';
+                    urlValidation.classList.add('show');
+                    isValid = false;
+                }
+            }
+            
+            // Validate API URL if provided
+            if (apiUrl) {
+                try {
+                    new URL(apiUrl);
+                } catch (e) {
+                    apiValidation.textContent = 'Invalid URL format';
+                    apiValidation.classList.add('show');
+                    isValid = false;
+                }
+            }
+            
+            saveButton.disabled = !isValid;
+            return isValid;
+        }
+
+        // Function to populate environments list
+        function populateEnvironmentsList() {
+            const listContainer = document.getElementById('environments-list');
+            listContainer.innerHTML = '';
+            
+            // Load all types of environments and bots
+            const idwEnvironments = JSON.parse(localStorage.getItem('idwEnvironments') || '[]');
+            const externalBots = JSON.parse(localStorage.getItem('externalBots') || '[]');
+            const imageCreators = JSON.parse(localStorage.getItem('imageCreators') || '[]');
+            const videoCreators = JSON.parse(localStorage.getItem('videoCreators') || '[]');
+            const audioGenerators = JSON.parse(localStorage.getItem('audioGenerators') || '[]');
+            const uiDesignTools = JSON.parse(localStorage.getItem('uiDesignTools') || '[]');
+            
+            const allItems = [
+                ...idwEnvironments.map(env => ({ ...env, type: 'idw' })),
+                ...externalBots.map(bot => ({ ...bot, type: 'external' })),
+                ...imageCreators.map(creator => ({ ...creator, type: 'image' })),
+                ...videoCreators.map(creator => ({ ...creator, type: 'video' })),
+                ...audioGenerators.map(gen => ({ ...gen, type: 'audio' })),
+                ...uiDesignTools.map(tool => ({ ...tool, type: 'ui-design' }))
+            ];
+            
+            if (allItems.length === 0) {
+                listContainer.innerHTML = `
+                                    <div class="empty-state">
+                    <h3>No digital workers or agents configured</h3>
+                    <p>Click the button below to add your first digital worker or agent</p>
+                </div>
+                `;
+                return;
+            }
+            
+            allItems.forEach(item => {
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'environment-item';
+                
+                let typeLabel = '';
+                let typeClass = '';
+                let itemName = '';
+                let itemUrl = '';
+                
+                switch(item.type) {
+                    case 'idw':
+                        typeLabel = 'IDW';
+                        typeClass = 'idw';
+                        itemName = item.label;
+                        itemUrl = item.homeUrl;
+                        break;
+                    case 'external':
+                        typeLabel = 'Agent';
+                        typeClass = 'external';
+                        itemName = item.name;
+                        itemUrl = item.chatUrl;
+                        break;
+                    case 'image':
+                        typeLabel = 'Image';
+                        typeClass = 'image';
+                        itemName = item.name;
+                        itemUrl = item.url;
+                        break;
+                    case 'video':
+                        typeLabel = 'Video';
+                        typeClass = 'video';
+                        itemName = item.name;
+                        itemUrl = item.url;
+                        break;
+                    case 'audio':
+                        typeLabel = 'Audio';
+                        typeClass = 'audio';
+                        itemName = item.name;
+                        itemUrl = item.url;
+                        break;
+                    case 'ui-design':
+                        typeLabel = 'UI Design';
+                        typeClass = 'ui-design';
+                        itemName = item.name;
+                        itemUrl = item.url;
+                        break;
+                }
+                
+                let shortcutInfo = '';
+                if ((item.type === 'idw' || item.type === 'external') && item.globalShortcut) {
+                    shortcutInfo = `<div class="environment-shortcut">Shortcut: ${item.globalShortcut}</div>`;
+                }
+                
+                itemDiv.innerHTML = `
+                    <div class="environment-item-info">
+                        <div class="environment-title">
+                            ${itemName}
+                            <span class="environment-type ${typeClass}">${typeLabel}</span>
+                        </div>
+                        <div class="environment-details">${itemUrl}</div>
+                        ${shortcutInfo}
+                    </div>
+                    <div class="environment-actions">
+                        <button class="action-btn edit" onclick="editItem('${item.type}', '${item.id}')">Edit</button>
+                        <button class="action-btn delete" onclick="deleteItem('${item.type}', '${item.id}')">Delete</button>
+                    </div>
+                `;
+                
+                listContainer.appendChild(itemDiv);
+            });
+        }
+
+        // Function to edit an item
+        function editItem(type, id) {
+            switch(type) {
+                case 'idw':
+                    editIDWEnvironment(id);
+                    break;
+                case 'external':
+                    editExternalBot(id);
+                    break;
+                case 'image':
+                    editImageCreator(id);
+                    break;
+                case 'video':
+                    editVideoCreator(id);
+                    break;
+                case 'audio':
+                    editAudioGenerator(id);
+                    break;
+                case 'ui-design':
+                    editUIDesign(id);
+                    break;
+            }
+        }
+
+        // Function to delete an item
+        function deleteItem(type, id) {
+            if (!confirm('Are you sure you want to delete this item?')) {
+                return;
+            }
+            
+            switch(type) {
+                case 'idw':
+                    deleteIDWEnvironment(id);
+                    break;
+                case 'external':
+                    deleteExternalBot(id);
+                    break;
+                case 'image':
+                    deleteImageCreator(id);
+                    break;
+                case 'video':
+                    deleteVideoCreator(id);
+                    break;
+                case 'audio':
+                    deleteAudioGenerator(id);
+                    break;
+                case 'ui-design':
+                    deleteUIDesign(id);
+                    break;
+            }
+        }
+
+        // Function to edit audio generator
+        function editAudioGenerator(id) {
+            const generators = JSON.parse(localStorage.getItem('audioGenerators') || '[]');
+            const generator = generators.find(g => g.id === id);
+            
+            if (!generator) {
+                console.error('Audio generator not found:', id);
+                return;
+            }
+            
+            // Reset forms and show audio generator setup
+            resetAllForms();
+            document.getElementById('step0').classList.remove('active');
+            document.getElementById('step-audio').classList.add('active');
+            
+            // Set the category
+            selectedAudioCategory = generator.category || 'custom';
+            selectAudioCategory(selectedAudioCategory);
+            
+            // Pre-fill the form
+            document.getElementById('audio-generator-name').value = generator.name;
+            document.getElementById('audio-generator-url').value = generator.url;
+            document.getElementById('audio-generator-api-url').value = generator.apiUrl || '';
+            
+            // Update save button
+            const saveBtn = document.getElementById('audio-generator-save-btn');
+            saveBtn.textContent = 'Update';
+            saveBtn.dataset.generatorId = id;
+            
+            // Show delete button
+            document.getElementById('delete-audio-generator-btn').style.display = 'inline-block';
+            
+            // Validate
+            validateAudioGenerator();
+        }
+
+        // Function to delete audio generator from list
+        function deleteAudioGenerator(id) {
+            try {
+                let generators = JSON.parse(localStorage.getItem('audioGenerators') || '[]');
+                generators = generators.filter(g => g.id !== id);
+                
+                localStorage.setItem('audioGenerators', JSON.stringify(generators));
+                
+                if (window.api && window.api.send) {
+                    window.api.send('save-audio-generators', generators);
+                    window.api.send('refresh-menu');
+                }
+                
+                populateEnvironmentsList();
+            } catch (error) {
+                console.error('Error deleting audio generator:', error);
+                alert('Error deleting audio generator: ' + error.message);
+            }
+        }
+
+        // Initialize the wizard when the page loads
+        window.addEventListener('DOMContentLoaded', () => {
+            console.log('Setup wizard DOM loaded');
+            
+            // Load data from main process
+            if (window.api && window.api.send) {
+                window.api.send('get-idw-environments');
+                window.api.send('get-external-bots');
+                window.api.send('get-image-creators');
+                window.api.send('get-video-creators');
+                window.api.send('get-audio-generators');
+                window.api.send('get-ui-design-tools');
+            }
+            
+            // Listen for responses
+            if (window.api && window.api.on) {
+                window.api.on('get-idw-environments', (environments) => {
+                    localStorage.setItem('idwEnvironments', JSON.stringify(environments));
+                    populateEnvironmentsList();
+                });
+                
+                window.api.on('get-external-bots', (bots) => {
+                    localStorage.setItem('externalBots', JSON.stringify(bots));
+                    populateEnvironmentsList();
+                });
+                
+                window.api.on('get-image-creators', (creators) => {
+                    localStorage.setItem('imageCreators', JSON.stringify(creators));
+                    populateEnvironmentsList();
+                });
+                
+                window.api.on('get-video-creators', (creators) => {
+                    localStorage.setItem('videoCreators', JSON.stringify(creators));
+                    populateEnvironmentsList();
+                });
+                
+                window.api.on('get-audio-generators', (generators) => {
+                    localStorage.setItem('audioGenerators', JSON.stringify(generators));
+                    populateEnvironmentsList();
+                });
+                
+                window.api.on('get-ui-design-tools', (tools) => {
+                    localStorage.setItem('uiDesignTools', JSON.stringify(tools));
+                    populateEnvironmentsList();
+                });
+            }
+            
+            // Initialize the environments list
+            populateEnvironmentsList();
+            
+            // Initialize audio category to music
+            selectedAudioCategory = 'music';
+        });
+
+        // Add missing helper functions
+        function editIDWEnvironment(id) {
+            const environments = JSON.parse(localStorage.getItem('idwEnvironments') || '[]');
+            const environment = environments.find(env => env.id === id);
+
+            if (!environment) {
+                console.error('IDW environment not found:', id);
+                return;
+            }
+
+            // Reset forms and show IDW setup step (preserve editing ID)
+            resetAllForms(true);
+            document.querySelectorAll('.step').forEach(step => step.classList.remove('active'));
+            document.getElementById('step1').classList.add('active');
+
+            // Pre-fill the form fields
+            document.getElementById('idw-home-url').value = environment.homeUrl;
+            document.getElementById('idw-chat-url').value = environment.chatUrl;
+            document.getElementById('gsx-account-id').value = environment.gsxAccountId || '';
+            document.getElementById('idw-global-shortcut').value = environment.globalShortcut || '';
+
+            // Update environment info display
+            document.getElementById('detected-environment').textContent = environment.environment;
+            document.getElementById('detected-label').textContent = environment.label;
+            document.getElementById('environment-info').style.display = 'block';
+
+            // Update next button
+            const nextBtn = document.getElementById('idw-next-btn');
+            nextBtn.textContent = 'Update';
+            nextBtn.disabled = false;
+            nextBtn.dataset.environmentId = id;
+            
+            // IMPORTANT: Set the editing ID in sessionStorage immediately
+            sessionStorage.setItem('editingEnvironmentId', id);
+
+            // Validate URLs to ensure form is ready
+            validateIDWUrls();
+        }
+
+        function editExternalBot(id) {
+            const bots = JSON.parse(localStorage.getItem('externalBots') || '[]');
+            const bot = bots.find(b => b.id === id);
+            
+            if (!bot) {
+                console.error('External agent not found:', id);
+                return;
+            }
+            
+            // Reset forms and show external agent setup
+            resetAllForms();
+            document.getElementById('step0').classList.remove('active');
+            document.getElementById('step-external').classList.add('active');
+            
+            // Pre-fill the form
+            document.getElementById('bot-name').value = bot.name;
+            document.getElementById('bot-chat-url').value = bot.chatUrl;
+            document.getElementById('bot-api-url').value = bot.apiUrl || '';
+            document.getElementById('bot-global-shortcut').value = bot.globalShortcut || '';
+            
+            // Update save button
+            const saveBtn = document.getElementById('external-bot-save-btn');
+            saveBtn.textContent = 'Update';
+            saveBtn.dataset.botId = id;
+            
+            // Show delete button
+            document.getElementById('delete-bot-btn').style.display = 'inline-block';
+            
+            // Validate
+            validateExternalBot();
+        }
+
+        function editImageCreator(id) {
+            const creators = JSON.parse(localStorage.getItem('imageCreators') || '[]');
+            const creator = creators.find(c => c.id === id);
+            
+            if (!creator) {
+                console.error('Image creator not found:', id);
+                return;
+            }
+            
+            // Reset forms and show image creator setup
+            resetAllForms();
+            document.getElementById('step0').classList.remove('active');
+            document.getElementById('step-image').classList.add('active');
+            
+            // Pre-fill the form
+            document.getElementById('image-creator-name').value = creator.name;
+            document.getElementById('image-creator-url').value = creator.url;
+            document.getElementById('image-creator-api-url').value = creator.apiUrl || '';
+            
+            // Update save button
+            const saveBtn = document.getElementById('image-creator-save-btn');
+            saveBtn.textContent = 'Update';
+            saveBtn.dataset.creatorId = id;
+            
+            // Show delete button
+            document.getElementById('delete-image-creator-btn').style.display = 'inline-block';
+            
+            // Validate
+            validateImageCreator();
+        }
+
+        function editVideoCreator(id) {
+            const creators = JSON.parse(localStorage.getItem('videoCreators') || '[]');
+            const creator = creators.find(c => c.id === id);
+            
+            if (!creator) {
+                console.error('Video creator not found:', id);
+                return;
+            }
+            
+            // Reset forms and show video creator setup
+            resetAllForms();
+            document.getElementById('step0').classList.remove('active');
+            document.getElementById('step-video').classList.add('active');
+            
+            // Pre-fill the form
+            document.getElementById('video-creator-name').value = creator.name;
+            document.getElementById('video-creator-url').value = creator.url;
+            document.getElementById('video-creator-api-url').value = creator.apiUrl || '';
+            
+            // Update save button
+            const saveBtn = document.getElementById('video-creator-save-btn');
+            saveBtn.textContent = 'Update';
+            saveBtn.dataset.creatorId = id;
+            
+            // Show delete button
+            document.getElementById('delete-video-creator-btn').style.display = 'inline-block';
+            
+            // Validate
+            validateVideoCreator();
+        }
+
+        function deleteIDWEnvironment(id) {
+            try {
+                let environments = JSON.parse(localStorage.getItem('idwEnvironments') || '[]');
+                environments = environments.filter(env => env.id !== id);
+                
+                localStorage.setItem('idwEnvironments', JSON.stringify(environments));
+                
+                if (window.api && window.api.send) {
+                    // Ensure the data is serializable by creating a clean copy
+                    const cleanEnvironments = JSON.parse(JSON.stringify(environments));
+                    window.api.send('save-idw-environments', cleanEnvironments);
+                    window.api.send('refresh-menu');
+                }
+                
+                populateEnvironmentsList();
+            } catch (error) {
+                console.error('Error deleting IDW environment:', error);
+                alert('Error deleting IDW environment: ' + error.message);
+            }
+        }
+
+        function deleteExternalBot(id) {
+            try {
+                let bots = JSON.parse(localStorage.getItem('externalBots') || '[]');
+                bots = bots.filter(b => b.id !== id);
+                
+                localStorage.setItem('externalBots', JSON.stringify(bots));
+                
+                if (window.api && window.api.send) {
+                    window.api.send('save-external-bots', bots);
+                    window.api.send('refresh-menu');
+                }
+                
+                populateEnvironmentsList();
+            } catch (error) {
+                console.error('Error deleting external agent:', error);
+                alert('Error deleting external agent: ' + error.message);
+            }
+        }
+
+        function deleteImageCreator(id) {
+            try {
+                let creators = JSON.parse(localStorage.getItem('imageCreators') || '[]');
+                creators = creators.filter(c => c.id !== id);
+                
+                localStorage.setItem('imageCreators', JSON.stringify(creators));
+                
+                if (window.api && window.api.send) {
+                    window.api.send('save-image-creators', creators);
+                    window.api.send('refresh-menu');
+                }
+                
+                populateEnvironmentsList();
+            } catch (error) {
+                console.error('Error deleting image creator:', error);
+                alert('Error deleting image creator: ' + error.message);
+            }
+        }
+
+        function deleteVideoCreator(id) {
+            try {
+                let creators = JSON.parse(localStorage.getItem('videoCreators') || '[]');
+                creators = creators.filter(c => c.id !== id);
+                
+                localStorage.setItem('videoCreators', JSON.stringify(creators));
+                
+                if (window.api && window.api.send) {
+                    window.api.send('save-video-creators', creators);
+                    window.api.send('refresh-menu');
+                }
+                
+                populateEnvironmentsList();
+            } catch (error) {
+                console.error('Error deleting video creator:', error);
+                alert('Error deleting video creator: ' + error.message);
+            }
+        }
+
+        function deleteCurrentBot() {
+            const saveBtn = document.getElementById('external-bot-save-btn');
+            const botId = saveBtn.dataset.botId;
+            
+            if (!botId) {
+                console.error('No bot ID found for deletion');
+                return;
+            }
+            
+            deleteExternalBot(botId);
+        }
+
+        // Add missing navigation functions
+        function showAddChoice() {
+            document.getElementById('step0').classList.remove('active');
+            document.getElementById('step-choice').classList.add('active');
+        }
+
+        function backToManager() {
+            // Hide all steps
+            document.querySelectorAll('.step').forEach(step => {
+                step.classList.remove('active');
+            });
+            // Show manager step
+            document.getElementById('step0').classList.add('active');
+            // Refresh the list
+            populateEnvironmentsList();
+            // Reset all forms
+            resetAllForms();
+        }
+
+        function resetAllForms(preserveEditingId = false) {
+            // Reset IDW form
+            document.getElementById('idw-home-url').value = '';
+            document.getElementById('idw-chat-url').value = '';
+            document.getElementById('gsx-account-id').value = '';
+            
+            // Reset external agent form
+            document.getElementById('bot-name').value = '';
+            document.getElementById('bot-chat-url').value = '';
+            document.getElementById('bot-api-url').value = '';
+            
+            // Reset image creator form
+            document.getElementById('image-creator-name').value = '';
+            document.getElementById('image-creator-url').value = '';
+            document.getElementById('image-creator-api-url').value = '';
+            
+            // Reset video creator form
+            document.getElementById('video-creator-name').value = '';
+            document.getElementById('video-creator-url').value = '';
+            document.getElementById('video-creator-api-url').value = '';
+            
+            // Reset audio generator form if exists
+            const audioNameInput = document.getElementById('audio-generator-name');
+            if (audioNameInput) {
+                audioNameInput.value = '';
+                document.getElementById('audio-generator-url').value = '';
+                document.getElementById('audio-generator-api-url').value = '';
+            }
+            
+            // Hide all info divs
+            const infoDivs = ['bot-type-info', 'image-creator-type-info', 'video-creator-type-info', 'audio-generator-type-info'];
+            infoDivs.forEach(id => {
+                const div = document.getElementById(id);
+                if (div) div.style.display = 'none';
+            });
+            
+            // Reset validation messages
+            document.querySelectorAll('.validation-message').forEach(msg => {
+                msg.textContent = '';
+                msg.classList.remove('show');
+            });
+            
+            // Reset save buttons
+            const saveBtns = ['external-bot-save-btn', 'image-creator-save-btn', 'video-creator-save-btn', 'audio-generator-save-btn'];
+            saveBtns.forEach(id => {
+                const btn = document.getElementById(id);
+                if (btn) {
+                    btn.textContent = btn.textContent.includes('Update') ? 'Save' : btn.textContent;
+                    delete btn.dataset.botId;
+                    delete btn.dataset.creatorId;
+                    delete btn.dataset.generatorId;
+                }
+            });
+            
+            // Hide delete buttons
+            const deleteBtns = ['delete-bot-btn', 'delete-image-creator-btn', 'delete-video-creator-btn', 'delete-audio-generator-btn'];
+            deleteBtns.forEach(id => {
+                const btn = document.getElementById(id);
+                if (btn) btn.style.display = 'none';
+            });
+
+            // Only clear editing ID if not preserving it
+            if (!preserveEditingId) {
+                sessionStorage.removeItem('editingEnvironmentId');
+            }
+        }
+
+        function nextStep() {
+            const currentStep = document.querySelector('.step.active');
+            const currentId = currentStep.id;
+
+            if (currentId === 'step1') {
+                currentStep.classList.remove('active');
+                document.getElementById('step2').classList.add('active');
+                populateGSXLinks();
+            } else if (currentId === 'step2') {
+                finish(); // Call finish at the end of step2
+            }
+        }
+
+        function prevStep() {
+            const currentStep = document.querySelector('.step.active');
+            const currentId = currentStep.id;
+            
+            if (currentId === 'step2') {
+                currentStep.classList.remove('active');
+                document.getElementById('step1').classList.add('active');
+            }
+        }
+
+        function validateAndProceed() {
+            if (validateIDWUrls()) {
+                const nextBtn = document.getElementById('idw-next-btn');
+                const environmentId = nextBtn.dataset.environmentId;
+                if (environmentId) {
+                    sessionStorage.setItem('editingEnvironmentId', environmentId);
+                } else {
+                    sessionStorage.removeItem('editingEnvironmentId');
+                }
+                nextStep();
+            }
+        }
+
+        function populateGSXLinks() {
+            const gsxContainer = document.querySelector('.gsx-links');
+            if (!gsxContainer) return;
+            
+            gsxContainer.innerHTML = '';
+            
+            // Get the current environment being edited or use the validated data
+            const environmentId = sessionStorage.getItem('editingEnvironmentId');
+            let currentEnv = null;
+            
+            if (environmentId) {
+                const environments = JSON.parse(localStorage.getItem('idwEnvironments') || '[]');
+                currentEnv = environments.find(env => env.id === environmentId);
+            }
+            
+            // If no current environment (new environment), use the validated data
+            if (!currentEnv && validatedIDWData) {
+                currentEnv = validatedIDWData;
+            }
+            
+            if (!currentEnv || !currentEnv.environment) {
+                gsxContainer.innerHTML = '<p>Please complete step 1 to configure GSX links</p>';
+                return;
+            }
+            
+            // Default GSX links for the environment
+            const defaultLinks = [
+                { label: 'HITL', url: `https://hitl.${currentEnv.environment}.onereach.ai/` },
+                { label: 'Action Desk', url: `https://actiondesk.${currentEnv.environment}.onereach.ai/dashboard/` },
+                { label: 'Designer', url: `https://studio.${currentEnv.environment}.onereach.ai/bots` },
+                { label: 'Tickets', url: `https://tickets.${currentEnv.environment}.onereach.ai/` },
+                { label: 'Calendar', url: `https://calendar.${currentEnv.environment}.onereach.ai/` },
+                { label: 'Developer', url: `https://docs.${currentEnv.environment}.onereach.ai/` }
+            ];
+            
+            // Add GSX account ID if available
+            const gsxAccountId = document.getElementById('gsx-account-id').value.trim();
+            if (gsxAccountId) {
+                defaultLinks.forEach(link => {
+                    link.url += `?accountId=${gsxAccountId}`;
+                });
+            }
+            
+            // Create link items
+            defaultLinks.forEach(link => {
+                const linkItem = document.createElement('div');
+                linkItem.className = 'link-item';
+                linkItem.innerHTML = `
+                    <input type="checkbox" checked>
+                    <label>${link.label}</label>
+                    <span style="flex: 1; color: rgba(255,255,255,0.6); font-size: 12px; margin-left: 10px;">${link.url}</span>
+                `;
+                gsxContainer.appendChild(linkItem);
+            });
+        }
+
+
+        function addCustomGSXLink() {
+            // TODO: Implement custom GSX link addition
+            alert('Custom GSX link functionality coming soon');
+        }
+
+        function finish() {
+            console.log('[finish] Starting finish function...');
+            const environmentId = sessionStorage.getItem('editingEnvironmentId');
+            console.log('[finish] editingEnvironmentId:', environmentId);
+
+            let idwEnvironments = JSON.parse(localStorage.getItem('idwEnvironments') || '[]');
+            console.log('[finish] Current environments:', idwEnvironments.length);
+
+            const newLabel = document.getElementById('detected-label').textContent;
+            const environmentData = {
+                id: environmentId || `idw-${Date.now()}`,
+                type: 'idw',
+                homeUrl: document.getElementById('idw-home-url').value.trim(),
+                chatUrl: document.getElementById('idw-chat-url').value.trim(),
+                gsxAccountId: document.getElementById('gsx-account-id').value.trim(),
+                globalShortcut: document.getElementById('idw-global-shortcut').value.trim(),
+                environment: document.getElementById('detected-environment').textContent,
+                label: newLabel,
+                updatedAt: new Date().toISOString()
+            };
+            console.log('[finish] Environment data:', environmentData);
+
+            if (environmentId) {
+                const index = idwEnvironments.findIndex(env => env.id === environmentId);
+                console.log('[finish] Found environment at index:', index);
+                if (index >= 0) {
+                    // Check if the label has changed (which means the ID should change too)
+                    const oldEnv = idwEnvironments[index];
+                    if (oldEnv.label !== newLabel) {
+                        // Label has changed, so we need to update the ID to match
+                        console.log('[finish] Label changed from', oldEnv.label, 'to', newLabel);
+                        
+                        // Remove the old environment
+                        idwEnvironments.splice(index, 1);
+                        
+                        // Create new environment with new ID based on the new label
+                        environmentData.id = newLabel; // Use the label as the ID
+                        environmentData.createdAt = oldEnv.createdAt || new Date().toISOString();
+                        idwEnvironments.push(environmentData);
+                    } else {
+                        // Label hasn't changed, just update the existing environment
+                        idwEnvironments[index] = {
+                            ...idwEnvironments[index],
+                            ...environmentData,
+                            updatedAt: new Date().toISOString()
+                        };
+                    }
+                } else {
+                    idwEnvironments.push(environmentData); // fallback if not found
+                }
+            } else {
+                // New environment - use the label as the ID
+                environmentData.id = newLabel || `idw-${Date.now()}`;
+                environmentData.createdAt = new Date().toISOString();
+                idwEnvironments.push(environmentData);
+            }
+
+            console.log('[finish] Saving to localStorage...');
+            localStorage.setItem('idwEnvironments', JSON.stringify(idwEnvironments));
+
+            console.log('[finish] Checking window.api...');
+            if (window.api && window.api.send) {
+                console.log('[finish] window.api.send is available, sending save-idw-environments...');
+                
+                // Debug the data before sending
+                console.log('[finish] Data to send:', idwEnvironments);
+                console.log('[finish] Data type check:');
+                idwEnvironments.forEach((env, i) => {
+                    console.log(`[finish] Environment ${i}:`, env);
+                    Object.keys(env).forEach(key => {
+                        const value = env[key];
+                        const type = typeof value;
+                        console.log(`[finish]   ${key}: ${type} = ${type === 'function' ? '[Function]' : value}`);
+                    });
+                });
+                
+                try {
+                    // Ensure the data is serializable by creating a clean copy
+                    const cleanEnvironments = JSON.parse(JSON.stringify(idwEnvironments));
+                    console.log('[finish] Clean environments created successfully');
+                    console.log('[finish] Sending clean environments:', cleanEnvironments);
+                    
+                    // Try to send the data
+                    window.api.send('save-idw-environments', cleanEnvironments);
+                    console.log('[finish] save-idw-environments sent successfully');
+                } catch (error) {
+                    console.error('[finish] Error sending save-idw-environments:', error);
+                    console.error('[finish] Error stack:', error.stack);
+                    
+                    // Try to identify which environment is causing the issue
+                    console.log('[finish] Checking each environment individually...');
+                    idwEnvironments.forEach((env, i) => {
+                        try {
+                            JSON.stringify(env);
+                            console.log(`[finish] Environment ${i} is serializable`);
+                        } catch (e) {
+                            console.error(`[finish] Environment ${i} is NOT serializable:`, e);
+                            console.error(`[finish] Problematic environment:`, env);
+                        }
+                    });
+                }
+                
+                console.log('[finish] Sending refresh-menu...');
+                try {
+                    window.api.send('refresh-menu');
+                    console.log('[finish] refresh-menu sent successfully');
+                } catch (error) {
+                    console.error('[finish] Error sending refresh-menu:', error);
+                }
+            } else {
+                console.error('[finish] window.api.send not available!');
+            }
+
+            alert(`Environment has been ${environmentId ? 'updated' : 'added'} successfully!`);
+            console.log(`[finish] Environment has been ${environmentId ? 'updated' : 'added'} successfully!`);
+
+            sessionStorage.removeItem('editingEnvironmentId');
+            backToManager();
+        }
+
+        function closeWizard() {
+            if (window.close) {
+                window.close();
+            } else {
+                // Fallback for when window.close() doesn't work
+                alert('You can close this window manually.');
+            }
+        }
+
+        function validateIDWUrls() {
+            const homeUrl = document.getElementById('idw-home-url').value.trim();
+            const chatUrl = document.getElementById('idw-chat-url').value.trim();
+            const accountId = document.getElementById('gsx-account-id').value.trim();
+            
+            const homeValidation = document.getElementById('idw-home-validation-message');
+            const chatValidation = document.getElementById('idw-chat-validation-message');
+            const accountValidation = document.getElementById('gsx-account-validation-message');
+            const nextButton = document.getElementById('idw-next-btn');
+            const environmentInfo = document.getElementById('environment-info');
+            
+            let isValid = true;
+            
+            // Reset validation messages
+            homeValidation.className = 'validation-message';
+            chatValidation.className = 'validation-message';
+            accountValidation.className = 'validation-message';
+            
+            // Validate home URL
+            if (!homeUrl) {
+                homeValidation.textContent = 'IDW Home URL is required';
+                homeValidation.classList.add('show');
+                isValid = false;
+            } else {
+                try {
+                    const url = new URL(homeUrl);
+                    // Extract environment and label from URL
+                    const match = homeUrl.match(/https:\/\/idw\.(.+?)\.onereach\.ai\/(.+?)(?:\/|$)/);
+                    if (match) {
+                        const environment = match[1];
+                        const label = match[2];
+                        
+                        // Update environment info
+                        document.getElementById('detected-environment').textContent = environment;
+                        document.getElementById('detected-label').textContent = label;
+                        environmentInfo.style.display = 'block';
+                        
+                        // Store for later use
+                        validatedIDWData = {
+                            environment: environment,
+                            label: label,
+                            homeUrl: homeUrl,
+                            chatUrl: chatUrl
+                        };
+                    }
+                } catch (e) {
+                    homeValidation.textContent = 'Invalid URL format';
+                    homeValidation.classList.add('show');
+                    isValid = false;
+                }
+            }
+            
+            // Validate chat URL
+            if (!chatUrl) {
+                chatValidation.textContent = 'Chat URL is required';
+                chatValidation.classList.add('show');
+                isValid = false;
+            } else {
+                try {
+                    new URL(chatUrl);
+                } catch (e) {
+                    chatValidation.textContent = 'Invalid URL format';
+                    chatValidation.classList.add('show');
+                    isValid = false;
+                }
+            }
+            
+            // Validate GSX Account ID if provided
+            if (accountId && !isValidUUID(accountId)) {
+                accountValidation.textContent = 'Invalid Account ID format';
+                accountValidation.classList.add('show');
+                isValid = false;
+            }
+            
+            nextButton.disabled = !isValid;
+            return isValid;
+        }
+
+        function validateGSXAccountId() {
+            const accountId = document.getElementById('gsx-account-id').value.trim();
+            const validation = document.getElementById('gsx-account-validation-message');
+            
+            validation.className = 'validation-message';
+            
+            if (accountId && !isValidUUID(accountId)) {
+                validation.textContent = 'Invalid format. Account ID should be a UUID (e.g., 35254342-4a2e-475b-aec1-18547e517e29)';
+                validation.classList.add('show');
+            }
+            
+            // Re-validate all fields
+            validateIDWUrls();
+        }
+
+        function isValidUUID(str) {
+            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+            return uuidRegex.test(str);
+        }
+
+        function validateIDWShortcut() {
+            const shortcut = document.getElementById('idw-global-shortcut').value.trim();
+            const validation = document.getElementById('idw-shortcut-validation-message');
+            
+            validation.className = 'validation-message';
+            
+            if (shortcut) {
+                // Basic validation for shortcut format
+                const validModifiers = ['CmdOrCtrl', 'Cmd', 'Ctrl', 'Alt', 'Option', 'Shift', 'Super'];
+                const parts = shortcut.split('+');
+                
+                if (parts.length < 2) {
+                    validation.textContent = 'Shortcut must include at least one modifier and a key (e.g., CmdOrCtrl+1)';
+                    validation.classList.add('show');
+                } else {
+                    // Check if at least one modifier is present
+                    const hasModifier = parts.slice(0, -1).some(part => 
+                        validModifiers.includes(part)
+                    );
+                    
+                    if (!hasModifier) {
+                        validation.textContent = 'Shortcut must include a valid modifier (CmdOrCtrl, Alt, Shift)';
+                        validation.classList.add('show');
+                    }
+                }
+            }
+            
+            // Re-validate all fields
+            validateIDWUrls();
+        }
+
+        function validateBotShortcut() {
+            const shortcut = document.getElementById('bot-global-shortcut').value.trim();
+            const validation = document.getElementById('bot-shortcut-validation-message');
+            
+            validation.className = 'validation-message';
+            
+            if (shortcut) {
+                // Basic validation for shortcut format
+                const validModifiers = ['CmdOrCtrl', 'Cmd', 'Ctrl', 'Alt', 'Option', 'Shift', 'Super'];
+                const parts = shortcut.split('+');
+                
+                if (parts.length < 2) {
+                    validation.textContent = 'Shortcut must include at least one modifier and a key (e.g., CmdOrCtrl+G)';
+                    validation.classList.add('show');
+                } else {
+                    // Check if at least one modifier is present
+                    const hasModifier = parts.slice(0, -1).some(part => 
+                        validModifiers.includes(part)
+                    );
+                    
+                    if (!hasModifier) {
+                        validation.textContent = 'Shortcut must include a valid modifier (CmdOrCtrl, Alt, Shift)';
+                        validation.classList.add('show');
+                    }
+                }
+            }
+            
+            // Re-validate all fields
+            validateExternalBot();
+        }
+
+        // Function to populate audio generator buttons
+        function populateAudioGeneratorButtons(category) {
+            const grid = document.getElementById('audio-type-grid');
+            grid.innerHTML = '';
+            
+            if (category === 'custom') {
+                grid.innerHTML = '<p style="color: rgba(255,255,255,0.6); text-align: center; grid-column: 1/-1;">Fill in the details below for your custom audio generator</p>';
+                selectedAudioGeneratorType = 'custom';
+            } else {
+                const generators = audioGeneratorConfigs[category];
+                if (generators) {
+                    Object.keys(generators).forEach(key => {
+                        const btn = document.createElement('button');
+                        btn.className = 'bot-type-btn';
+                        btn.textContent = generators[key].name;
+                        btn.onclick = () => selectAudioGeneratorType(key);
+                        grid.appendChild(btn);
+                    });
+                }
+            }
+        }
+
+        function deleteIDWEnvironment(id) {
+            try {
+                let environments = JSON.parse(localStorage.getItem('idwEnvironments') || '[]');
+                environments = environments.filter(env => env.id !== id);
+                
+                localStorage.setItem('idwEnvironments', JSON.stringify(environments));
+                
+                if (window.api && window.api.send) {
+                    // Ensure the data is serializable by creating a clean copy
+                    const cleanEnvironments = JSON.parse(JSON.stringify(environments));
+                    window.api.send('save-idw-environments', cleanEnvironments);
+                    window.api.send('refresh-menu');
+                }
+                
+                populateEnvironmentsList();
+            } catch (error) {
+                console.error('Error deleting IDW environment:', error);
+                alert('Error deleting IDW environment: ' + error.message);
+            }
+        }
+
+
+
+        // Function to select UI design tool type
+        function selectUIDesignType(type) {
+            selectedUIDesignType = type;
+            
+            // Update button states
+            document.querySelectorAll('#step-ui-design .bot-type-btn').forEach(btn => {
+                btn.classList.remove('selected');
+            });
+            event.target.classList.add('selected');
+            
+            // Pre-fill form if it's a known UI design tool type
+            if (uiDesignConfigs[type]) {
+                const config = uiDesignConfigs[type];
+                document.getElementById('ui-design-name').value = config.name;
+                document.getElementById('ui-design-url').value = config.url;
+                document.getElementById('ui-design-api-url').value = config.apiUrl || '';
+                
+                // Show UI design tool info
+                const infoDiv = document.getElementById('ui-design-type-info');
+                infoDiv.innerHTML = `<strong>${config.name}:</strong> ${config.info}`;
+                infoDiv.style.display = 'block';
+            } else {
+                // Clear form for custom UI design tool
+                document.getElementById('ui-design-name').value = '';
+                document.getElementById('ui-design-url').value = '';
+                document.getElementById('ui-design-api-url').value = '';
+                
+                const infoDiv = document.getElementById('ui-design-type-info');
+                infoDiv.innerHTML = '<strong>Custom UI Design Tool:</strong> Add any AI-powered UI/UX design tool with a web interface';
+                infoDiv.style.display = 'block';
+            }
+            
+            // Validate
+            validateUIDesign();
+        }
+
+        // Function to validate UI design form
+        function validateUIDesign() {
+            const name = document.getElementById('ui-design-name').value.trim();
+            const url = document.getElementById('ui-design-url').value.trim();
+            const apiUrl = document.getElementById('ui-design-api-url').value.trim();
+            
+            const nameValidation = document.getElementById('ui-design-name-validation-message');
+            const urlValidation = document.getElementById('ui-design-url-validation-message');
+            const apiValidation = document.getElementById('ui-design-api-validation-message');
+            const saveButton = document.getElementById('ui-design-save-btn');
+            
+            let isValid = true;
+            
+            // Reset validation messages
+            nameValidation.className = 'validation-message';
+            urlValidation.className = 'validation-message';
+            apiValidation.className = 'validation-message';
+            
+            // Validate name
+            if (!name) {
+                nameValidation.textContent = 'UI design tool name is required';
+                nameValidation.classList.add('show');
+                isValid = false;
+            }
+            
+            // Validate URL
+            if (!url) {
+                urlValidation.textContent = 'UI design tool URL is required';
+                urlValidation.classList.add('show');
+                isValid = false;
+            } else {
+                try {
+                    new URL(url);
+                } catch (e) {
+                    urlValidation.textContent = 'Invalid URL format';
+                    urlValidation.classList.add('show');
+                    isValid = false;
+                }
+            }
+            
+            // Validate API URL if provided
+            if (apiUrl) {
+                try {
+                    new URL(apiUrl);
+                } catch (e) {
+                    apiValidation.textContent = 'Invalid URL format';
+                    apiValidation.classList.add('show');
+                    isValid = false;
+                }
+            }
+            
+            saveButton.disabled = !isValid;
+            return isValid;
+        }
+
+        // Function to save UI design tool
+        function saveUIDesign() {
+            if (!validateUIDesign()) return;
+            
+            const name = document.getElementById('ui-design-name').value.trim();
+            const url = document.getElementById('ui-design-url').value.trim();
+            const apiUrl = document.getElementById('ui-design-api-url').value.trim();
+            const saveBtn = document.getElementById('ui-design-save-btn');
+            const designId = saveBtn.dataset.designId;
+            
+            // Load existing UI design tools
+            let uiDesignTools = [];
+            try {
+                const toolsJson = localStorage.getItem('uiDesignTools');
+                if (toolsJson) {
+                    uiDesignTools = JSON.parse(toolsJson);
+                }
+            } catch (error) {
+                console.error('Error loading UI design tools:', error);
+            }
+            
+            if (designId) {
+                // Update existing UI design tool
+                const toolIndex = uiDesignTools.findIndex(tool => tool.id === designId);
+                if (toolIndex >= 0) {
+                    uiDesignTools[toolIndex] = {
+                        ...uiDesignTools[toolIndex],
+                        name: name,
+                        url: url,
+                        apiUrl: apiUrl,
+                        updatedAt: new Date().toISOString()
+                    };
+                }
+            } else {
+                // Create new UI design tool
+                const uiDesignTool = {
+                    id: `ui-design-${Date.now()}`,
+                    type: 'ui-design',
+                    name: name,
+                    url: url,
+                    apiUrl: apiUrl,
+                    designType: selectedUIDesignType || 'custom',
+                    createdAt: new Date().toISOString()
+                };
+                uiDesignTools.push(uiDesignTool);
+            }
+            
+            // Save to localStorage
+            localStorage.setItem('uiDesignTools', JSON.stringify(uiDesignTools));
+            
+            // Save to file via IPC
+            if (window.api && window.api.send) {
+                window.api.send('save-ui-design-tools', uiDesignTools);
+                window.api.send('refresh-menu');
+            }
+            
+            // Show success message
+            alert(`${name} has been ${designId ? 'updated' : 'added'} successfully!`);
+            
+            // Return to manager view
+            backToManager();
+        }
+
+        // Function to delete current UI design tool
+        function deleteCurrentUIDesign() {
+            const saveBtn = document.getElementById('ui-design-save-btn');
+            const designId = saveBtn.dataset.designId;
+            
+            if (!designId) {
+                console.error('No design ID found for deletion');
+                return;
+            }
+            
+            if (!confirm('Are you sure you want to delete this UI design tool?')) {
+                return;
+            }
+            
+            try {
+                // Get current UI design tools
+                const toolsJson = localStorage.getItem('uiDesignTools');
+                if (toolsJson) {
+                    let tools = JSON.parse(toolsJson);
+                    
+                    // Find and remove the tool
+                    tools = tools.filter(tool => tool.id !== designId);
+                    
+                    // Save updated tools
+                    localStorage.setItem('uiDesignTools', JSON.stringify(tools));
+                    
+                    // Update main process
+                    if (window.api && window.api.send) {
+                        window.api.send('save-ui-design-tools', tools);
+                        window.api.send('refresh-menu');
+                    }
+                    
+                    // Show success message
+                    alert('UI design tool deleted successfully');
+                    
+                    // Return to manager view
+                    backToManager();
+                }
+            } catch (error) {
+                console.error('Error deleting UI design tool:', error);
+                alert('Error deleting UI design tool: ' + error.message);
+            }
+        }
+
+        // Function to edit UI design tool
+        function editUIDesign(id) {
+            const tools = JSON.parse(localStorage.getItem('uiDesignTools') || '[]');
+            const tool = tools.find(t => t.id === id);
+            
+            if (!tool) {
+                console.error('UI design tool not found:', id);
+                return;
+            }
+            
+            // Reset forms and show UI design setup
+            resetAllForms();
+            document.getElementById('step0').classList.remove('active');
+            document.getElementById('step-ui-design').classList.add('active');
+            
+            // Set the design type
+            selectedUIDesignType = tool.designType || 'custom';
+            selectUIDesignType(selectedUIDesignType);
+            
+            // Pre-fill the form
+            document.getElementById('ui-design-name').value = tool.name;
+            document.getElementById('ui-design-url').value = tool.url;
+            document.getElementById('ui-design-api-url').value = tool.apiUrl || '';
+            
+            // Update save button
+            const saveBtn = document.getElementById('ui-design-save-btn');
+            saveBtn.textContent = 'Update';
+            saveBtn.dataset.designId = id;
+            
+            // Show delete button
+            document.getElementById('delete-ui-design-btn').style.display = 'inline-block';
+            
+            // Validate
+            validateUIDesign();
+        }
+
+        // Function to delete UI design tool from list
+        function deleteUIDesign(id) {
+            try {
+                let tools = JSON.parse(localStorage.getItem('uiDesignTools') || '[]');
+                tools = tools.filter(t => t.id !== id);
+                
+                localStorage.setItem('uiDesignTools', JSON.stringify(tools));
+                
+                if (window.api && window.api.send) {
+                    window.api.send('save-ui-design-tools', tools);
+                    window.api.send('refresh-menu');
+                }
+                
+                populateEnvironmentsList();
+            } catch (error) {
+                console.error('Error deleting UI design tool:', error);
+                alert('Error deleting UI design tool: ' + error.message);
+            }
+        }
+    </script>
+</body>
+</html>

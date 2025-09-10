@@ -1,0 +1,359 @@
+const fs = require('fs');
+const path = require('path');
+const { app, BrowserWindow, Menu, dialog } = require('electron');
+const unzipper = require('unzipper');
+const https = require('https');
+const http = require('http');
+
+class ModuleManager {
+  constructor() {
+    this.modulesPath = path.join(app.getPath('userData'), 'modules');
+    this.modulesDataPath = path.join(app.getPath('userData'), 'modules-data');
+    this.installedModules = new Map();
+    this.moduleWindows = new Map();
+    
+    // Ensure directories exist
+    this.ensureDirectories();
+    
+    // Load installed modules on startup
+    this.loadInstalledModules();
+  }
+  
+  ensureDirectories() {
+    if (!fs.existsSync(this.modulesPath)) {
+      fs.mkdirSync(this.modulesPath, { recursive: true });
+    }
+    if (!fs.existsSync(this.modulesDataPath)) {
+      fs.mkdirSync(this.modulesDataPath, { recursive: true });
+    }
+  }
+  
+  async loadInstalledModules() {
+    try {
+      const modulesDirs = fs.readdirSync(this.modulesPath);
+      
+      for (const dir of modulesDirs) {
+        const modulePath = path.join(this.modulesPath, dir);
+        const manifestPath = path.join(modulePath, 'manifest.json');
+        
+        if (fs.existsSync(manifestPath)) {
+          try {
+            const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+            manifest.path = modulePath;
+            this.installedModules.set(manifest.id, manifest);
+            console.log(`Loaded module: ${manifest.name} (${manifest.id})`);
+            
+            // Load main process script if exists
+            if (manifest.mainProcess) {
+              const mainScriptPath = path.join(modulePath, manifest.mainProcess);
+              if (fs.existsSync(mainScriptPath)) {
+                try {
+                  require(mainScriptPath);
+                  console.log(`Loaded main process script for ${manifest.id}`);
+                } catch (error) {
+                  console.error(`Error loading main process script for ${manifest.id}:`, error);
+                }
+              }
+            }
+          } catch (error) {
+            console.error(`Error loading module from ${dir}:`, error);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error loading installed modules:', error);
+    }
+  }
+  
+  async installModuleFromUrl(url) {
+    return new Promise((resolve, reject) => {
+      const tempPath = path.join(app.getPath('temp'), `module-${Date.now()}.zip`);
+      const file = fs.createWriteStream(tempPath);
+      
+      const protocol = url.startsWith('https') ? https : http;
+      
+      console.log(`Downloading module from: ${url}`);
+      
+      const request = protocol.get(url, (response) => {
+        if (response.statusCode !== 200) {
+          reject(new Error(`Failed to download: ${response.statusCode}`));
+          return;
+        }
+        
+        response.pipe(file);
+        
+        file.on('finish', () => {
+          file.close(async () => {
+            try {
+              const result = await this.installModuleFromZip(tempPath);
+              // Clean up temp file
+              fs.unlinkSync(tempPath);
+              resolve(result);
+            } catch (error) {
+              // Clean up temp file on error
+              if (fs.existsSync(tempPath)) {
+                fs.unlinkSync(tempPath);
+              }
+              reject(error);
+            }
+          });
+        });
+      });
+      
+      request.on('error', (error) => {
+        fs.unlinkSync(tempPath);
+        reject(error);
+      });
+    });
+  }
+  
+  async installModuleFromZip(zipPath) {
+    console.log(`Installing module from: ${zipPath}`);
+    
+    // First, extract to temp directory to validate
+    const tempExtractPath = path.join(app.getPath('temp'), `module-extract-${Date.now()}`);
+    
+    try {
+      // Extract zip
+      await fs.createReadStream(zipPath)
+        .pipe(unzipper.Extract({ path: tempExtractPath }))
+        .promise();
+      
+      // Read and validate manifest
+      const manifestPath = path.join(tempExtractPath, 'manifest.json');
+      if (!fs.existsSync(manifestPath)) {
+        throw new Error('No manifest.json found in module');
+      }
+      
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+      
+      // Validate required fields
+      if (!manifest.id || !manifest.name || !manifest.main) {
+        throw new Error('Invalid manifest: missing required fields (id, name, main)');
+      }
+      
+      // Check if module already exists
+      const moduleInstallPath = path.join(this.modulesPath, manifest.id);
+      if (fs.existsSync(moduleInstallPath)) {
+        // Optional: Handle updates here
+        const response = await dialog.showMessageBox({
+          type: 'question',
+          buttons: ['Update', 'Cancel'],
+          defaultId: 0,
+          message: `Module "${manifest.name}" is already installed. Update it?`
+        });
+        
+        if (response.response !== 0) {
+          throw new Error('Installation cancelled');
+        }
+        
+        // Remove old version
+        this.removeModule(manifest.id);
+      }
+      
+      // Move to final location
+      fs.renameSync(tempExtractPath, moduleInstallPath);
+      
+      // Create data directory for module
+      const moduleDataPath = path.join(this.modulesDataPath, manifest.dataDirectory || manifest.id);
+      if (!fs.existsSync(moduleDataPath)) {
+        fs.mkdirSync(moduleDataPath, { recursive: true });
+      }
+      
+      // Install npm dependencies if package.json exists
+      const packageJsonPath = path.join(moduleInstallPath, 'package.json');
+      if (fs.existsSync(packageJsonPath)) {
+        console.log(`Installing npm dependencies for ${manifest.id}...`);
+        const { exec } = require('child_process');
+        await new Promise((resolve, reject) => {
+          exec('npm install --production', { cwd: moduleInstallPath }, (error, stdout, stderr) => {
+            if (error) {
+              console.error(`Error installing dependencies: ${error}`);
+              reject(error);
+            } else {
+              console.log(`Dependencies installed for ${manifest.id}`);
+              resolve();
+            }
+          });
+        });
+      }
+      
+      // Add to installed modules
+      manifest.path = moduleInstallPath;
+      this.installedModules.set(manifest.id, manifest);
+      
+      // Load main process script if exists
+      if (manifest.mainProcess) {
+        const mainScriptPath = path.join(moduleInstallPath, manifest.mainProcess);
+        if (fs.existsSync(mainScriptPath)) {
+          try {
+            require(mainScriptPath);
+            console.log(`Loaded main process script for ${manifest.id}`);
+          } catch (error) {
+            console.error(`Error loading main process script for ${manifest.id}:`, error);
+          }
+        }
+      }
+      
+      // Update menu
+      this.updateApplicationMenu();
+      
+      console.log(`Successfully installed module: ${manifest.name}`);
+      return manifest;
+      
+    } catch (error) {
+      // Clean up on error
+      if (fs.existsSync(tempExtractPath)) {
+        fs.rmSync(tempExtractPath, { recursive: true, force: true });
+      }
+      throw error;
+    }
+  }
+  
+  removeModule(moduleId) {
+    const module = this.installedModules.get(moduleId);
+    if (!module) {
+      throw new Error(`Module ${moduleId} not found`);
+    }
+    
+    // Close any open windows for this module
+    const window = this.moduleWindows.get(moduleId);
+    if (window && !window.isDestroyed()) {
+      window.close();
+    }
+    
+    // Remove module directory
+    if (fs.existsSync(module.path)) {
+      fs.rmSync(module.path, { recursive: true, force: true });
+    }
+    
+    // Remove from installed modules
+    this.installedModules.delete(moduleId);
+    
+    // Update menu
+    this.updateApplicationMenu();
+    
+    console.log(`Removed module: ${module.name}`);
+  }
+  
+  openModule(moduleId) {
+    const module = this.installedModules.get(moduleId);
+    if (!module) {
+      console.error(`Module ${moduleId} not found`);
+      return;
+    }
+    
+    // Check if window already exists
+    let window = this.moduleWindows.get(moduleId);
+    if (window && !window.isDestroyed()) {
+      window.focus();
+      return;
+    }
+    
+    // Create new window
+    const windowOptions = {
+      width: 1200,
+      height: 800,
+      title: module.name,
+      webPreferences: {
+        nodeIntegration: true,
+        contextIsolation: false,
+        webSecurity: false
+      },
+      ...module.windowOptions
+    };
+    
+    // Add preload script if specified
+    if (module.preload) {
+      windowOptions.webPreferences.preload = path.join(module.path, module.preload);
+    }
+    
+    // Set icon if exists
+    if (module.icon) {
+      const iconPath = path.join(module.path, module.icon);
+      if (fs.existsSync(iconPath)) {
+        windowOptions.icon = iconPath;
+      }
+    }
+    
+    window = new BrowserWindow(windowOptions);
+    
+    // Store window reference
+    this.moduleWindows.set(moduleId, window);
+    
+    // Clean up reference when window is closed
+    window.on('closed', () => {
+      this.moduleWindows.delete(moduleId);
+    });
+    
+    // Make module data path available to the module
+    window.moduleDataPath = path.join(this.modulesDataPath, module.dataDirectory || moduleId);
+    window.moduleInfo = module;
+    
+    // Inject module API client when DOM is ready
+    window.webContents.on('dom-ready', () => {
+      // Read the module API client file
+      const apiClientPath = path.join(__dirname, 'module-api-client.js');
+      if (fs.existsSync(apiClientPath)) {
+        const apiClientCode = fs.readFileSync(apiClientPath, 'utf8');
+        
+        // Inject the API client code
+        window.webContents.executeJavaScript(`
+          // Inject module data path
+          window.moduleDataPath = ${JSON.stringify(window.moduleDataPath)};
+          window.moduleInfo = ${JSON.stringify(module)};
+          
+          // Inject module API client
+          ${apiClientCode}
+          
+          console.log('Module API client injected successfully');
+        `).catch(error => {
+          console.error('Error injecting module API client:', error);
+        });
+      }
+    });
+    
+    // Load module HTML
+    const htmlPath = path.join(module.path, module.main);
+    window.loadFile(htmlPath);
+    
+    console.log(`Opened module: ${module.name}`);
+  }
+  
+  getModuleMenuItems() {
+    const items = [];
+    
+    for (const [id, module] of this.installedModules) {
+      items.push({
+        label: module.menuLabel || module.name,
+        click: () => this.openModule(id)
+      });
+    }
+    
+    return items;
+  }
+  
+  updateApplicationMenu() {
+    // This will be called to refresh the app menu with module items
+    // The main app will need to integrate this
+    if (global.updateApplicationMenu) {
+      global.updateApplicationMenu();
+    }
+  }
+  
+  // Get list of all installed modules
+  getInstalledModules() {
+    return Array.from(this.installedModules.values());
+  }
+  
+  // Get module data directory path
+  getModuleDataPath(moduleId) {
+    const module = this.installedModules.get(moduleId);
+    if (!module) {
+      return null;
+    }
+    return path.join(this.modulesDataPath, module.dataDirectory || moduleId);
+  }
+}
+
+module.exports = ModuleManager; 

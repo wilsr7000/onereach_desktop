@@ -1,0 +1,619 @@
+/* Smart Export Style Guide - Based on Journey Map Design */
+
+/* CSS Variables for Customization */
+:root {
+  /* Primary Colors */
+  --color-primary: #3B82F6;
+  --color-primary-dark: #2563EB;
+  --color-primary-light: rgba(59, 130, 246, 0.1);
+  --color-secondary: #10B981;
+  --color-accent: #F59E0B;
+  
+  /* Background Colors */
+  --color-background: #F5F2ED;
+  --color-surface: #FFFFFF;
+  --color-input-bg: #FFFFFF;
+  
+  /* Text Colors */
+  --color-text: #2C2C2C;
+  --color-text-secondary: #666666;
+  --color-text-muted: #999999;
+  
+  /* Border Colors */
+  --color-border: #E5E7EB;
+  --color-border-light: #F3F4F6;
+  
+  /* Status Colors */
+  --color-success: #10B981;
+  --color-success-bg: #F0FDF4;
+  --color-success-border: #BBF7D0;
+  
+  --color-warning: #F59E0B;
+  --color-warning-bg: #FFFBEB;
+  --color-warning-border: #FED7AA;
+  
+  --color-error: #EF4444;
+  --color-error-bg: #FEF2F2;
+  --color-error-border: #FECACA;
+  
+  --color-info: #3B82F6;
+  --color-info-bg: #EFF6FF;
+  --color-info-border: #DBEAFE;
+  
+  /* Typography */
+  --font-heading: 'Crimson Text', Georgia, serif;
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  
+  /* Font Sizes */
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.875rem;
+  --font-size-base: 1rem;
+  --font-size-lg: 1.125rem;
+  --font-size-xl: 1.5rem;
+  --font-size-2xl: 2rem;
+  --font-size-3xl: 3rem;
+  
+  /* Spacing */
+  --spacing-xs: 0.25rem;
+  --spacing-sm: 0.5rem;
+  --spacing-md: 1rem;
+  --spacing-lg: 2rem;
+  --spacing-xl: 3rem;
+  --spacing-xxl: 4rem;
+  
+  /* Border Radius */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 1rem;
+  --radius-full: 9999px;
+  
+  /* Shadows */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+}
+
+/* Base Document Styles */
+body, .smart-export-document {
+  font-family: var(--font-body);
+  color: var(--color-text);
+  background-color: var(--color-background);
+  line-height: 1.6;
+  font-size: var(--font-size-base);
+}
+
+/* Header Styles */
+.document-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: var(--spacing-xxl);
+  padding-bottom: var(--spacing-lg);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.document-title {
+  font-family: var(--font-heading);
+  font-size: var(--font-size-2xl);
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 0;
+}
+
+.document-meta {
+  text-align: right;
+  font-family: var(--font-heading);
+  font-size: var(--font-size-lg);
+}
+
+.document-date {
+  display: block;
+  margin-bottom: var(--spacing-xs);
+}
+
+.document-context {
+  display: block;
+  font-style: italic;
+}
+
+/* Section Headers */
+.section-header {
+  font-family: var(--font-heading);
+  font-size: var(--font-size-xl);
+  font-weight: 400;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin-top: var(--spacing-xl);
+  margin-bottom: var(--spacing-lg);
+  position: relative;
+}
+
+.section-header::after {
+  content: '';
+  position: absolute;
+  bottom: -8px;
+  left: 0;
+  width: 60px;
+  height: 1px;
+  background-color: var(--color-border);
+}
+
+/* Body Text */
+.body-text {
+  font-family: var(--font-heading);
+  font-size: var(--font-size-base);
+  line-height: 1.8;
+  margin-bottom: var(--spacing-md);
+  color: var(--color-text);
+}
+
+.emphasized-text {
+  font-style: italic;
+  font-size: var(--font-size-lg);
+  margin: var(--spacing-lg) 0;
+  color: var(--color-text-secondary);
+}
+
+/* Timeline/Journey Styles */
+.timeline-container {
+  margin: var(--spacing-xl) 0;
+  position: relative;
+}
+
+.timeline-line {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background-color: var(--color-border);
+  z-index: 1;
+}
+
+.timeline-stages {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  position: relative;
+  z-index: 2;
+}
+
+.timeline-stage {
+  background-color: var(--color-surface);
+  padding: var(--spacing-sm) var(--spacing-lg);
+  text-align: center;
+  font-family: var(--font-heading);
+  font-size: var(--font-size-lg);
+}
+
+.timeline-marker {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background-color: var(--color-surface);
+  border: 2px solid var(--color-text-secondary);
+  margin: var(--spacing-sm) auto;
+}
+
+/* Card/Box Styles */
+.content-card {
+  background-color: transparent;
+  border: 1px solid var(--color-border);
+  padding: var(--spacing-lg);
+  margin-bottom: var(--spacing-lg);
+  position: relative;
+}
+
+.card-title {
+  font-family: var(--font-heading);
+  font-size: var(--font-size-lg);
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: var(--spacing-md);
+}
+
+/* List Styles */
+.styled-list {
+  list-style: none;
+  padding: 0;
+  margin: var(--spacing-md) 0;
+}
+
+.styled-list li {
+  position: relative;
+  padding-left: var(--spacing-lg);
+  margin-bottom: var(--spacing-sm);
+  font-family: var(--font-heading);
+  line-height: 1.8;
+}
+
+.styled-list li::before {
+  content: '•';
+  position: absolute;
+  left: 0;
+  color: var(--color-text-secondary);
+}
+
+/* Opportunity/Matrix Styles */
+.opportunity-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background-color: var(--color-border);
+  padding: 1px;
+  margin: var(--spacing-lg) 0;
+}
+
+.opportunity-cell {
+  background-color: var(--color-surface);
+  padding: var(--spacing-md);
+  min-height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.opportunity-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--color-text-secondary);
+}
+
+/* Chart/Graph Styles */
+.chart-container {
+  margin: var(--spacing-xl) 0;
+  padding: var(--spacing-lg);
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+}
+
+.chart-title {
+  font-family: var(--font-heading);
+  font-size: var(--font-size-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: var(--spacing-md);
+  color: var(--color-text-secondary);
+}
+
+/* Navigation */
+.document-navigation {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: var(--spacing-xxl);
+  padding-top: var(--spacing-lg);
+  border-top: 1px solid var(--color-border);
+}
+
+.nav-arrow {
+  font-size: var(--font-size-xl);
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.nav-arrow:hover {
+  color: var(--color-text);
+}
+
+.page-indicator {
+  font-family: var(--font-heading);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+/* Quote/Callout Styles */
+.quote-block {
+  margin: var(--spacing-xl) var(--spacing-lg);
+  padding-left: var(--spacing-lg);
+  border-left: 2px solid var(--color-border);
+  font-style: italic;
+  font-size: var(--font-size-lg);
+  line-height: 1.8;
+  color: var(--color-text-secondary);
+}
+
+/* Table Styles */
+.styled-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: var(--spacing-lg) 0;
+  font-family: var(--font-heading);
+}
+
+.styled-table th {
+  text-align: left;
+  padding: var(--spacing-md);
+  border-bottom: 2px solid var(--color-border);
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: var(--font-size-sm);
+}
+
+.styled-table td {
+  padding: var(--spacing-md);
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .smart-export-document {
+    padding: var(--spacing-lg);
+  }
+  
+  .document-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .document-meta {
+    text-align: left;
+    margin-top: var(--spacing-md);
+  }
+  
+  .document-title {
+    font-size: var(--font-size-2xl);
+  }
+  
+  .timeline-stages {
+    flex-direction: column;
+    gap: var(--spacing-md);
+  }
+}
+
+/* Print Styles */
+@media print {
+  .smart-export-document {
+    background-color: white;
+    padding: 2cm;
+  }
+  
+  .document-navigation {
+    display: none;
+  }
+  
+  .page-break {
+    page-break-after: always;
+  }
+}
+
+/* Utility Classes */
+.text-center { text-align: center; }
+.text-right { text-align: right; }
+.text-muted { color: var(--color-text-secondary); }
+.mt-sm { margin-top: var(--spacing-sm); }
+.mt-md { margin-top: var(--spacing-md); }
+.mt-lg { margin-top: var(--spacing-lg); }
+.mt-xl { margin-top: var(--spacing-xl); }
+.mb-sm { margin-bottom: var(--spacing-sm); }
+.mb-md { margin-bottom: var(--spacing-md); }
+.mb-lg { margin-bottom: var(--spacing-lg); }
+.mb-xl { margin-bottom: var(--spacing-xl); }
+
+/* Animation Classes */
+.fade-in {
+  animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Custom Elements for Smart Export */
+.insight-card {
+  background-color: transparent;
+  border: 1px solid var(--color-border);
+  padding: var(--spacing-lg);
+  margin-bottom: var(--spacing-lg);
+  border-radius: 0;
+}
+
+.metric-display {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-3xl);
+  color: var(--color-text);
+  text-align: center;
+  margin: var(--spacing-lg) 0;
+}
+
+.metric-label {
+  font-family: var(--font-heading);
+  font-size: var(--font-size-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--color-text-secondary);
+  text-align: center;
+  margin-top: var(--spacing-sm);
+}
+
+/* Journey Map Specific Elements */
+.journey-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: var(--spacing-xl);
+}
+
+.journey-header-left {
+  flex: 1;
+}
+
+.journey-header-right {
+  text-align: right;
+  font-family: var(--font-heading);
+  font-size: var(--font-size-base);
+}
+
+.journey-subtitle {
+  font-family: var(--font-heading);
+  font-size: var(--font-size-lg);
+  font-weight: 400;
+  margin-top: var(--spacing-sm);
+}
+
+/* Emotion Curve */
+.emotion-curve {
+  height: 150px;
+  position: relative;
+  margin: var(--spacing-xl) 0;
+}
+
+.emotion-curve svg {
+  width: 100%;
+  height: 100%;
+}
+
+.emotion-curve path {
+  fill: none;
+  stroke: var(--color-text-secondary);
+  stroke-width: 2;
+  stroke-dasharray: 4,4;
+}
+
+/* Journey Stages with Markers */
+.journey-stages {
+  position: relative;
+  margin: var(--spacing-xl) 0;
+}
+
+.journey-stages-line {
+  position: absolute;
+  top: 20px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: var(--color-text);
+  z-index: 1;
+}
+
+.journey-stage-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.journey-stage-marker {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background-color: var(--color-surface);
+  border: 2px solid var(--color-text);
+  margin-bottom: var(--spacing-sm);
+  z-index: 2;
+  position: relative;
+}
+
+.journey-stage-marker.active {
+  width: 30px;
+  height: 30px;
+  border-width: 3px;
+}
+
+/* Thought Annotations */
+.thought-annotation {
+  font-style: italic;
+  font-family: var(--font-heading);
+  font-size: var(--font-size-base);
+  color: var(--color-text-secondary);
+  position: relative;
+  padding: var(--spacing-md);
+  margin: var(--spacing-md) 0;
+}
+
+.thought-annotation::before {
+  content: '';
+  position: absolute;
+  top: -20px;
+  left: 50%;
+  width: 1px;
+  height: 20px;
+  background-color: var(--color-border);
+}
+
+/* Experience Sweeteners */
+.sweeteners-section {
+  background-color: transparent;
+  border-left: 3px solid var(--color-border);
+  padding-left: var(--spacing-lg);
+  margin: var(--spacing-lg) 0;
+}
+
+.sweeteners-title {
+  font-family: var(--font-heading);
+  font-style: italic;
+  font-size: var(--font-size-lg);
+  margin-bottom: var(--spacing-sm);
+}
+
+/* Sources Citation */
+.sources-citation {
+  font-family: var(--font-heading);
+  font-style: italic;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin-top: var(--spacing-xxl);
+  padding-top: var(--spacing-lg);
+  border-top: 1px solid var(--color-border);
+}
+
+/* Opportunity Dots Pattern */
+.opportunity-pattern {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 12px);
+  gap: 8px;
+  margin: var(--spacing-md) 0;
+}
+
+.opportunity-pattern-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--color-text-secondary);
+  opacity: 0.3;
+}
+
+.opportunity-pattern-dot.active {
+  opacity: 1;
+}
+
+/* Journey Map Grid Layout */
+.journey-map-grid {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: var(--spacing-lg);
+  margin: var(--spacing-xl) 0;
+}
+
+.journey-map-label {
+  font-family: var(--font-heading);
+  font-size: var(--font-size-base);
+  text-align: right;
+  padding-right: var(--spacing-md);
+  color: var(--color-text-secondary);
+}
+
+/* Curved Connection Lines */
+.connection-curve {
+  position: absolute;
+  pointer-events: none;
+}
+
+.connection-curve svg {
+  overflow: visible;
+}
+
+.connection-curve path {
+  fill: none;
+  stroke: var(--color-border);
+  stroke-width: 2;
+} 

@@ -1,0 +1,51 @@
+{
+  "id": "one-pager",
+  "name": "One Pager",
+  "description": "Concise single-page summary",
+  "icon": "📋",
+  "category": "summary",
+  "prompt": "Create a concise one-page HTML document that summarizes all key information. Focus on the most important points and present them in a scannable format. Use visual hierarchy to guide the reader's eye. Everything should fit on a single page when printed.",
+  "systemPrompt": "You are an executive summary expert. Distill the content into its essence, presenting only the most critical information in a highly organized, single-page format. Use bullet points, key metrics, and visual elements to maximize information density while maintaining readability.",
+  "example": {
+    "title": "Executive Summary",
+    "sections": [
+      {
+        "type": "key-points",
+        "title": "Key Takeaways",
+        "points": [
+          "Most important finding",
+          "Critical insight",
+          "Action required"
+        ]
+      },
+      {
+        "type": "metrics",
+        "title": "Key Metrics",
+        "data": [
+          { "label": "ROI", "value": "125%" },
+          { "label": "Timeline", "value": "3 months" }
+        ]
+      },
+      {
+        "type": "next-steps",
+        "title": "Next Steps",
+        "items": [
+          "Immediate action 1",
+          "Follow-up action 2"
+        ]
+      }
+    ]
+  },
+  "styling": {
+    "fontFamily": "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+    "headingFont": "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+    "primaryColor": "#2c3e50",
+    "secondaryColor": "#7f8c8d",
+    "accentColor": "#e74c3c",
+    "backgroundColor": "#ffffff",
+    "highlightBackground": "#f8f9fa",
+    "lineHeight": "1.4",
+    "maxWidth": "800px"
+  },
+  "htmlTemplate": "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"UTF-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n    <title>{{title}} - One Pager</title>\n    <style>\n        * {\n            margin: 0;\n            padding: 0;\n            box-sizing: border-box;\n        }\n        \n        @page {\n            size: letter;\n            margin: 0.5in;\n        }\n        \n        body {\n            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;\n            line-height: 1.4;\n            color: #2c3e50;\n            background-color: #fff;\n            font-size: 11pt;\n        }\n        \n        .container {\n            max-width: 800px;\n            margin: 0 auto;\n            padding: 20px;\n        }\n        \n        .header {\n            text-align: center;\n            margin-bottom: 20px;\n            padding-bottom: 15px;\n            border-bottom: 3px solid #2c3e50;\n        }\n        \n        h1 {\n            font-size: 24pt;\n            font-weight: 700;\n            margin-bottom: 5px;\n            text-transform: uppercase;\n            letter-spacing: 1px;\n        }\n        \n        .subtitle {\n            font-size: 12pt;\n            color: #7f8c8d;\n        }\n        \n        .grid {\n            display: grid;\n            grid-template-columns: repeat(2, 1fr);\n            gap: 20px;\n            margin-bottom: 20px;\n        }\n        \n        .section {\n            background: #f8f9fa;\n            padding: 15px;\n            border-radius: 6px;\n            border-left: 4px solid #3498db;\n        }\n        \n        .section-title {\n            font-size: 14pt;\n            font-weight: 600;\n            margin-bottom: 10px;\n            color: #2c3e50;\n            text-transform: uppercase;\n            letter-spacing: 0.5px;\n        }\n        \n        .metric-row {\n            display: flex;\n            justify-content: space-between;\n            align-items: baseline;\n            margin: 8px 0;\n            padding: 5px 0;\n            border-bottom: 1px dotted #e0e0e0;\n        }\n        \n        .metric-label {\n            font-size: 10pt;\n            color: #7f8c8d;\n        }\n        \n        .metric-value {\n            font-size: 14pt;\n            font-weight: 600;\n            color: #e74c3c;\n        }\n        \n        ul {\n            list-style: none;\n            padding-left: 0;\n        }\n        \n        li {\n            position: relative;\n            padding-left: 20px;\n            margin: 5px 0;\n            font-size: 10pt;\n        }\n        \n        li:before {\n            content: '▸';\n            position: absolute;\n            left: 0;\n            color: #3498db;\n            font-weight: bold;\n        }\n        \n        .highlight-box {\n            background: #fff3cd;\n            border: 1px solid #ffeaa7;\n            border-radius: 6px;\n            padding: 15px;\n            margin: 15px 0;\n            text-align: center;\n        }\n        \n        .highlight-box h3 {\n            font-size: 14pt;\n            margin-bottom: 5px;\n            color: #f39c12;\n        }\n        \n        .full-width {\n            grid-column: 1 / -1;\n        }\n        \n        .timeline {\n            display: flex;\n            justify-content: space-between;\n            margin: 15px 0;\n            position: relative;\n        }\n        \n        .timeline::before {\n            content: '';\n            position: absolute;\n            top: 10px;\n            left: 0;\n            right: 0;\n            height: 2px;\n            background: #e0e0e0;\n            z-index: 0;\n        }\n        \n        .timeline-item {\n            position: relative;\n            text-align: center;\n            z-index: 1;\n        }\n        \n        .timeline-dot {\n            width: 20px;\n            height: 20px;\n            background: #3498db;\n            border-radius: 50%;\n            margin: 0 auto 5px;\n            border: 3px solid #fff;\n            box-shadow: 0 0 0 2px #e0e0e0;\n        }\n        \n        .timeline-label {\n            font-size: 9pt;\n            color: #7f8c8d;\n        }\n        \n        @media print {\n            body {\n                font-size: 10pt;\n            }\n            \n            .container {\n                padding: 0;\n                max-width: 100%;\n            }\n            \n            h1 {\n                font-size: 20pt;\n            }\n            \n            .section-title {\n                font-size: 12pt;\n            }\n            \n            .section {\n                break-inside: avoid;\n            }\n        }\n        \n        @media (max-width: 768px) {\n            .grid {\n                grid-template-columns: 1fr;\n            }\n        }\n    </style>\n</head>\n<body>\n    <div class=\"container\">\n        {{content}}\n    </div>\n</body>\n</html>"
+}

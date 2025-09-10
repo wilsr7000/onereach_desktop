@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Tools Manager</title>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval'">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        /* Header */
+        .header {
+            background: #2a2a2a;
+            padding: 20px;
+            border-bottom: 1px solid #3a3a3a;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .header h1 {
+            font-size: 24px;
+            font-weight: 500;
+        }
+        
+        /* Main Content */
+        .content {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+        }
+        
+        /* Module Grid */
+        .module-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .module-card {
+            background: #2a2a2a;
+            border-radius: 8px;
+            padding: 20px;
+            border: 1px solid #3a3a3a;
+            transition: all 0.2s ease;
+        }
+        
+        .module-card:hover {
+            border-color: #4a4a4a;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+        
+        .module-name {
+            font-size: 18px;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+        
+        .module-description {
+            color: #999;
+            font-size: 14px;
+            margin-bottom: 16px;
+        }
+        
+        .module-actions {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .module-actions button {
+            flex: 1;
+            padding: 8px 12px;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        /* Buttons */
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .btn-primary {
+            background: #0099ff;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #0077cc;
+        }
+        
+        .btn-secondary {
+            background: #3a3a3a;
+            color: #e0e0e0;
+        }
+        
+        .btn-secondary:hover {
+            background: #4a4a4a;
+        }
+        
+        .btn-danger {
+            background: #ff3b30;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #cc2e26;
+        }
+        
+        .btn-success {
+            background: #4cd964;
+            color: white;
+        }
+        
+        .btn-success:hover {
+            background: #3dae50;
+        }
+        
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+        }
+        
+        .empty-state h2 {
+            font-size: 24px;
+            margin-bottom: 12px;
+            color: #999;
+        }
+        
+        .empty-state p {
+            color: #666;
+            margin-bottom: 24px;
+        }
+        
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal.active {
+            display: flex;
+        }
+        
+        .modal-content {
+            background: #2a2a2a;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 600px;
+            max-height: 80vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .modal-header {
+            padding: 20px;
+            border-bottom: 1px solid #3a3a3a;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .modal-header h2 {
+            font-size: 20px;
+            font-weight: 500;
+        }
+        
+        .modal-body {
+            padding: 20px;
+            overflow-y: auto;
+            flex: 1;
+        }
+        
+        .modal-footer {
+            padding: 20px;
+            border-top: 1px solid #3a3a3a;
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+        
+        /* Add Module Flow */
+        .source-selector {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            padding: 40px 0;
+        }
+        
+        .source-option {
+            text-align: center;
+            padding: 40px;
+            background: #333;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: 2px solid transparent;
+        }
+        
+        .source-option:hover {
+            background: #3a3a3a;
+            border-color: #0099ff;
+        }
+        
+        .source-option i {
+            font-size: 48px;
+            margin-bottom: 16px;
+            display: block;
+        }
+        
+        /* Forms */
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+        
+        .form-group input {
+            width: 100%;
+            padding: 10px;
+            background: #1a1a1a;
+            border: 1px solid #3a3a3a;
+            border-radius: 4px;
+            color: #e0e0e0;
+            font-size: 14px;
+        }
+        
+        .form-group input:focus {
+            outline: none;
+            border-color: #0099ff;
+        }
+        
+        /* Progress */
+        .progress-bar {
+            height: 4px;
+            background: #3a3a3a;
+            border-radius: 2px;
+            overflow: hidden;
+            margin: 20px 0;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: #0099ff;
+            transition: width 0.3s ease;
+        }
+        
+        /* Validation Results */
+        .validation-results {
+            margin: 20px 0;
+        }
+        
+        .validation-item {
+            padding: 12px;
+            margin-bottom: 8px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .validation-item.success {
+            background: rgba(76, 217, 100, 0.1);
+            border: 1px solid rgba(76, 217, 100, 0.3);
+        }
+        
+        .validation-item.error {
+            background: rgba(255, 59, 48, 0.1);
+            border: 1px solid rgba(255, 59, 48, 0.3);
+        }
+        
+        .validation-item.warning {
+            background: rgba(255, 149, 0, 0.1);
+            border: 1px solid rgba(255, 149, 0, 0.3);
+        }
+        
+        /* Icons */
+        .icon {
+            width: 20px;
+            height: 20px;
+            display: inline-block;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Tools Manager</h1>
+        <button class="btn btn-primary" onclick="ModuleManager.showAddModule()">
+            <span>➕</span> Add Tool
+        </button>
+    </div>
+    
+    <div class="content" id="content">
+        <!-- Content will be dynamically loaded here -->
+    </div>
+    
+    <!-- Add Module Modal -->
+    <div class="modal" id="addModuleModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Add Tool</h2>
+                <button class="btn btn-secondary" onclick="ModuleManager.closeModal('addModuleModal')">✕</button>
+            </div>
+            <div class="modal-body" id="addModuleBody">
+                <!-- Dynamic content -->
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const { ipcRenderer } = require('electron');
+        
+        // Module Manager namespace
+        window.ModuleManager = {
+            modules: [],
+            currentStep: null,
+            tempModuleData: null,
+            
+            // Initialize
+            async init() {
+                await this.loadModules();
+            },
+            
+            // Load installed modules
+            async loadModules() {
+                try {
+                    this.modules = await ipcRenderer.invoke('module:get-installed');
+                    this.renderModules();
+                } catch (error) {
+                    console.error('Error loading modules:', error);
+                }
+            },
+            
+            // Render module list
+            renderModules() {
+                const content = document.getElementById('content');
+                
+                if (this.modules.length === 0) {
+                    content.innerHTML = `
+                        <div class="empty-state">
+                            <h2>No Tools Installed</h2>
+                            <p>Add tools to extend OneReach functionality</p>
+                            <button class="btn btn-primary" onclick="ModuleManager.showAddModule()">
+                                <span>➕</span> Add Your First Tool
+                            </button>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                content.innerHTML = `
+                    <div class="module-grid">
+                        ${this.modules.map(module => `
+                            <div class="module-card">
+                                <div class="module-name">${module.name || module.id}</div>
+                                <div class="module-description">${module.description || 'No description'}</div>
+                                <div class="module-actions">
+                                    <button class="btn btn-secondary" onclick="ModuleManager.openModule('${module.id}')">Open</button>
+                                    <button class="btn btn-danger" onclick="ModuleManager.uninstallModule('${module.id}')">Uninstall</button>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            },
+            
+            // Show add module modal
+            showAddModule() {
+                const modal = document.getElementById('addModuleModal');
+                const body = document.getElementById('addModuleBody');
+                
+                body.innerHTML = `
+                    <div class="source-selector">
+                        <div class="source-option" onclick="ModuleManager.selectSource('file')">
+                            <i>📁</i>
+                            <h3>Upload ZIP File</h3>
+                            <p>Select a tool from your computer</p>
+                        </div>
+                        <div class="source-option" onclick="ModuleManager.selectSource('url')">
+                            <i>🌐</i>
+                            <h3>Download from URL</h3>
+                            <p>Install from a web address</p>
+                        </div>
+                    </div>
+                `;
+                
+                modal.classList.add('active');
+            },
+            
+            // Select installation source
+            selectSource(type) {
+                const body = document.getElementById('addModuleBody');
+                
+                if (type === 'file') {
+                    // Trigger file selection
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.accept = '.zip';
+                    input.onchange = (e) => {
+                        const file = e.target.files[0];
+                        if (file) {
+                            this.tempModuleData = { type: 'file', path: file.path };
+                            this.showValidationStep();
+                        }
+                    };
+                    input.click();
+                } else if (type === 'url') {
+                    body.innerHTML = `
+                        <div class="form-group">
+                            <label>Tool URL</label>
+                            <input type="text" id="moduleUrl" placeholder="https://example.com/tool.zip">
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-secondary" onclick="ModuleManager.showAddModule()">Back</button>
+                            <button class="btn btn-primary" onclick="ModuleManager.downloadFromUrl()">Next</button>
+                        </div>
+                    `;
+                }
+            },
+            
+            // Download from URL
+            async downloadFromUrl() {
+                const url = document.getElementById('moduleUrl').value.trim();
+                if (!url) return;
+                
+                this.tempModuleData = { type: 'url', url: url };
+                this.showValidationStep();
+            },
+            
+            // Show validation step
+            showValidationStep() {
+                const body = document.getElementById('addModuleBody');
+                
+                body.innerHTML = `
+                                    <h3>Tool Validation</h3>
+                <p>Choose how to proceed with this tool:</p>
+                    <div style="display: flex; gap: 10px; margin-top: 20px;">
+                        <button class="btn btn-secondary" onclick="ModuleManager.validateOnly()">
+                            🔍 Validate Only
+                        </button>
+                        <button class="btn btn-primary" onclick="ModuleManager.validateAndInstall()">
+                            ✅ Validate & Install
+                        </button>
+                    </div>
+                `;
+            },
+            
+            // Validate only
+            async validateOnly() {
+                await this.performValidation(false);
+            },
+            
+            // Validate and install
+            async validateAndInstall() {
+                await this.performValidation(true);
+            },
+            
+            // Perform validation
+            async performValidation(autoInstall) {
+                const body = document.getElementById('addModuleBody');
+                body.innerHTML = `
+                    <h3>Validating Tool...</h3>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: 50%"></div>
+                    </div>
+                `;
+                
+                try {
+                    let result;
+                    if (this.tempModuleData.type === 'file') {
+                        result = await ipcRenderer.invoke('module:evaluate', this.tempModuleData.path);
+                    } else {
+                        // For URL, first download then evaluate
+                        const downloadResult = await ipcRenderer.invoke('module:download-temp', this.tempModuleData.url);
+                        if (downloadResult.success) {
+                            result = await ipcRenderer.invoke('module:evaluate', downloadResult.path);
+                            this.tempModuleData.path = downloadResult.path;
+                        } else {
+                            throw new Error(downloadResult.error);
+                        }
+                    }
+                    
+                    if (result.success) {
+                        this.showValidationResults(result.evaluation, autoInstall);
+                    } else {
+                        throw new Error(result.error);
+                    }
+                } catch (error) {
+                    body.innerHTML = `
+                        <h3>❌ Validation Failed</h3>
+                        <p style="color: #ff3b30;">${error.message}</p>
+                        <div class="modal-footer">
+                            <button class="btn btn-secondary" onclick="ModuleManager.closeModal('addModuleModal')">Close</button>
+                        </div>
+                    `;
+                }
+            },
+            
+            // Show validation results
+            showValidationResults(evaluation, autoInstall) {
+                const body = document.getElementById('addModuleBody');
+                const passed = evaluation.score >= 80;
+                
+                let html = `
+                    <h3>${passed ? '✅' : '⚠️'} Validation Results</h3>
+                    <div style="text-align: center; font-size: 2em; margin: 20px 0;">
+                        Score: ${evaluation.score}/100
+                    </div>
+                    <div class="validation-results">
+                `;
+                
+                evaluation.checks.forEach(check => {
+                    html += `
+                        <div class="validation-item ${check.passed ? 'success' : 'error'}">
+                            <span>${check.passed ? '✅' : '❌'}</span>
+                            <span>${check.message}</span>
+                        </div>
+                    `;
+                });
+                
+                if (evaluation.warnings.length > 0) {
+                    evaluation.warnings.forEach(warning => {
+                        html += `
+                            <div class="validation-item warning">
+                                <span>⚠️</span>
+                                <span>${warning}</span>
+                            </div>
+                        `;
+                    });
+                }
+                
+                html += '</div>';
+                
+                if (passed && autoInstall) {
+                    html += `
+                        <div class="modal-footer">
+                            <button class="btn btn-primary" onclick="ModuleManager.installModule()">
+                                Install Tool
+                            </button>
+                        </div>
+                    `;
+                } else if (!passed) {
+                    html += `
+                        <div class="modal-footer">
+                            <button class="btn btn-secondary" onclick="ModuleManager.closeModal('addModuleModal')">Cancel</button>
+                            <button class="btn btn-primary" onclick="ModuleManager.aiFixModule()">
+                                🤖 AI Fix & Retry
+                            </button>
+                        </div>
+                    `;
+                } else {
+                    html += `
+                        <div class="modal-footer">
+                            <button class="btn btn-secondary" onclick="ModuleManager.closeModal('addModuleModal')">Close</button>
+                            <button class="btn btn-primary" onclick="ModuleManager.installModule()">Install Anyway</button>
+                        </div>
+                    `;
+                }
+                
+                body.innerHTML = html;
+            },
+            
+            // Install module
+            async installModule() {
+                const body = document.getElementById('addModuleBody');
+                body.innerHTML = `
+                    <h3>Installing Tool...</h3>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: 75%"></div>
+                    </div>
+                `;
+                
+                try {
+                    let result;
+                    if (this.tempModuleData.type === 'file') {
+                        result = await ipcRenderer.invoke('module:install-from-file', this.tempModuleData.path);
+                    } else {
+                        result = await ipcRenderer.invoke('module:install-from-url', this.tempModuleData.url);
+                    }
+                    
+                    if (result.success) {
+                        body.innerHTML = `
+                            <h3>✅ Tool Installed!</h3>
+                            <p>${result.manifest.name} has been installed successfully.</p>
+                            <div class="modal-footer">
+                                <button class="btn btn-primary" onclick="ModuleManager.finishInstall()">Done</button>
+                            </div>
+                        `;
+                    } else {
+                        throw new Error(result.error);
+                    }
+                } catch (error) {
+                    body.innerHTML = `
+                        <h3>❌ Installation Failed</h3>
+                        <p style="color: #ff3b30;">${error.message}</p>
+                        <div class="modal-footer">
+                            <button class="btn btn-secondary" onclick="ModuleManager.closeModal('addModuleModal')">Close</button>
+                        </div>
+                    `;
+                }
+            },
+            
+            // AI Fix module
+            async aiFixModule() {
+                const hasApiKey = await ipcRenderer.invoke('module:check-claude-api');
+                if (!hasApiKey) {
+                    alert('Claude API key not configured. Please configure it in Settings > API Keys.');
+                    return;
+                }
+                
+                const body = document.getElementById('addModuleBody');
+                body.innerHTML = `
+                    <h3>🤖 AI Tool Review</h3>
+                    <p>Using Claude AI to analyze and fix issues...</p>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: 30%; animation: pulse 2s infinite"></div>
+                    </div>
+                    <style>
+                        @keyframes pulse {
+                            0% { opacity: 0.6; }
+                            50% { opacity: 1; }
+                            100% { opacity: 0.6; }
+                        }
+                    </style>
+                `;
+                
+                try {
+                    const result = await ipcRenderer.invoke('module:ai-review', this.tempModuleData.path);
+                    
+                    if (result.success && result.fixedZipPath) {
+                        this.tempModuleData.path = result.fixedZipPath;
+                        this.showValidationResults(result.verification, true);
+                    } else {
+                        throw new Error(result.error || 'AI review failed');
+                    }
+                } catch (error) {
+                    body.innerHTML = `
+                        <h3>❌ AI Review Failed</h3>
+                        <p style="color: #ff3b30;">${error.message}</p>
+                        <div class="modal-footer">
+                            <button class="btn btn-secondary" onclick="ModuleManager.closeModal('addModuleModal')">Close</button>
+                        </div>
+                    `;
+                }
+            },
+            
+            // Finish installation
+            finishInstall() {
+                this.closeModal('addModuleModal');
+                this.loadModules();
+                ipcRenderer.send('refresh-menu');
+            },
+            
+            // Open module
+            async openModule(moduleId) {
+                await ipcRenderer.invoke('module:open', moduleId);
+            },
+            
+            // Uninstall module
+            async uninstallModule(moduleId) {
+                const module = this.modules.find(m => m.id === moduleId);
+                if (!module) return;
+                
+                if (confirm(`Are you sure you want to uninstall "${module.name || moduleId}"?`)) {
+                    const result = await ipcRenderer.invoke('module:uninstall', moduleId);
+                    if (result.success) {
+                        await this.loadModules();
+                        ipcRenderer.send('refresh-menu');
+                    } else {
+                        alert(`Failed to uninstall: ${result.error}`);
+                    }
+                }
+            },
+            
+            // Close modal
+            closeModal(modalId) {
+                document.getElementById(modalId).classList.remove('active');
+                this.tempModuleData = null;
+            }
+        };
+        
+        // Initialize on load
+        ModuleManager.init();
+    </script>
+</body>
+</html>

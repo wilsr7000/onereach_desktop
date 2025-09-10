@@ -1,0 +1,16 @@
+{
+  "id": "example-calculator",
+  "name": "Calculator Module",
+  "version": "1.0.0",
+  "description": "A simple calculator module example",
+  "main": "index.html",
+  "icon": "icon.png",
+  "menuLabel": "Calculator",
+  "windowOptions": {
+    "width": 400,
+    "height": 600,
+    "resizable": false,
+    "title": "Calculator"
+  },
+  "dataDirectory": "calculator-data"
+} 

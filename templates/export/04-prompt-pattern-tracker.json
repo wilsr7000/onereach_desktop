@@ -1,0 +1,93 @@
+{
+  "id": "04-prompt-pattern-tracker",
+  "name": "04. Prompt Pattern Tracker",
+  "description": "Track what users ask AI agents to identify patterns",
+  "icon": "💬",
+  "category": "wiser-discovery",
+  "aiFirst": true,
+  "orderIndex": 4,
+  "prompt": "Create a prompt pattern tracker that analyzes common user requests to AI agents. Categorize prompts by intent, frequency, complexity, and success rate. Identify patterns in how users interact with AI and opportunities to improve agent responses or create new capabilities.",
+  "systemPrompt": "You are a conversational AI analyst. Create a comprehensive tracker of user prompts and interactions with AI agents. Analyze patterns in user requests, identify common intents, and highlight opportunities to improve the AI experience through better prompt handling or new features.",
+  "example": {
+    "title": "Prompt Pattern Tracker",
+    "timeframe": "Last 30 days",
+    "summary": {
+      "totalPrompts": 2847,
+      "uniqueUsers": 156,
+      "avgPromptsPerUser": 18.3,
+      "successRate": "82%"
+    },
+    "patterns": [
+      {
+        "category": "Information Retrieval",
+        "frequency": "45%",
+        "examples": [
+          "Find all documents about [topic]",
+          "What's the latest on [project]?",
+          "Show me emails from [person] about [topic]"
+        ],
+        "commonIntents": [
+          "Search across multiple sources",
+          "Filter by recency",
+          "Contextual search"
+        ],
+        "successMetrics": {
+          "userSatisfaction": "High",
+          "taskCompletion": "85%",
+          "avgIterations": 1.3
+        },
+        "opportunities": [
+          "Pre-filter common searches",
+          "Suggest related topics",
+          "Save search templates"
+        ]
+      },
+      {
+        "category": "Content Generation",
+        "frequency": "30%",
+        "examples": [
+          "Write a summary of this report",
+          "Create an email response to [person]",
+          "Draft a proposal based on [requirements]"
+        ],
+        "commonIntents": [
+          "Summarization",
+          "Professional writing",
+          "Template filling"
+        ],
+        "successMetrics": {
+          "userSatisfaction": "Medium",
+          "taskCompletion": "70%",
+          "avgIterations": 2.1
+        },
+        "opportunities": [
+          "Provide style options",
+          "Learn user preferences",
+          "Offer revision suggestions"
+        ]
+      }
+    ],
+    "failurePatterns": [
+      {
+        "type": "Ambiguous requests",
+        "frequency": "15%",
+        "examples": ["Make this better", "Fix this"],
+        "recommendation": "Ask clarifying questions"
+      }
+    ]
+  },
+  "styling": {
+    "fontFamily": "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+    "headingFont": "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+    "primaryColor": "#00d4ff",
+    "secondaryColor": "#0099cc",
+    "accentColor": "#ff6b6b",
+    "backgroundColor": "#ffffff",
+    "aiPillColor": "#00d4ff",
+    "successColor": "#10b981",
+    "warningColor": "#f59e0b",
+    "lineHeight": "1.6",
+    "maxWidth": "1200px"
+  },
+  "htmlTemplate": "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"UTF-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n    <title>{{title}} - WISER Framework</title>\n    <style>\n        * {\n            margin: 0;\n            padding: 0;\n            box-sizing: border-box;\n        }\n        \n        body {\n            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;\n            line-height: 1.6;\n            color: #1a1a1a;\n            background-color: #fafafa;\n        }\n        \n        .header {\n            background: linear-gradient(135deg, #00d4ff 0%, #0099cc 100%);\n            color: white;\n            padding: 60px 40px;\n            position: relative;\n            overflow: hidden;\n        }\n        \n        .header::after {\n            content: '';\n            position: absolute;\n            top: -50%;\n            right: -10%;\n            width: 300px;\n            height: 300px;\n            background: rgba(255, 255, 255, 0.1);\n            border-radius: 50%;\n        }\n        \n        .ai-pill {\n            display: inline-block;\n            background: rgba(255, 255, 255, 0.2);\n            padding: 6px 16px;\n            border-radius: 20px;\n            font-size: 0.85em;\n            font-weight: 600;\n            margin-bottom: 20px;\n            backdrop-filter: blur(10px);\n            border: 1px solid rgba(255, 255, 255, 0.3);\n        }\n        \n        h1 {\n            font-size: 2.5em;\n            font-weight: 700;\n            margin-bottom: 10px;\n            position: relative;\n            z-index: 1;\n        }\n        \n        .subtitle {\n            font-size: 1.2em;\n            opacity: 0.9;\n            position: relative;\n            z-index: 1;\n        }\n        \n        .container {\n            max-width: 1200px;\n            margin: 0 auto;\n            padding: 40px 20px;\n        }\n        \n        .summary-grid {\n            display: grid;\n            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));\n            gap: 20px;\n            margin-bottom: 40px;\n        }\n        \n        .summary-card {\n            background: white;\n            padding: 25px;\n            border-radius: 12px;\n            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);\n            text-align: center;\n        }\n        \n        .summary-number {\n            font-size: 2.5em;\n            font-weight: 700;\n            color: #00d4ff;\n            margin-bottom: 5px;\n        }\n        \n        .summary-label {\n            color: #666;\n            font-size: 0.9em;\n        }\n        \n        .pattern-section {\n            background: white;\n            border-radius: 12px;\n            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);\n            margin-bottom: 30px;\n            overflow: hidden;\n        }\n        \n        .pattern-header {\n            background: #f8f9fa;\n            padding: 25px;\n            border-bottom: 1px solid #e0e0e0;\n            display: flex;\n            justify-content: space-between;\n            align-items: center;\n        }\n        \n        .pattern-category {\n            font-size: 1.4em;\n            font-weight: 600;\n            color: #1a1a1a;\n        }\n        \n        .frequency-badge {\n            background: #e0f2fe;\n            color: #0284c7;\n            padding: 8px 16px;\n            border-radius: 20px;\n            font-weight: 600;\n            font-size: 0.9em;\n        }\n        \n        .pattern-content {\n            padding: 30px;\n        }\n        \n        .examples-section {\n            margin-bottom: 25px;\n        }\n        \n        .section-label {\n            font-weight: 600;\n            color: #666;\n            margin-bottom: 10px;\n            font-size: 0.9em;\n            text-transform: uppercase;\n        }\n        \n        .example-list {\n            background: #f8f9fa;\n            padding: 15px;\n            border-radius: 8px;\n            border-left: 3px solid #00d4ff;\n        }\n        \n        .example-item {\n            padding: 8px 0;\n            font-family: 'Consolas', 'Monaco', monospace;\n            font-size: 0.95em;\n            color: #374151;\n        }\n        \n        .intents-grid {\n            display: grid;\n            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));\n            gap: 15px;\n            margin-bottom: 25px;\n        }\n        \n        .intent-chip {\n            background: #e0f2fe;\n            padding: 10px 15px;\n            border-radius: 8px;\n            text-align: center;\n            font-size: 0.9em;\n            color: #0369a1;\n            border: 1px solid #bae6fd;\n        }\n        \n        .metrics-row {\n            display: grid;\n            grid-template-columns: repeat(3, 1fr);\n            gap: 20px;\n            margin-bottom: 25px;\n        }\n        \n        .metric-card {\n            text-align: center;\n            padding: 20px;\n            background: #f8f9fa;\n            border-radius: 8px;\n        }\n        \n        .metric-value {\n            font-size: 1.8em;\n            font-weight: 700;\n            margin-bottom: 5px;\n        }\n        \n        .metric-label {\n            font-size: 0.85em;\n            color: #666;\n        }\n        \n        .metric-high {\n            color: #10b981;\n        }\n        \n        .metric-medium {\n            color: #f59e0b;\n        }\n        \n        .metric-low {\n            color: #ef4444;\n        }\n        \n        .opportunities-list {\n            background: #f0fdff;\n            border: 1px solid #a5f3fc;\n            border-radius: 8px;\n            padding: 20px;\n        }\n        \n        .opportunity-item {\n            display: flex;\n            align-items: start;\n            margin: 10px 0;\n        }\n        \n        .opportunity-icon {\n            color: #0891b2;\n            margin-right: 10px;\n            font-size: 1.2em;\n        }\n        \n        .failure-patterns {\n            background: #fef2f2;\n            border: 1px solid #fecaca;\n            border-radius: 12px;\n            padding: 30px;\n            margin-top: 40px;\n        }\n        \n        .failure-title {\n            font-size: 1.2em;\n            font-weight: 600;\n            color: #dc2626;\n            margin-bottom: 20px;\n        }\n        \n        .failure-item {\n            background: white;\n            padding: 20px;\n            border-radius: 8px;\n            margin-bottom: 15px;\n            border: 1px solid #fee2e2;\n        }\n        \n        .failure-type {\n            font-weight: 600;\n            color: #b91c1c;\n            margin-bottom: 8px;\n        }\n        \n        .failure-examples {\n            font-style: italic;\n            color: #666;\n            margin: 8px 0;\n        }\n        \n        .recommendation {\n            background: #fef3c7;\n            padding: 10px 15px;\n            border-radius: 6px;\n            font-size: 0.9em;\n            color: #92400e;\n            margin-top: 10px;\n        }\n        \n        .prompt-cloud {\n            background: white;\n            padding: 30px;\n            border-radius: 12px;\n            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);\n            margin-top: 40px;\n            text-align: center;\n        }\n        \n        .cloud-title {\n            font-size: 1.2em;\n            font-weight: 600;\n            margin-bottom: 20px;\n            color: #1a1a1a;\n        }\n        \n        .word-cloud {\n            display: flex;\n            flex-wrap: wrap;\n            justify-content: center;\n            gap: 10px;\n            padding: 20px;\n        }\n        \n        .cloud-word {\n            padding: 6px 12px;\n            border-radius: 20px;\n            background: #e0f2fe;\n            color: #0369a1;\n            font-weight: 500;\n        }\n        \n        .cloud-word.large {\n            font-size: 1.2em;\n            background: #0891b2;\n            color: white;\n        }\n        \n        .cloud-word.medium {\n            font-size: 1em;\n        }\n        \n        .cloud-word.small {\n            font-size: 0.85em;\n            opacity: 0.8;\n        }\n        \n        @media print {\n            .header {\n                background: none;\n                color: #1a1a1a;\n                border: 2px solid #00d4ff;\n            }\n            \n            .ai-pill {\n                background: #00d4ff;\n                color: white;\n            }\n            \n            .pattern-section {\n                page-break-inside: avoid;\n            }\n        }\n    </style>\n</head>\n<body>\n    <div class=\"header\">\n        <div class=\"ai-pill\">🤖 AI-FIRST • WISER FRAMEWORK</div>\n        <h1>{{title}}</h1>\n        <div class=\"subtitle\">Phase 1: Agent-Enabled Discovery</div>\n    </div>\n    <div class=\"container\">\n        {{content}}\n    </div>\n</body>\n</html>"
+} 

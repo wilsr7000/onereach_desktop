@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Drop Zone</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: transparent;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            -webkit-font-smoothing: antialiased;
+            user-select: none;
+            -webkit-app-region: no-drag;
+            margin: 0;
+            padding: 0;
+        }
+        
+        .container {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+        
+        /* Ghost zone - liquid glass effect */
+        .ghost-zone {
+            position: relative;
+            width: 80px;
+            height: 80px;
+            cursor: grab;
+            transition: background 0.4s ease,
+                        border-color 0.4s ease,
+                        box-shadow 0.4s ease;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(30px) saturate(1.5);
+            -webkit-backdrop-filter: blur(30px) saturate(1.5);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 
+                0 8px 32px rgba(0, 0, 0, 0.12),
+                0 2px 8px rgba(0, 0, 0, 0.08),
+                inset 0 2px 4px rgba(255, 255, 255, 0.1),
+                inset 0 -2px 4px rgba(0, 0, 0, 0.05);
+            pointer-events: all;
+            will-change: background, border-color, box-shadow;
+        }
+        
+        /* Hover detection helper - invisible larger area */
+        .ghost-zone::after {
+            content: '';
+            position: absolute;
+            top: -10px;
+            left: -10px;
+            right: -10px;
+            bottom: -10px;
+            border-radius: 50%;
+            z-index: -1;
+            pointer-events: all;
+        }
+        
+        .ghost-zone:hover {
+            background: rgba(255, 255, 255, 0.04);
+            border-color: rgba(255, 255, 255, 0.1);
+            box-shadow: 
+                0 10px 40px rgba(0, 0, 0, 0.12),
+                0 3px 12px rgba(0, 0, 0, 0.08),
+                inset 0 2px 6px rgba(255, 255, 255, 0.12),
+                inset 0 -2px 6px rgba(0, 0, 0, 0.06);
+        }
+        
+        .ghost-zone:active {
+            cursor: grabbing;
+            transform: scale(0.97);
+            transition: transform 0.1s ease;
+        }
+        
+        /* Glass shine effect */
+        .ghost-zone::before {
+            content: '';
+            position: absolute;
+            top: 15%;
+            left: 15%;
+            width: 40%;
+            height: 40%;
+            background: radial-gradient(
+                ellipse at top left,
+                rgba(255, 255, 255, 0.2) 0%,
+                rgba(255, 255, 255, 0.05) 40%,
+                transparent 70%
+            );
+            border-radius: 50%;
+            opacity: 0.6;
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+            z-index: 1;
+        }
+        
+        .ghost-zone:hover::before {
+            opacity: 0.7;
+        }
+        
+        /* Center icon - elegant glass icon */
+        .zone-icon {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 28px;
+            height: 28px;
+            opacity: 0.4;
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+            z-index: 2;
+        }
+        
+        .ghost-zone:hover .zone-icon {
+            opacity: 0.5;
+            transform: translate(-50%, -50%);
+        }
+        
+        .zone-icon svg {
+            width: 100%;
+            height: 100%;
+            fill: none;
+            stroke: rgba(255, 255, 255, 0.7);
+            stroke-width: 1.5;
+            filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
+        }
+        
+        /* Active dragging state - enhanced glass */
+        .ghost-zone.dragging-over {
+            width: 140px;
+            height: 140px;
+            background: linear-gradient(135deg, 
+                rgba(59, 130, 246, 0.15) 0%, 
+                rgba(59, 130, 246, 0.08) 50%, 
+                rgba(99, 102, 241, 0.12) 100%);
+            backdrop-filter: blur(50px) saturate(1.8);
+            -webkit-backdrop-filter: blur(50px) saturate(1.8);
+            border: 2px solid rgba(59, 130, 246, 0.4);
+            box-shadow: 
+                0 0 0 1px rgba(59, 130, 246, 0.3),
+                0 20px 60px rgba(59, 130, 246, 0.25),
+                0 8px 24px rgba(59, 130, 246, 0.2),
+                inset 0 4px 16px rgba(59, 130, 246, 0.15),
+                inset 0 -4px 16px rgba(99, 102, 241, 0.1);
+            transition: width 0.3s ease,
+                        height 0.3s ease,
+                        background 0.3s ease,
+                        border 0.3s ease,
+                        box-shadow 0.3s ease;
+        }
+        
+        .ghost-zone.dragging-over .zone-icon {
+            opacity: 1;
+            width: 40px;
+            height: 40px;
+            transform: translate(-50%, -50%) scale(1);
+        }
+        
+        .ghost-zone.dragging-over .zone-icon svg {
+            stroke: rgba(59, 130, 246, 1);
+            stroke-width: 2;
+            filter: drop-shadow(0 4px 8px rgba(59, 130, 246, 0.3));
+        }
+        
+        /* Drop ready pulse */
+        @keyframes drop-ready-pulse {
+            0%, 100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+            50% {
+                transform: scale(1.05);
+                opacity: 0.8;
+            }
+        }
+        
+        .ghost-zone.drop-ready {
+            animation: drop-ready-pulse 1s ease-in-out infinite;
+        }
+        
+        /* Success state - glass ripple */
+        .success-ripple {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            background: radial-gradient(
+                circle at center,
+                rgba(34, 197, 94, 0.2) 0%,
+                rgba(34, 197, 94, 0.1) 50%,
+                transparent 100%
+            );
+            border: 2px solid rgba(34, 197, 94, 0.6);
+            box-shadow: 
+                0 0 20px rgba(34, 197, 94, 0.4),
+                inset 0 0 20px rgba(34, 197, 94, 0.2);
+            opacity: 0;
+            pointer-events: none;
+        }
+        
+        .success-ripple.active {
+            animation: glass-ripple 0.8s cubic-bezier(0.4, 0.0, 0.2, 1) forwards;
+        }
+        
+        @keyframes glass-ripple {
+            0% {
+                transform: translate(-50%, -50%) scale(0.8);
+                opacity: 0;
+            }
+            50% {
+                opacity: 1;
+            }
+            100% {
+                transform: translate(-50%, -50%) scale(2.5);
+                opacity: 0;
+            }
+        }
+        
+        /* Particle effect - glass drops */
+        .particle {
+            position: absolute;
+            width: 6px;
+            height: 6px;
+            background: radial-gradient(
+                circle at 30% 30%,
+                rgba(255, 255, 255, 0.8) 0%,
+                rgba(59, 130, 246, 0.6) 50%,
+                rgba(59, 130, 246, 0.4) 100%
+            );
+            border-radius: 50%;
+            box-shadow: 
+                0 2px 4px rgba(59, 130, 246, 0.3),
+                inset 0 -1px 2px rgba(0, 0, 0, 0.2);
+            pointer-events: none;
+            opacity: 0;
+        }
+        
+        .particle.active {
+            animation: particle-flow 1.2s cubic-bezier(0.4, 0.0, 0.2, 1) forwards;
+        }
+        
+        @keyframes particle-flow {
+            0% {
+                transform: translate(0, 0) scale(1);
+                opacity: 1;
+            }
+            100% {
+                transform: translate(var(--end-x), var(--end-y)) scale(0);
+                opacity: 0;
+            }
+        }
+        
+        /* Status text - minimal and clean */
+        .status-text {
+            position: absolute;
+            bottom: -28px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 12px;
+            font-weight: 500;
+            color: rgba(255, 255, 255, 0.7);
+            white-space: nowrap;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            pointer-events: none;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+        }
+        
+        .status-text.visible {
+            opacity: 1;
+        }
+        
+        .status-text.error {
+            color: #ef4444;
+        }
+        
+        /* Menu dots - ultra minimal */
+        .menu-dots {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            width: 4px;
+            height: 4px;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            cursor: pointer;
+            padding: 8px;
+            margin: -8px;
+            z-index: 10;
+        }
+        
+        body:hover .menu-dots {
+            opacity: 0.3;
+        }
+        
+        .menu-dots:hover {
+            opacity: 0.5;
+        }
+        
+        .menu-dots::before,
+        .menu-dots::after {
+            content: '';
+            position: absolute;
+            width: 4px;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.6);
+            border-radius: 50%;
+        }
+        
+        .menu-dots::before {
+            top: -8px;
+        }
+        
+        .menu-dots::after {
+            top: 8px;
+        }
+        
+        .menu-dots,
+        .menu-dots::before,
+        .menu-dots::after {
+            background: rgba(255, 255, 255, 0.6);
+            border-radius: 50%;
+        }
+        
+        /* Paste hint - minimal toast */
+        .paste-hint {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%) translateY(10px);
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.8);
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(20px);
+            padding: 6px 12px;
+            border-radius: 6px;
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
+            pointer-events: none;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        }
+        
+        body.paste-ready .paste-hint {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+        
+        /* Modal - glass overlay */
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(20px) saturate(1.2);
+            -webkit-backdrop-filter: blur(20px) saturate(1.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
+            z-index: 1000;
+        }
+        
+        .modal.show {
+            opacity: 1;
+            visibility: visible;
+        }
+        
+        .modal-content {
+            background: rgba(30, 30, 30, 0.85);
+            backdrop-filter: blur(40px) saturate(1.5);
+            -webkit-backdrop-filter: blur(40px) saturate(1.5);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+            padding: 24px;
+            width: 90%;
+            max-width: 380px;
+            max-height: 70vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            transform: scale(0.9) translateY(20px);
+            transition: transform 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
+            box-shadow: 
+                0 24px 48px rgba(0, 0, 0, 0.3),
+                0 8px 16px rgba(0, 0, 0, 0.2),
+                inset 0 1px 2px rgba(255, 255, 255, 0.1),
+                inset 0 -1px 2px rgba(0, 0, 0, 0.1);
+        }
+        
+        .modal.show .modal-content {
+            transform: scale(1) translateY(0);
+        }
+        
+        .modal-header {
+            margin-bottom: 16px;
+        }
+        
+        .modal-header h2 {
+            font-size: 16px;
+            font-weight: 600;
+            color: rgba(255, 255, 255, 0.9);
+            margin: 0;
+        }
+        
+        .modal-header p {
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.5);
+            margin: 4px 0 0 0;
+        }
+        
+        /* Space grid - compact */
+        .space-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+            overflow-y: auto;
+            max-height: 320px;
+            margin: 0 -4px;
+            padding: 0 4px;
+        }
+        
+        .space-item {
+            background: rgba(255, 255, 255, 0.02);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            padding: 14px;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.4, 0.0, 0.2, 1);
+            text-align: center;
+            box-shadow: 
+                0 2px 4px rgba(0, 0, 0, 0.05),
+                inset 0 1px 1px rgba(255, 255, 255, 0.03);
+        }
+        
+        .space-item:hover {
+            background: rgba(255, 255, 255, 0.04);
+            border-color: rgba(255, 255, 255, 0.08);
+            transform: translateY(-1px);
+            box-shadow: 
+                0 3px 6px rgba(0, 0, 0, 0.08),
+                inset 0 1px 2px rgba(255, 255, 255, 0.04);
+        }
+        
+        .space-item.selected {
+            background: linear-gradient(135deg, 
+                rgba(59, 130, 246, 0.2) 0%, 
+                rgba(59, 130, 246, 0.15) 100%);
+            border-color: rgba(59, 130, 246, 0.4);
+            box-shadow: 
+                0 4px 8px rgba(59, 130, 246, 0.1),
+                inset 0 1px 2px rgba(59, 130, 246, 0.2);
+        }
+        
+        .space-icon {
+            font-size: 24px;
+            margin-bottom: 4px;
+            display: block;
+        }
+        
+        .space-name {
+            font-size: 12px;
+            font-weight: 500;
+            color: rgba(255, 255, 255, 0.8);
+            margin-bottom: 2px;
+            display: block;
+        }
+        
+        .space-count {
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.4);
+        }
+        
+        /* Modal footer */
+        .modal-footer {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        
+        .modal-actions {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        
+        .btn {
+            flex: 1;
+            padding: 8px 16px;
+            border: 1px solid transparent;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.4, 0.0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, 
+                rgba(59, 130, 246, 0.8) 0%, 
+                rgba(99, 102, 241, 0.8) 100%);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 
+                0 2px 8px rgba(59, 130, 246, 0.2),
+                inset 0 1px 2px rgba(255, 255, 255, 0.2);
+        }
+        
+        .btn-primary:hover {
+            background: linear-gradient(135deg, 
+                rgba(59, 130, 246, 0.85) 0%, 
+                rgba(99, 102, 241, 0.85) 100%);
+            box-shadow: 
+                0 3px 10px rgba(59, 130, 246, 0.25),
+                inset 0 1px 2px rgba(255, 255, 255, 0.25);
+        }
+        
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.04);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            color: rgba(255, 255, 255, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 
+                0 2px 4px rgba(0, 0, 0, 0.05),
+                inset 0 1px 1px rgba(255, 255, 255, 0.05);
+        }
+        
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.06);
+            box-shadow: 
+                0 3px 6px rgba(0, 0, 0, 0.08),
+                inset 0 1px 2px rgba(255, 255, 255, 0.08);
+        }
+        
+        .checkbox-option {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.6);
+        }
+        
+        .checkbox-option input[type="checkbox"] {
+            width: 14px;
+            height: 14px;
+            accent-color: rgba(59, 130, 246, 0.9);
+        }
+        
+        /* Hide zone when modal is open */
+        body.modal-open .ghost-zone {
+            opacity: 0;
+            transform: scale(0.8);
+        }
+        
+        /* Custom scrollbar */
+        .space-grid::-webkit-scrollbar {
+            width: 4px;
+        }
+        
+        .space-grid::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        
+        .space-grid::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+        }
+        
+        .space-grid::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        
+        /* Responsive */
+        @media (max-width: 360px) {
+            .space-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="ghost-zone" id="dropZone">
+            <div class="zone-icon">
+                <!-- Icon removed for cleaner appearance -->
+            </div>
+            
+            <div class="success-ripple" id="successRipple"></div>
+            <div id="particles"></div>
+        </div>
+        
+        <div class="status-text" id="statusText"></div>
+        <div class="paste-hint">Press ⌘V to paste</div>
+        
+        <div class="menu-dots" id="menuBtn" title="Options"></div>
+    </div>
+    
+    <!-- Space Selection Modal -->
+    <div class="modal" id="spaceModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Choose a Space</h2>
+                <button class="modal-close-btn" id="modalCloseBtn" title="Close (Esc)" style="position: absolute; top: 10px; right: 10px; background: none; border: none; color: #999; font-size: 24px; cursor: pointer; padding: 5px; line-height: 1;">×</button>
+                <p id="modalDescription">Select where to save this item</p>
+            </div>
+            
+            <div class="space-grid" id="spaceGrid">
+                <!-- Spaces will be dynamically added here -->
+            </div>
+            
+            <div class="modal-footer">
+                <div class="modal-actions">
+                    <button class="btn btn-secondary" id="cancelBtn">Cancel</button>
+                    <button class="btn btn-primary" id="confirmBtn">Save</button>
+                </div>
+                
+                <div class="checkbox-option">
+                    <input type="checkbox" id="alwaysAskCheckbox">
+                    <label for="alwaysAskCheckbox">Always ask where to save</label>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="black-hole.js"></script>
+</body>
+</html> 

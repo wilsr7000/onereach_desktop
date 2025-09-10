@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+# Allow all bots to access the site
+# This is a public product page 

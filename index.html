@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' * https://*.onereach.ai https://*.api.onereach.ai; style-src 'self' 'unsafe-inline' * https://*.onereach.ai https://fonts.googleapis.com; style-src-elem 'self' 'unsafe-inline' * https://*.onereach.ai https://fonts.googleapis.com; script-src 'self' 'unsafe-inline' 'unsafe-eval' * https://*.onereach.ai; connect-src 'self' * https://*.onereach.ai https://*.api.onereach.ai; img-src 'self' data: blob: * https://*.onereach.ai; font-src 'self' data: * https://*.onereach.ai https://fonts.gstatic.com; media-src 'self' * https://*.onereach.ai; object-src 'none'; base-uri 'self'">
+  <title>Onereach.ai</title>
+  <!-- Preload Material Symbols font only if needed -->
+  <link rel="preload" href="https://fonts.gstatic.com/s/materialsymbolsoutlined/v232/kJESBvYX7BgnkSrUwT8OhrdQw4oELdPIeeII9v6oDMzBwG-RpA6RzaxHMO1WwbppMw.woff2" as="font" type="font/woff2" crossorigin="anonymous" media="print" onload="this.media='all'">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="logo">
+        <h1>Onereach.ai</h1>
+      </div>
+      <nav>
+        <ul>
+          <li><a href="#" class="active">Home</a></li>
+          <li><a href="#">Dashboard</a></li>
+          <li><a href="#">Settings</a></li>
+        </ul>
+      </nav>
+    </header>
+    
+    <main>
+      <section class="hero">
+        <h2>Welcome to Onereach.ai</h2>
+        <p>Your powerful AI-powered desktop assistant</p>
+        <button id="start-btn" class="btn primary">Get Started</button>
+      </section>
+      
+      <section class="features">
+        <div class="feature-card">
+          <h3>Smart Automation</h3>
+          <p>Automate your workflow with AI-powered tools</p>
+        </div>
+        <div class="feature-card">
+          <h3>Cross-Platform</h3>
+          <p>Works seamlessly on macOS and Windows</p>
+        </div>
+        <div class="feature-card">
+          <h3>Real-time Analytics</h3>
+          <p>Get insights into your productivity</p>
+        </div>
+      </section>
+    </main>
+    
+    <footer>
+      <p>&copy; 2023 Onereach.ai. All rights reserved.</p>
+    </footer>
+  </div>
+
+  <!-- Hidden test button (only visible in development mode) -->
+  <div id="dev-controls" style="display: none; margin-top: 20px; padding: 10px; border: 1px dashed #666; background: rgba(255,255,255,0.05);">
+    <h3>Development Controls</h3>
+    <button id="open-test-btn">Open Test Window</button>
+  </div>
+
+  <script>
+    // Show dev controls when running locally or if api indicates dev mode
+    document.addEventListener('DOMContentLoaded', () => {
+      if (window.location.hostname === 'localhost' || (window.api && window.api.isDevMode)) {
+        document.getElementById('dev-controls').style.display = 'block';
+      }
+    });
+  </script>
+
+  <script src="renderer.js"></script>
+</body>
+</html> 

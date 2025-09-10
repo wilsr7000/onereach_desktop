@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AI Insights - User Guide</title>
+    <meta charset="UTF-8">
+    <style>
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1000px; 
+            margin: 0 auto; 
+            padding: 40px 20px;
+            line-height: 1.7;
+            color: #e2e8f0;
+            background: #0f1419;
+        }
+        .logo {
+            width: 60px;
+            height: 60px;
+            vertical-align: middle;
+            margin-right: 15px;
+            filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+        }
+        .header-nav {
+            background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
+            color: white;
+            padding: 40px;
+            border-radius: 16px;
+            margin-bottom: 40px;
+            text-align: center;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }
+        .header-nav h1 {
+            margin: 0;
+            font-size: 3em;
+            font-weight: 300;
+            letter-spacing: -1px;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        .header-nav p {
+            margin: 15px 0 0 0;
+            opacity: 0.95;
+            font-size: 1.3em;
+        }
+        h1 { 
+            color: #f1f5f9; 
+            border-bottom: 3px solid #3b82f6; 
+            padding-bottom: 15px;
+            margin-top: 50px;
+            font-size: 2.2em;
+            position: relative;
+        }
+        h2 { 
+            color: #e2e8f0; 
+            border-bottom: 2px solid #334155; 
+            padding-bottom: 10px;
+            margin-top: 40px;
+            font-size: 1.7em;
+        }
+        h3 { 
+            color: #cbd5e1; 
+            margin-top: 30px;
+            font-size: 1.4em;
+        }
+        .feature { 
+            background: #1a202c; 
+            padding: 30px; 
+            border-radius: 12px;
+            margin: 25px 0;
+            border-top: 4px solid #3b82f6;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
+            transition: all 0.3s ease;
+            border: 1px solid #2d3748;
+        }
+        .feature:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(59, 130, 246, 0.2);
+            border-color: #3b82f6;
+        }
+        .feature h3 {
+            margin-top: 0;
+            color: #60a5fa;
+            font-size: 1.3em;
+        }
+        .feature p {
+            color: #94a3b8;
+            margin: 10px 0 0 0;
+        }
+        .step {
+            display: flex;
+            align-items: flex-start;
+            margin: 20px 0;
+            padding: 20px;
+            background: #0f1419;
+            border-radius: 10px;
+            border-left: 4px solid #10b981;
+        }
+        .step-number {
+            background: #10b981;
+            color: white;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 20px;
+            flex-shrink: 0;
+            box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+        }
+        .step-content {
+            flex: 1;
+            color: #f1f5f9;
+            font-weight: 500;
+        }
+        .warning-box {
+            background: #422006;
+            padding: 25px;
+            border-radius: 10px;
+            margin: 20px 0;
+            border-left: 4px solid #f59e0b;
+            color: #fef3c7;
+        }
+        .warning-box h3 {
+            color: #fbbf24;
+            margin-top: 0;
+        }
+        .warning-box strong {
+            color: #fbbf24;
+        }
+        .info-box {
+            background: #1e3a8a;
+            padding: 25px;
+            border-radius: 10px;
+            margin: 20px 0;
+            border-left: 4px solid #3b82f6;
+            color: #dbeafe;
+        }
+        .info-box strong {
+            color: #ffffff;
+        }
+        code { 
+            background: #1e293b; 
+            padding: 3px 6px; 
+            border-radius: 4px;
+            font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+            font-size: 0.9em;
+            color: #60a5fa;
+            border: 1px solid #334155;
+        }
+        ul, ol { 
+            padding-left: 25px;
+            margin: 15px 0;
+            color: #cbd5e1;
+        }
+        li {
+            margin: 10px 0;
+        }
+        p {
+            margin: 15px 0;
+            color: #cbd5e1;
+        }
+        strong {
+            color: #f1f5f9;
+            font-weight: 600;
+        }
+        .emoji {
+            font-size: 1.3em;
+            margin-right: 10px;
+            vertical-align: middle;
+        }
+        .quick-start {
+            background: #1a202c;
+            padding: 30px;
+            border-radius: 12px;
+            margin: 25px 0;
+            box-shadow: 0 3px 15px rgba(0, 0, 0, 0.3);
+            border: 1px solid #2d3748;
+        }
+        .quick-start h2 {
+            color: #60a5fa;
+            border-bottom: 2px solid #334155;
+            margin-top: 0;
+        }
+        .interface-item {
+            background: #1a202c;
+            padding: 20px;
+            margin: 15px 0;
+            border-radius: 10px;
+            border-left: 4px solid #8b5cf6;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+            border: 1px solid #2d3748;
+        }
+        .interface-item strong {
+            color: #a78bfa;
+        }
+        /* Scrollbar styling for dark mode */
+        ::-webkit-scrollbar {
+            width: 12px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1a202c;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #4b5563;
+            border-radius: 6px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #6b7280;
+        }
+    </style>
+</head>
+<body>
+    <div class="header-nav">
+        <h1><span class="emoji">🤖</span>AI Insights</h1>
+        <p>Advanced RSS Reader with Intelligent Reading Time Estimation</p>
+    </div>
+
+    <div class="quick-start">
+        <h2><span class="emoji">🚀</span>Quick Start</h2>
+        <div class="step">
+            <div class="step-number">1</div>
+            <div class="step-content">Navigate to <strong>View → AI Insights</strong> in the menu bar</div>
+        </div>
+        <div class="step">
+            <div class="step-number">2</div>
+            <div class="step-content">Wait for articles to load (reading times will show "Loading..." initially)</div>
+        </div>
+        <div class="step">
+            <div class="step-number">3</div>
+            <div class="step-content">Reading times will update automatically to show accurate estimates</div>
+        </div>
+        <div class="step">
+            <div class="step-number">4</div>
+            <div class="step-content">Click on any article tile to read the full content</div>
+        </div>
+    </div>
+
+    <h1><span class="emoji">📖</span>What is AI Insights?</h1>
+    <p>AI Insights is an advanced RSS reader built into Onereach.ai that provides intelligent reading time estimation and progress tracking for UX Magazine articles. Unlike generic RSS readers, AI Insights analyzes the actual content of each article to provide accurate reading time estimates.</p>
+
+    <h1><span class="emoji">✨</span>Key Features</h1>
+    
+    <div class="feature">
+        <h3><span class="emoji">📊</span>Intelligent Reading Time Estimation</h3>
+        <p>Calculates accurate reading times (7-35 minutes) based on actual article content analysis, not generic estimates. The system analyzes word count and uses a 200 words per minute reading speed to provide realistic time estimates.</p>
+    </div>
+    
+    <div class="feature">
+        <h3><span class="emoji">⚡</span>Real-time Content Fetching</h3>
+        <p>Uses Electron's native networking to bypass browser limitations and fetch full article content. This ensures reliable access to content without CORS restrictions.</p>
+    </div>
+    
+    <div class="feature">
+        <h3><span class="emoji">📈</span>Progress Tracking</h3>
+        <p>Visual progress bars show reading completion status with accurate time estimates. Track your reading progress with real-time updates.</p>
+    </div>
+
+    <div class="feature">
+        <h3><span class="emoji">🎨</span>Modern Interface</h3>
+        <p>Responsive grid layout with article previews, images, and clean typography. The interface updates dynamically with visual feedback when reading times are calculated.</p>
+    </div>
+
+    <h1><span class="emoji">🔧</span>How It Works</h1>
+    <ol>
+        <li><strong>RSS Feed Processing</strong>: Fetches the latest articles from UX Magazine's RSS feed</li>
+        <li><strong>Content Analysis</strong>: Downloads full article content and analyzes word count</li>
+        <li><strong>Smart Estimation</strong>: Calculates reading time using 200 words per minute average</li>
+        <li><strong>Dynamic Updates</strong>: Reading times update from "Loading..." to accurate estimates</li>
+        <li><strong>Visual Feedback</strong>: Green highlights indicate when reading times are updated</li>
+        <li><strong>Progress Tracking</strong>: Blue progress bars show reading completion (e.g., "2:30 / 14:00")</li>
+    </ol>
+
+    <h1><span class="emoji">🎯</span>Understanding the Interface</h1>
+    
+    <div class="interface-item">
+        <strong><span class="emoji">🔲</span>Article Tiles:</strong> Grid layout showing article previews with images and summaries
+    </div>
+    
+    <div class="interface-item">
+        <strong><span class="emoji">⏱️</span>Reading Time:</strong> Shows calculated time based on word count (e.g., "14 min read")
+    </div>
+    
+    <div class="interface-item">
+        <strong><span class="emoji">📊</span>Progress Bar:</strong> Blue bars showing completion status (e.g., "2:30 / 14:00")
+    </div>
+    
+    <div class="interface-item">
+        <strong><span class="emoji">💚</span>Green Highlights:</strong> Indicate when reading times have been updated with fresh calculations
+    </div>
+
+    <div class="interface-item">
+        <strong><span class="emoji">🔗</span>External Links:</strong> Related links open in your default browser automatically
+    </div>
+
+    <h1><span class="emoji">🛠️</span>Troubleshooting</h1>
+
+    <h2>Common Issues</h2>
+    
+    <div class="warning-box">
+        <strong><span class="emoji">⏳</span>Reading times stuck on "Loading..." indefinitely:</strong>
+        <ul>
+            <li>Check your internet connection</li>
+            <li>Wait 10-30 seconds for background processing to complete</li>
+            <li>Restart the application if issues persist</li>
+            <li>Check the console for network errors (View → Toggle Developer Tools)</li>
+        </ul>
+    </div>
+
+    <div class="warning-box">
+        <strong><span class="emoji">📄</span>Articles not loading or showing wrong content:</strong>
+        <ul>
+            <li>Clear the application cache by restarting</li>
+            <li>Verify the RSS feed is accessible: <code>https://uxmag.com/feed</code></li>
+            <li>Check for JavaScript errors in the developer console</li>
+            <li>Ensure you have a stable internet connection</li>
+        </ul>
+    </div>
+
+    <div class="warning-box">
+        <strong><span class="emoji">📊</span>Progress bars showing "0:00 / Loading...":</strong>
+        <ul>
+            <li>This indicates reading time calculation is in progress</li>
+            <li>Background processing typically completes within 10-30 seconds</li>
+            <li>If it persists, check the main process logs for errors</li>
+        </ul>
+    </div>
+
+    <h2>Performance Notes</h2>
+    
+    <div class="info-box">
+        <strong><span class="emoji">⚡</span>Background Processing:</strong>
+        <p>AI Insights fetches article content in the background for accurate reading times. Initial load may take 10-30 seconds depending on network speed. Subsequent loads use cached data for better performance.</p>
+    </div>
+
+    <h1><span class="emoji">🔬</span>Technical Details</h1>
+    
+    <div class="info-box">
+        <p><strong>Reading Speed Calculation:</strong> AI Insights uses a 200 words per minute reading speed, which is the average for technical content. The system strips HTML tags and counts actual words for accurate estimation.</p>
+        
+        <p><strong>Content Processing:</strong> Articles are processed using Electron's native <code>net.request()</code> module, which bypasses browser CORS limitations and provides reliable content fetching.</p>
+        
+        <p><strong>Real-time Updates:</strong> The system uses Inter-Process Communication (IPC) to send reading time updates from the main process to the renderer, ensuring the UI stays responsive while processing happens in the background.</p>
+    </div>
+
+    <h1><span class="emoji">💡</span>Tips for Best Experience</h1>
+    <ul>
+        <li>Allow a few seconds for initial loading when opening AI Insights</li>
+        <li>Reading times become more accurate as the system processes more articles</li>
+        <li>Use the progress bars to track your reading completion</li>
+        <li>Green highlights indicate fresh reading time calculations</li>
+        <li>External links automatically open in your default browser</li>
+    </ul>
+
+    <div class="info-box">
+        <p><strong>Need more help?</strong> Check the main documentation or contact support through the Help menu.</p>
+    </div>
+</body>
+</html> 

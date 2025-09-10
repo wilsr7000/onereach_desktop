@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Calculator Module</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #1e1e1e;
+            color: #ffffff;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            box-sizing: border-box;
+        }
+        
+        .calculator {
+            background-color: #2a2a2a;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .display {
+            background-color: #1a1a1a;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+            text-align: right;
+            font-size: 2em;
+            min-height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            word-break: break-all;
+        }
+        
+        .buttons {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            flex-grow: 1;
+        }
+        
+        button {
+            background-color: #3a3a3a;
+            border: none;
+            color: white;
+            padding: 20px;
+            border-radius: 5px;
+            font-size: 1.2em;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        button:hover {
+            background-color: #4a4a4a;
+            transform: translateY(-2px);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        button.operator {
+            background-color: #ff9500;
+        }
+        
+        button.operator:hover {
+            background-color: #ffb143;
+        }
+        
+        button.equals {
+            background-color: #4cd964;
+            grid-column: span 2;
+        }
+        
+        button.equals:hover {
+            background-color: #5fe176;
+        }
+        
+        button.clear {
+            background-color: #ff3b30;
+        }
+        
+        button.clear:hover {
+            background-color: #ff6259;
+        }
+        
+        .history {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #2a2a2a;
+            border-radius: 5px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        
+        .history h3 {
+            margin-top: 0;
+            color: #999;
+            font-size: 0.9em;
+        }
+        
+        .history-item {
+            padding: 5px;
+            color: #ccc;
+            font-size: 0.9em;
+        }
+        
+        .save-button {
+            margin-top: 10px;
+            background-color: #007aff;
+            padding: 10px;
+            border-radius: 5px;
+            text-align: center;
+            cursor: pointer;
+        }
+        
+        .save-button:hover {
+            background-color: #0051d5;
+        }
+    </style>
+</head>
+<body>
+    <div class="calculator">
+        <div class="display" id="display">0</div>
+        <div class="buttons">
+            <button class="clear" onclick="clearDisplay()">C</button>
+            <button onclick="appendToDisplay('/')" class="operator">÷</button>
+            <button onclick="appendToDisplay('*')" class="operator">×</button>
+            <button onclick="deleteLast()">←</button>
+            
+            <button onclick="appendToDisplay('7')">7</button>
+            <button onclick="appendToDisplay('8')">8</button>
+            <button onclick="appendToDisplay('9')">9</button>
+            <button onclick="appendToDisplay('-')" class="operator">−</button>
+            
+            <button onclick="appendToDisplay('4')">4</button>
+            <button onclick="appendToDisplay('5')">5</button>
+            <button onclick="appendToDisplay('6')">6</button>
+            <button onclick="appendToDisplay('+')" class="operator">+</button>
+            
+            <button onclick="appendToDisplay('1')">1</button>
+            <button onclick="appendToDisplay('2')">2</button>
+            <button onclick="appendToDisplay('3')">3</button>
+            <button onclick="appendToDisplay('.')">.</button>
+            
+            <button onclick="appendToDisplay('0')">0</button>
+            <button onclick="appendToDisplay('00')">00</button>
+            <button class="equals" onclick="calculate()">=</button>
+        </div>
+    </div>
+    
+    <div class="history">
+        <h3>History</h3>
+        <div id="history-list"></div>
+        <div class="save-button" onclick="saveHistory()">Save History to File</div>
+    </div>
+    
+    <script>
+        const { remote } = require('electron');
+        const fs = require('fs');
+        const path = require('path');
+        
+        let currentExpression = '';
+        let history = [];
+        
+        // Get the module data path from the window
+                        const moduleDataPath = window.moduleDataPath;
+        console.log('Module data path:', moduleDataPath);
+        
+        // Load history from file
+        function loadHistory() {
+            try {
+                const historyFile = path.join(moduleDataPath, 'history.json');
+                if (fs.existsSync(historyFile)) {
+                    const data = fs.readFileSync(historyFile, 'utf8');
+                    history = JSON.parse(data);
+                    updateHistoryDisplay();
+                }
+            } catch (error) {
+                console.error('Error loading history:', error);
+            }
+        }
+        
+        // Save history to file
+        function saveHistory() {
+            try {
+                const historyFile = path.join(moduleDataPath, 'history.json');
+                fs.writeFileSync(historyFile, JSON.stringify(history, null, 2));
+                alert('History saved successfully!');
+            } catch (error) {
+                console.error('Error saving history:', error);
+                alert('Error saving history: ' + error.message);
+            }
+        }
+        
+        function updateDisplay() {
+            document.getElementById('display').textContent = currentExpression || '0';
+        }
+        
+        function appendToDisplay(value) {
+            if (currentExpression === '0' && value !== '.') {
+                currentExpression = value;
+            } else {
+                currentExpression += value;
+            }
+            updateDisplay();
+        }
+        
+        function clearDisplay() {
+            currentExpression = '';
+            updateDisplay();
+        }
+        
+        function deleteLast() {
+            currentExpression = currentExpression.slice(0, -1);
+            updateDisplay();
+        }
+        
+        function calculate() {
+            try {
+                // Use Function constructor instead of eval for better security
+                const result = Function('"use strict"; return (' + currentExpression + ')')();
+                const calculation = currentExpression + ' = ' + result;
+                
+                // Add to history
+                history.unshift({
+                    expression: currentExpression,
+                    result: result,
+                    timestamp: new Date().toISOString()
+                });
+                
+                // Keep only last 50 entries
+                if (history.length > 50) {
+                    history = history.slice(0, 50);
+                }
+                
+                updateHistoryDisplay();
+                
+                currentExpression = result.toString();
+                updateDisplay();
+            } catch (error) {
+                alert('Invalid expression');
+            }
+        }
+        
+        function updateHistoryDisplay() {
+            const historyList = document.getElementById('history-list');
+            historyList.innerHTML = history.slice(0, 10).map(item => 
+                `<div class="history-item">${item.expression} = ${item.result}</div>`
+            ).join('');
+        }
+        
+        // Handle keyboard input
+        document.addEventListener('keydown', (e) => {
+            if (e.key >= '0' && e.key <= '9') {
+                appendToDisplay(e.key);
+            } else if (['+', '-', '*', '/'].includes(e.key)) {
+                appendToDisplay(e.key);
+            } else if (e.key === '.') {
+                appendToDisplay('.');
+            } else if (e.key === 'Enter' || e.key === '=') {
+                calculate();
+            } else if (e.key === 'Escape' || e.key === 'c' || e.key === 'C') {
+                clearDisplay();
+            } else if (e.key === 'Backspace') {
+                deleteLast();
+            }
+        });
+        
+        // Load history on startup
+        loadHistory();
+    </script>
+</body>
+</html> 

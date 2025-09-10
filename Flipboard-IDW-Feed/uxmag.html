@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Insights - OneReach</title>
+    <!-- Update CSP to allow necessary external resources -->
+    <meta http-equiv="Content-Security-Policy" content="
+        default-src 'self';
+        script-src 'self' 'unsafe-inline' https://platform.twitter.com https://cdnjs.cloudflare.com;
+        style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com;
+        img-src 'self' data: https: blob:;
+        media-src 'self' https:;
+        connect-src 'self' https:;
+        font-src 'self' https://cdnjs.cloudflare.com;
+        frame-src https://platform.twitter.com;
+        child-src https://platform.twitter.com;
+    ">
+    <link rel="stylesheet" href="uxmag-styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <div class="feed-header">
+            <h1 class="feed-title">AI Insights</h1>
+            <div class="header-actions">
+                <button id="preferencesBtn" class="preferences-btn" title="Content Preferences">
+                    <i class="fa fa-cog"></i> Preferences
+                </button>
+                <button id="downloadReadingLogs" class="download-logs-btn" title="Download your reading history">
+                    <i class="fa fa-download"></i> Reading Logs
+                </button>
+            </div>
+        </div>
+        
+        <!-- Preferences Panel -->
+        <div id="preferencesPanel" class="preferences-panel">
+            <div class="preferences-header">
+                <h2>Content Preferences</h2>
+                <button class="close-preferences" id="closePreferences">&times;</button>
+            </div>
+            <div class="preferences-content">
+                <p class="preferences-intro">Select the topics you're interested in to personalize your AI insights feed:</p>
+                <div class="preferences-container">
+                    <!-- Preferences will be populated dynamically -->
+                </div>
+                <div class="preferences-actions">
+                    <button class="select-all-btn" id="selectAllBtn">Select All</button>
+                    <button class="save-preferences-btn" id="savePreferencesBtn">Save Preferences</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="loading-spinner" style="display: none;"></div>
+        <div class="grid">
+            <!-- Tiles will be dynamically inserted here -->
+        </div>
+    </div>
+
+    <!-- Article viewer -->
+    <div class="article-viewer" id="article-viewer">
+        <button id="close-article" class="close-article">&times;</button>
+        <div id="article-content"></div>
+    </div>
+
+    <div class="article-overlay"></div>
+    <script src="uxmag-script.js?v=20250526215100"></script>
+    <script>
+        // Content preferences data
+        const contentPreferences = [
+            { id: 'conv-design', label: 'Conversational Design', description: 'Best practices for designing conversational AI experiences' },
+            { id: 'ai-analytics', label: 'AI Analytics', description: 'Insights and analytics for AI performance' },
+            { id: 'enterprise-ai', label: 'Enterprise AI', description: 'AI solutions for enterprise environments' },
+            { id: 'implementation', label: 'Implementation Guides', description: 'Step-by-step implementation tutorials' },
+            { id: 'ai-trends', label: 'AI Trends', description: 'Latest trends in artificial intelligence' },
+            { id: 'llm-tech', label: 'LLM Technology', description: 'Large Language Model developments' },
+            { id: 'platform-updates', label: 'Platform Updates', description: 'OneReach.ai platform updates and features' }
+        ];
+        
+        // Initialize preferences
+        function initializePreferences() {
+            const container = document.querySelector('.preferences-container');
+            container.innerHTML = '';
+            
+            // Load saved preferences
+            const savedPrefs = JSON.parse(localStorage.getItem('contentPreferences') || '[]');
+            
+            contentPreferences.forEach(pref => {
+                const prefGroup = document.createElement('div');
+                prefGroup.className = 'preference-group';
+                prefGroup.innerHTML = `
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="pref-${pref.id}" ${savedPrefs.includes(pref.id) || savedPrefs.length === 0 ? 'checked' : ''}>
+                        <div>
+                            <span>${pref.label}</span>
+                            <small>${pref.description}</small>
+                        </div>
+                    </label>
+                `;
+                container.appendChild(prefGroup);
+            });
+            
+            updateSelectAllState();
+        }
+        
+        // Update select all button state
+        function updateSelectAllState() {
+            const checkboxes = document.querySelectorAll('.preferences-container input[type="checkbox"]');
+            const checkedCount = document.querySelectorAll('.preferences-container input[type="checkbox"]:checked').length;
+            const selectAllBtn = document.getElementById('selectAllBtn');
+            
+            if (checkedCount === checkboxes.length) {
+                selectAllBtn.textContent = 'Deselect All';
+            } else {
+                selectAllBtn.textContent = 'Select All';
+            }
+        }
+        
+        // Initialize after DOM is loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            // Initialize preferences
+            initializePreferences();
+            
+            // Don't create a new reader if one already exists
+            if (!window.reader) {
+                console.log('🚨 Creating reader from DOMContentLoaded');
+                window.reader = new FlipboardReader();
+            } else {
+                console.log('🚨 Reader already exists, skipping creation');
+            }
+            
+            // Automatically load both feeds
+            if (window.reader && window.reader.loadMultipleFeeds) {
+                window.reader.loadMultipleFeeds();
+            }
+
+            // Set up the close button to hide the article overlay.
+            const closeButton = document.getElementById('close-article');
+            if (closeButton) {
+                closeButton.addEventListener('click', function() {
+                    const viewer = document.getElementById('article-viewer');
+                    if (viewer) {
+                        viewer.classList.remove("active");
+                        setTimeout(() => {
+                            viewer.style.display = "none";
+                            document.body.classList.remove("article-open");
+                        }, 300);
+                    }
+                });
+            }
+            
+            // Preferences panel handlers
+            const preferencesBtn = document.getElementById('preferencesBtn');
+            const preferencesPanel = document.getElementById('preferencesPanel');
+            const closePreferences = document.getElementById('closePreferences');
+            const selectAllBtn = document.getElementById('selectAllBtn');
+            const savePreferencesBtn = document.getElementById('savePreferencesBtn');
+            
+            preferencesBtn.addEventListener('click', () => {
+                preferencesPanel.classList.add('show');
+            });
+            
+            closePreferences.addEventListener('click', () => {
+                preferencesPanel.classList.remove('show');
+            });
+            
+            selectAllBtn.addEventListener('click', () => {
+                const checkboxes = document.querySelectorAll('.preferences-container input[type="checkbox"]');
+                const allChecked = selectAllBtn.textContent === 'Deselect All';
+                
+                checkboxes.forEach(checkbox => {
+                    checkbox.checked = !allChecked;
+                });
+                
+                updateSelectAllState();
+            });
+            
+            savePreferencesBtn.addEventListener('click', () => {
+                const selectedPrefs = [];
+                document.querySelectorAll('.preferences-container input[type="checkbox"]:checked').forEach(checkbox => {
+                    const prefId = checkbox.id.replace('pref-', '');
+                    selectedPrefs.push(prefId);
+                });
+                
+                // Save to localStorage
+                localStorage.setItem('contentPreferences', JSON.stringify(selectedPrefs));
+                
+                // Show success message
+                const successMsg = document.createElement('div');
+                successMsg.className = 'preferences-success';
+                successMsg.innerHTML = '<i class="fa fa-check"></i> Preferences saved successfully!';
+                document.body.appendChild(successMsg);
+                
+                setTimeout(() => {
+                    successMsg.remove();
+                    preferencesPanel.classList.remove('show');
+                }, 2000);
+                
+                // TODO: Apply preferences to filter content
+                console.log('Saved preferences:', selectedPrefs);
+            });
+        });
+
+        // This function should be called when a tile is clicked.
+        // 'item' is an object representing the RSS item, including its title, description, and full content.
+        function openArticle(item) {
+            const viewer  = document.getElementById('article-viewer');
+            const titleEl = document.getElementById('article-title');
+            const contentEl = document.getElementById('article-content');
+            
+            // Set the title
+            titleEl.innerHTML = item.title || 'No Title';
+            // Display the full item content (using the 'content' field, which you populate from <content:encoded>)
+            contentEl.innerHTML = item.content 
+                                 ? item.content 
+                                 : (item.description || 'No Content Available');
+            
+            // Show the overlay
+            viewer.style.display = "block";
+        }
+    </script>
+</body>
+</html> 

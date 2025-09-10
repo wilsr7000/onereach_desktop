@@ -1,0 +1,6 @@
+owner: OneReachAI
+repo: desktop-app
+provider: github
+# For local testing, uncomment the lines below:
+# provider: generic
+# url: http://localhost:8080/ 

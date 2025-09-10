@@ -1,0 +1,11 @@
+# Ignore all update files in this directory
+*.dmg
+*.zip
+*.zip.blockmap
+*.yml
+*.exe
+*.AppImage
+*.deb
+
+# Except the README
+!README.md 

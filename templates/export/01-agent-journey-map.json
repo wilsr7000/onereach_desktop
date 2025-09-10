@@ -1,0 +1,53 @@
+{
+  "id": "01-agent-journey-map",
+  "name": "01. Agent-Enabled Journey Map",
+  "description": "Map user journeys with AI delegation points",
+  "icon": "🤖",
+  "category": "wiser-discovery",
+  "aiFirst": true,
+  "orderIndex": 1,
+  "prompt": "Create an agent-enabled journey map that identifies key delegation points where AI can assist users. Include user thoughts, emotions, and opportunities for agent intervention. Highlight moments where users might want to delegate tasks to an AI agent. Structure the journey with clear phases and touchpoints.",
+  "systemPrompt": "You are an AI experience designer specializing in agent-human collaboration. Create a comprehensive journey map that identifies where AI agents can enhance the user experience through task delegation, automation, and intelligent assistance. Focus on trust-building moments and natural handoff points.",
+  "example": {
+    "title": "Agent-Enabled Journey Map",
+    "journey": "User Task Journey with AI Delegation",
+    "phases": [
+      {
+        "name": "Discovery",
+        "touchpoints": [
+          {
+            "action": "User searches for information",
+            "emotion": "Overwhelmed",
+            "thought": "This is taking too long",
+            "agentOpportunity": "AI could pre-filter and summarize results",
+            "delegationConfidence": "High"
+          }
+        ]
+      },
+      {
+        "name": "Decision",
+        "touchpoints": [
+          {
+            "action": "Comparing options",
+            "emotion": "Uncertain",
+            "thought": "I need expert advice",
+            "agentOpportunity": "AI could provide recommendations based on criteria",
+            "delegationConfidence": "Medium"
+          }
+        ]
+      }
+    ]
+  },
+  "styling": {
+    "fontFamily": "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+    "headingFont": "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+    "primaryColor": "#00d4ff",
+    "secondaryColor": "#0099cc",
+    "accentColor": "#ff6b6b",
+    "backgroundColor": "#ffffff",
+    "aiPillColor": "#00d4ff",
+    "lineHeight": "1.6",
+    "maxWidth": "1200px"
+  },
+  "htmlTemplate": "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"UTF-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n    <title>{{title}} - WISER Framework</title>\n    <style>\n        * {\n            margin: 0;\n            padding: 0;\n            box-sizing: border-box;\n        }\n        \n        body {\n            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;\n            line-height: 1.6;\n            color: #1a1a1a;\n            background-color: #fafafa;\n        }\n        \n        .header {\n            background: linear-gradient(135deg, #00d4ff 0%, #0099cc 100%);\n            color: white;\n            padding: 60px 40px;\n            position: relative;\n            overflow: hidden;\n        }\n        \n        .header::after {\n            content: '';\n            position: absolute;\n            top: -50%;\n            right: -10%;\n            width: 300px;\n            height: 300px;\n            background: rgba(255, 255, 255, 0.1);\n            border-radius: 50%;\n        }\n        \n        .ai-pill {\n            display: inline-block;\n            background: rgba(255, 255, 255, 0.2);\n            padding: 6px 16px;\n            border-radius: 20px;\n            font-size: 0.85em;\n            font-weight: 600;\n            margin-bottom: 20px;\n            backdrop-filter: blur(10px);\n            border: 1px solid rgba(255, 255, 255, 0.3);\n        }\n        \n        h1 {\n            font-size: 2.5em;\n            font-weight: 700;\n            margin-bottom: 10px;\n            position: relative;\n            z-index: 1;\n        }\n        \n        .subtitle {\n            font-size: 1.2em;\n            opacity: 0.9;\n            position: relative;\n            z-index: 1;\n        }\n        \n        .container {\n            max-width: 1200px;\n            margin: 0 auto;\n            padding: 40px 20px;\n        }\n        \n        .journey-timeline {\n            position: relative;\n            padding: 40px 0;\n        }\n        \n        .journey-line {\n            position: absolute;\n            top: 80px;\n            left: 0;\n            right: 0;\n            height: 2px;\n            background: #e0e0e0;\n            z-index: 0;\n        }\n        \n        .phase {\n            margin-bottom: 60px;\n        }\n        \n        .phase-header {\n            background: white;\n            border-radius: 12px;\n            padding: 30px;\n            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);\n            margin-bottom: 30px;\n            border-left: 4px solid #00d4ff;\n        }\n        \n        .phase-name {\n            font-size: 1.8em;\n            font-weight: 600;\n            color: #1a1a1a;\n            margin-bottom: 10px;\n        }\n        \n        .touchpoint {\n            background: white;\n            border-radius: 12px;\n            padding: 25px;\n            margin: 20px 0;\n            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);\n            position: relative;\n            transition: transform 0.2s, box-shadow 0.2s;\n        }\n        \n        .touchpoint:hover {\n            transform: translateY(-2px);\n            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);\n        }\n        \n        .touchpoint-header {\n            display: flex;\n            justify-content: space-between;\n            align-items: start;\n            margin-bottom: 20px;\n        }\n        \n        .touchpoint-action {\n            font-weight: 600;\n            color: #1a1a1a;\n            font-size: 1.1em;\n        }\n        \n        .emotion-indicator {\n            padding: 4px 12px;\n            border-radius: 16px;\n            font-size: 0.85em;\n            font-weight: 500;\n        }\n        \n        .emotion-positive {\n            background: #d4f4dd;\n            color: #1e7e34;\n        }\n        \n        .emotion-neutral {\n            background: #fff3cd;\n            color: #856404;\n        }\n        \n        .emotion-negative {\n            background: #f8d7da;\n            color: #721c24;\n        }\n        \n        .thought-bubble {\n            background: #f8f9fa;\n            padding: 15px;\n            border-radius: 8px;\n            margin: 15px 0;\n            font-style: italic;\n            color: #666;\n            position: relative;\n        }\n        \n        .thought-bubble::before {\n            content: '💭';\n            position: absolute;\n            left: -25px;\n            top: 10px;\n            font-size: 1.5em;\n        }\n        \n        .agent-opportunity {\n            background: linear-gradient(135deg, #e3f9ff 0%, #f0f9ff 100%);\n            border: 2px solid #00d4ff;\n            border-radius: 8px;\n            padding: 20px;\n            margin-top: 20px;\n        }\n        \n        .agent-opportunity-header {\n            display: flex;\n            align-items: center;\n            margin-bottom: 10px;\n        }\n        \n        .agent-icon {\n            width: 30px;\n            height: 30px;\n            background: #00d4ff;\n            border-radius: 50%;\n            display: flex;\n            align-items: center;\n            justify-content: center;\n            margin-right: 10px;\n            color: white;\n            font-weight: bold;\n        }\n        \n        .agent-opportunity-title {\n            font-weight: 600;\n            color: #0099cc;\n        }\n        \n        .agent-opportunity-desc {\n            color: #333;\n            margin-bottom: 10px;\n        }\n        \n        .confidence-meter {\n            display: flex;\n            align-items: center;\n            gap: 10px;\n        }\n        \n        .confidence-label {\n            font-size: 0.9em;\n            color: #666;\n        }\n        \n        .confidence-bar {\n            flex: 1;\n            height: 8px;\n            background: #e0e0e0;\n            border-radius: 4px;\n            overflow: hidden;\n        }\n        \n        .confidence-fill {\n            height: 100%;\n            background: linear-gradient(90deg, #00d4ff, #0099cc);\n            transition: width 0.3s;\n        }\n        \n        .confidence-high { width: 90%; }\n        .confidence-medium { width: 60%; }\n        .confidence-low { width: 30%; }\n        \n        .delegation-points {\n            margin-top: 40px;\n            padding: 30px;\n            background: #f8f9fa;\n            border-radius: 12px;\n        }\n        \n        .delegation-points h3 {\n            font-size: 1.4em;\n            margin-bottom: 20px;\n            color: #1a1a1a;\n        }\n        \n        .delegation-grid {\n            display: grid;\n            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));\n            gap: 20px;\n        }\n        \n        .delegation-card {\n            background: white;\n            padding: 20px;\n            border-radius: 8px;\n            border: 1px solid #e0e0e0;\n        }\n        \n        .delegation-task {\n            font-weight: 600;\n            margin-bottom: 8px;\n        }\n        \n        .delegation-benefit {\n            font-size: 0.9em;\n            color: #666;\n        }\n        \n        @media print {\n            .header {\n                background: none;\n                color: #1a1a1a;\n                border: 2px solid #00d4ff;\n            }\n            \n            .ai-pill {\n                background: #00d4ff;\n                color: white;\n            }\n        }\n    </style>\n</head>\n<body>\n    <div class=\"header\">\n        <div class=\"ai-pill\">🤖 AI-FIRST • WISER FRAMEWORK</div>\n        <h1>{{title}}</h1>\n        <div class=\"subtitle\">Phase 1: Agent-Enabled Discovery</div>\n    </div>\n    <div class=\"container\">\n        {{content}}\n    </div>\n</body>\n</html>"
+} 

@@ -1,0 +1,1824 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OneReach.ai - Your Digital Workforce</title>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        :root {
+            --or-background: #0a0a0a;
+            --or-purple: #a94be7;
+            --or-purple-dim: rgba(169, 75, 231, 0.1);
+            --or-purple-glow: rgba(169, 75, 231, 0.4);
+            --text-primary: rgba(255, 255, 255, 0.95);
+            --text-secondary: rgba(255, 255, 255, 0.6);
+            --text-tertiary: rgba(255, 255, 255, 0.4);
+            --border: rgba(255, 255, 255, 0.06);
+            --border-light: rgba(255, 255, 255, 0.03);
+            --gradient-purple: linear-gradient(135deg, #a94be7 0%, #8b3bc7 100%);
+        }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--or-background);
+            color: var(--text-primary);
+            line-height: 1.6;
+            font-size: 16px;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            letter-spacing: -0.011em;
+        }
+        
+        /* Banner - more subtle */
+        .banner-bg {
+            position: fixed;
+            top: 50%;
+            right: -20%;
+            transform: translateY(-50%);
+            width: 70%;
+            max-width: 900px;
+            opacity: 0.03;
+            z-index: 0;
+            animation: rotate 120s linear infinite;
+            pointer-events: none;
+        }
+        
+        @keyframes rotate {
+            from { transform: translateY(-50%) rotate(0deg); }
+            to { transform: translateY(-50%) rotate(360deg); }
+        }
+        
+        /* Header - cleaner */
+        .header {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+            padding: 24px 0;
+        }
+        
+        .header-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 40px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .header-content svg {
+            height: 20px;
+            opacity: 0.9;
+        }
+        
+        /* Hero - more breathing room */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            position: relative;
+            padding: 120px 40px 80px;
+            background: radial-gradient(ellipse at top right, rgba(169, 75, 231, 0.03) 0%, transparent 40%),
+                        radial-gradient(ellipse at bottom left, rgba(169, 75, 231, 0.02) 0%, transparent 40%);
+            overflow: hidden;
+        }
+        
+
+        
+        .hero-content {
+            max-width: 900px;
+            margin: 0 auto;
+            position: relative;
+            z-index: 1;
+        }
+        
+        .hero h1 {
+            font-size: clamp(40px, 5vw, 64px);
+            font-weight: 600;
+            letter-spacing: -0.03em;
+            line-height: 1.1;
+            margin-bottom: 24px;
+            background: linear-gradient(180deg, var(--text-primary) 0%, rgba(255, 255, 255, 0.8) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .hero .subtitle {
+            font-size: clamp(18px, 2.5vw, 24px);
+            font-weight: 400;
+            color: var(--text-secondary);
+            line-height: 1.4;
+            margin-bottom: 48px;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        
+        /* Simplified buttons */
+        .download-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 14px 28px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 15px;
+            transition: all 0.2s ease;
+            position: relative;
+        }
+        
+        .download-button:hover {
+            transform: translateY(-1px);
+        }
+        
+        .download-button.disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+        
+        .download-button.disabled:hover {
+            transform: none;
+        }
+        
+        /* Hero Product Preview - cleaner */
+        .hero-product-preview {
+            margin-top: 80px;
+            max-width: 1200px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        
+        .hero-video-showcase {
+            background: #000;
+            border: 1px solid var(--border-light);
+            border-radius: 16px;
+            padding: 0;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4),
+                        0 0 0 1px rgba(255, 255, 255, 0.05) inset;
+        }
+        
+        .hero-product-video {
+            width: 100%;
+            height: auto;
+            display: block;
+            border-radius: 16px;
+        }
+        
+        /* Add a subtle glow effect */
+        .hero-video-showcase::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: radial-gradient(ellipse at center, transparent 50%, rgba(169, 75, 231, 0.1) 100%);
+            pointer-events: none;
+            z-index: 1;
+        }
+        
+        /* Add play button overlay that fades out */
+        .hero-video-showcase::after {
+            content: '▶';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80px;
+            height: 80px;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            color: white;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+            z-index: 2;
+        }
+        
+        .hero-video-showcase:hover::after {
+            opacity: 0.8;
+        }
+        
+        /* Trust Section - Redesigned */
+        .trust-section {
+            padding: 80px 0;
+            border-bottom: 1px solid var(--border-light);
+            background: rgba(255, 255, 255, 0.01);
+        }
+        
+        .trust-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 40px;
+        }
+        
+        .trust-grid {
+            display: grid;
+            grid-template-columns: 1fr 2.5fr 1fr;
+            gap: 40px;
+            align-items: start;
+        }
+        
+        .trust-column {
+            text-align: center;
+        }
+        
+        .trust-label {
+            font-size: 13px;
+            color: var(--text-tertiary);
+            margin-bottom: 24px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            font-weight: 500;
+        }
+        
+        .company-logos-scroll-container {
+            height: 130px;
+            overflow: hidden;
+            position: relative;
+            mask-image: linear-gradient(to bottom, transparent, black 20%, black 80%, transparent);
+            -webkit-mask-image: linear-gradient(to bottom, transparent, black 20%, black 80%, transparent);
+        }
+        
+        .company-logos-vertical {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 30px;
+            animation: scrollUp 30s linear infinite;
+        }
+        
+        @keyframes scrollUp {
+            0% {
+                transform: translateY(0);
+            }
+            100% {
+                transform: translateY(-50%);
+            }
+        }
+        
+        .company-logo-static {
+            height: 24px;
+            width: auto;
+            opacity: 0.5;
+            filter: brightness(0) invert(1);
+            transition: opacity 0.3s ease;
+        }
+        
+        .company-logo-static:hover {
+            opacity: 0.8;
+        }
+        
+        /* Deloitte logo is a bit larger, so make it smaller */
+        .company-logo-static[alt="Deloitte"] {
+            height: 16px;
+        }
+        
+        /* PVC/PWC logo needs to be bigger */
+        .company-logo-static[alt="PVC"] {
+            height: 36px;
+        }
+        
+        /* BASF logo needs to be smaller */
+        .company-logo-static[alt="BASF"] {
+            height: 14px;
+        }
+        
+        /* DHL logo needs to be much smaller */
+        .company-logo-static[alt="DHL"] {
+            height: 12px;
+        }
+        
+        .logo-verizon-static {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--text-secondary);
+            opacity: 0.6;
+            letter-spacing: -0.02em;
+            transition: opacity 0.3s ease;
+        }
+        
+        .logo-verizon-static:hover {
+            opacity: 0.8;
+        }
+        
+        /* Pause on hover */
+        .company-logos-scroll-container:hover .company-logos-vertical {
+            animation-play-state: paused;
+        }
+        
+        .analyst-logos-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 20px 40px;
+            max-width: 600px;
+            margin: 0 auto;
+            align-items: center;
+            justify-items: center;
+        }
+        
+        .analyst-logo {
+            max-height: 35px;
+            width: auto;
+            max-width: 100%;
+            opacity: 0.6;
+            filter: brightness(0) invert(1);
+            transition: opacity 0.3s ease;
+            object-fit: contain;
+        }
+        
+        .analyst-logo:hover {
+            opacity: 0.8;
+        }
+        
+        /* Analyst Logo Fade Animation */
+        @keyframes gentlePulse {
+            0%, 100% { 
+                opacity: 0.4;
+                transform: scale(0.95);
+            }
+            50% { 
+                opacity: 0.8;
+                transform: scale(1);
+            }
+        }
+        
+        .analyst-logo {
+            animation: gentlePulse 8s ease-in-out infinite;
+            transform-origin: center;
+        }
+        
+        .analyst-logo-1 { animation-delay: 0s; }
+        .analyst-logo-2 { animation-delay: 0.8s; }
+        .analyst-logo-3 { animation-delay: 1.6s; }
+        .analyst-logo-4 { animation-delay: 2.4s; }
+        .analyst-logo-5 { animation-delay: 3.2s; }
+        .analyst-logo-6 { animation-delay: 4s; }
+        
+        /* Pause animation on hover */
+        .analyst-logos-grid:hover .analyst-logo {
+            animation-play-state: paused;
+            opacity: 0.8;
+            transform: scale(1);
+        }
+        
+        .awards-highlight {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .award-logo-featured {
+            height: 60px;
+            width: auto;
+            opacity: 0.7;
+            filter: brightness(0) invert(1);
+            margin-bottom: 8px;
+        }
+        
+        .award-text {
+            font-size: 12px;
+            color: var(--text-tertiary);
+            margin: 0;
+            line-height: 1.4;
+        }
+        
+        .award-subtext {
+            font-size: 12px;
+            color: var(--text-tertiary);
+            margin: 0;
+            margin-top: 16px;
+        }
+        
+        /* Awards Rotation Animation */
+        .awards-rotating {
+            position: relative;
+            height: 100px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .award-item-single {
+            position: absolute;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: all 0.6s ease-in-out;
+        }
+        
+        .award-item-single.award-item-active {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        
+        /* Cycle through awards */
+        @keyframes awardCycle {
+            0%, 20% { opacity: 1; transform: translateY(0); }
+            25%, 95% { opacity: 0; transform: translateY(-10px); }
+            100% { opacity: 0; transform: translateY(10px); }
+        }
+        
+        /* Sections - more spacious */
+        .section {
+            padding: 120px 0;
+            position: relative;
+        }
+        
+        .section-content {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 0 40px;
+            position: relative;
+            z-index: 1;
+        }
+        
+        .section-header {
+            font-size: clamp(32px, 4vw, 48px);
+            font-weight: 600;
+            letter-spacing: -0.02em;
+            line-height: 1.2;
+            margin-bottom: 20px;
+            position: relative;
+            display: inline-block;
+        }
+        
+        .section-content:hover .section-header::after {
+            content: '';
+            position: absolute;
+            bottom: -8px;
+            left: 0;
+            width: 60px;
+            height: 3px;
+            background: var(--gradient-purple);
+            border-radius: 2px;
+            opacity: 0.6;
+            animation: slideIn 0.4s ease-out;
+        }
+        
+        @keyframes slideIn {
+            from {
+                width: 0;
+                opacity: 0;
+            }
+            to {
+                width: 60px;
+                opacity: 0.6;
+            }
+        }
+        
+        .section-description {
+            font-size: 18px;
+            color: var(--text-secondary);
+            line-height: 1.6;
+            max-width: 720px;
+        }
+        
+        /* Feature Grid - cleaner cards */
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 24px;
+            margin-top: 64px;
+        }
+        
+        .feature {
+            text-align: center;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-light);
+            border-radius: 16px;
+            padding: 48px 32px;
+            transition: all 0.2s ease;
+        }
+        
+        .feature:hover {
+            transform: translateY(-4px);
+            background: rgba(255, 255, 255, 0.03);
+            border-color: var(--border);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3),
+                        0 0 0 1px rgba(169, 75, 231, 0.1);
+        }
+        
+        .feature-icon {
+            width: 48px;
+            height: 48px;
+            margin: 0 auto 24px;
+            background: var(--or-purple-dim);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--or-purple);
+        }
+        
+        .feature-icon svg {
+            width: 24px;
+            height: 24px;
+        }
+        
+        .feature h3 {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            letter-spacing: -0.01em;
+        }
+        
+        .feature p {
+            color: var(--text-secondary);
+            line-height: 1.6;
+            font-size: 15px;
+        }
+        
+        /* Comparison Visual - Simplified */
+        .comparison-visual {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 60px;
+            margin: 0 auto;
+        }
+        
+        .comparison-item {
+            text-align: center;
+        }
+        
+        .comparison-metric {
+            font-size: 36px;
+            font-weight: 500;
+            margin: 0;
+            letter-spacing: -0.02em;
+            font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+            color: var(--text-tertiary);
+            line-height: 1;
+        }
+        
+        .comparison-label {
+            margin-top: 16px;
+            font-size: 16px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+        
+        .comparison-vs {
+            font-size: 24px;
+            color: var(--text-tertiary);
+            font-weight: 300;
+            opacity: 0.5;
+        }
+        
+        .comparison-highlight .comparison-metric {
+            color: var(--or-purple);
+            text-shadow: 0 0 30px var(--or-purple-glow);
+        }
+        
+        .comparison-highlight .comparison-label {
+            color: var(--text-primary);
+        }
+        
+        .comparison-detail {
+            margin-top: 12px;
+            font-size: 14px;
+            color: var(--text-tertiary);
+            line-height: 1.5;
+            max-width: 200px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        
+        .comparison-highlight .comparison-detail {
+            color: var(--text-secondary);
+        }
+        
+        /* Testimonial - refined */
+        .testimonial {
+            margin-top: 48px;
+            padding: 24px;
+            background: rgba(169, 75, 231, 0.03);
+            border-radius: 8px;
+            max-width: 500px;
+            margin-left: auto;
+            margin-right: auto;
+            border: 1px solid rgba(169, 75, 231, 0.08);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .testimonial::before {
+            content: '"';
+            position: absolute;
+            top: -10px;
+            left: 16px;
+            font-size: 60px;
+            color: var(--or-purple);
+            opacity: 0.08;
+            font-family: Georgia, serif;
+        }
+        
+        .testimonial-quote {
+            font-size: 15px;
+            line-height: 1.5;
+            margin-bottom: 16px;
+            font-style: normal;
+        }
+        
+        .testimonial-author {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+        }
+        
+        .testimonial-avatar {
+            width: 40px;
+            height: 40px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+        
+        .testimonial-info {
+            text-align: left;
+        }
+        
+        .testimonial-name {
+            font-weight: 600;
+            font-size: 15px;
+        }
+        
+        .testimonial-title {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        
+        /* Timeline - cleaner */
+        .timeline-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 48px;
+            margin-bottom: 64px;
+        }
+        
+        .timeline-item {
+            text-align: center;
+        }
+        
+        .timeline-number {
+            width: 64px;
+            height: 64px;
+            margin: 0 auto 20px;
+            background: var(--or-purple-dim);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            font-weight: 600;
+            color: var(--or-purple);
+            position: relative;
+            box-shadow: 0 0 0 1px rgba(169, 75, 231, 0.2),
+                        0 4px 12px rgba(169, 75, 231, 0.1);
+        }
+        
+        .timeline-number::before {
+            content: '';
+            position: absolute;
+            inset: -2px;
+            border-radius: 50%;
+            background: var(--gradient-purple);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            z-index: -1;
+        }
+        
+        .timeline-item:hover .timeline-number::before {
+            opacity: 0.1;
+        }
+        
+        .timeline-title {
+            font-size: 18px;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+        
+        .timeline-description {
+            color: var(--text-secondary);
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        
+        /* Visual Section - simplified */
+        .visual-section {
+            padding: 120px 0;
+            background: rgba(255, 255, 255, 0.01);
+            text-align: center;
+            border-top: 1px solid var(--border-light);
+            border-bottom: 1px solid var(--border-light);
+        }
+        
+        .visual-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 32px;
+            max-width: 1000px;
+            margin: 64px auto 0;
+            padding: 0 40px;
+        }
+        
+        .visual-card {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-light);
+            border-radius: 16px;
+            padding: 40px;
+            transition: all 0.2s ease;
+        }
+        
+        .visual-card:hover {
+            transform: translateY(-2px);
+            background: rgba(255, 255, 255, 0.03);
+        }
+        
+        /* Demo section - cleaner */
+        .demo-item {
+            margin-bottom: 120px;
+        }
+        
+        .demo-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 64px;
+            align-items: center;
+        }
+        
+        .demo-content h3 {
+            font-size: 32px;
+            margin-bottom: 20px;
+            font-weight: 600;
+            letter-spacing: -0.01em;
+        }
+        
+        .demo-content p {
+            font-size: 17px;
+            line-height: 1.6;
+            color: var(--text-secondary);
+            margin-bottom: 32px;
+        }
+        
+        .demo-features {
+            margin-bottom: 32px;
+        }
+        
+        .demo-features h4 {
+            font-size: 15px;
+            color: var(--or-purple);
+            margin-bottom: 16px;
+            font-weight: 600;
+        }
+        
+        .demo-features ul {
+            list-style: none;
+            color: var(--text-secondary);
+            font-size: 15px;
+            line-height: 2;
+        }
+        
+        .demo-features li {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .demo-features svg {
+            width: 16px;
+            height: 16px;
+            color: var(--or-purple);
+            opacity: 0.6;
+            flex-shrink: 0;
+        }
+        
+        .demo-quote {
+            background: var(--or-purple-dim);
+            border: 1px solid rgba(169, 75, 231, 0.2);
+            border-radius: 8px;
+            padding: 20px;
+            font-size: 15px;
+            color: var(--or-purple);
+            line-height: 1.5;
+        }
+        
+        .demo-metrics {
+            display: flex;
+            gap: 32px;
+            margin-top: 32px;
+        }
+        
+        .demo-metric-value {
+            font-size: 28px;
+            font-weight: 600;
+            color: var(--or-purple);
+            text-shadow: 0 0 20px var(--or-purple-glow);
+        }
+        
+        .demo-metric-label {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+        
+        .demo-screenshot {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-light);
+            border-radius: 16px;
+            padding: 40px;
+            min-height: 400px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .demo-screenshot p {
+            color: var(--text-tertiary);
+            font-style: italic;
+            font-size: 15px;
+        }
+        
+        /* Success metrics - refined */
+        .metrics-section {
+            padding: 100px 0;
+            background: rgba(169, 75, 231, 0.02);
+            border-top: 1px solid var(--border-light);
+        }
+        
+        .metrics-header {
+            text-align: center;
+            font-size: 36px;
+            margin-bottom: 16px;
+            font-weight: 600;
+        }
+        
+        .metrics-subheader {
+            text-align: center;
+            font-size: 17px;
+            color: var(--text-secondary);
+            margin-bottom: 64px;
+            max-width: 700px;
+            margin-left: auto;
+            margin-right: auto;
+            line-height: 1.6;
+        }
+        
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 48px;
+            text-align: center;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 0 40px;
+        }
+        
+        .metric-item {
+            padding: 32px;
+        }
+        
+        .metric-value {
+            font-size: 42px;
+            font-weight: 600;
+            color: var(--or-purple);
+            margin-bottom: 12px;
+        }
+        
+        .metric-label {
+            font-size: 17px;
+            margin-bottom: 8px;
+            line-height: 1.4;
+        }
+        
+        .metric-company {
+            font-size: 14px;
+            color: var(--text-tertiary);
+        }
+        
+        /* Email capture - minimal */
+        .email-section {
+            padding: 100px 0;
+            background: linear-gradient(180deg, transparent 0%, rgba(169, 75, 231, 0.03) 100%);
+            border-top: 1px solid var(--border-light);
+        }
+        
+        .email-content {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 0 40px;
+            text-align: center;
+        }
+        
+        .email-header {
+            font-size: 28px;
+            margin-bottom: 16px;
+            font-weight: 600;
+        }
+        
+        .email-description {
+            font-size: 17px;
+            color: var(--text-secondary);
+            margin-bottom: 32px;
+            line-height: 1.6;
+        }
+        
+        .email-form {
+            display: flex;
+            gap: 12px;
+            max-width: 480px;
+            margin: 0 auto;
+        }
+        
+        .email-input {
+            flex: 1;
+            padding: 14px 20px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: white;
+            font-size: 15px;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+        
+        .email-input:focus {
+            border-color: var(--or-purple);
+            background: rgba(255, 255, 255, 0.05);
+        }
+        
+        .email-submit {
+            background: var(--gradient-purple);
+            padding: 14px 28px;
+            white-space: nowrap;
+            border: none;
+            cursor: pointer;
+            border-radius: 8px;
+            color: white;
+            font-weight: 500;
+            font-size: 15px;
+            transition: all 0.2s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .email-submit::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 0;
+            height: 0;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.2);
+            transform: translate(-50%, -50%);
+            transition: width 0.6s, height 0.6s;
+        }
+        
+        .email-submit:active::before {
+            width: 300px;
+            height: 300px;
+        }
+        
+        .email-submit:hover {
+            transform: translateY(-1px);
+            opacity: 0.9;
+        }
+        
+        .email-note {
+            font-size: 13px;
+            color: var(--text-tertiary);
+            margin-top: 16px;
+        }
+        
+        /* Awards Section */
+        .awards-section {
+            padding: 80px 0;
+            background: rgba(255, 255, 255, 0.02);
+            border-top: 1px solid var(--border-light);
+            border-bottom: 1px solid var(--border-light);
+        }
+        
+        .awards-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 40px;
+        }
+        
+        .awards-label {
+            text-align: center;
+            font-size: 16px;
+            color: var(--text-secondary);
+            margin-bottom: 40px;
+            max-width: 800px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        
+        .awards-carousel-wrapper {
+            position: relative;
+            overflow: hidden;
+            mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent);
+            -webkit-mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent);
+        }
+        
+        .awards-carousel {
+            display: flex;
+            overflow: hidden;
+        }
+        
+        .awards-track {
+            display: flex;
+            gap: 120px;
+            animation: scroll-awards 50s linear infinite;
+        }
+        
+        @keyframes scroll-awards {
+            0% {
+                transform: translateX(0);
+            }
+            100% {
+                transform: translateX(-50%);
+            }
+        }
+        
+        .award-item {
+            flex: 0 0 auto;
+            text-align: center;
+            min-width: 280px;
+            max-width: 280px;
+        }
+        
+        .award-item img {
+            height: 50px;
+            width: auto;
+            opacity: 0.8;
+            filter: brightness(0) invert(1);
+            transition: opacity 0.3s ease;
+            margin-bottom: 16px;
+        }
+        
+        .award-item:hover img {
+            opacity: 1;
+        }
+        
+        .award-item p {
+            font-size: 12px;
+            color: var(--text-tertiary);
+            margin: 0;
+            line-height: 1.4;
+            padding: 0 20px;
+            white-space: nowrap;
+        }
+        
+        /* Pause animation on hover */
+        .awards-carousel:hover .awards-track {
+            animation-play-state: paused;
+        }
+        
+        /* Simple Awards Section */
+        .awards-simple-wrapper {
+            position: relative;
+            overflow: hidden;
+            mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent);
+            -webkit-mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent);
+        }
+        
+        .awards-simple-track {
+            display: flex;
+            gap: 60px;
+            animation: scroll-simple-awards 35s linear infinite;
+        }
+        
+        @keyframes scroll-simple-awards {
+            0% {
+                transform: translateX(0);
+            }
+            100% {
+                transform: translateX(-50%);
+            }
+        }
+        
+        .award-simple-item {
+            flex: 0 0 auto;
+            text-align: center;
+            min-width: 150px;
+        }
+        
+        .award-simple-item img {
+            height: 60px;
+            width: auto;
+            opacity: 0.7;
+            filter: brightness(0) invert(1);
+            transition: opacity 0.3s ease;
+            margin-bottom: 12px;
+        }
+        
+        .award-simple-item:hover img {
+            opacity: 1;
+        }
+        
+        .award-simple-item p {
+            font-size: 12px;
+            color: var(--text-tertiary);
+            margin: 0;
+            line-height: 1.4;
+        }
+        
+        .awards-simple-wrapper:hover .awards-simple-track {
+            animation-play-state: paused;
+        }
+        
+        /* Platform Stats Section */
+        .platform-stats-section {
+            padding: 100px 0;
+            background: rgba(169, 75, 231, 0.02);
+            border-top: 1px solid var(--border-light);
+        }
+        
+        .platform-stats-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 40px;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 48px;
+            text-align: center;
+        }
+        
+        .stat-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+        }
+        
+        .stat-icon {
+            width: 60px;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .stat-icon img {
+            width: 100%;
+            height: 100%;
+            opacity: 0.8;
+            filter: brightness(0) invert(1);
+        }
+        
+        .stat-value {
+            font-size: 32px;
+            font-weight: 600;
+            margin: 0;
+            color: var(--text-primary);
+            letter-spacing: -0.02em;
+        }
+        
+        .stat-description {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin: 0;
+            max-width: 200px;
+            line-height: 1.5;
+        }
+        
+        /* Footer - minimal */
+        .footer {
+            padding: 60px 0;
+            text-align: center;
+            color: var(--text-tertiary);
+            font-size: 14px;
+            border-top: 1px solid var(--border-light);
+        }
+        
+        .footer-links {
+            display: flex;
+            gap: 32px;
+            justify-content: center;
+            margin-bottom: 24px;
+        }
+        
+        .footer-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 14px;
+            transition: color 0.2s ease;
+        }
+        
+        .footer-links a:hover {
+            color: var(--text-primary);
+        }
+        
+        /* Sticky CTA - cleaner */
+        .sticky-cta {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(10, 10, 10, 0.95);
+            backdrop-filter: blur(20px);
+            border-top: 1px solid var(--border);
+            padding: 16px 0;
+            z-index: 1000;
+            transform: translateY(100%);
+            transition: transform 0.3s ease;
+        }
+        
+        .sticky-cta.visible {
+            transform: translateY(0);
+        }
+        
+        .sticky-cta-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 40px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 20px;
+        }
+        
+        .sticky-cta-text {
+            font-size: 16px;
+            font-weight: 500;
+        }
+        
+        .sticky-cta-button {
+            background: var(--gradient-purple);
+            padding: 10px 24px;
+            border-radius: 8px;
+            color: white;
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 14px;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 10px rgba(169, 75, 231, 0.3);
+        }
+        
+        .sticky-cta-button:hover {
+            transform: translateY(-1px);
+            opacity: 0.9;
+        }
+        
+        /* Responsive improvements */
+        @media (max-width: 768px) {
+            .hero h1 {
+                font-size: 36px;
+            }
+            
+            .hero .subtitle {
+                font-size: 18px;
+            }
+            
+            .section-header {
+                font-size: 28px;
+            }
+            
+            .visual-grid,
+            .demo-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .comparison-visual {
+                gap: 30px;
+            }
+            
+            .comparison-metric {
+                font-size: 48px;
+            }
+            
+            .timeline-grid {
+                grid-template-columns: 1fr;
+                gap: 32px;
+            }
+            
+            .trust-grid {
+                grid-template-columns: 1fr;
+                gap: 48px;
+            }
+            
+            .analyst-logos-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 40px;
+            }
+            
+            .sticky-cta-content {
+                flex-direction: column;
+                text-align: center;
+                gap: 12px;
+            }
+            
+            .email-form {
+                flex-direction: column;
+            }
+            
+            .footer-links {
+                flex-direction: column;
+                gap: 16px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Banner Background -->
+    <img src="assets/banner.png" class="banner-bg" alt="">
+    
+    <!-- Header -->
+    <header class="header">
+        <div class="header-content">
+            <a href="https://onereach.ai" target="_blank">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 821.11 112.43" style="height: 24px; width: auto;">
+                    <g id="Layer_2" data-name="Layer 2">
+                        <g id="Layer_1-2" data-name="Layer 1">
+                            <path fill="white" d="M128.62,35.93h11.93V47.86c3.45-7,11.79-13.22,24.15-13.22,15.52,0,26.44,8.48,26.44,30.32V111.1H179.21v-47c0-13.22-5.6-19.11-17.67-19.11-11.07,0-21,7-21,20.55V111.1H128.62Z"></path>
+                            <path fill="white" d="M206.42,74.31V73.16c0-22.71,14.52-38.52,35.21-38.52,17.39,0,33.78,10.49,33.78,37.37v3.88H218.78c.58,17.1,8.77,26.59,24.15,26.59,11.64,0,18.39-4.31,20-13.08h11.93c-2.58,15.09-15.09,23-32,23C221.51,112.39,206.42,97.45,206.42,74.31Zm56.77-8c-1.15-15.52-9.2-21.7-21.56-21.7-12.21,0-20.41,8.33-22.42,21.7Z"></path>
+                            <path fill="white" d="M293.35,8.34h30.9c19.69,0,35.93,8.05,35.93,28.6v.57c0,17-11.36,25.3-25.44,28l31.47,45.56H352.27L321.66,66.4H305.85v44.7h-12.5Zm31.76,48.15c14.66,0,22.56-6.33,22.56-19v-.57c0-13.94-8.62-18.54-22.56-18.54H305.85V56.49Z"></path>
+                            <path fill="white" d="M372.76,74.31V73.16c0-22.71,14.51-38.52,35.21-38.52,17.39,0,33.77,10.49,33.77,37.37v3.88H385.11c.58,17.1,8.77,26.59,24.15,26.59,11.64,0,18.4-4.31,20-13.08h11.93c-2.59,15.09-15.09,23-32.05,23C387.85,112.39,372.76,97.45,372.76,74.31Zm56.77-8c-1.15-15.52-9.2-21.7-21.56-21.7s-20.41,8.33-22.42,21.7Z"></path>
+                            <path fill="white" d="M452.19,90.26c0-17.39,18.4-23.28,37.66-23.28h10.78V61.52c0-11.93-4.6-17-16.1-17-10.35,0-16.1,4.31-17.25,13.51H455.35c1.59-17.11,15.24-23.43,29.76-23.43,14.37,0,27.45,5.89,27.45,26.88V111.1H500.63v-9.48c-5.61,7-12.36,10.77-23.43,10.77C463.26,112.39,452.19,105.64,452.19,90.26Zm48.44-5.46V75.46H490.28c-15.09,0-26.16,3.73-26.16,14.8,0,7.76,3.74,12.65,14.23,12.65C491,102.91,500.63,96.44,500.63,84.8Z"></path>
+                            <path fill="white" d="M527.56,74.31V73.16c0-23,16.39-38.52,36.51-38.52,15.67,0,30.33,7.19,32.63,26.3H584.91C583,49,574.42,44.56,564.07,44.56c-13.65,0-24.15,10.92-24.15,28.6v1.15c0,18.39,10.06,28.17,24.58,28.17,10.64,0,20.27-6.18,21.56-18.4h11.07c-1.59,16.24-14.66,28.31-32.77,28.31C543.37,112.39,527.56,97.59,527.56,74.31Z"></path>
+                            <path fill="white" d="M612.2,0h11.93V47.86c3.45-7,11.79-13.22,24.15-13.22,15.52,0,26.44,8.48,26.44,30.32V111.1H662.79v-47c0-13.22-5.6-19.11-17.67-19.11-11.07,0-21,7-21,20.55V111.1H612.2Z"></path>
+                            <path fill="white" d="M727.2,90.26C727.2,72.87,745.59,67,764.85,67h10.78V61.52c0-11.93-4.6-17-16.09-17-10.35,0-16.1,4.31-17.25,13.51H730.36c1.58-17.11,15.23-23.43,29.75-23.43s27.45,5.89,27.45,26.88V111.1H775.63v-9.48c-5.6,7-12.36,10.77-23.42,10.77C738.26,112.39,727.2,105.64,727.2,90.26Zm48.43-5.46V75.46H765.29c-15.1,0-26.16,3.73-26.16,14.8,0,7.76,3.73,12.65,14.23,12.65C766,102.91,775.63,96.44,775.63,84.8Z"></path>
+                            <path fill="white" d="M805.3,12.36a7.91,7.91,0,0,1,15.81,0,7.91,7.91,0,1,1-15.81,0Zm2.16,23.57h11.92V111.1H807.46ZM694.34,104.49a7.91,7.91,0,1,1,7.9,7.9A8,8,0,0,1,694.34,104.49Z"></path>
+                            <path fill="white" d="M109.3,48A52,52,0,0,0,65,7.52C32.82,3.58,5.19,26.81,5.32,58.22a50.64,50.64,0,0,0,.49,7.19.91.91,0,0,0,.9.79c2.81,0,6.22,0,9,0a.82.82,0,0,0,.84-1,38.79,38.79,0,0,1-.19-9.11c2.11-23.42,23.7-40.9,45.65-38.77S100,40.18,97.68,63.59s-19.82,39.1-41.87,39.13c-4.17,0-30.77-.13-33.78-.13-5.9,0-6,0-17.74,0a.57.57,0,0,0-.54.35l-2.66,6.12-1,2.36a.74.74,0,0,0,.71,1c6.89,0,15.41,0,29.37,0H37.9c7.23,0,13,0,20,0C90.8,112.58,116.71,82.17,109.3,48Z"></path>
+                        </g>
+                    </g>
+                </svg>
+            </a>
+        </div>
+    </header>
+    
+    <!-- Hero -->
+    <section class="hero">
+        <div class="hero-content">
+            <h1>Your Digital Workforce,<br>One Interface.</h1>
+            <p class="subtitle" style="margin-bottom: 3rem;">Deploy specialized AI workers that understand your business.<br>Manage them like a team.</p>
+            
+            <!-- Primary CTA -->
+            <div style="display: flex; gap: 16px; justify-content: center; flex-wrap: wrap;">
+                <a href="#demo" class="download-button" style="background: var(--gradient-purple); border: 2px solid transparent; padding: 16px 32px; box-shadow: 0 4px 20px rgba(169, 75, 231, 0.3); position: relative; overflow: hidden;">
+                    <span style="position: relative; z-index: 1;">See a Demo</span>
+                </a>
+                <a href="dist/Onereach.ai-1.0.3-arm64.dmg" class="download-button" style="background: transparent; border: 2px solid rgba(255, 255, 255, 0.2); color: rgba(255, 255, 255, 0.9); padding: 16px 32px; backdrop-filter: blur(10px);" download>
+                    Download for Mac
+                </a>
+            </div>
+            
+            <!-- Hero Product Preview -->
+            <div class="hero-product-preview">
+                <div class="hero-video-showcase">
+                    <video class="hero-product-video" autoplay muted playsinline loop>
+                        <source src="https://newonereach.wpenginepowered.com/wp-content/uploads/2023/12/hero-optimized.mp4" type="video/mp4">
+                    </video>
+                </div>
+            </div>
+        </div>
+    </section>
+    
+    <!-- Combined Trust Section -->
+    <section class="trust-section">
+        <div class="trust-content">
+            <div class="trust-grid">
+                <!-- Trusted Companies -->
+                <div class="trust-column">
+                    <p class="trust-label">Trusted by</p>
+                    <div class="company-logos-scroll-container">
+                        <div class="company-logos-vertical">
+                            <img src="https://onereach.ai/wp-content/uploads/2024/01/trusted-2.png" alt="PepsiCo" class="company-logo-static">
+                            <img src="https://onereach.ai/wp-content/uploads/2024/01/trusted-3.png" alt="Deloitte" class="company-logo-static">
+                            <div class="logo-verizon-static">verizon</div>
+                            <img src="https://onereach.ai/wp-content/uploads/2024/01/trusted-1.png" alt="PVC" class="company-logo-static">
+                            <img src="https://onereach.ai/wp-content/uploads/2024/01/trusted-4.png" alt="BASF" class="company-logo-static">
+                            <img src="https://onereach.ai/wp-content/uploads/2024/01/trusted-6.png" alt="DHL" class="company-logo-static">
+                            <!-- Duplicate set for seamless loop -->
+                            <img src="https://onereach.ai/wp-content/uploads/2024/01/trusted-2.png" alt="PepsiCo" class="company-logo-static">
+                            <img src="https://onereach.ai/wp-content/uploads/2024/01/trusted-3.png" alt="Deloitte" class="company-logo-static">
+                            <div class="logo-verizon-static">verizon</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Analyst Recognition -->
+                <div class="trust-column trust-column-wide">
+                    <p class="trust-label">The only platform named a leader by every major analyst</p>
+                    <div class="analyst-logos-grid">
+                        <img src="https://onereach.ai/wp-content/uploads/2023/12/gartner.svg" alt="Gartner" class="analyst-logo analyst-logo-1">
+                        <img src="https://onereach.ai/wp-content/uploads/2023/12/idc.svg" alt="IDC" class="analyst-logo analyst-logo-2">
+                        <img src="https://onereach.ai/wp-content/uploads/2023/12/opus.svg" alt="Opus Research" class="analyst-logo analyst-logo-3">
+                        <img src="https://onereach.ai/wp-content/uploads/2023/12/everest.svg" alt="Everest Group" class="analyst-logo analyst-logo-4">
+                        <img src="https://onereach.ai/wp-content/uploads/2023/12/aragon.svg" alt="Aragon Research" class="analyst-logo analyst-logo-5">
+                        <img src="https://onereach.ai/wp-content/uploads/2023/12/quadrant.svg" alt="Quadrant" class="analyst-logo analyst-logo-6">
+                    </div>
+                </div>
+                
+                <!-- Key Awards -->
+                <div class="trust-column">
+                    <p class="trust-label">Award-winning</p>
+                    <div class="awards-highlight">
+                        <div class="awards-rotating">
+                            <div class="award-item-single award-item-active">
+                                <img src="https://onereach.ai/wp-content/uploads/2023/12/15.svg" alt="Edison Awards Gold" class="award-logo-featured">
+                                <p class="award-text">Edison Awards Gold</p>
+                            </div>
+                            <div class="award-item-single">
+                                <img src="https://onereach.ai/wp-content/uploads/2023/12/13.svg" alt="AI Company of the Year" class="award-logo-featured">
+                                <p class="award-text">AI Company of the Year</p>
+                            </div>
+                            <div class="award-item-single">
+                                <img src="https://onereach.ai/wp-content/uploads/2023/12/1.svg" alt="Best Innovation in AI" class="award-logo-featured">
+                                <p class="award-text">Best Innovation in AI</p>
+                            </div>
+                            <div class="award-item-single">
+                                <img src="https://onereach.ai/wp-content/uploads/2023/12/11.svg" alt="Top Conversational AI Platform" class="award-logo-featured">
+                                <p class="award-text">Top Conversational AI Platform</p>
+                            </div>
+                            <div class="award-item-single">
+                                <img src="https://onereach.ai/wp-content/uploads/2023/12/8.svg" alt="Best AI/ML Solution" class="award-logo-featured">
+                                <p class="award-text">Best AI/ML Solution</p>
+                            </div>
+                        </div>
+                        <p class="award-subtext">+ 12 industry awards</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    
+    <section class="section" style="position: relative; overflow: hidden;">
+        <!-- Add subtle background pattern -->
+        <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle at 20% 50%, rgba(169, 75, 231, 0.03) 0%, transparent 50%), radial-gradient(circle at 80% 50%, rgba(169, 75, 231, 0.02) 0%, transparent 50%); transform: rotate(-5deg); pointer-events: none;"></div>
+        
+        <div class="section-content">
+            <h2 class="section-header" style="text-align: center; margin-bottom: 24px;">When every competitor has AI,<br>how do you win?</h2>
+            <p class="section-description" style="margin: 0 auto 80px; text-align: center; max-width: 600px; font-size: 20px; line-height: 1.5; color: var(--text-secondary);">
+                Give each customer their own AI. Not one AI for everyone.<br>The difference is everything.
+            </p>
+            
+            <div class="comparison-visual" style="position: relative; padding: 40px 0;">
+                <!-- Add connecting line -->
+                <div style="position: absolute; top: 50%; left: 25%; right: 25%; height: 1px; background: linear-gradient(to right, transparent, var(--border), transparent); z-index: 0;"></div>
+                
+                <div class="comparison-item" style="position: relative; z-index: 1;">
+                    <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-light); border-radius: 100px; width: 120px; height: 120px; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center;">
+                        <p class="comparison-metric" style="margin: 0;">1:∞</p>
+                    </div>
+                    <p class="comparison-label">One AI for everyone</p>
+                    <p class="comparison-detail">Forgets you. Generic answers. No relationship.</p>
+                </div>
+                <div class="comparison-vs">vs</div>
+                <div class="comparison-item comparison-highlight" style="position: relative; z-index: 1;">
+                    <div style="background: rgba(169, 75, 231, 0.1); border: 1px solid rgba(169, 75, 231, 0.2); border-radius: 100px; width: 120px; height: 120px; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 40px rgba(169, 75, 231, 0.2);">
+                        <p class="comparison-metric" style="margin: 0;">1:1</p>
+                    </div>
+                    <p class="comparison-label">One AI per customer</p>
+                    <p class="comparison-detail">Remembers everything. Learns you. Grows with you.</p>
+                </div>
+            </div>
+            
+            <div style="text-align: center; margin-top: 60px;">
+                <p style="font-size: 18px; color: var(--text-secondary); margin-bottom: 12px;">The answer?</p>
+                <p style="font-size: 24px; color: var(--text-primary); font-weight: 600;">GSX. Your AI secret weapon.</p>
+                <p style="font-size: 16px; color: var(--text-secondary); margin-top: 12px; max-width: 500px; margin-left: auto; margin-right: auto;">Deploy unlimited AI workers. Each one dedicated to a single customer or employee.</p>
+            </div>
+            
+            <div class="testimonial" style="margin-top: 60px;">
+                <p class="testimonial-quote">
+                    "Our competitor launched AI chat. We gave every customer their own AI. 73% fewer tickets, 2.4x more revenue."
+                </p>
+                <div class="testimonial-author">
+                    <div class="testimonial-avatar">SM</div>
+                    <div class="testimonial-info">
+                        <p class="testimonial-name">Sarah Mitchell</p>
+                        <p class="testimonial-title">VP Customer Success, TechStyle Fashion</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+    
+    <section class="visual-section">
+        <div class="section-content">
+            <h2 class="section-header">What couldn't exist before</h2>
+            <p class="section-description">When you remove human limitations—the need to sleep, remember, context-switch—something beautiful happens. Technology becomes truly personal.</p>
+            
+            <div class="feature-grid">
+                <div class="feature">
+                    <div class="feature-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                        </svg>
+                    </div>
+                    <h3>Perfect Memory</h3>
+                    <p>Every interaction remembered. Every preference learned. Knowledge that compounds over time, exclusively for each individual.</p>
+                </div>
+                
+                <div class="feature">
+                    <div class="feature-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-12.5c-2.49 0-4.5 2.01-4.5 4.5s2.01 4.5 4.5 4.5 4.5-2.01 4.5-4.5-2.01-4.5-4.5-4.5zm0 5.5c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1z"/>
+                        </svg>
+                    </div>
+                    <h3>Always Available</h3>
+                    <p>No context-switching. No forgetting. Your AI workers are available 24/7, building expertise that's unique to your business.</p>
+                </div>
+                
+                <div class="feature">
+                    <div class="feature-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M19 3h-4.18C14.4 1.84 13.3 1 12 1c-1.3 0-2.4.84-2.82 2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm2 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/>
+                        </svg>
+                    </div>
+                    <h3>Your Rules</h3>
+                    <p>Create IDWs with your specific knowledge and processes. They become domain experts, following your guidelines, speaking in your voice.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+    
+    <section class="section">
+        <div class="section-content" style="text-align: center;">
+            <h2 class="section-header">Start Simple. Scale Smart.</h2>
+            <p class="section-description" style="margin: 0 auto 60px; max-width: 700px;">
+                You don't need to transform everything overnight. Most companies see results in weeks, not years.
+            </p>
+            
+            <div class="timeline-grid">
+                <div class="timeline-item">
+                    <div class="timeline-number">1</div>
+                    <h3 class="timeline-title">Week 3</h3>
+                    <p class="timeline-description">Support tickets drop dramatically. Your team asks "what happened?"</p>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-number">2</div>
+                    <h3 class="timeline-title">Month 2</h3>
+                    <p class="timeline-description">Customers start buying differently. Engagement metrics soar.</p>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-number">3</div>
+                    <h3 class="timeline-title">Quarter 1</h3>
+                    <p class="timeline-description">Competitors start asking how. Your CFO becomes biggest advocate.</p>
+                </div>
+            </div>
+            
+            <div style="background: rgba(169, 75, 231, 0.05); border-left: 4px solid var(--or-purple); padding: 24px; margin: 60px auto 0; max-width: 600px; text-align: left;">
+                <p style="font-size: 18px; font-weight: 600; margin-bottom: 8px; color: rgba(255, 255, 255, 0.95);">The best part?</p>
+                <p style="font-size: 16px; color: var(--text-secondary); margin: 0;">
+                    You're not building from scratch. You're orchestrating what already exists—your data, modern AI, and our platform—into something that feels magical to your customers.
+                </p>
+            </div>
+        </div>
+    </section>
+    
+    <section class="visual-section" style="background: rgba(255, 255, 255, 0.02);" id="demo">
+        <div class="section-content">
+            <h2 class="section-header">See it in action</h2>
+            
+            <div style="margin-top: 80px;">
+                <!-- Demo 1: Personal Concierge -->
+                <div class="demo-item">
+                    <div class="demo-grid">
+                        <div class="demo-content">
+                            <h3>Your AI Concierge</h3>
+                            <p>
+                                Meet the AI concierge brands assign to you. It navigates their ecosystem, discovers opportunities, and maximizes value—with perfect memory across every channel.
+                            </p>
+                            <div class="demo-features">
+                                <h4>Key capabilities:</h4>
+                                <ul>
+                                    <li>
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                                            <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+                                        </svg>
+                                        Knows your complete history and preferences
+                                    </li>
+                                    <li>
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                                            <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+                                        </svg>
+                                        Proactively surfaces relevant opportunities
+                                    </li>
+                                    <li>
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                                            <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+                                        </svg>
+                                        Available 24/7 across phone, text, and video
+                                    </li>
+                                </ul>
+                            </div>
+                            
+                            <div class="demo-metrics">
+                                <div>
+                                    <p class="demo-metric-value">87%</p>
+                                    <p class="demo-metric-label">Never switch</p>
+                                </div>
+                                <div>
+                                    <p class="demo-metric-value">Day 1</p>
+                                    <p class="demo-metric-label">Feel understood</p>
+                                </div>
+                                <div>
+                                    <p class="demo-metric-value">11 min</p>
+                                    <p class="demo-metric-label">To "wow"</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="demo-screenshot">
+                            <p>[Multimodal Interface Demo]</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Demo 2: BHX Platform -->
+                <div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 60px; align-items: center;">
+                        <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 24px; padding: 40px; min-height: 400px; display: flex; align-items: center; justify-content: center;">
+                            <p style="color: var(--text-secondary); font-style: italic;">[BHX Total Experience Platform]</p>
+                        </div>
+                        <div>
+                            <h3 style="font-size: 32px; margin-bottom: 20px; color: rgba(255, 255, 255, 0.95);">BHX: Total Experience Platform</h3>
+                            <p style="font-size: 18px; line-height: 1.6; color: var(--text-secondary); margin-bottom: 24px;">
+                                One AI brain that knows everything—products, competition, customers. Employees and customers access the same intelligence through their preferred interface.
+                            </p>
+                            <div style="background: rgba(169, 75, 231, 0.05); border-left: 3px solid var(--or-purple); padding: 20px; margin-top: 24px;">
+                                <p style="font-size: 16px; font-weight: 600; margin-bottom: 8px; color: rgba(255, 255, 255, 0.95);">The Total Experience Difference</p>
+                                <p style="font-size: 14px; color: var(--text-secondary); margin: 0;">
+                                    When employees and customers share the same AI brain, magic happens. Teams anticipate needs. Customers get expert answers instantly.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- CTA Section -->
+            <div style="margin-top: 80px; text-align: center;">
+                <a href="#demo" class="download-button" style="background: var(--gradient-purple); padding: 16px 40px; font-size: 16px; box-shadow: 0 4px 20px rgba(169, 75, 231, 0.3); border: 2px solid transparent;">
+                    Start with a demo →
+                </a>
+            </div>
+        </div>
+    </section>
+    
+    <!-- Email Capture Section -->
+    <section class="email-section">
+        <div class="email-content">
+            <h3 class="email-header">The AI First Playbook</h3>
+            <p class="email-description">
+                Learn how leading companies built their 1:1 customer relationships. Real examples, proven frameworks.
+            </p>
+            
+            <form class="email-form" onsubmit="event.preventDefault(); alert('Email capture would be processed here');">
+                <input 
+                    type="email" 
+                    placeholder="your@company.com" 
+                    required
+                    class="email-input"
+                />
+                <button 
+                    type="submit" 
+                    class="email-submit"
+                >
+                    Send me the playbook
+                </button>
+            </form>
+            
+            <p class="email-note">
+                We'll send it once. That's it.
+            </p>
+        </div>
+    </section>
+    
+    <!-- Platform Stats Section -->
+    <section class="platform-stats-section">
+        <div class="platform-stats-content">
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <div class="stat-icon">
+                        <img src="https://onereach.ai/wp-content/uploads/2023/06/hero-icon1.svg" alt="Conversations">
+                    </div>
+                    <h4 class="stat-value">1.5 billion+</h4>
+                    <p class="stat-description">automated conversations per year</p>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-icon">
+                        <img src="https://onereach.ai/wp-content/uploads/2023/06/hero-icon2.svg" alt="Toolkits">
+                    </div>
+                    <h4 class="stat-value">1000+</h4>
+                    <p class="stat-description">prebuilt toolkits to use out of the box</p>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-icon">
+                        <img src="https://onereach.ai/wp-content/uploads/2023/06/hero-icon3.svg" alt="Users">
+                    </div>
+                    <h4 class="stat-value">80%</h4>
+                    <p class="stat-description">of buildrers are non-developers</p>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-icon">
+                        <img src="https://onereach.ai/wp-content/uploads/2023/06/hero-icon4.svg" alt="Enterprise AIs">
+                    </div>
+                    <h4 class="stat-value">10,000+</h4>
+                    <p class="stat-description">enterprise AIs deployed</p>
+                </div>
+            </div>
+        </div>
+    </section>
+    
+    <footer class="footer">
+        <div class="footer-links">
+            <a href="https://onereach.ai/privacy">Privacy</a>
+            <a href="https://onereach.ai/terms">Terms</a>
+            <a href="https://onereach.ai/contact">Contact</a>
+        </div>
+        <p>© 2025 OneReach.ai</p>
+    </footer>
+    
+    <!-- Sticky CTA Bar -->
+    <div class="sticky-cta" id="sticky-cta">
+        <div class="sticky-cta-content">
+            <p class="sticky-cta-text">When every competitor has AI, how do you win?</p>
+            <a href="#demo" class="sticky-cta-button">
+                See how →
+            </a>
+        </div>
+    </div>
+    
+    <script>
+        // Show sticky CTA after scrolling past hero
+        window.addEventListener('scroll', function() {
+            const stickyCTA = document.getElementById('sticky-cta');
+            const heroHeight = document.querySelector('.hero').offsetHeight;
+            
+            if (window.scrollY > heroHeight) {
+                stickyCTA.classList.add('visible');
+            } else {
+                stickyCTA.classList.remove('visible');
+            }
+        });
+        
+        // Cycle through awards
+        const awards = document.querySelectorAll('.award-item-single');
+        let currentAward = 0;
+        
+        function rotateAwards() {
+            // Remove active class from current
+            awards[currentAward].classList.remove('award-item-active');
+            
+            // Move to next award
+            currentAward = (currentAward + 1) % awards.length;
+            
+            // Add active class to new current
+            awards[currentAward].classList.add('award-item-active');
+        }
+        
+        // Start rotation after page loads
+        if (awards.length > 0) {
+            setInterval(rotateAwards, 3000); // Change every 3 seconds
+        }
+    </script>
+</body>
+</html> 
+</html> 

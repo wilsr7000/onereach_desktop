@@ -1,0 +1,130 @@
+{
+  "name": "onereach-ai",
+  "productName": "Onereach.ai",
+  "version": "1.0.3",
+  "description": "Onereach.ai Desktop Application",
+  "main": "main.js",
+  "icon": "assets/icon.icns",
+  "scripts": {
+    "start": "electron .",
+    "dev": "NODE_ENV=development npx electron .",
+    "dev:win": "set NODE_ENV=development && npx electron .",
+    "package": "npx electron-builder build --mac --win --publish never",
+    "package:mac": "npx electron-builder build --mac --publish never",
+    "package:win": "npx electron-builder build --win --publish never",
+    "package:mac:arm64": "npx electron-builder build --mac arm64 --publish never",
+    "package:mac:x64": "npx electron-builder build --mac x64 --publish never",
+    "package:win:arm64": "npx electron-builder build --win arm64 --publish never",
+    "package:win:x64": "npx electron-builder build --win x64 --publish never",
+    "package:universal": "npx electron-builder build --mac universal --win arm64,x64 --publish never",
+    "publish": "npx electron-builder build --mac --win --publish always",
+    "publish:mac": "npx electron-builder build --mac --publish always",
+    "publish:win": "npx electron-builder build --win --publish always",
+    "publish:github": "npx electron-builder build --mac --win --publish always --publish-config publish.json",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "test:wizard": "electron test/setup-wizard-test-suite.js",
+    "test:external-ai": "electron test/external-ai-test-suite.js",
+    "test:external-ai-interactive": "electron test/external-ai-interactive-test.js",
+    "test:idw": "electron test/run-idw-tests.js",
+    "dist": "electron-builder",
+    "build:signed": "./scripts/build-signed.sh",
+    "build:signed:skip-notarize": "./scripts/build-signed.sh --skip-notarize"
+  },
+  "build": {
+    "appId": "com.onereach.app",
+    "productName": "Onereach.ai",
+    "files": [
+      "**/*",
+      "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
+      "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}",
+      "!**/node_modules/*.d.ts",
+      "!**/node_modules/.bin",
+      "!**/.{idea,git,github,vscode}/**",
+      "!**/{.DS_Store,.git,.gitignore,.npmignore}"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "assets/icon.icns",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "darkModeSupport": true,
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "notarize": false
+    },
+    "win": {
+      "icon": "assets/tray-icon.png",
+      "target": [
+        "nsis",
+        "zip"
+      ]
+    },
+    "linux": {
+      "icon": "assets/tray-icon.png",
+      "target": [
+        "AppImage",
+        "deb"
+      ]
+    },
+    "dmg": {
+      "background": "assets/dmg/background.png",
+      "icon": "assets/icon.icns",
+      "iconSize": 128,
+      "contents": [
+        {
+          "x": 130,
+          "y": 150
+        },
+        {
+          "x": 410,
+          "y": 150,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    },
+    "directories": {
+      "output": "dist"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "onereach-ai",
+        "repo": "desktop-app",
+        "releaseType": "release"
+      },
+      {
+        "provider": "generic",
+        "url": "https://example.com/updates/",
+        "channel": "latest"
+      }
+    ]
+  },
+  "keywords": [
+    "electron",
+    "onereach",
+    "ai"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@electron/notarize": "^3.0.1",
+    "electron": "^35.1.2",
+    "electron-builder": "^24.9.1"
+  },
+  "dependencies": {
+    "archiver": "^7.0.1",
+    "electron-clipboard-extended": "^1.1.1",
+    "electron-log": "^5.3.3",
+    "electron-updater": "^6.6.2",
+    "playwright": "^1.40.1",
+    "plist": "^3.1.0",
+    "simple-peer": "^9.11.1",
+    "unzipper": "^0.10.14",
+    "ws": "^8.17.0"
+  }
+}

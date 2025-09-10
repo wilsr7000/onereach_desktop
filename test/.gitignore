@@ -1,0 +1,9 @@
+# Test reports
+test-report-*.json
+
+# Test data directory
+test-data/
+
+# Backup files
+*.backup.json
+*.test-backup 

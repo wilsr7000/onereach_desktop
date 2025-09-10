@@ -1,0 +1,85 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+out/
+*.app
+*.exe
+*.dmg
+*.AppImage
+*.snap
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS Files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# IDE Files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Temporary files
+_temp/
+temp/
+tmp/
+*.tmp
+*.temp
+
+# Archive/Backup files
+_archive/
+*.backup
+*.bak
+*-backup.*
+*-broken.*
+
+# Test outputs
+test-report-*.json
+coverage/
+.nyc_output/
+
+# Scripts directory (optional - remove if you want to track scripts)
+_scripts/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Storage status files
+.storage-*-status
+
+# Base64 encoded files (redundant)
+*-base64*.txt
+
+# Cache
+.cache/
+*.cache
+
+# Package lock files (uncomment if you prefer not to track)
+# package-lock.json
+# yarn.lock
+
+# Electron-specific
+electron-builder.yml
+app/dist/
+
+# Debug files
+debug-*.html
+debug-*.js
+
+# Test files (uncomment if you don't want to track test files)
+# test-*.html
+# test-*.js
+# *-test.js 

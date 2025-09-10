@@ -1,0 +1,1424 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background: #1a1a1a;
+    color: #fff;
+    margin: 0;
+    padding: 0;
+    height: 100vh;
+    overflow-y: auto;
+}
+
+.container {
+    max-width: none;  /* Remove max-width constraint */
+    margin: 0;
+    padding: 0;
+    height: 100vh;
+}
+
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 20px;
+    padding: 20px;
+    background: #121212;
+}
+
+.tile {
+    position: relative;
+    background: #1a1a1a;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    min-height: 400px;
+    display: flex;
+    flex-direction: column;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.tile:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+}
+
+.tile-front {
+    position: relative;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.tile-image-container {
+    position: relative;
+    height: 200px;
+    overflow: hidden;
+    background-color: #1a1a1a;
+}
+
+.tile-image {
+    width: 100%;
+    height: 100%;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    transition: transform 0.3s ease;
+}
+
+.tile-image img {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0;
+}
+
+.tile:hover .tile-image {
+    transform: scale(1.05);
+}
+
+.tile-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(
+        to bottom,
+        rgba(0, 0, 0, 0) 0%,
+        rgba(0, 0, 0, 0.4) 50%,
+        rgba(0, 0, 0, 0.8) 100%
+    );
+    z-index: 1;
+}
+
+.tile-content {
+    padding: 20px;
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    background: #1a1a1a;
+}
+
+.tile-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #ffffff;
+    margin-bottom: 12px;
+    line-height: 1.4;
+}
+
+.tile-excerpt {
+    font-size: 0.95rem;
+    color: #b0b0b0;
+    line-height: 1.6;
+    margin-bottom: 16px;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.tile-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    font-size: 0.85rem;
+    color: #888;
+}
+
+.tile-author {
+    color: #4a9eff;
+    font-weight: 500;
+}
+
+.tile-date {
+    color: #666;
+}
+
+/* Featured tile styles */
+.tile.featured {
+    grid-column: span 2;
+    grid-row: span 2;
+}
+
+.tile.featured .tile-image-container {
+    height: 300px;
+}
+
+.tile.featured .tile-title {
+    font-size: 1.5rem;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .grid {
+        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+        gap: 15px;
+        padding: 15px;
+    }
+
+    .tile.featured {
+        grid-column: span 1;
+        grid-row: span 1;
+    }
+
+    .tile.featured .tile-image-container {
+        height: 200px;
+    }
+
+    .tile.featured .tile-title {
+        font-size: 1.25rem;
+    }
+}
+
+/* Back side styling */
+.tile-back {
+    transform: rotateY(180deg);
+    padding: 20px;
+    background: #1a1a1a;
+}
+
+.tile-back h3 {
+    color: #fff;
+    margin-bottom: 15px;
+}
+
+.tile-back .tile-content {
+    color: #ccc;
+    line-height: 1.6;
+    margin-bottom: 20px;
+}
+
+.read-more {
+    display: inline-block;
+    padding: 8px 16px;
+    background: #333;
+    color: #fff;
+    text-decoration: none;
+    border-radius: 4px;
+    margin-top: auto;
+}
+
+.read-more:hover {
+    background: #444;
+}
+
+/* Feed header styling */
+.feed-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px;
+    background: #1a1a1a;
+    border-bottom: 1px solid #333;
+}
+
+.feed-title {
+    margin: 0;
+    font-size: 28px;
+    font-weight: 600;
+    color: #fff;
+    letter-spacing: -0.5px;
+}
+
+/* Legacy feed-input styling kept for compatibility */
+.feed-input {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 20px;
+    background: #1a1a1a;
+    border-bottom: 1px solid #333;
+}
+
+.feed-input input {
+    flex: 1;
+    padding: 10px;
+    border: 1px solid #333;
+    border-radius: 5px;
+    font-size: 16px;
+    background: #2a2a2a;
+    color: #fff;
+}
+
+.feed-input button {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 5px;
+    font-size: 16px;
+    background: #4a9eff;
+    color: #fff;
+    cursor: pointer;
+    transition: background 0.3s ease;
+}
+
+.feed-input button:hover {
+    background: #3a8eef;
+}
+
+/* Download logs button specific styling */
+.download-logs-btn {
+    background: #27ae60 !important;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.download-logs-btn:hover {
+    background: #229954 !important;
+}
+
+.download-logs-btn i {
+    font-size: 14px;
+}
+
+/* Download success message */
+.download-success-message {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #27ae60;
+    color: #fff;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    z-index: 10000;
+    animation: slideDownFadeIn 0.3s ease-out;
+}
+
+.download-success-message i {
+    font-size: 20px;
+}
+
+@keyframes slideDownFadeIn {
+    from {
+        opacity: 0;
+        transform: translate(-50%, -20px);
+    }
+    to {
+        opacity: 1;
+        transform: translate(-50%, 0);
+    }
+}
+
+.loading-spinner {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 80px;
+    height: 80px;
+    border: 4px solid rgba(255, 255, 255, 0.2);
+    border-top-color: #ffffff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+    z-index: 1000;
+}
+
+@keyframes spin {
+    to {
+        transform: translate(-50%, -50%) rotate(360deg);
+    }
+}
+
+.feed-select {
+    padding: 10px;
+    border: 1px solid #333;
+    border-radius: 5px;
+    font-size: 16px;
+    background: #2a2a2a;
+    color: #fff;
+    min-width: 200px;
+}
+
+.feed-select:focus {
+    outline: none;
+    border-color: #444;
+}
+
+.tile-interactions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 12px;
+    margin-top: auto;
+    border-top: 1px solid #333;
+    font-size: 0.85em;
+    color: #666;
+    width: 100%;
+    max-width: 600px;
+}
+
+.tile-reactions, .tile-comments {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.tile-reactions i, .tile-comments i {
+    font-size: 1.1em;
+}
+
+.interaction-count {
+    color: #999;
+}
+
+.tile-image.placeholder-image {
+    object-fit: contain;
+    padding: 40px;
+    background: #1a1a1a;
+    max-width: 100%;
+    max-height: 100%;
+}
+
+/* Special handling for site logos */
+.tile-image[src*="logo"],
+.tile-image[src*="favicon"] {
+    object-fit: contain;
+    padding: 40px;
+    background: #1a1a1a;
+}
+
+/* Article viewer styling */
+#article-viewer {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: #121212;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    color: #fff;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+#article-viewer.active {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+#article-viewer:not(.active) {
+    opacity: 0;
+    transform: translateY(20px);
+    pointer-events: none;
+}
+
+.article-header {
+    position: relative;
+    width: 100%;
+    height: 60vh;
+    min-height: 400px;
+    background-color: #000;
+    overflow: hidden;
+}
+
+.article-header-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.article-header-overlay {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 100px 40px 40px;
+    background: linear-gradient(to bottom, transparent, rgba(0,0,0,0.9));
+}
+
+#article-title {
+    font-size: 3.2rem;
+    font-weight: 800;
+    margin-bottom: 20px;
+    text-align: center;
+    max-width: 800px;
+    margin: 0 auto;
+    line-height: 1.2;
+    color: #fff;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+
+.article-metadata {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 20px 40px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    color: #888;
+    font-size: 0.9rem;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+
+#article-content {
+    max-width: 800px;
+    margin: 0 auto;
+    font-size: 1.2rem;
+    line-height: 1.6;
+    padding: 40px;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+#article-content p {
+    margin-bottom: 1.8em;
+}
+
+#article-content img {
+    width: 100%;
+    height: auto;
+    margin: 2em 0;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
+
+#article-content h2 {
+    font-size: 2rem;
+    margin: 2em 0 1em;
+    color: #fff;
+}
+
+#article-content h3 {
+    font-size: 1.5rem;
+    margin: 1.5em 0 1em;
+    color: #fff;
+}
+
+#article-content a {
+    color: #4a9eff;
+    text-decoration: none;
+    border-bottom: 1px solid rgba(74, 158, 255, 0.3);
+}
+
+#article-content a:hover {
+    border-bottom-color: #4a9eff;
+}
+
+/* Close button styling */
+.close-article {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: rgba(0,0,0,0.5);
+    width: 40px;
+    height: 40px;
+    border: none;
+    border-radius: 50%;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s ease;
+    backdrop-filter: blur(4px);
+    z-index: 2000;
+}
+
+.close-article:hover {
+    background: rgba(255,255,255,0.2);
+    transform: rotate(90deg);
+}
+
+/* Article footer */
+.article-footer {
+    max-width: 800px;
+    margin: 40px auto;
+    padding: 40px;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    color: #888;
+    font-size: 0.9rem;
+    text-align: center;
+}
+
+/* Reading progress indicator */
+.reading-progress-indicator {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 2px;
+    background: #4a9eff;
+    width: 0%;
+    transition: width 0.2s ease;
+    z-index: 2001;
+}
+
+/* Custom scrollbar for the article viewer */
+.article-viewer::-webkit-scrollbar {
+    width: 8px;
+}
+
+.article-viewer::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.article-viewer::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.2);
+    border-radius: 4px;
+}
+
+.article-viewer::-webkit-scrollbar-thumb:hover {
+    background: rgba(255,255,255,0.3);
+}
+
+/* Style article content elements */
+.article-content p {
+    margin-bottom: 1.5em;
+}
+
+.article-content h2,
+.article-content h3,
+.article-content h4 {
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    color: #ffffff;
+    margin: 1.5em 0 0.8em;
+}
+
+.article-content a {
+    color: #4a9eff;
+    text-decoration: none;
+}
+
+.article-content a:hover {
+    text-decoration: underline;
+}
+
+.article-content img {
+    max-width: 100%;
+    height: auto;
+    margin: 2em 0;
+    border-radius: 4px;
+}
+
+.article-content blockquote {
+    margin: 2em 0;
+    padding: 1em 2em;
+    border-left: 4px solid #333;
+    background: rgba(255,255,255,0.05);
+}
+
+/* OneReach article specific styles */
+#article-content .wp-block-quote {
+    margin: 2em 0;
+    padding: 1em 2em;
+    border-left: 4px solid #4a9eff;
+    background: rgba(255,255,255,0.05);
+    font-style: italic;
+}
+
+#article-content .wp-block-image {
+    margin: 2em 0;
+    text-align: center;
+}
+
+#article-content .wp-block-image img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+}
+
+#article-content .wp-block-heading {
+    margin-top: 2em;
+    margin-bottom: 1em;
+    color: #ffffff;
+}
+
+#article-content ul, 
+#article-content ol {
+    margin: 1.5em 0;
+    padding-left: 2em;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+#article-content li {
+    margin-bottom: 0.5em;
+    line-height: 1.8;
+}
+
+#article-content pre {
+    background: rgba(0,0,0,0.3);
+    padding: 1em;
+    border-radius: 4px;
+    overflow-x: auto;
+    margin: 2em 0;
+}
+
+#article-content code {
+    background: rgba(255,255,255,0.1);
+    padding: 0.2em 0.4em;
+    border-radius: 3px;
+    font-family: 'Courier New', monospace;
+}
+
+#article-content table {
+    width: 100%;
+    margin: 2em 0;
+    border-collapse: collapse;
+}
+
+#article-content th,
+#article-content td {
+    padding: 0.75em;
+    border: 1px solid rgba(255,255,255,0.2);
+    text-align: left;
+}
+
+#article-content th {
+    background: rgba(255,255,255,0.1);
+    font-weight: 600;
+}
+
+/* WordPress block classes for OneReach */
+#article-content .wp-block-separator {
+    border: 0;
+    border-top: 2px solid rgba(255,255,255,0.2);
+    margin: 3em 0;
+}
+
+#article-content .wp-block-button {
+    margin: 2em 0;
+}
+
+#article-content .wp-block-button__link {
+    background: #4a9eff;
+    color: #fff;
+    padding: 0.75em 1.5em;
+    border-radius: 4px;
+    text-decoration: none;
+    display: inline-block;
+}
+
+#article-content .wp-block-button__link:hover {
+    background: #3a8eef;
+}
+
+/* Prevent body scroll when article is open */
+body.article-open {
+    overflow: hidden;
+}
+
+/* Add iframe styles */
+.article-frame {
+    display: none;
+}
+
+/* Add custom scrollbar styling */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #1a1a1a;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #333;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #444;
+}
+
+/* For Firefox */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: #333 #1a1a1a;
+}
+
+.tile-author {
+    font-size: 1.2em;
+    font-weight: bold;
+    color: #ffffff;
+    margin-right: 10px;
+}
+
+/* Ensure the author info is fully visible */
+.tile-author-info {
+    display: block;
+    max-height: none;
+    overflow: visible;
+    white-space: normal;
+    word-break: break-word;
+    font-size: 0.9em;  /* Adjust as needed */
+    color: #aaa;       /* Adjust text color to match design */
+    margin-top: 8px;    /* Provide some spacing above */
+}
+
+@@ async function showArticle() {
+    const articleViewer = document.querySelector('.article-viewer');
+    const content = document.querySelector('.article-content');
+    console.log('DEBUG: showArticle() function triggered');
+    content.innerHTML = "<p style='color:red;'>Loading raw RSS feed...</p>";
+    
+    // Fetch the RSS feed and display full content from <content:encoded>
+    fetch('https://uxmag.com/feed', { mode: 'cors' })
+      .then(response => response.text())
+      .then(rssFeed => {
+         console.log("Fetched RSS feed:", rssFeed);
+         const parser = new DOMParser();
+         const xmlDoc = parser.parseFromString(rssFeed, "text/xml");
+         const items = xmlDoc.getElementsByTagName("item");
+         let html = "";
+         for (let i = 0; i < items.length; i++) {
+             const title = items[i].getElementsByTagName("title")[0]?.textContent || "No Title";
+             const pubDate = items[i].getElementsByTagName("pubDate")[0]?.textContent || "";
+             let contentEncoded = "";
+             // Try to find the <content:encoded> element using its namespace.
+             let contentEncodedElement = items[i].getElementsByTagNameNS("http://purl.org/rss/1.0/modules/content/", "encoded")[0];
+             if (contentEncodedElement) {
+                 const serializer = new XMLSerializer();
+                 // Serialize each child node so that HTML markup is preserved.
+                 for (let j = 0; j < contentEncodedElement.childNodes.length; j++) {
+                     contentEncoded += serializer.serializeToString(contentEncodedElement.childNodes[j]);
+                 }
+             } else {
+                 // Fallback: use the <description> text if <content:encoded> isn't available.
+                 contentEncoded = items[i].getElementsByTagName("description")[0]?.textContent || "";
+             }
+             html += `<article>
+                         <h2>${title}</h2>
+                         <p><em>${pubDate}</em></p>
+                         <div>${contentEncoded}</div>
+                      </article>`;
+         }
+         content.innerHTML = html;
+      })
+      .catch(error => console.error('Error fetching RSS feed:', error));
+    
+    // Display the article viewer overlay after updating the content
+    articleViewer.classList.add("active");
+    document.body.classList.add("article-open");
+}
+
+// NEW function: Show the full article text by fetching from the article URL.
+async function showFullArticle(link) {
+  const articleViewer = document.querySelector('.article-viewer');
+  const content = document.querySelector('.article-content');
+
+  // Fetch the full article content via the IPC-exposed API.
+  window.electronAPI.fetchFullArticle(link)
+    .then(fullArticleHTML => {
+      // Optionally (if needed), you can further process or sanitize the fullArticleHTML.
+      content.innerHTML = fullArticleHTML;
+    })
+    .catch(error => {
+      console.error('Error fetching full article:', error);
+      content.textContent = "Failed to load full article";
+    });
+
+  // Display the article viewer overlay after updating the content.
+  articleViewer.classList.add("active");
+  document.body.classList.add("article-open");
+}
+
+/* Style for the "New" pill displayed on new articles */
+.new-pill {
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    background: #ff5252;
+    color: #fff;
+    padding: 2px 6px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: bold;
+    z-index: 5;
+}
+
+/* Style for new indicator for recently published articles (within the last week) */
+.recent-pill {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: #95a5a6; /* Muted, elegant grayish-blue */
+    color: #fff;
+    padding: 2px 6px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: bold;
+    z-index: 5;
+}
+
+/* Source badge styles */
+.source-badge {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    z-index: 5;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(4px);
+}
+
+.source-badge.uxmag {
+    background: rgba(74, 158, 255, 0.85);
+    color: white;
+}
+
+.source-badge.onereach {
+    background: rgba(39, 174, 96, 0.85);
+    color: white;
+}
+
+/* Subtle style for the estimated reading time in the tile */
+.tile-reading-time {
+    display: block;
+    font-size: 0.75rem;
+    color: #b0b0b0;
+    margin-top: 4px;
+}
+
+/* Reading progress bar styles */
+.reading-progress-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 24px;  /* slightly increased height */
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 0 0 12px 12px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.3s ease;
+}
+
+.reading-progress-fill {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 0%;
+    height: 100%;
+    background: linear-gradient(90deg, 
+        rgba(74, 158, 255, 0.8), 
+        rgba(52, 177, 244, 0.8)
+    );
+    border-radius: inherit;
+    transition: width 0.3s ease;
+    z-index: 1;
+}
+
+/* Completed reading status styles */
+.tile.read .reading-progress-bar {
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.tile.read .reading-progress-fill {
+    background: linear-gradient(90deg, 
+        rgba(39, 174, 96, 0.8),
+        rgba(46, 204, 113, 0.8)
+    );
+}
+
+.reading-progress-text {
+    position: relative;
+    z-index: 2;
+    font-size: 11px;
+    font-weight: 500;
+    color: #fff;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 8px;
+}
+
+/* Add a small indicator dot before the time for read articles */
+.tile.read .reading-progress-text::before {
+    content: "✓";
+    font-size: 12px;
+    color: #fff;
+}
+
+@@ class FlipboardReader {
+    constructor() {
+        // ... existing constructor code ...
+        
+        // Initialize reading log to track cumulative seconds read per article.
+        this.readingLog = {};
+        if (window.flipboardAPI && window.flipboardAPI.loadReadingLog) {
+            window.flipboardAPI.loadReadingLog().then((log) => {
+                this.readingLog = log || {};
+                console.log('Loaded reading log:', this.readingLog);
+                // If the RSS items have already been loaded, update the reading progress bars for all articles
+                if (this.items && this.items.length) {
+                    this.items.forEach(item => {
+                        this.updateReadingProgress(item);
+                    });
+                }
+            }).catch(() => {
+                this.readingLog = {};
+            });
+        }
+        
+        // Ensure that when the app is closed or reloaded,
+        // any running reading timer is stopped and the reading log is persisted.
+        window.addEventListener('beforeunload', () => {
+            console.log('App is unloading; stopping reading timer and saving reading log.');
+            this.stopReadingTimer();
+        });
+    }
+
+    // New method to update the reading progress bar of the current article's tile
+    updateReadingProgress(item) {
+        const estimatedTime = this.estimateTimeInSeconds(item.content || item.description);
+        const articleId = this.normalizeUrl(item.link);
+        // Get previously logged time for this article (if any)
+        let loggedTime = this.readingLog[articleId] || 0;
+        let currentSession = 0;
+        if (this.currentReadingItem && this.normalizeUrl(this.currentReadingItem.link) === articleId) {
+            currentSession = (Date.now() - this.readingStartTime) / 1000;
+        }
+        const totalElapsed = loggedTime + currentSession;
+        console.log('Updating progress for article:', articleId, { loggedTime, currentSession, totalElapsed, estimatedTime });
+        const progress = Math.min(totalElapsed / estimatedTime, 1);
+        // Find the tile corresponding to this article using the normalized link.
+        const tile = document.querySelector(`.tile[data-link="${articleId}"]`);
+        if (tile) {
+            const progressFill = tile.querySelector('.reading-progress-fill');
+            if (progressFill) {
+                progressFill.style.width = `${progress * 100}%`;
+            }
+            const progressText = tile.querySelector('.reading-progress-text');
+            if (progressText) {
+                progressText.textContent = `${this.formatTime(totalElapsed)} / ${this.formatTime(estimatedTime)}`;
+            }
+            
+            // Gamification: Add a badge if the article has been read at least 50%
+            if (progress >= 0.5) {
+                // Check if badge already exists
+                if (!tile.querySelector('.badge')) {
+                    const badge = document.createElement('span');
+                    badge.classList.add('badge');
+                    badge.textContent = "Read";
+                    // Append the badge; position it via CSS
+                    tile.appendChild(badge);
+
+                    // Show a congratulatory banner for a positive reinforcement (only once at a time)
+                    this.showAchievementBanner();
+                }
+            }
+
+            // Add or update new indicator for recently published articles (within the last week)
+            if (item.pubDate) {
+                const pubDate = new Date(item.pubDate);
+                const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+                if (pubDate >= oneWeekAgo) {
+                    const recentIndicator = tile.querySelector('.recent-pill');
+                    if (recentIndicator) {
+                        recentIndicator.textContent = "New";
+                    } else {
+                        const recentPill = document.createElement('span');
+                        recentPill.classList.add('recent-pill');
+                        recentPill.textContent = "New";
+                        tile.appendChild(recentPill);
+                    }
+                }
+            }
+        }
+    }
+
+    stopReadingTimer() {
+        if (this.readingTimer) {
+            clearInterval(this.readingTimer);
+            this.readingTimer = null;
+            if (this.currentReadingItem) {
+                const articleId = this.normalizeUrl(this.currentReadingItem.link);
+                const sessionTime = (Date.now() - this.readingStartTime) / 1000;
+                console.log('Stopping reading timer for article:', articleId, 'Session time:', sessionTime);
+                this.readingLog[articleId] = (this.readingLog[articleId] || 0) + sessionTime;
+                // Persist the updated reading log
+                if (window.flipboardAPI && window.flipboardAPI.saveReadingLog) {
+                    window.flipboardAPI.saveReadingLog(this.readingLog);
+                }
+            }
+        }
+        this.currentReadingItem = null;
+    }
+
+    // Ensure that when the article is closed, the reading timer is stopped.
+    closeArticle() {
+        this.stopReadingTimer();
+        this.articleViewer.classList.remove("active");
+        document.body.classList.remove("article-open");
+    }
+
+    createTile(item, isNew = false, isRead = false) {
+         // ... existing code to create the tile ...
+
+        // Update the reading progress for this tile based on the stored reading log.
+        this.updateReadingProgress(item);
+
+        if (isNew) {
+            const newPill = document.createElement('span');
+            newPill.classList.add('new-pill');
+            newPill.textContent = "New";
+            tile.appendChild(newPill);
+        }
+
+        return tile;
+    }
+}
+
+@@ _handleRSSData(data, isCached) {
+     // ... your existing code for processing the RSS data and rendering tiles ...
+ 
+    // Once the tiles (and this.items) have been set, update reading progress bars.
+    if (this.items && this.items.length) {
+         this.items.forEach(item => {
+             this.updateReadingProgress(item);
+         });
+    }
+}
+
+.tile.read {
+    /* No grey overlay for read article tiles */
+    filter: none;
+    transition: none;
+}
+
+/* Badge for achievement */
+.badge {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background: linear-gradient(90deg, #f39c12, #e67e22);
+    color: #fff;
+    padding: 4px 8px;
+    font-size: 0.8rem;
+    font-weight: bold;
+    border-radius: 12px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+    z-index: 10;
+}
+
+/* Congratulatory banner */
+.congratulations-banner {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #f1c40f;
+    color: #2c3e50;
+    padding: 10px 20px;
+    border-radius: 20px;
+    font-size: 1rem;
+    font-weight: bold;
+    z-index: 10000;
+    animation: slideDownBanner 0.5s ease-out;
+}
+
+@keyframes slideDownBanner {
+    from { opacity: 0; transform: translate(-50%, -100%); }
+    to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+/* Fixed header bar for the article viewer */
+.article-header-bar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 60px;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    z-index: 2100;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+}
+
+.article-header-bar .close-article {
+    background: none;
+    border: none;
+    color: #fff;
+    font-size: 1.5rem;
+    cursor: pointer;
+    margin-right: 20px;
+}
+
+.article-header-bar .close-article:hover {
+    color: #ccc;
+}
+
+.article-header-bar .article-title-short {
+    color: #fff;
+    font-size: 1.2rem;
+    font-weight: bold;
+}
+
+/* Add top padding to the article viewer content to prevent it from hiding behind the header bar */
+#article-viewer {
+    padding-top: 60px;
+}
+
+/* Header actions container */
+.header-actions {
+    display: flex;
+    gap: 12px;
+}
+
+/* Preferences button styling */
+.preferences-btn {
+    background: #4a9eff !important;
+    color: #fff;
+    border: none;
+    border-radius: 5px;
+    padding: 10px 20px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: background 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.preferences-btn:hover {
+    background: #3a8eef !important;
+}
+
+.preferences-btn i {
+    font-size: 14px;
+}
+
+/* Preferences panel */
+.preferences-panel {
+    position: fixed;
+    top: 0;
+    right: -400px;
+    width: 400px;
+    height: 100vh;
+    background: #1a1a1a;
+    border-left: 1px solid #333;
+    z-index: 1001;
+    transition: right 0.3s ease;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+}
+
+.preferences-panel.show {
+    right: 0;
+}
+
+.preferences-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px;
+    border-bottom: 1px solid #333;
+}
+
+.preferences-header h2 {
+    margin: 0;
+    font-size: 24px;
+    color: #fff;
+}
+
+.close-preferences {
+    background: none;
+    border: none;
+    color: #fff;
+    font-size: 28px;
+    cursor: pointer;
+    padding: 0;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: background 0.2s;
+}
+
+.close-preferences:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.preferences-content {
+    flex: 1;
+    padding: 20px;
+}
+
+.preferences-intro {
+    color: #b0b0b0;
+    margin-bottom: 24px;
+    line-height: 1.5;
+}
+
+.preferences-container {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 24px;
+}
+
+.preference-group {
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 8px;
+    padding: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    transition: all 0.2s ease;
+}
+
+.preference-group:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+    margin-top: 4px;
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    appearance: none;
+    -webkit-appearance: none;
+    cursor: pointer;
+    position: relative;
+    transition: all 0.2s ease;
+    background: transparent;
+}
+
+.checkbox-label input[type="checkbox"]:checked {
+    background-color: #4a9eff;
+    border-color: #4a9eff;
+}
+
+.checkbox-label input[type="checkbox"]:checked::after {
+    content: '✓';
+    position: absolute;
+    color: white;
+    font-size: 12px;
+    left: 3px;
+    top: 0px;
+}
+
+.checkbox-label div {
+    flex: 1;
+}
+
+.checkbox-label span {
+    display: block;
+    font-weight: 500;
+    font-size: 16px;
+    color: #ffffff;
+    margin-bottom: 4px;
+}
+
+.checkbox-label small {
+    display: block;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.checkbox-label:hover span {
+    color: #4a9eff;
+}
+
+.preferences-actions {
+    display: flex;
+    gap: 12px;
+    padding-top: 20px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.select-all-btn, .save-preferences-btn {
+    flex: 1;
+    padding: 12px 20px;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.select-all-btn {
+    background: rgba(255, 255, 255, 0.06);
+    color: white;
+    border: 2px solid rgba(255, 255, 255, 0.08);
+}
+
+.select-all-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
+.save-preferences-btn {
+    background: #27ae60;
+    color: white;
+}
+
+.save-preferences-btn:hover {
+    background: #229954;
+}
+
+/* Preferences success message */
+.preferences-success {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #27ae60;
+    color: #fff;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    z-index: 10000;
+    animation: slideDownFadeIn 0.3s ease-out;
+}
+
+.preferences-success i {
+    font-size: 20px;
+}
+
+/* Responsive adjustments for preferences panel */
+@media (max-width: 768px) {
+    .preferences-panel {
+        width: 100%;
+        right: -100%;
+    }
+    
+    .preferences-panel.show {
+        right: 0;
+    }
+} 

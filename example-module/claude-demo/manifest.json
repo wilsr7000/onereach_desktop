@@ -1,0 +1,14 @@
+{
+  "id": "claude-demo",
+  "name": "Claude API Demo",
+  "version": "1.0.0",
+  "description": "Demonstrates using Claude API in modules",
+  "main": "index.html",
+  "icon": "icon.png",
+  "windowOptions": {
+    "width": 1000,
+    "height": 700,
+    "minWidth": 800,
+    "minHeight": 600
+  }
+} 

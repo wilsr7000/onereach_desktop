@@ -1,0 +1,1094 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Onereach.ai - Event Log Viewer</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #f5f5f5;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        
+        .log-viewer {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        
+        .log-header {
+            background: white;
+            padding: 20px;
+            border-bottom: 1px solid #e0e0e0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        
+        .log-controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .log-search {
+            flex: 1;
+            display: flex;
+            gap: 10px;
+        }
+        
+        .search-input {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        .log-filters {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        
+        .filter-group {
+            display: flex;
+            gap: 5px;
+            align-items: center;
+        }
+        
+        .log-level-filter {
+            display: flex;
+            gap: 5px;
+        }
+        
+        .level-toggle {
+            padding: 4px 8px;
+            border: 1px solid #e0e0e0;
+            border-radius: 3px;
+            background: white;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+        
+        .level-toggle.active {
+            background: #0099ff;
+            color: white;
+            border-color: #0099ff;
+        }
+        
+        .level-toggle.debug { border-color: #6c757d; }
+        .level-toggle.debug.active { background: #6c757d; }
+        
+        .level-toggle.info { border-color: #0099ff; }
+        .level-toggle.info.active { background: #0099ff; }
+        
+        .level-toggle.warn { border-color: #ffc107; }
+        .level-toggle.warn.active { background: #ffc107; color: #000; }
+        
+        .level-toggle.error { border-color: #dc3545; }
+        .level-toggle.error.active { background: #dc3545; }
+        
+        .log-stats {
+            display: flex;
+            gap: 20px;
+            font-size: 13px;
+            color: #666;
+        }
+        
+        .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .log-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+        
+        .log-entry {
+            background: white;
+            margin-bottom: 8px;
+            padding: 12px;
+            border-radius: 4px;
+            border: 1px solid #e0e0e0;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+        
+        .log-entry:hover {
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .log-entry.debug { border-left: 3px solid #6c757d; }
+        .log-entry.info { border-left: 3px solid #0099ff; }
+        .log-entry.warn { border-left: 3px solid #ffc107; }
+        .log-entry.error { border-left: 3px solid #dc3545; }
+        
+        .log-timestamp {
+            color: #999;
+            margin-right: 10px;
+        }
+        
+        .log-level {
+            font-weight: bold;
+            margin-right: 10px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 11px;
+        }
+        
+        .log-level.DEBUG { background: #e2e3e5; color: #383d41; }
+        .log-level.INFO { background: #cce5ff; color: #004085; }
+        .log-level.WARN { background: #fff3cd; color: #856404; }
+        .log-level.ERROR { background: #f8d7da; color: #721c24; }
+        
+        .log-message {
+            color: #333;
+            margin-bottom: 5px;
+        }
+        
+        .log-data {
+            margin-top: 5px;
+            padding: 8px;
+            background: #f8f9fa;
+            border-radius: 3px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        
+        .log-data-toggle {
+            color: #0099ff;
+            cursor: pointer;
+            font-size: 11px;
+            text-decoration: underline;
+        }
+        
+        .log-footer {
+            background: white;
+            padding: 15px 20px;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        
+        .btn-primary {
+            background: #0099ff;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #0077cc;
+        }
+        
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+        
+        .export-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        
+        .export-modal.show {
+            display: flex;
+        }
+        
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            width: 400px;
+        }
+        
+        .modal-header {
+            margin-bottom: 20px;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 14px;
+            color: #333;
+        }
+        
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        .filter-group select {
+            padding: 4px 8px;
+            border: 1px solid #e0e0e0;
+            border-radius: 3px;
+            font-size: 12px;
+            min-width: 120px;
+        }
+        
+        .modal-footer {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px;
+            color: #999;
+        }
+        
+        .auto-refresh {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 13px;
+        }
+        
+        .log-files {
+            margin-top: 10px;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        
+        .log-file-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="log-viewer">
+        <div class="log-header">
+            <h2 style="margin: 0 0 20px 0;">Event Log Viewer</h2>
+            
+            <div class="log-controls">
+                <div class="log-search">
+                    <input type="text" class="search-input" id="searchInput" placeholder="Search logs...">
+                    <button class="btn btn-secondary" onclick="searchLogs()">Search</button>
+                </div>
+                
+                <div class="log-filters">
+                    <div class="filter-group">
+                        <label>Level:</label>
+                        <div class="log-level-filter">
+                            <button class="level-toggle debug active" data-level="debug">Debug</button>
+                            <button class="level-toggle info active" data-level="info">Info</button>
+                            <button class="level-toggle warn active" data-level="warn">Warn</button>
+                            <button class="level-toggle error active" data-level="error">Error</button>
+                        </div>
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label>Source:</label>
+                        <select id="sourceFilter" onchange="filterLogs()">
+                            <option value="">All Sources</option>
+                            <option value="main">Main Process</option>
+                            <option value="renderer">Renderer</option>
+                        </select>
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label>Window:</label>
+                        <select id="windowFilter" onchange="filterLogs()">
+                            <option value="">All Windows</option>
+                        </select>
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label>Function:</label>
+                        <select id="functionFilter" onchange="filterLogs()">
+                            <option value="">All Functions</option>
+                        </select>
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label>Test Area:</label>
+                        <select id="testAreaFilter" onchange="filterLogs()">
+                            <option value="">All Test Areas</option>
+                        </select>
+                    </div>
+                    
+                    <div class="auto-refresh">
+                        <input type="checkbox" id="autoRefresh" checked>
+                        <label for="autoRefresh">Auto-refresh</label>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="log-stats">
+                <div class="stat-item">
+                    <span>Total Entries:</span>
+                    <strong id="totalEntries">0</strong>
+                </div>
+                <div class="stat-item">
+                    <span>Current File:</span>
+                    <strong id="currentFile">-</strong>
+                </div>
+                <div class="stat-item">
+                    <span>File Size:</span>
+                    <strong id="fileSize">-</strong>
+                </div>
+            </div>
+        </div>
+        
+        <div class="log-content" id="logContent">
+            <div class="loading">Loading logs...</div>
+        </div>
+        
+        <div class="log-footer">
+            <div>
+                <button class="btn btn-secondary" onclick="refreshLogs()">Refresh</button>
+                <button class="btn btn-secondary" onclick="clearDisplay()">Clear Display</button>
+            </div>
+            <div>
+                <button class="btn btn-primary" onclick="analyzeWithAI()">🤖 Analyze with AI</button>
+                <button class="btn btn-primary" onclick="showExportModal()">Export Logs</button>
+                <button class="btn btn-secondary" onclick="viewLogFiles()">View Log Files</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Export Modal -->
+    <div class="export-modal" id="exportModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Export Logs</h3>
+            </div>
+            
+            <div class="form-group">
+                <label>Time Range:</label>
+                <select id="timeRange">
+                    <option value="1">Last 1 hour</option>
+                    <option value="6">Last 6 hours</option>
+                    <option value="24" selected>Last 24 hours</option>
+                    <option value="168">Last 7 days</option>
+                    <option value="all">All logs</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label>Format:</label>
+                <select id="exportFormat">
+                    <option value="json">JSON</option>
+                    <option value="text">Plain Text</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" id="includeDebug"> Include debug logs
+                </label>
+            </div>
+            
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeExportModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="exportLogs()">Export</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- AI Analysis Modal -->
+    <div class="export-modal" id="aiAnalysisModal">
+        <div class="modal-content" style="width: 700px; max-width: 90vw;">
+            <div class="modal-header">
+                <h3>AI Log Analysis</h3>
+            </div>
+            
+            <div id="aiAnalysisContent" style="max-height: 60vh; overflow-y: auto; padding: 20px;">
+                <div class="loading">Analyzing logs with Claude AI...</div>
+            </div>
+            
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeAIAnalysisModal()">Close</button>
+                <button class="btn btn-primary" onclick="generateCursorPrompt()" id="generatePromptBtn" style="display: none;">📋 Generate Cursor Prompt</button>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let allLogs = [];
+        let filteredLogs = [];
+        let autoRefreshInterval = null;
+        let activeLevels = new Set(['debug', 'info', 'warn', 'error']);
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            loadLogs();
+            setupEventListeners();
+            startAutoRefresh();
+        });
+        
+        function setupEventListeners() {
+            // Level filter toggles
+            document.querySelectorAll('.level-toggle').forEach(toggle => {
+                toggle.addEventListener('click', () => {
+                    toggle.classList.toggle('active');
+                    const level = toggle.dataset.level;
+                    
+                    if (toggle.classList.contains('active')) {
+                        activeLevels.add(level);
+                    } else {
+                        activeLevels.delete(level);
+                    }
+                    
+                    filterLogs();
+                });
+            });
+            
+            // Search on enter
+            document.getElementById('searchInput').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    searchLogs();
+                }
+            });
+            
+            // Auto-refresh toggle
+            document.getElementById('autoRefresh').addEventListener('change', (e) => {
+                if (e.target.checked) {
+                    startAutoRefresh();
+                } else {
+                    stopAutoRefresh();
+                }
+            });
+        }
+        
+        async function loadLogs() {
+            try {
+                const logs = await window.logViewer.getRecentLogs(1000);
+                allLogs = logs;
+                
+                // Update stats
+                const stats = await window.logViewer.getLogStats();
+                document.getElementById('totalEntries').textContent = logs.length;
+                document.getElementById('currentFile').textContent = stats.currentFile || '-';
+                document.getElementById('fileSize').textContent = formatFileSize(stats.fileSize || 0);
+                
+                // Extract unique windows and update filter
+                updateWindowFilter(logs);
+                
+                filterLogs();
+            } catch (error) {
+                console.error('Error loading logs:', error);
+                showError('Failed to load logs');
+            }
+        }
+        
+        function updateWindowFilter(logs) {
+            const windowSet = new Set();
+            const functionSet = new Set();
+            const testAreaSet = new Set();
+            
+            logs.forEach(log => {
+                // Check for window property
+                if (log.window) {
+                    windowSet.add(log.window);
+                }
+                // Check for source in message (e.g., "[Console.log]")
+                const match = log.message?.match(/^\[([^\]]+)\]/);
+                if (match) {
+                    windowSet.add(match[1]);
+                }
+                
+                // Extract function names from message
+                // Look for patterns like "FunctionName:" or "FunctionName(...)" 
+                const funcPatterns = [
+                    /^([A-Za-z_$][A-Za-z0-9_$]*)\s*:/,  // FunctionName:
+                    /^([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/,  // FunctionName(
+                    /^IPC:\s*([A-Za-z0-9:_-]+)/,          // IPC: channel-name
+                    /Event:\s*([A-Za-z0-9_-]+)/,          // Event: event-name
+                    /Error in ([A-Za-z0-9_$]+)/,          // Error in functionName
+                ];
+                
+                for (const pattern of funcPatterns) {
+                    const funcMatch = log.message?.match(pattern);
+                    if (funcMatch) {
+                        functionSet.add(funcMatch[1]);
+                        break;
+                    }
+                }
+                
+                // Also check for consoleMethod in data
+                if (log.consoleMethod) {
+                    functionSet.add(`Console.${log.consoleMethod}`);
+                }
+                
+                // Extract test areas
+                if (log.testContext?.testArea) {
+                    testAreaSet.add(log.testContext.testArea);
+                }
+                if (log.testArea) {
+                    testAreaSet.add(log.testArea);
+                }
+            });
+            
+            // Update window filter
+            const windowFilter = document.getElementById('windowFilter');
+            windowFilter.innerHTML = '<option value="">All Windows</option>';
+            
+            Array.from(windowSet).sort().forEach(window => {
+                const option = document.createElement('option');
+                option.value = window;
+                option.textContent = window;
+                windowFilter.appendChild(option);
+            });
+            
+            // Update function filter
+            const functionFilter = document.getElementById('functionFilter');
+            functionFilter.innerHTML = '<option value="">All Functions</option>';
+            
+            Array.from(functionSet).sort().forEach(func => {
+                const option = document.createElement('option');
+                option.value = func;
+                option.textContent = func;
+                functionFilter.appendChild(option);
+            });
+            
+            // Update test area filter
+            const testAreaFilter = document.getElementById('testAreaFilter');
+            testAreaFilter.innerHTML = '<option value="">All Test Areas</option>';
+            
+            Array.from(testAreaSet).sort().forEach(area => {
+                const option = document.createElement('option');
+                option.value = area;
+                // Make test area names more readable
+                const readableName = area.split('-').map(word => 
+                    word.charAt(0).toUpperCase() + word.slice(1)
+                ).join(' ');
+                option.textContent = readableName;
+                testAreaFilter.appendChild(option);
+            });
+        }
+        
+        function filterLogs() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            const sourceFilter = document.getElementById('sourceFilter').value;
+            const windowFilter = document.getElementById('windowFilter').value;
+            
+            filteredLogs = allLogs.filter(log => {
+                // Filter by level
+                const level = (log.level || 'INFO').toLowerCase();
+                if (!activeLevels.has(level)) {
+                    return false;
+                }
+                
+                // Filter by source (main/renderer)
+                if (sourceFilter) {
+                    const isMain = log.source !== 'renderer' && !log.window;
+                    const isRenderer = log.source === 'renderer' || log.window;
+                    
+                    if (sourceFilter === 'main' && !isMain) {
+                        return false;
+                    }
+                    if (sourceFilter === 'renderer' && !isRenderer) {
+                        return false;
+                    }
+                }
+                
+                // Filter by window
+                if (windowFilter) {
+                    let matchesWindow = false;
+                    
+                    // Check window property
+                    if (log.window === windowFilter) {
+                        matchesWindow = true;
+                    }
+                    
+                    // Check message prefix
+                    const match = log.message?.match(/^\[([^\]]+)\]/);
+                    if (match && match[1] === windowFilter) {
+                        matchesWindow = true;
+                    }
+                    
+                    if (!matchesWindow) {
+                        return false;
+                    }
+                }
+                
+                // Filter by function
+                const functionFilter = document.getElementById('functionFilter').value;
+                if (functionFilter) {
+                    let matchesFunction = false;
+                    
+                    // Check console method
+                    if (log.consoleMethod && `Console.${log.consoleMethod}` === functionFilter) {
+                        matchesFunction = true;
+                    }
+                    
+                    // Check message patterns
+                    const funcPatterns = [
+                        /^([A-Za-z_$][A-Za-z0-9_$]*)\s*:/,
+                        /^([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/,
+                        /^IPC:\s*([A-Za-z0-9:_-]+)/,
+                        /Event:\s*([A-Za-z0-9_-]+)/,
+                        /Error in ([A-Za-z0-9_$]+)/,
+                    ];
+                    
+                    for (const pattern of funcPatterns) {
+                        const funcMatch = log.message?.match(pattern);
+                        if (funcMatch && funcMatch[1] === functionFilter) {
+                            matchesFunction = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!matchesFunction) {
+                        return false;
+                    }
+                }
+                
+                // Filter by test area
+                const testAreaFilter = document.getElementById('testAreaFilter').value;
+                if (testAreaFilter) {
+                    let matchesTestArea = false;
+                    
+                    if (log.testContext?.testArea === testAreaFilter) {
+                        matchesTestArea = true;
+                    }
+                    if (log.testArea === testAreaFilter) {
+                        matchesTestArea = true;
+                    }
+                    
+                    if (!matchesTestArea) {
+                        return false;
+                    }
+                }
+                
+                // Filter by search term
+                if (searchTerm) {
+                    const searchableText = `${log.message} ${JSON.stringify(log)}`.toLowerCase();
+                    if (!searchableText.includes(searchTerm)) {
+                        return false;
+                    }
+                }
+                
+                return true;
+            });
+            
+            renderLogs();
+        }
+        
+        function renderLogs() {
+            const container = document.getElementById('logContent');
+            
+            if (filteredLogs.length === 0) {
+                container.innerHTML = '<div class="empty-state">No logs found</div>';
+                return;
+            }
+            
+            container.innerHTML = filteredLogs.map(log => {
+                const level = log.level || 'INFO';
+                const timestamp = new Date(log.timestamp).toLocaleString();
+                const hasData = Object.keys(log).length > 3; // More than timestamp, level, message
+                
+                // Extract source/window info
+                let sourceInfo = '';
+                if (log.window) {
+                    sourceInfo = `<span class="log-source" style="background: #e3f2fd; color: #1976d2; padding: 2px 6px; border-radius: 3px; font-size: 11px; margin-right: 10px;">Window: ${log.window}</span>`;
+                } else if (log.source === 'renderer') {
+                    sourceInfo = `<span class="log-source" style="background: #e8f5e9; color: #388e3c; padding: 2px 6px; border-radius: 3px; font-size: 11px; margin-right: 10px;">Renderer</span>`;
+                } else if (log.process === 'main') {
+                    sourceInfo = `<span class="log-source" style="background: #fff3e0; color: #f57c00; padding: 2px 6px; border-radius: 3px; font-size: 11px; margin-right: 10px;">Main Process</span>`;
+                }
+                
+                // Extract function/method info from message
+                let functionInfo = '';
+                let funcName = null;
+                
+                // Check console method first
+                if (log.consoleMethod) {
+                    funcName = `Console.${log.consoleMethod}`;
+                } else {
+                    // Check various patterns
+                    const funcPatterns = [
+                        /^([A-Za-z_$][A-Za-z0-9_$]*)\s*:/,
+                        /^([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/,
+                        /^IPC:\s*([A-Za-z0-9:_-]+)/,
+                        /Event:\s*([A-Za-z0-9_-]+)/,
+                        /Error in ([A-Za-z0-9_$]+)/,
+                    ];
+                    
+                    for (const pattern of funcPatterns) {
+                        const match = log.message?.match(pattern);
+                        if (match) {
+                            funcName = match[1];
+                            break;
+                        }
+                    }
+                }
+                
+                if (funcName) {
+                    functionInfo = `<span class="log-function" style="background: #f3e5f5; color: #7b1fa2; padding: 2px 6px; border-radius: 3px; font-size: 11px; margin-right: 10px;">${funcName}</span>`;
+                }
+                
+                // Extract test context info
+                let testInfo = '';
+                if (log.testContext) {
+                    const tc = log.testContext;
+                    testInfo = `<span class="log-test-info" style="background: #e8eaf6; color: #3f51b5; padding: 2px 6px; border-radius: 3px; font-size: 11px; margin-right: 10px;" title="Test: ${tc.testName}">Test ${tc.testIndex}/${tc.totalTests}: ${tc.testArea}</span>`;
+                }
+                
+                let dataHtml = '';
+                if (hasData) {
+                    const data = { ...log };
+                    delete data.timestamp;
+                    delete data.level;
+                    delete data.message;
+                    
+                    dataHtml = `
+                        <div class="log-data-toggle" onclick="toggleData(this)">Show details</div>
+                        <div class="log-data" style="display: none;">${JSON.stringify(data, null, 2)}</div>
+                    `;
+                }
+                
+                return `
+                    <div class="log-entry ${level.toLowerCase()}">
+                        <div>
+                            <span class="log-timestamp">${timestamp}</span>
+                            <span class="log-level ${level}">${level}</span>
+                            ${sourceInfo}
+                            ${testInfo}
+                            ${functionInfo}
+                            <span class="log-message">${log.message}</span>
+                        </div>
+                        ${dataHtml}
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        function toggleData(element) {
+            const dataDiv = element.nextElementSibling;
+            if (dataDiv.style.display === 'none') {
+                dataDiv.style.display = 'block';
+                element.textContent = 'Hide details';
+            } else {
+                dataDiv.style.display = 'none';
+                element.textContent = 'Show details';
+            }
+        }
+        
+        function searchLogs() {
+            filterLogs();
+        }
+        
+        function refreshLogs() {
+            loadLogs();
+        }
+        
+        function clearDisplay() {
+            filteredLogs = [];
+            renderLogs();
+        }
+        
+        function startAutoRefresh() {
+            if (autoRefreshInterval) return;
+            
+            autoRefreshInterval = setInterval(() => {
+                loadLogs();
+            }, 5000); // Refresh every 5 seconds
+        }
+        
+        function stopAutoRefresh() {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+            }
+        }
+        
+        function showExportModal() {
+            document.getElementById('exportModal').classList.add('show');
+        }
+        
+        function closeExportModal() {
+            document.getElementById('exportModal').classList.remove('show');
+        }
+        
+        async function exportLogs() {
+            const timeRange = document.getElementById('timeRange').value;
+            const format = document.getElementById('exportFormat').value;
+            const includeDebug = document.getElementById('includeDebug').checked;
+            
+            try {
+                const exported = await window.logViewer.exportLogs({
+                    timeRange,
+                    format,
+                    includeDebug
+                });
+                
+                closeExportModal();
+                
+                // Show success message
+                alert('Logs exported successfully!');
+            } catch (error) {
+                console.error('Error exporting logs:', error);
+                alert('Failed to export logs: ' + error.message);
+            }
+        }
+        
+        async function viewLogFiles() {
+            try {
+                const files = await window.logViewer.getLogFiles();
+                
+                const filesHtml = files.map(file => `
+                    <div class="log-file-item">
+                        <span>${file.name}</span>
+                        <span>${formatFileSize(file.size)}</span>
+                    </div>
+                `).join('');
+                
+                alert(`Log Files:\n\n${filesHtml}`);
+            } catch (error) {
+                console.error('Error getting log files:', error);
+            }
+        }
+        
+        function formatFileSize(bytes) {
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            if (bytes === 0) return '0 Bytes';
+            const i = Math.floor(Math.log(bytes) / Math.log(1024));
+            return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
+        }
+        
+        function showError(message) {
+            const container = document.getElementById('logContent');
+            container.innerHTML = `<div class="empty-state" style="color: #dc3545;">Error: ${message}</div>`;
+        }
+        
+        // AI Analysis Functions
+        let currentAnalysis = null;
+        
+        async function analyzeWithAI() {
+            const modal = document.getElementById('aiAnalysisModal');
+            const content = document.getElementById('aiAnalysisContent');
+            const promptBtn = document.getElementById('generatePromptBtn');
+            
+            modal.classList.add('show');
+            content.innerHTML = '<div class="loading">Analyzing logs with Claude AI...</div>';
+            promptBtn.style.display = 'none';
+            
+            try {
+                // Get current filtered logs or all logs if no filter
+                const logsToAnalyze = filteredLogs.length > 0 ? filteredLogs : allLogs;
+                
+                // Get current filter context
+                const context = getFilterContext();
+                
+                // Limit logs to prevent overwhelming the AI
+                const limitedLogs = logsToAnalyze.slice(0, 500);
+                
+                // Call AI analysis
+                const analysis = await window.logViewer.analyzeLogsWithAI({
+                    logs: limitedLogs,
+                    context: context,
+                    focusArea: document.getElementById('testAreaFilter').value || null
+                });
+                
+                currentAnalysis = analysis;
+                
+                // Display analysis results
+                displayAnalysisResults(analysis);
+                
+                // Show generate prompt button if there are issues
+                if (analysis.issues && analysis.issues.length > 0) {
+                    promptBtn.style.display = 'inline-block';
+                }
+            } catch (error) {
+                console.error('AI analysis error:', error);
+                content.innerHTML = `
+                    <div style="color: #dc3545; padding: 20px;">
+                        <h4>Analysis Failed</h4>
+                        <p>${error.message}</p>
+                        <p style="font-size: 14px; margin-top: 10px;">
+                            Make sure you have configured your Claude API key in Settings > API Keys.
+                        </p>
+                    </div>
+                `;
+            }
+        }
+        
+        function getFilterContext() {
+            const parts = [];
+            
+            const level = Array.from(activeLevels).join(', ');
+            if (level !== 'debug, info, warn, error') {
+                parts.push(`Level filter: ${level}`);
+            }
+            
+            const source = document.getElementById('sourceFilter').value;
+            if (source) parts.push(`Source: ${source}`);
+            
+            const window = document.getElementById('windowFilter').value;
+            if (window) parts.push(`Window: ${window}`);
+            
+            const func = document.getElementById('functionFilter').value;
+            if (func) parts.push(`Function: ${func}`);
+            
+            const testArea = document.getElementById('testAreaFilter').value;
+            if (testArea) parts.push(`Test Area: ${testArea}`);
+            
+            const search = document.getElementById('searchInput').value;
+            if (search) parts.push(`Search: "${search}"`);
+            
+            return parts.length > 0 ? 
+                `Filtered logs (${parts.join(', ')})` : 
+                'All logs';
+        }
+        
+        function displayAnalysisResults(analysis) {
+            const content = document.getElementById('aiAnalysisContent');
+            
+            let html = `
+                <div style="padding: 20px;">
+                    <h4>Analysis Summary</h4>
+                    <p style="margin-bottom: 20px;">${analysis.summary}</p>
+            `;
+            
+            // Display issues
+            if (analysis.issues && analysis.issues.length > 0) {
+                html += `
+                    <h4>Issues Identified (${analysis.issues.length})</h4>
+                    <div style="margin-bottom: 20px;">
+                `;
+                
+                analysis.issues.forEach((issue, index) => {
+                    const severityColor = {
+                        critical: '#dc3545',
+                        high: '#fd7e14',
+                        medium: '#ffc107',
+                        low: '#28a745'
+                    }[issue.severity] || '#6c757d';
+                    
+                    html += `
+                        <div style="border: 1px solid #e0e0e0; border-radius: 8px; padding: 15px; margin-bottom: 10px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                <h5 style="margin: 0;">${index + 1}. ${issue.title}</h5>
+                                <span style="background: ${severityColor}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px;">
+                                    ${issue.severity.toUpperCase()}
+                                </span>
+                            </div>
+                            <p style="margin: 5px 0;"><strong>Component:</strong> ${issue.component}</p>
+                            <p style="margin: 5px 0;"><strong>Impact:</strong> ${issue.impact}</p>
+                            <p style="margin: 10px 0;">${issue.description}</p>
+                            <div style="background: #f8f9fa; padding: 10px; border-radius: 4px; margin-top: 10px;">
+                                <strong>Suggested Fix:</strong><br>
+                                ${issue.fix}
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                html += '</div>';
+            } else {
+                html += '<p style="color: #28a745;">✅ No issues found in the analyzed logs.</p>';
+            }
+            
+            // Display patterns
+            if (analysis.patterns && analysis.patterns.length > 0) {
+                html += `
+                    <h4>Patterns Observed</h4>
+                    <ul style="margin-bottom: 20px;">
+                `;
+                analysis.patterns.forEach(pattern => {
+                    html += `<li>${pattern}</li>`;
+                });
+                html += '</ul>';
+            }
+            
+            // Display recommendations
+            if (analysis.recommendations && analysis.recommendations.length > 0) {
+                html += `
+                    <h4>Recommendations</h4>
+                    <ol style="margin-bottom: 20px;">
+                `;
+                analysis.recommendations.forEach(rec => {
+                    html += `<li>${rec}</li>`;
+                });
+                html += '</ol>';
+            }
+            
+            html += '</div>';
+            content.innerHTML = html;
+        }
+        
+        function closeAIAnalysisModal() {
+            document.getElementById('aiAnalysisModal').classList.remove('show');
+            currentAnalysis = null;
+        }
+        
+        async function generateCursorPrompt() {
+            if (!currentAnalysis) {
+                alert('No analysis available');
+                return;
+            }
+            
+            try {
+                const result = await window.logViewer.generateCursorPrompt(currentAnalysis);
+                
+                // Copy to clipboard
+                await navigator.clipboard.writeText(result.prompt);
+                
+                // Show success message with metadata
+                const severity = result.metadata.severity;
+                const issueCount = result.metadata.issueCount;
+                const areas = result.metadata.affectedAreas.join(', ');
+                
+                alert(`Cursor prompt copied to clipboard!\n\nSeverity: ${severity}\nIssues: ${issueCount}\nAffected areas: ${areas}\n\nPaste this prompt into Cursor to get fixes for the identified issues.`);
+                
+                // Close the modal
+                closeAIAnalysisModal();
+            } catch (error) {
+                console.error('Error generating Cursor prompt:', error);
+                alert('Failed to generate Cursor prompt: ' + error.message);
+            }
+        }
+    </script>
+</body>
+</html> 
