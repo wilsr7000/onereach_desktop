@@ -1328,13 +1328,32 @@ END OF AUTOMATED REPORT
                 type: 'info',
                 title: 'Bug Report Ready',
                 message: `Bug Report ${reportId} Prepared`,
-                detail: 'Your bug report has been prepared with all system information and logs. Click "Send Email" to open your email client with everything pre-filled. You just need to describe the issue you encountered.',
-                buttons: ['Send Email', 'Copy to Clipboard', 'Save to File', 'Cancel'],
+                detail: 'Your bug report has been prepared with all system information and logs. Choose how you want to submit it:',
+                buttons: ['Open GitHub Issues', 'Send Email', 'Copy to Clipboard', 'Save to File', 'Cancel'],
                 defaultId: 0,
-                cancelId: 3
+                cancelId: 4
               });
               
               if (result.response === 0) {
+                // Open GitHub issues page with pre-filled title
+                const issueTitle = `Bug Report ${reportId} - Onereach.ai v${systemInfo.app_version}`;
+                const encodedTitle = encodeURIComponent(issueTitle);
+                const encodedBody = encodeURIComponent(emailBody);
+                
+                // Open GitHub issues page with title and body pre-filled
+                const githubUrl = `https://github.com/wilsr7000/onereach_desktop/issues/new?title=${encodedTitle}&body=${encodedBody}`;
+                await shell.openExternal(githubUrl);
+                
+                // Show success message
+                dialog.showMessageBox(BrowserWindow.getFocusedWindow(), {
+                  type: 'info',
+                  title: 'GitHub Issues Opened',
+                  message: 'GitHub Issues page opened',
+                  detail: `A new issue page has been opened on GitHub with Report ${reportId}. Please describe your issue at the top of the issue body and submit it.`,
+                  buttons: ['OK']
+                });
+                
+              } else if (result.response === 1) {
                 // Open email client with everything pre-filled
                 const subject = `Bug Report ${reportId} - Onereach.ai v${systemInfo.app_version}`;
                 const encodedSubject = encodeURIComponent(subject);
@@ -1355,7 +1374,7 @@ END OF AUTOMATED REPORT
                   buttons: ['OK']
                 });
                 
-              } else if (result.response === 1) {
+              } else if (result.response === 2) {
                 // Copy to clipboard
                 clipboard.writeText(emailBody);
                 dialog.showMessageBox(BrowserWindow.getFocusedWindow(), {
@@ -1366,7 +1385,7 @@ END OF AUTOMATED REPORT
                   buttons: ['OK']
                 });
                 
-              } else if (result.response === 2) {
+              } else if (result.response === 3) {
                 // Save to file
                 const savePath = await dialog.showSaveDialog(BrowserWindow.getFocusedWindow(), {
                   defaultPath: `bug-report-${reportId}.txt`,
@@ -1391,7 +1410,7 @@ END OF AUTOMATED REPORT
                   });
                 }
               }
-              // If response === 3, user cancelled
+              // If response === 4, user cancelled
               
             } catch (error) {
               console.error('Error creating bug report:', error);
