@@ -28,7 +28,9 @@
     "test:idw": "electron test/run-idw-tests.js",
     "dist": "electron-builder",
     "build:signed": "./scripts/build-signed.sh",
-    "build:signed:skip-notarize": "./scripts/build-signed.sh --skip-notarize"
+    "build:signed:skip-notarize": "./scripts/build-signed.sh --skip-notarize",
+    "release": "./scripts/release-master.sh",
+    "release:quick": "./scripts/release-master.sh --quick"
   },
   "build": {
     "appId": "com.onereach.app",
@@ -94,7 +96,7 @@
       {
         "provider": "github",
         "owner": "wilsr7000",
-        "repo": "onereach_desktop",
+        "repo": "onereach-desktop-releases",
         "releaseType": "release"
       }
     ]
