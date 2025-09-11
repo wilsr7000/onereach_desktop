@@ -3027,7 +3027,17 @@ function setupIPC() {
     }
     
     
-        // Handle audio generator opening - open in separate window
+    // Handle video creator opening - open in separate window
+    if (data.action === 'open-video-creator' && data.url) {
+      console.log('Opening video creator in separate window:', data.label, data.url);
+      openExternalAIWindow(data.url, data.label || 'Video Creator', {
+        width: 1400,
+        height: 900
+      });
+      return;
+    }
+    
+    // Handle audio generator opening - open in separate window
     if (data.action === 'open-audio-generator' && data.url) {
       console.log('Opening audio generator in separate window:', data.label, data.url);
       openExternalAIWindow(data.url, data.label || 'Audio Generator', {
