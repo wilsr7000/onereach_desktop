@@ -1893,7 +1893,7 @@ class TestRunner {
             }
         });
 
-        // AI Insights/RSS Reader Tests
+        // AI Run Times/RSS Reader Tests
         this.tests.set('rss-feed-load', {
             name: 'UXMag Feed Loading',
             category: 'ai-insights',

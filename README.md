@@ -6,7 +6,7 @@
 - Modern and responsive UI
 - Cross-platform compatibility (macOS and Windows)
 - Secure IPC communication between main and renderer processes
-- **AI Insights RSS Reader**: Advanced RSS reader with intelligent reading time estimation
+- **AI Run Times RSS Reader**: Advanced RSS reader with intelligent reading time estimation
 - IDW (Intelligent Digital Worker) environment management
 - GSX (Global Service Exchange) integr
 ation
@@ -47,9 +47,9 @@ npm run package
 npm run package:win
 ```
 
-## AI Insights RSS Reader
+## AI Run Times RSS Reader
 
-The AI Insights feature provides an advanced RSS reader specifically designed for UX Magazine and other design-focused content.
+The AI Run Times feature provides an advanced RSS reader specifically designed for UX Magazine and other design-focused content.
 
 ### Key Features
 
@@ -68,10 +68,10 @@ The AI Insights feature provides an advanced RSS reader specifically designed fo
 4. **Visual Feedback**: Green highlights indicate when reading times are updated
 5. **Progress Tracking**: Blue progress bars show reading completion (e.g., "2:30 / 14:00")
 
-### Accessing AI Insights
+### Accessing AI Run Times
 
 1. Open the Onereach.ai application
-2. Navigate to **View → AI Insights** in the menu bar
+2. Navigate to **View → AI Run Times** in the menu bar
 3. The RSS reader will automatically load UX Magazine articles
 4. Click on any article tile to read the full content
 
@@ -139,7 +139,7 @@ Test data is stored in the app's user data directory:
 ```
 onereach-ai/
 ├── assets/                    # Static assets like images and icons
-├── Flipboard-IDW-Feed/       # AI Insights RSS Reader
+├── Flipboard-IDW-Feed/       # AI Run Times RSS Reader
 │   ├── uxmag.html           # RSS reader interface
 │   ├── uxmag-script.js      # Reader functionality and logic
 │   ├── uxmag-styles.css     # Reader styling
@@ -192,7 +192,7 @@ convert assets/icons/icon.png -define icon:auto-resize=256,128,64,48,32,16 asset
 
 ## Troubleshooting
 
-### AI Insights RSS Reader
+### AI Run Times RSS Reader
 
 **Reading times show "Loading..." indefinitely:**
 - Check your internet connection
@@ -228,9 +228,9 @@ convert assets/icons/icon.png -define icon:auto-resize=256,128,64,48,32,16 asset
 
 ## Development Notes
 
-### AI Insights Implementation Details
+### AI Run Times Implementation Details
 
-The AI Insights RSS reader uses several advanced techniques:
+The AI Run Times RSS reader uses several advanced techniques:
 
 1. **Electron Native Networking**: Bypasses browser CORS limitations using `net.request()`
 2. **HTML Content Parsing**: Strips HTML tags and extracts plain text for word counting
@@ -238,7 +238,7 @@ The AI Insights RSS reader uses several advanced techniques:
 4. **Cache Management**: Prevents stale JavaScript from interfering with updates
 5. **Error Recovery**: Graceful fallbacks when network requests fail
 
-### Key Files for AI Insights
+### Key Files for AI Run Times
 
 - `main.js`: Contains `calculateReadingTimeFromHTML()` and article fetching logic
 - `Flipboard-IDW-Feed/preload.js`: IPC bridge for RSS reader

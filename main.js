@@ -2654,14 +2654,14 @@ function setupIPC() {
               wordCount: getWordCount(responseData)
             };
             
-            // Also send the reading time to all windows (including AI Insights window)
+            // Also send the reading time to all windows (including AI Run Times window)
             console.log('📤 SENDING READING TIME TO ALL WINDOWS:', {
               url: url,
               readingTime: readingTime,
               wordCount: getWordCount(responseData)
             });
             
-            // Send to all windows to ensure AI Insights window receives it
+            // Send to all windows to ensure AI Run Times window receives it
             const { BrowserWindow } = require('electron');
             const allWindows = BrowserWindow.getAllWindows();
             console.log(`📤 Found ${allWindows.length} windows to send reading time to`);

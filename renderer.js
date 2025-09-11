@@ -190,8 +190,8 @@ document.addEventListener('DOMContentLoaded', () => {
         handleCheckUpdates();
         break;
       case 'open-ai-insights':
-        console.log('Opening AI Insights');
-        // Create a new window for AI Insights
+        console.log('Opening AI Run Times');
+        // Create a new window for AI Run Times
         const aiWindow = new BrowserWindow({
           width: 1200,
           height: 800,

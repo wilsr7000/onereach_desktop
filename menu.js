@@ -979,7 +979,7 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
         ...(global.moduleManager ? global.moduleManager.getModuleMenuItems() : []),
         ...(global.moduleManager && global.moduleManager.getInstalledModules().length > 0 ? [{ type: 'separator' }] : []),
         {
-          label: 'AI Insights',
+          label: 'AI Run Times',
           click: () => {
             const aiWindow = new BrowserWindow({
               width: 1200,
@@ -1130,12 +1130,12 @@ Right-click anywhere: Paste to Black Hole`;
               }
             },
             {
-              label: 'AI Insights Guide',
+              label: 'AI Run Times Guide',
               click: () => {
                 const { BrowserWindow } = require('electron');
                 const path = require('path');
                 
-                // Create AI Insights help window
+                // Create AI Run Times help window
                 const aiHelpWindow = new BrowserWindow({
                   width: 1000,
                   height: 800,
@@ -1147,11 +1147,11 @@ Right-click anywhere: Paste to Black Hole`;
                   }
                 });
                 
-                // Load the dedicated AI Insights guide HTML file
+                // Load the dedicated AI Run Times guide HTML file
                 try {
                   aiHelpWindow.loadFile('docs-ai-insights.html');
                 } catch (error) {
-                  console.error('Error loading AI Insights guide:', error);
+                  console.error('Error loading AI Run Times guide:', error);
                   // Fallback to external documentation
                   shell.openExternal('https://onereach.ai/docs');
                 }
