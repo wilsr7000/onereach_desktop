@@ -14,7 +14,7 @@ set -e  # Exit on any error
 
 # Configuration
 PRIVATE_REPO="wilsr7000/onereach_desktop"
-PUBLIC_REPO="wilsr7000/onereach-desktop-releases"
+PUBLIC_REPO="wilsr7000/Onereach_Desktop_App"
 
 # Colors for output
 RED='\033[0;31m'

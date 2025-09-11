@@ -3,7 +3,7 @@
 # This script publishes releases to the PUBLIC repository
 # while keeping source code in the PRIVATE repository
 
-PUBLIC_REPO="wilsr7000/onereach-desktop-releases"
+PUBLIC_REPO="wilsr7000/Onereach_Desktop_App"
 PRIVATE_REPO="wilsr7000/onereach_desktop"
 
 echo "🔒 Publishing release from private to public repository"

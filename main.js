@@ -4456,6 +4456,20 @@ function checkForUpdates() {
       }, 1000);
     }).catch(err => {
       log.error('Failed to check for updates:', err);
+      
+      // Show user-friendly error if repository doesn't exist
+      const { dialog } = require('electron');
+      const focusedWindow = BrowserWindow.getFocusedWindow();
+      if (err.message && (err.message.includes('404') || err.message.includes('Not Found'))) {
+        dialog.showMessageBox(focusedWindow, {
+          type: 'info',
+          title: 'No Updates Available',
+          message: 'Update repository not configured',
+          detail: 'The public releases repository has not been created yet.\n\nTo enable auto-updates:\n1. Create repository: github.com/wilsr7000/Onereach_Desktop_App\n2. Make it PUBLIC\n3. Publish a release using: npm run release',
+          buttons: ['OK']
+        });
+      }
+      
       sendUpdateStatus('error', { error: err.message });
       isCheckingForUpdates = false;
     });
@@ -4465,6 +4479,9 @@ function checkForUpdates() {
     isCheckingForUpdates = false;
   }
 }
+
+// Make function available globally for menu.js
+global.checkForUpdatesGlobal = checkForUpdates;
 
 // Function to download an available update
 function downloadUpdate() {

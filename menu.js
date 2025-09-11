@@ -975,7 +975,7 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
 • Auto-updates
 
 📥 Download it here:
-https://github.com/wilsr7000/onereach-desktop-releases/releases/latest
+https://github.com/wilsr7000/Onereach_Desktop_App/releases/latest
 
 Available for macOS (Intel & Apple Silicon)`;
         
@@ -993,7 +993,7 @@ Available for macOS (Intel & Apple Silicon)`;
         
         switch (result.response) {
           case 0: // Copy Link
-            clipboard.writeText('https://github.com/wilsr7000/onereach-desktop-releases/releases/latest');
+            clipboard.writeText('https://github.com/wilsr7000/Onereach_Desktop_App/releases/latest');
             dialog.showMessageBox(focusedWindow, {
               type: 'info',
               title: 'Link Copied',
@@ -1016,7 +1016,7 @@ Available for macOS (Intel & Apple Silicon)`;
             break;
             
           case 2: // Open GitHub
-            shell.openExternal('https://github.com/wilsr7000/onereach-desktop-releases/releases/latest');
+            shell.openExternal('https://github.com/wilsr7000/Onereach_Desktop_App/releases/latest');
             console.log('[Share] Opened GitHub releases page');
             break;
             
@@ -1596,9 +1596,27 @@ END OF AUTOMATED REPORT
         {
           label: 'Check for Updates',
           click: () => {
-            const focusedWindow = BrowserWindow.getFocusedWindow();
-            if (focusedWindow) {
-              focusedWindow.webContents.send('menu-action', { action: 'check-updates' });
+            console.log('[Menu Click] Check for Updates clicked');
+            
+            // Call the checkForUpdates function directly from main process
+            const { checkForUpdates } = require('./main.js');
+            if (typeof checkForUpdates === 'function') {
+              checkForUpdates();
+            } else {
+              // Fallback: Try using the global function if available
+              if (typeof global.checkForUpdatesGlobal === 'function') {
+                global.checkForUpdatesGlobal();
+              } else {
+                const { dialog } = require('electron');
+                const focusedWindow = BrowserWindow.getFocusedWindow();
+                dialog.showMessageBox(focusedWindow, {
+                  type: 'info',
+                  title: 'Updates Not Available',
+                  message: 'Auto-update repository not configured',
+                  detail: 'The public releases repository needs to be created first:\n\n1. Go to github.com/new\n2. Create repository: onereach-desktop-releases\n3. Make it PUBLIC\n4. Run: npm run release',
+                  buttons: ['OK']
+                });
+              }
             }
           }
         },
