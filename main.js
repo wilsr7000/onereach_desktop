@@ -641,8 +641,10 @@ app.whenReady().then(() => {
     console.error('Failed to initialize rollback manager:', err);
   });
   
-  // Set application menu
-  console.log('[Main] About to set application menu');
+  // Set application menu (menu is already set in createWindow, so we can skip this duplicate call)
+  // Commenting out duplicate menu setup that was overriding the Share menu
+  console.log('[Main] Application menu already set in createWindow');
+  /*
   try {
     setApplicationMenu();
     console.log('[Main] Application menu set successfully');
@@ -650,6 +652,7 @@ app.whenReady().then(() => {
     console.error('[Main] Error setting application menu:', error);
     console.error('[Main] Stack trace:', error.stack);
   }
+  */
   
   // Register test menu shortcut
   console.log('[Main] Registering test menu shortcut');
