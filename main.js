@@ -1594,22 +1594,13 @@ function setupIPC() {
       return;
     }
     
-    // Handle video creator opening
+    // Handle video creator opening - open in separate window (removed duplicate tab handler)
     if (data.action === 'open-video-creator' && data.url) {
-      console.log('Opening video creator in new tab:', data.label, data.url);
-      
-      // Get the main window
-      const mainWindow = browserWindow.getMainWindow();
-      if (mainWindow) {
-        // Send to main window to open in a new tab
-        mainWindow.webContents.send('open-in-new-tab', {
-          url: data.url,
-          label: data.label || 'Video Creator',
-          isVideoCreator: true
-        });
-      } else {
-        console.error('Main window not found, cannot open video creator URL');
-      }
+      console.log('Opening video creator in separate window:', data.label, data.url);
+      openExternalAIWindow(data.url, data.label || 'Video Creator', {
+        width: 1400,
+        height: 900
+      });
       return;
     }
     
@@ -3035,15 +3026,6 @@ function setupIPC() {
       return;
     }
     
-        // Handle video creator opening - open in separate window
-    if (data.action === 'open-video-creator' && data.url) {
-      console.log('Opening video creator in separate window:', data.label, data.url);
-      openExternalAIWindow(data.url, data.label || 'Video Creator', {
-        width: 1400,
-        height: 900
-      });
-      return;
-    }
     
         // Handle audio generator opening - open in separate window
     if (data.action === 'open-audio-generator' && data.url) {
