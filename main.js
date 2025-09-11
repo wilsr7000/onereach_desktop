@@ -4012,142 +4012,24 @@ function openSetupWizard() {
 function updateIDWMenu(environments) {
   if (!Array.isArray(environments) || environments.length === 0) return;
   
-  try {
-    const { createMenu } = require('./menu');
-    const menuTemplate = createMenu();
-    
-    // Find the IDW menu
-    const idwMenuItem = menuTemplate.items.find(item => item.label === 'IDW');
-    if (!idwMenuItem) {
-      console.error('IDW menu not found in menu template');
-      return;
-    }
-    
-    // Get the original Add/Remove item
-    const addRemoveItem = idwMenuItem.submenu.items.find(item => item.label === 'Add/Remove');
-    if (!addRemoveItem) {
-      console.error('Add/Remove item not found in IDW menu');
-      return;
-    }
-    
-    // Create a new submenu with the dynamic entries
-    const newSubmenu = Menu.buildFromTemplate([
-      // Add each IDW environment as a menu item
-      ...environments.map(env => ({
-        label: env.label,
-        click: () => {
-          const focusedWindow = BrowserWindow.getFocusedWindow();
-          if (focusedWindow) {
-            focusedWindow.webContents.send('menu-action', { 
-              action: `idw-${env.label}`
-            });
-          }
-        }
-      })),
-      
-      // Add a separator
-      { type: 'separator' },
-      
-      // Add the Add/Remove item
-      {
-        label: 'Add/Remove',
-        accelerator: 'CmdOrCtrl+A',
-        click: addRemoveItem.click
-      }
-    ]);
-    
-    // Replace the IDW submenu
-    idwMenuItem.submenu = newSubmenu;
-    
-    // Set the updated menu
-    Menu.setApplicationMenu(menuTemplate);
-    console.log(`IDW menu updated with ${environments.length} environments`);
-  } catch (error) {
-    console.error('Error updating IDW menu:', error);
-  }
+  // FIXED: Use the proper menu system from menu.js which includes the Share menu
+  // The old implementation was directly calling Menu.setApplicationMenu() which
+  // was overriding the Share menu. Now we use setApplicationMenu from menu.js
+  const { setApplicationMenu } = require('./menu');
+  setApplicationMenu(environments);
+  console.log(`IDW menu updated with ${environments.length} environments using proper menu system`);
 }
 
 // Function to update the GSX menu dynamically
 function updateGSXMenu(links) {
   if (!Array.isArray(links) || links.length === 0) return;
   
-  try {
-    const { createMenu } = require('./menu');
-    const menuTemplate = createMenu();
-    
-    // Look for existing GSX menu, or create a new one
-    let gsxMenuItem = menuTemplate.items.find(item => item.label === 'GSX');
-    
-    // If GSX menu doesn't exist, create it after the IDW menu
-    if (!gsxMenuItem) {
-      // Find the IDW menu index
-      const idwIndex = menuTemplate.items.findIndex(item => item.label === 'IDW');
-      if (idwIndex === -1) {
-        console.error('IDW menu not found in menu template');
-        return;
-      }
-      
-      // Create a new GSX menu
-      const gsxMenu = Menu.buildFromTemplate([
-        ...links.map(link => ({
-          label: link.label,
-          click: () => {
-            console.log(`GSX menu item clicked: ${link.label}`);
-            
-            // Use browserWindow.openGSXWindow to open the URL in an Electron window
-            browserWindow.openGSXWindow(link.url, link.label);
-          }
-        }))
-      ]);
-      
-      // Create the GSX menu item
-      gsxMenuItem = new MenuItem({
-        label: 'GSX',
-        submenu: gsxMenu
-      });
-      
-      // Insert it after the IDW menu
-      const newItems = [...menuTemplate.items];
-      newItems.splice(idwIndex + 1, 0, gsxMenuItem);
-      
-      // Create a new menu with the updated items
-      const newMenu = Menu.buildFromTemplate(newItems.map(item => item.label === 'GSX' ? {
-        label: 'GSX',
-        submenu: links.map(link => ({
-          label: link.label,
-          click: () => {
-            console.log(`GSX menu item clicked: ${link.label}`);
-            
-            // Use browserWindow.openGSXWindow to open the URL in an Electron window
-            browserWindow.openGSXWindow(link.url, link.label);
-          }
-        }))
-      } : item));
-      
-      // Set the updated menu
-      Menu.setApplicationMenu(newMenu);
-      console.log(`GSX menu created with ${links.length} links`);
-    } else {
-      // Replace the GSX menu items
-      const gsxMenu = Menu.buildFromTemplate(
-        links.map(link => ({
-          label: link.label,
-          click: () => {
-            console.log(`GSX menu item clicked: ${link.label}`);
-            
-            // Use browserWindow.openGSXWindow to open the URL in an Electron window
-            browserWindow.openGSXWindow(link.url, link.label);
-          }
-        }))
-      );
-      
-      gsxMenuItem.submenu = gsxMenu;
-      Menu.setApplicationMenu(menuTemplate);
-      console.log(`GSX menu updated with ${links.length} links`);
-    }
-  } catch (error) {
-    console.error('Error updating GSX menu:', error);
-  }
+  // FIXED: Use the proper menu system from menu.js which includes the Share menu
+  // The old implementation was directly calling Menu.setApplicationMenu() which
+  // was overriding the Share menu. Now we use refreshGSXLinks from menu.js
+  const { refreshGSXLinks } = require('./menu');
+  refreshGSXLinks();
+  console.log(`GSX menu updated with ${links.length} links using proper menu system`);
 }
 
 // Function to open an IDW environment in a new browser window or tab
