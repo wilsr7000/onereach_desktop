@@ -59,27 +59,31 @@ body {
     height: 200px;
     overflow: hidden;
     background-color: #1a1a1a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .tile-image {
     width: 100%;
     height: 100%;
-    background-size: cover;
+    background-size: contain;
     background-position: center;
     background-repeat: no-repeat;
     transition: transform 0.3s ease;
+    background-color: #1a1a1a;
 }
 
 .tile-image img {
     position: absolute;
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;
     opacity: 0;
 }
 
 .tile:hover .tile-image {
-    transform: scale(1.05);
+    transform: scale(1.08);
 }
 
 .tile-overlay {
@@ -91,10 +95,11 @@ body {
     background: linear-gradient(
         to bottom,
         rgba(0, 0, 0, 0) 0%,
-        rgba(0, 0, 0, 0.4) 50%,
-        rgba(0, 0, 0, 0.8) 100%
+        rgba(0, 0, 0, 0.2) 60%,
+        rgba(0, 0, 0, 0.5) 100%
     );
     z-index: 1;
+    pointer-events: none;
 }
 
 .tile-content {
@@ -152,6 +157,7 @@ body {
 
 .tile.featured .tile-image-container {
     height: 300px;
+    background: linear-gradient(to bottom, #1a1a1a, #121212);
 }
 
 .tile.featured .tile-title {
@@ -173,6 +179,7 @@ body {
 
     .tile.featured .tile-image-container {
         height: 200px;
+        background: linear-gradient(to bottom, #1a1a1a, #121212);
     }
 
     .tile.featured .tile-title {
@@ -483,7 +490,8 @@ body {
 .article-header-image {
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;
+    background-color: #000;
 }
 
 .article-header-overlay {
