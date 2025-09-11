@@ -4360,18 +4360,56 @@ function setupAutoUpdater() {
   autoUpdater.on('checking-for-update', () => {
     log.info('Checking for updates...');
     sendUpdateStatus('checking');
+    
+    // Show notification that we're checking
+    const { Notification } = require('electron');
+    if (Notification.isSupported()) {
+      const notification = new Notification({
+        title: 'Checking for Updates',
+        body: 'Looking for new versions...',
+        silent: true
+      });
+      notification.show();
+    }
   });
   
   autoUpdater.on('update-available', (info) => {
     log.info('Update available:', info);
     sendUpdateStatus('available', info);
     isCheckingForUpdates = false;
+    
+    // Show dialog to user
+    const { dialog } = require('electron');
+    const focusedWindow = BrowserWindow.getFocusedWindow();
+    dialog.showMessageBox(focusedWindow, {
+      type: 'info',
+      title: 'Update Available!',
+      message: `A new version (${info.version}) is available!`,
+      detail: `Current version: ${app.getVersion()}\nNew version: ${info.version}\n\nWould you like to download it now?`,
+      buttons: ['Download', 'Later'],
+      defaultId: 0
+    }).then(result => {
+      if (result.response === 0) {
+        downloadUpdate();
+      }
+    });
   });
   
   autoUpdater.on('update-not-available', (info) => {
     log.info('Update not available:', info);
     sendUpdateStatus('not-available', info);
     isCheckingForUpdates = false;
+    
+    // Show dialog to user
+    const { dialog } = require('electron');
+    const focusedWindow = BrowserWindow.getFocusedWindow();
+    dialog.showMessageBox(focusedWindow, {
+      type: 'info',
+      title: 'No Updates Available',
+      message: 'You are running the latest version!',
+      detail: `Current version: ${app.getVersion()}\n\nYour app is up to date.`,
+      buttons: ['OK']
+    });
   });
   
       autoUpdater.on('error', (err) => {
