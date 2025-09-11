@@ -1020,81 +1020,6 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
       ]
     },
     
-    // Share menu - positioned before Help (macOS forces Help to be last when using role: 'help')
-    {
-      label: 'Share',
-      click: async () => {
-        console.log('[Menu Click] Share clicked');
-        const { dialog, clipboard } = require('electron');
-        
-        // Get app version
-        const appVersion = app.getVersion();
-        const appName = app.getName();
-        
-        // Create sharing text
-        const shareTitle = `Check out ${appName}!`;
-        const shareText = `I'm using ${appName} v${appVersion} - a powerful desktop app for AI productivity.
-
-🚀 Features:
-• Multiple AI assistants in tabs
-• Smart clipboard management with Spaces
-• Image and video creation tools
-• Audio generation capabilities
-• Auto-updates
-
-📥 Download it here:
-https://github.com/wilsr7000/Onereach_Desktop_App/releases/latest
-
-Available for macOS (Intel & Apple Silicon)`;
-        
-        // Show dialog with share options
-        const focusedWindow = BrowserWindow.getFocusedWindow();
-        const result = await dialog.showMessageBox(focusedWindow, {
-          type: 'info',
-          title: 'Share Onereach.ai',
-          message: shareTitle,
-          detail: shareText,
-          buttons: ['Copy Link', 'Copy Full Text', 'Open GitHub', 'Cancel'],
-          defaultId: 0,
-          cancelId: 3
-        });
-        
-        switch (result.response) {
-          case 0: // Copy Link
-            clipboard.writeText('https://github.com/wilsr7000/Onereach_Desktop_App/releases/latest');
-            dialog.showMessageBox(focusedWindow, {
-              type: 'info',
-              title: 'Link Copied',
-              message: 'Download link copied to clipboard!',
-              buttons: ['OK']
-            });
-            console.log('[Share] Download link copied to clipboard');
-            break;
-            
-          case 1: // Copy Full Text
-            clipboard.writeText(shareText);
-            dialog.showMessageBox(focusedWindow, {
-              type: 'info', 
-              title: 'Text Copied',
-              message: 'Share text copied to clipboard!',
-              detail: 'You can now paste it in any messaging app, email, or social media.',
-              buttons: ['OK']
-            });
-            console.log('[Share] Full share text copied to clipboard');
-            break;
-            
-          case 2: // Open GitHub
-            shell.openExternal('https://github.com/wilsr7000/Onereach_Desktop_App/releases/latest');
-            console.log('[Share] Opened GitHub releases page');
-            break;
-            
-          case 3: // Cancel
-            console.log('[Share] Share cancelled');
-            break;
-        }
-      }
-    },
-    
     // Help menu (macOS forces this to be last when using role: 'help')
     {
       role: 'help',
@@ -1777,12 +1702,65 @@ END OF AUTOMATED REPORT
           }
         ] : [])
       ]
+    },
+    
+    // Share menu - positioned before Help (must have submenu)
+    {
+      label: 'Share',
+      submenu: [
+        {
+          label: 'Copy Download Link',
+          click: () => {
+            console.log('[Share] Copy Download Link clicked');
+            const { clipboard, dialog } = require('electron');
+            clipboard.writeText('https://github.com/wilsr7000/Onereach_Desktop_App/releases/latest');
+            const focusedWindow = BrowserWindow.getFocusedWindow();
+            dialog.showMessageBox(focusedWindow, {
+              type: 'info',
+              title: 'Link Copied',
+              message: 'Download link copied to clipboard!',
+              buttons: ['OK']
+            });
+          }
+        },
+        {
+          label: 'Share via Email',
+          click: () => {
+            console.log('[Share] Share via Email clicked');
+            const { shell } = require('electron');
+            const subject = encodeURIComponent('Check out Onereach.ai Desktop');
+            const body = encodeURIComponent('I\'m using Onereach.ai Desktop - a powerful app for AI productivity. Download it here: https://github.com/wilsr7000/Onereach_Desktop_App/releases/latest');
+            shell.openExternal(`mailto:?subject=${subject}&body=${body}`);
+          }
+        },
+        {
+          label: 'Open GitHub Page',  
+          click: () => {
+            console.log('[Share] Open GitHub Page clicked');
+            const { shell } = require('electron');
+            shell.openExternal('https://github.com/wilsr7000/Onereach_Desktop_App/releases/latest');
+          }
+        }
+      ]
     }
   ];
 
+  // Debug: Log the menu items being built
+  console.log('[Menu] Building menu with items:', template.map(item => item.label || item.role).filter(Boolean));
+  
   try {
     const menu = Menu.buildFromTemplate(template);
     console.log('[Menu] Menu built successfully.');
+    
+    // Debug: Verify Share menu is in the built menu
+    const menuItems = menu.items.map(item => item.label || item.role);
+    console.log('[Menu] Final menu items:', menuItems);
+    if (!menuItems.includes('Share')) {
+      console.error('[Menu] WARNING: Share menu is missing from final menu!');
+    } else {
+      console.log('[Menu] ✓ Share menu is present in position:', menuItems.indexOf('Share'));
+    }
+    
     return menu;
   } catch (error) {
     console.error('[Menu] Error building menu from template:', error);
