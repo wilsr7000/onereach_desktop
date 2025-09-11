@@ -952,6 +952,81 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
       submenu: gsxMenuItems
     },
     
+    // Share menu - top level, no submenu
+    {
+      label: 'Share',
+      click: async () => {
+        console.log('[Menu Click] Share clicked');
+        const { dialog, clipboard } = require('electron');
+        
+        // Get app version
+        const appVersion = app.getVersion();
+        const appName = app.getName();
+        
+        // Create sharing text
+        const shareTitle = `Check out ${appName}!`;
+        const shareText = `I'm using ${appName} v${appVersion} - a powerful desktop app for AI productivity.
+
+🚀 Features:
+• Multiple AI assistants in tabs
+• Smart clipboard management with Spaces
+• Image and video creation tools
+• Audio generation capabilities
+• Auto-updates
+
+📥 Download it here:
+https://github.com/wilsr7000/onereach-desktop-releases/releases/latest
+
+Available for macOS (Intel & Apple Silicon)`;
+        
+        // Show dialog with share options
+        const focusedWindow = BrowserWindow.getFocusedWindow();
+        const result = await dialog.showMessageBox(focusedWindow, {
+          type: 'info',
+          title: 'Share Onereach.ai',
+          message: shareTitle,
+          detail: shareText,
+          buttons: ['Copy Link', 'Copy Full Text', 'Open GitHub', 'Cancel'],
+          defaultId: 0,
+          cancelId: 3
+        });
+        
+        switch (result.response) {
+          case 0: // Copy Link
+            clipboard.writeText('https://github.com/wilsr7000/onereach-desktop-releases/releases/latest');
+            dialog.showMessageBox(focusedWindow, {
+              type: 'info',
+              title: 'Link Copied',
+              message: 'Download link copied to clipboard!',
+              buttons: ['OK']
+            });
+            console.log('[Share] Download link copied to clipboard');
+            break;
+            
+          case 1: // Copy Full Text
+            clipboard.writeText(shareText);
+            dialog.showMessageBox(focusedWindow, {
+              type: 'info', 
+              title: 'Text Copied',
+              message: 'Share text copied to clipboard!',
+              detail: 'You can now paste it in any messaging app, email, or social media.',
+              buttons: ['OK']
+            });
+            console.log('[Share] Full share text copied to clipboard');
+            break;
+            
+          case 2: // Open GitHub
+            shell.openExternal('https://github.com/wilsr7000/onereach-desktop-releases/releases/latest');
+            console.log('[Share] Opened GitHub releases page');
+            break;
+            
+          case 3: // Cancel
+            console.log('[Share] Share cancelled');
+            break;
+        }
+      }
+    },
+    
     // View menu
     // Clipboard menu
     {
