@@ -4317,10 +4317,20 @@ function setupAutoUpdater() {
   autoUpdater.on('download-progress', (progressObj) => {
     log.info(`Download progress: ${progressObj.percent}%`);
     sendUpdateStatus('progress', progressObj);
+    
+    // Show progress in the dock icon (macOS)
+    if (process.platform === 'darwin') {
+      app.dock.setBadge(`${Math.round(progressObj.percent)}%`);
+    }
   });
   
   autoUpdater.on('update-downloaded', async (info) => {
     log.info('Update downloaded:', info);
+    
+    // Clear the dock badge
+    if (process.platform === 'darwin') {
+      app.dock.setBadge('');
+    }
     
     // Create backup of current version before installing update
     try {
@@ -4348,6 +4358,35 @@ function setupAutoUpdater() {
       // Still allow update to proceed even if backup fails
       sendUpdateStatus('downloaded', info);
     }
+    
+    // Show dialog to user
+    const focusedWindow = BrowserWindow.getFocusedWindow();
+    const dialogOptions = {
+      type: 'info',
+      title: 'Update Ready to Install',
+      message: `Version ${info.version} has been downloaded.`,
+      detail: 'The application will restart to apply the update. Your settings and data will be preserved.',
+      buttons: ['Install and Restart', 'Install Later'],
+      defaultId: 0,
+      cancelId: 1
+    };
+    
+    dialog.showMessageBox(focusedWindow, dialogOptions).then((result) => {
+      if (result.response === 0) {
+        // User chose to install and restart
+        log.info('User chose to install update and restart');
+        autoUpdater.quitAndInstall();
+      } else {
+        // User chose to install later
+        log.info('User chose to install update later');
+        dialog.showMessageBox(focusedWindow, {
+          type: 'info',
+          title: 'Update Postponed',
+          message: 'The update will be installed when you restart the application.',
+          buttons: ['OK']
+        });
+      }
+    });
   });
 }
 
@@ -4410,14 +4449,52 @@ global.checkForUpdatesGlobal = checkForUpdates;
 function downloadUpdate() {
   log.info('Starting update download...');
   
+  // Show notification that download is starting
+  const focusedWindow = BrowserWindow.getFocusedWindow();
+  dialog.showMessageBox(focusedWindow, {
+    type: 'info',
+    title: 'Downloading Update',
+    message: 'The update is now downloading in the background.',
+    detail: 'You can continue using the app. You\'ll be notified when the download is complete.\n\nProgress will be shown in the dock icon.',
+    buttons: ['OK']
+  });
+  
   try {
     autoUpdater.downloadUpdate().catch(err => {
       log.error('Failed to download update:', err);
       sendUpdateStatus('error', { error: err.message });
+      
+      // Clear dock badge on error
+      if (process.platform === 'darwin') {
+        app.dock.setBadge('');
+      }
+      
+      // Show error dialog
+      dialog.showMessageBox(focusedWindow, {
+        type: 'error',
+        title: 'Download Failed',
+        message: 'Failed to download the update.',
+        detail: err.message,
+        buttons: ['OK']
+      });
     });
   } catch (err) {
     log.error('Exception when downloading update:', err);
     sendUpdateStatus('error', { error: err.message });
+    
+    // Clear dock badge on error
+    if (process.platform === 'darwin') {
+      app.dock.setBadge('');
+    }
+    
+    // Show error dialog
+    dialog.showMessageBox(focusedWindow, {
+      type: 'error',
+      title: 'Download Failed',
+      message: 'Failed to download the update.',
+      detail: err.message,
+      buttons: ['OK']
+    });
   }
 }
 
