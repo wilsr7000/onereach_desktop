@@ -61,31 +61,17 @@ class GSXFileSync {
       const filesApiUrl = filesApiUrls[environment] || filesApiUrls.production;
       
       console.log(`[GSX Sync] Initializing with environment: ${environment}`);
-      console.log(`[GSX Sync] Discovery URL: ${discoveryUrl}`);
-      console.log(`[GSX Sync] Files API URL (fallback): ${filesApiUrl}`);
+      console.log(`[GSX Sync] Files API URL: ${filesApiUrl}`);
       
-      // Try with discovery URL first
-      try {
-        console.log('[GSX Sync] Attempting initialization with service discovery...');
-        this.client = new FilesSyncNode({
-          token: token.trim(),
-          discoveryUrl: discoveryUrl
-        });
-        console.log('[GSX Sync] ✓ Initialized with service discovery');
-      } catch (discoveryError) {
-        console.log('[GSX Sync] Service discovery failed, trying direct Files API URL...');
-        console.log('[GSX Sync] Discovery error:', discoveryError.message);
-        
-        // Fallback to direct Files API URL
-        this.client = new FilesSyncNode({
-          token: token.trim(),
-          filesApiUrl: filesApiUrl
-        });
-        console.log('[GSX Sync] ✓ Initialized with direct Files API URL');
-      }
+      // Use direct Files API URL (more reliable than service discovery)
+      console.log('[GSX Sync] Initializing SDK with direct Files API URL...');
+      this.client = new FilesSyncNode({
+        token: token.trim(),
+        filesApiUrl: filesApiUrl
+      });
       
       this.isInitialized = true;
-      console.log('[GSX Sync] ✓ Client ready for sync operations');
+      console.log('[GSX Sync] ✓ Client initialized and ready for sync operations');
       
       return true;
     } catch (error) {
