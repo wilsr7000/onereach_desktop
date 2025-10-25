@@ -18,7 +18,7 @@ class SettingsManager {
         
         // Decrypt sensitive fields
         for (const [key, value] of Object.entries(encryptedData)) {
-          if (key.includes('apiKey') || key.includes('secret')) {
+          if (key.includes('apiKey') || key.includes('secret') || key.includes('Token')) {
             // Decrypt sensitive data
             if (safeStorage.isEncryptionAvailable() && value.encrypted) {
               try {
@@ -53,7 +53,12 @@ class SettingsManager {
       theme: 'dark',
       autoSave: true,
       claude4ThinkingMode: 'enabled',
-      claude4ThinkingLevel: 'default'
+      claude4ThinkingLevel: 'default',
+      gsxToken: '',
+      gsxEnvironment: 'production',
+      gsxAutoSync: false,
+      gsxSyncInterval: 'daily',
+      gsxSyncPaths: null
     };
   }
 
@@ -63,7 +68,7 @@ class SettingsManager {
       
       // Encrypt sensitive fields
       for (const [key, value] of Object.entries(this.settings)) {
-        if ((key.includes('apiKey') || key.includes('secret')) && value) {
+        if ((key.includes('apiKey') || key.includes('secret') || key.includes('Token')) && value) {
           // Encrypt sensitive data
           if (safeStorage.isEncryptionAvailable()) {
             const encrypted = safeStorage.encryptString(value);
@@ -167,6 +172,39 @@ class SettingsManager {
     }
     
     return headers;
+  }
+  
+  // GSX-specific methods
+  getGSXToken() {
+    return this.get('gsxToken') || '';
+  }
+  
+  setGSXToken(token) {
+    return this.set('gsxToken', token);
+  }
+  
+  getGSXEnvironment() {
+    return this.get('gsxEnvironment') || 'production';
+  }
+  
+  setGSXEnvironment(env) {
+    return this.set('gsxEnvironment', env);
+  }
+  
+  getGSXAutoSync() {
+    return this.get('gsxAutoSync') || false;
+  }
+  
+  setGSXAutoSync(enabled) {
+    return this.set('gsxAutoSync', enabled);
+  }
+  
+  getGSXSyncInterval() {
+    return this.get('gsxSyncInterval') || 'daily';
+  }
+  
+  setGSXSyncInterval(interval) {
+    return this.set('gsxSyncInterval', interval);
   }
 }
 

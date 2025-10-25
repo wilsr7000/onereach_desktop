@@ -328,6 +328,79 @@
         </div>
         
         <div class="section">
+            <h2 class="section-title">GSX File Sync Configuration</h2>
+            
+            <div class="form-group">
+                <label for="gsxEnvironment">GSX Environment</label>
+                <select id="gsxEnvironment">
+                    <option value="production">Production</option>
+                    <option value="staging">Staging</option>
+                    <option value="qa">QA</option>
+                </select>
+            </div>
+            
+            <div class="form-group api-key-group">
+                <label for="gsxToken">
+                    GSX Token
+                    <span id="gsxTokenStatus" class="api-key-status"></span>
+                    <a href="#" class="test-connection" onclick="testGSXConnection()">Test Connection</a>
+                </label>
+                <div style="position: relative;">
+                    <input type="password" id="gsxToken" placeholder="Paste your OneReach GSX token here">
+                    <button class="toggle-visibility" onclick="toggleGSXTokenVisibility()">👁</button>
+                </div>
+                <div style="margin-top: 10px;">
+                    <button class="btn-secondary" onclick="pasteGSXToken()" style="padding: 6px 12px; font-size: 12px;">
+                        📋 Paste Token from Clipboard
+                    </button>
+                    <button class="btn-secondary" onclick="clearGSXToken()" style="padding: 6px 12px; font-size: 12px; margin-left: 10px;">
+                        🗑️ Clear Token
+                    </button>
+                </div>
+                <div class="info-text">
+                    <strong>How to get your token:</strong> Log into OneReach → Account Settings → API Tokens → Generate New Token<br>
+                    Your token is encrypted and stored securely in your system keychain
+                </div>
+            </div>
+            
+            <div class="divider"></div>
+            
+            <h3 style="font-size: 16px; margin-bottom: 16px;">Auto-Sync Settings</h3>
+            
+            <div class="form-group">
+                <div class="checkbox-group">
+                    <input type="checkbox" id="gsxAutoSync">
+                    <label for="gsxAutoSync" style="margin-bottom: 0;">Enable Auto-Sync</label>
+                </div>
+                <div class="info-text">Automatically sync configured directories to GSX Files</div>
+            </div>
+            
+            <div class="form-group">
+                <label for="gsxSyncInterval">Sync Interval</label>
+                <select id="gsxSyncInterval">
+                    <option value="hourly">Hourly</option>
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="manual">Manual Only</option>
+                </select>
+                <div class="info-text">How often to automatically sync files to GSX</div>
+            </div>
+            
+            <div class="form-group">
+                <button class="btn-primary" onclick="syncCompleteBackup()" style="padding: 12px 24px;">
+                    🔒 Complete Backup (Recommended)
+                </button>
+                <button class="btn-secondary" onclick="syncNow()" style="margin-left: 10px;">Quick Sync</button>
+                <div class="info-text">
+                    <strong>Complete Backup</strong> syncs everything needed to restore on a new machine:<br>
+                    • OR-Spaces (clipboard data, items, spaces)<br>
+                    • App Configuration (settings, IDW entries, GSX links)<br>
+                    • Reading logs and preferences
+                </div>
+            </div>
+        </div>
+        
+        <div class="section">
             <h2 class="section-title">General Settings</h2>
             
             <div class="form-group">
@@ -357,6 +430,7 @@
     <script>
         let settings = {};
         let apiKeyVisible = false;
+        let gsxTokenVisible = false;
         
         // Load settings when window opens
         window.addEventListener('DOMContentLoaded', async () => {
@@ -374,6 +448,18 @@
                 document.getElementById('theme').value = settings.theme || 'dark';
                 document.getElementById('autoSave').checked = settings.autoSave !== false;
                 document.getElementById('autoGenerateScreenshotMetadata').checked = settings.autoGenerateScreenshotMetadata === true;
+                
+                // GSX Settings
+                document.getElementById('gsxToken').value = settings.gsxToken || '';
+                document.getElementById('gsxEnvironment').value = settings.gsxEnvironment || 'production';
+                document.getElementById('gsxAutoSync').checked = settings.gsxAutoSync === true;
+                document.getElementById('gsxSyncInterval').value = settings.gsxSyncInterval || 'daily';
+                
+                // Check if GSX token exists
+                if (settings.gsxToken) {
+                    document.getElementById('gsxTokenStatus').textContent = '(Token saved)';
+                    document.getElementById('gsxTokenStatus').className = 'api-key-status status-valid';
+                }
                 
                 // Update model options based on provider
                 updateModelOptions();
@@ -414,7 +500,11 @@
                 autoSave: document.getElementById('autoSave').checked,
                 claude4ThinkingMode: document.getElementById('claude4ThinkingMode').value,
                 claude4ThinkingLevel: document.getElementById('claude4ThinkingLevel').value,
-                autoGenerateScreenshotMetadata: document.getElementById('autoGenerateScreenshotMetadata').checked
+                autoGenerateScreenshotMetadata: document.getElementById('autoGenerateScreenshotMetadata').checked,
+                gsxToken: document.getElementById('gsxToken').value,
+                gsxEnvironment: document.getElementById('gsxEnvironment').value,
+                gsxAutoSync: document.getElementById('gsxAutoSync').checked,
+                gsxSyncInterval: document.getElementById('gsxSyncInterval').value
             };
             
             try {
@@ -583,6 +673,124 @@
                 saveSettings();
             }
         });
+        
+        function toggleGSXTokenVisibility() {
+            const input = document.getElementById('gsxToken');
+            const button = event.target;
+            
+            if (gsxTokenVisible) {
+                input.type = 'password';
+                button.textContent = '👁';
+                gsxTokenVisible = false;
+            } else {
+                input.type = 'text';
+                button.textContent = '🙈';
+                gsxTokenVisible = true;
+            }
+        }
+        
+        async function testGSXConnection() {
+            const token = document.getElementById('gsxToken').value;
+            const environment = document.getElementById('gsxEnvironment').value;
+            
+            if (!token) {
+                showStatus('Please enter a GSX token first', 'error');
+                return;
+            }
+            
+            showStatus('Testing GSX connection...', 'success');
+            
+            try {
+                const result = await window.api.testGSXConnection({ token, environment });
+                if (result.success) {
+                    showStatus('GSX connection successful!', 'success');
+                    document.getElementById('gsxTokenStatus').textContent = '(Valid)';
+                    document.getElementById('gsxTokenStatus').className = 'api-key-status status-valid';
+                } else {
+                    showStatus(`GSX connection failed: ${result.error}`, 'error');
+                    document.getElementById('gsxTokenStatus').textContent = '(Invalid)';
+                    document.getElementById('gsxTokenStatus').className = 'api-key-status status-invalid';
+                }
+            } catch (error) {
+                showStatus(`Error testing GSX connection: ${error.message}`, 'error');
+            }
+        }
+        
+        async function configureSyncPaths() {
+            // This would open a dialog to configure sync paths
+            showStatus('Sync paths configuration coming soon...', 'success');
+        }
+        
+        async function syncCompleteBackup() {
+            showStatus('Starting complete backup...', 'success');
+            
+            try {
+                const result = await window.api.syncGSXCompleteBackup();
+                if (result.success) {
+                    showStatus('Complete backup successful! All your data is now in GSX Files.', 'success');
+                } else {
+                    showStatus(`Backup failed: ${result.error}`, 'error');
+                }
+            } catch (error) {
+                showStatus(`Error during backup: ${error.message}`, 'error');
+            }
+        }
+        
+        async function syncNow() {
+            showStatus('Starting sync...', 'success');
+            
+            try {
+                const result = await window.api.syncGSXNow();
+                if (result.success) {
+                    showStatus('Files synced successfully!', 'success');
+                } else {
+                    showStatus(`Sync failed: ${result.error}`, 'error');
+                }
+            } catch (error) {
+                showStatus(`Error syncing: ${error.message}`, 'error');
+            }
+        }
+        
+        async function pasteGSXToken() {
+            try {
+                // Read from clipboard
+                const clipboardText = await navigator.clipboard.readText();
+                
+                if (!clipboardText) {
+                    showStatus('Clipboard is empty', 'error');
+                    return;
+                }
+                
+                // Basic validation - check if it looks like a token
+                if (clipboardText.length < 20) {
+                    showStatus('Invalid token format in clipboard', 'error');
+                    return;
+                }
+                
+                // Set the token value
+                document.getElementById('gsxToken').value = clipboardText.trim();
+                
+                // Show success message
+                showStatus('Token pasted from clipboard', 'success');
+                
+                // Optionally auto-test the connection
+                setTimeout(() => {
+                    testGSXConnection();
+                }, 500);
+            } catch (error) {
+                console.error('Failed to read clipboard:', error);
+                showStatus('Failed to read clipboard. Please paste manually with Ctrl+V or Cmd+V', 'error');
+            }
+        }
+        
+        function clearGSXToken() {
+            if (confirm('Are you sure you want to clear the GSX token?')) {
+                document.getElementById('gsxToken').value = '';
+                document.getElementById('gsxTokenStatus').textContent = '';
+                document.getElementById('gsxTokenStatus').className = 'api-key-status';
+                showStatus('GSX token cleared', 'success');
+            }
+        }
     </script>
 </body>
 </html> 

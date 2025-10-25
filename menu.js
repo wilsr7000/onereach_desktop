@@ -859,6 +859,192 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
     }
   }
   
+  // Add GSX File Sync menu items
+  if (gsxMenuItems.length > 0 && gsxMenuItems[0].label !== 'No IDW environments available') {
+    gsxMenuItems.push({ type: 'separator' });
+  }
+  
+  gsxMenuItems.push({
+    label: 'File Sync',
+    submenu: [
+      {
+        label: 'Complete Backup (Recommended)',
+        click: async () => {
+          console.log('[Menu] Complete Backup clicked');
+          const { getGSXFileSync } = require('./gsx-file-sync');
+          const gsxFileSync = getGSXFileSync();
+          
+          try {
+            const result = await gsxFileSync.syncCompleteBackup();
+            const { dialog } = require('electron');
+            dialog.showMessageBox({
+              type: 'info',
+              title: 'Complete Backup Successful',
+              message: 'All your data has been backed up to GSX Files',
+              detail: 'Backed up:\n• OR-Spaces (clipboard data)\n• App Configuration (settings, IDW entries, reading logs)\n\nLocation: GSX Files/Complete-Backup/'
+            });
+          } catch (error) {
+            const { dialog } = require('electron');
+            dialog.showErrorBox('Backup Failed', error.message);
+          }
+        }
+      },
+      { type: 'separator' },
+      {
+        label: 'Sync Desktop to GSX',
+        click: async () => {
+          console.log('[Menu] Sync Desktop to GSX clicked');
+          const { getGSXFileSync } = require('./gsx-file-sync');
+          const gsxFileSync = getGSXFileSync();
+          
+          try {
+            const result = await gsxFileSync.syncDesktop();
+            const { dialog } = require('electron');
+            dialog.showMessageBox({
+              type: 'info',
+              title: 'Sync Complete',
+              message: 'Desktop files synced to GSX successfully',
+              detail: `Synced to: GSX Files/Desktop-Backup`
+            });
+          } catch (error) {
+            const { dialog } = require('electron');
+            dialog.showErrorBox('Sync Failed', error.message);
+          }
+        }
+      },
+      {
+        label: 'Sync OR-Spaces (Clipboard Data)',
+        click: async () => {
+          console.log('[Menu] Sync OR-Spaces to GSX clicked');
+          const { getGSXFileSync } = require('./gsx-file-sync');
+          const gsxFileSync = getGSXFileSync();
+          
+          try {
+            const result = await gsxFileSync.syncORSpaces();
+            const { dialog } = require('electron');
+            dialog.showMessageBox({
+              type: 'info',
+              title: 'Sync Complete',
+              message: 'OR-Spaces synced to GSX successfully',
+              detail: `Synced to: GSX Files/OR-Spaces-Backup`
+            });
+          } catch (error) {
+            const { dialog } = require('electron');
+            dialog.showErrorBox('Sync Failed', error.message);
+          }
+        }
+      },
+      {
+        label: 'Sync App Config (Settings & Logs)',
+        click: async () => {
+          console.log('[Menu] Sync App Config clicked');
+          const { getGSXFileSync } = require('./gsx-file-sync');
+          const gsxFileSync = getGSXFileSync();
+          
+          try {
+            const result = await gsxFileSync.syncAppConfig();
+            const { dialog } = require('electron');
+            dialog.showMessageBox({
+              type: 'info',
+              title: 'Sync Complete',
+              message: 'App configuration synced successfully',
+              detail: 'Synced: Settings, IDW entries, GSX links, reading logs, and preferences\n\nLocation: GSX Files/App-Config-Backup'
+            });
+          } catch (error) {
+            const { dialog } = require('electron');
+            dialog.showErrorBox('Sync Failed', error.message);
+          }
+        }
+      },
+      {
+        label: 'Sync Custom Directory...',
+        click: async () => {
+          console.log('[Menu] Sync Custom Directory clicked');
+          const { getGSXFileSync } = require('./gsx-file-sync');
+          const gsxFileSync = getGSXFileSync();
+          
+          try {
+            const localPath = await gsxFileSync.selectDirectoryForSync();
+            if (localPath) {
+              const dirName = path.basename(localPath);
+              const result = await gsxFileSync.syncDirectory(localPath, dirName);
+              const { dialog } = require('electron');
+              dialog.showMessageBox({
+                type: 'info',
+                title: 'Sync Complete',
+                message: 'Directory synced to GSX successfully',
+                detail: `Synced ${localPath} to GSX Files/${dirName}`
+              });
+            }
+          } catch (error) {
+            const { dialog } = require('electron');
+            dialog.showErrorBox('Sync Failed', error.message);
+          }
+        }
+      },
+      { type: 'separator' },
+      {
+        label: 'View Sync History',
+        click: async () => {
+          console.log('[Menu] View Sync History clicked');
+          const { getGSXFileSync } = require('./gsx-file-sync');
+          const gsxFileSync = getGSXFileSync();
+          const history = gsxFileSync.getHistory();
+          
+          if (history.length === 0) {
+            const { dialog } = require('electron');
+            dialog.showMessageBox({
+              type: 'info',
+              title: 'Sync History',
+              message: 'No sync history available',
+              detail: 'No files have been synced yet.'
+            });
+          } else {
+            // Show recent sync history
+            const recentHistory = history.slice(0, 10);
+            const historyText = recentHistory.map(h => 
+              `${new Date(h.timestamp).toLocaleString()}: ${h.localPath} → ${h.remotePath} (${h.status})`
+            ).join('\n');
+            
+            const { dialog } = require('electron');
+            dialog.showMessageBox({
+              type: 'info',
+              title: 'Recent Sync History',
+              message: 'Last 10 sync operations:',
+              detail: historyText
+            });
+          }
+        }
+      },
+      {
+        label: 'Clear Sync History',
+        click: async () => {
+          console.log('[Menu] Clear Sync History clicked');
+          const { dialog } = require('electron');
+          const result = await dialog.showMessageBox({
+            type: 'question',
+            title: 'Clear Sync History',
+            message: 'Are you sure you want to clear the sync history?',
+            buttons: ['Cancel', 'Clear'],
+            defaultId: 0
+          });
+          
+          if (result.response === 1) {
+            const { getGSXFileSync } = require('./gsx-file-sync');
+            const gsxFileSync = getGSXFileSync();
+            await gsxFileSync.clearHistory();
+            
+            dialog.showMessageBox({
+              type: 'info',
+              title: 'History Cleared',
+              message: 'Sync history has been cleared.'
+            });
+          }
+        }
+      }
+    ]
+  });
+  
   const template = [
     // App menu (macOS only)
     ...(isMac ? [{
@@ -1555,8 +1741,7 @@ END OF AUTOMATED REPORT
                 const focusedWindow = BrowserWindow.getFocusedWindow();
                 
                 // Get available backups
-                const { RollbackManager } = require('./rollback-manager');
-                const rollbackManager = new RollbackManager();
+                const rollbackManager = require('./rollback-manager');
                 const result = await rollbackManager.getBackups();
                 
                 if (!result || result.length === 0) {
@@ -1611,8 +1796,7 @@ END OF AUTOMATED REPORT
             {
               label: 'Open Backups Folder',
               click: async () => {
-                const { RollbackManager } = require('./rollback-manager');
-                const rollbackManager = new RollbackManager();
+                const rollbackManager = require('./rollback-manager');
                 await rollbackManager.openBackupsFolder();
               }
             }

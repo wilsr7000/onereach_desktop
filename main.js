@@ -12,6 +12,7 @@ const ModuleManager = require('./module-manager');
 const getLogger = require('./event-logger');
 let logger = getLogger(); // This might be a stub initially
 const { createConsoleInterceptor } = require('./console-interceptor');
+const { getGSXFileSync } = require('./gsx-file-sync');
 
 // Configure logging for updates
 log.transports.file.level = 'info';
@@ -933,6 +934,15 @@ function setupModuleManagerIPC() {
 function setupIPC() {
   console.log('[setupIPC] Function called');
   
+  // Initialize GSX File Sync handlers
+  try {
+    const gsxFileSync = getGSXFileSync();
+    gsxFileSync.setupIPC();
+    console.log('[setupIPC] GSX File Sync IPC handlers registered');
+  } catch (error) {
+    console.error('[setupIPC] Failed to setup GSX File Sync:', error);
+  }
+  
   // Settings IPC handlers
   console.log('[setupIPC] Setting up settings handlers');
   ipcMain.handle('settings:get-all', async () => {
@@ -982,6 +992,43 @@ function setupIPC() {
       return { success: true };
     } catch (error) {
       console.error('Error testing LLM connection:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // GSX sync-all handler (for sync now button)
+  ipcMain.handle('gsx:sync-all', async () => {
+    try {
+      const gsxFileSync = getGSXFileSync();
+      const results = await gsxFileSync.syncMultiple();
+      return { success: true, results };
+    } catch (error) {
+      console.error('GSX sync-all failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // GSX test connection handler with token from settings
+  ipcMain.handle('gsx:test-connection', async (event, config) => {
+    try {
+      const settingsManager = global.settingsManager;
+      if (config.token) {
+        // Temporarily save the token to test it
+        settingsManager.set('gsxToken', config.token);
+        settingsManager.set('gsxEnvironment', config.environment || 'production');
+      }
+      
+      const gsxFileSync = getGSXFileSync();
+      const result = await gsxFileSync.testConnection();
+      
+      if (!result.success && config.token) {
+        // If test failed, clear the temporary token
+        settingsManager.set('gsxToken', '');
+      }
+      
+      return result;
+    } catch (error) {
+      console.error('GSX connection test failed:', error);
       return { success: false, error: error.message };
     }
   });

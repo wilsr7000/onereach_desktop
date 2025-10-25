@@ -281,6 +281,21 @@ contextBridge.exposeInMainWorld(
     saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
     testLLMConnection: (config) => ipcRenderer.invoke('settings:test-llm', config),
     
+    // GSX File Sync API
+    testGSXConnection: (config) => ipcRenderer.invoke('gsx:test-connection', config),
+    syncGSXNow: () => ipcRenderer.invoke('gsx:sync-all'),
+    syncGSXCompleteBackup: () => ipcRenderer.invoke('gsx:sync-complete-backup'),
+    syncGSXDesktop: (options) => ipcRenderer.invoke('gsx:sync-desktop', options),
+    syncGSXORSpaces: (options) => ipcRenderer.invoke('gsx:sync-or-spaces', options),
+    syncGSXAppConfig: (options) => ipcRenderer.invoke('gsx:sync-app-config', options),
+    syncGSXDirectory: (localPath, remotePath, options) => ipcRenderer.invoke('gsx:sync-directory', localPath, remotePath, options),
+    selectAndSyncGSX: (options) => ipcRenderer.invoke('gsx:select-and-sync', options),
+    getGSXHistory: () => ipcRenderer.invoke('gsx:get-history'),
+    clearGSXHistory: () => ipcRenderer.invoke('gsx:clear-history'),
+    getGSXSyncPaths: () => ipcRenderer.invoke('gsx:get-sync-paths'),
+    saveGSXSyncPaths: (paths) => ipcRenderer.invoke('gsx:save-sync-paths', paths),
+    getGSXStatus: () => ipcRenderer.invoke('gsx:get-status'),
+    
     // Smart export API
     getSmartExportData: () => ipcRenderer.invoke('get-smart-export-data'),
     generateSmartExport: (data) => ipcRenderer.invoke('generate-smart-export', data),

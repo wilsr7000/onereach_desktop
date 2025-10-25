@@ -153,10 +153,69 @@ class RollbackManager {
   }
 
   /**
+   * Get list of available backups
+   * @returns {Promise<Array>} List of backup info objects
+   */
+  async getBackups() {
+    try {
+      // Ensure backup directory exists
+      await fs.mkdir(this.backupDir, { recursive: true });
+      
+      // Read all directories in the backup folder
+      const entries = await fs.readdir(this.backupDir, { withFileTypes: true });
+      const backups = [];
+      
+      for (const entry of entries) {
+        if (entry.isDirectory() && entry.name.startsWith('v')) {
+          const backupPath = path.join(this.backupDir, entry.name);
+          const metadataPath = path.join(backupPath, 'backup-metadata.json');
+          
+          try {
+            // Try to read metadata
+            const metadataContent = await fs.readFile(metadataPath, 'utf8');
+            const metadata = JSON.parse(metadataContent);
+            backups.push({
+              version: metadata.version || entry.name.substring(1), // Remove 'v' prefix
+              path: backupPath,
+              createdAt: metadata.backupDate || null,
+              platform: metadata.platform,
+              arch: metadata.arch
+            });
+          } catch (e) {
+            // If no metadata, create basic info from directory name
+            const stats = await fs.stat(backupPath);
+            backups.push({
+              version: entry.name.substring(1), // Remove 'v' prefix
+              path: backupPath,
+              createdAt: stats.birthtime.toISOString(),
+              platform: process.platform,
+              arch: process.arch
+            });
+          }
+        }
+      }
+      
+      // Sort by creation date, newest first
+      backups.sort((a, b) => {
+        const dateA = new Date(a.createdAt || 0);
+        const dateB = new Date(b.createdAt || 0);
+        return dateB - dateA;
+      });
+      
+      return backups;
+    } catch (error) {
+      console.error('Failed to get backups:', error);
+      return [];
+    }
+  }
+
+  /**
    * Open the backups folder in the system file explorer
    */
   async openBackupsFolder() {
     try {
+      // Ensure backup directory exists before opening
+      await fs.mkdir(this.backupDir, { recursive: true });
       await shell.openPath(this.backupDir);
     } catch (error) {
       console.error('Failed to open backups folder:', error);
