@@ -873,19 +873,62 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
           console.log('[Menu] Complete Backup clicked');
           const { getGSXFileSync } = require('./gsx-file-sync');
           const gsxFileSync = getGSXFileSync();
+          const { dialog } = require('electron');
+          
+          // Show progress notification
+          const { Notification } = require('electron');
+          const notification = new Notification({
+            title: 'GSX Backup',
+            body: 'Starting complete backup...'
+          });
+          notification.show();
           
           try {
             const result = await gsxFileSync.syncCompleteBackup();
-            const { dialog } = require('electron');
+            
+            // Build detailed report
+            let reportDetails = `✅ Backup completed in ${result.summary.durationFormatted}\n\n`;
+            reportDetails += `📊 Summary:\n`;
+            reportDetails += `• Total Files: ${result.summary.totalFiles}\n`;
+            reportDetails += `• Total Size: ${result.summary.totalSizeFormatted}\n`;
+            reportDetails += `• Environment: ${result.summary.environment}\n\n`;
+            reportDetails += `📁 What was backed up:\n\n`;
+            
+            result.results.forEach(r => {
+              reportDetails += `${r.name}:\n`;
+              reportDetails += `  • Files: ${r.fileCount || 0}\n`;
+              reportDetails += `  • Size: ${r.totalSizeFormatted || '0 Bytes'}\n`;
+              reportDetails += `  • Duration: ${r.durationFormatted || '0s'}\n`;
+              reportDetails += `  • Location: GSX Files/${r.remotePath}\n\n`;
+            });
+            
+            reportDetails += `🌐 Access your files at:\n`;
+            reportDetails += `https://studio.${result.summary.environment === 'production' ? '' : result.summary.environment + '.'}onereach.ai/files`;
+            
             dialog.showMessageBox({
               type: 'info',
-              title: 'Complete Backup Successful',
+              title: '✅ Complete Backup Successful',
               message: 'All your data has been backed up to GSX Files',
-              detail: 'Backed up:\n• OR-Spaces (clipboard data)\n• App Configuration (settings, IDW entries, reading logs)\n\nLocation: GSX Files/Complete-Backup/'
+              detail: reportDetails,
+              buttons: ['OK']
             });
+            
+            // Show success notification
+            const successNotification = new Notification({
+              title: '✅ Backup Complete',
+              body: `Backed up ${result.summary.totalFiles} files (${result.summary.totalSizeFormatted})`
+            });
+            successNotification.show();
+            
           } catch (error) {
-            const { dialog } = require('electron');
             dialog.showErrorBox('Backup Failed', error.message);
+            
+            // Show error notification
+            const errorNotification = new Notification({
+              title: '❌ Backup Failed',
+              body: error.message
+            });
+            errorNotification.show();
           }
         }
       },
@@ -918,18 +961,25 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
           console.log('[Menu] Sync OR-Spaces to GSX clicked');
           const { getGSXFileSync } = require('./gsx-file-sync');
           const gsxFileSync = getGSXFileSync();
+          const { dialog } = require('electron');
           
           try {
             const result = await gsxFileSync.syncORSpaces();
-            const { dialog } = require('electron');
+            
+            const reportDetails = `✅ Sync completed in ${result.durationFormatted}\n\n` +
+              `📊 Details:\n` +
+              `• Files synced: ${result.fileCount || 0}\n` +
+              `• Total size: ${result.totalSizeFormatted || '0 Bytes'}\n` +
+              `• Source: ${result.localPath}\n` +
+              `• Destination: GSX Files/${result.remotePath}`;
+            
             dialog.showMessageBox({
               type: 'info',
-              title: 'Sync Complete',
+              title: '✅ OR-Spaces Sync Complete',
               message: 'OR-Spaces synced to GSX successfully',
-              detail: `Synced to: GSX Files/OR-Spaces-Backup`
+              detail: reportDetails
             });
           } catch (error) {
-            const { dialog } = require('electron');
             dialog.showErrorBox('Sync Failed', error.message);
           }
         }
@@ -940,18 +990,31 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
           console.log('[Menu] Sync App Config clicked');
           const { getGSXFileSync } = require('./gsx-file-sync');
           const gsxFileSync = getGSXFileSync();
+          const { dialog } = require('electron');
           
           try {
             const result = await gsxFileSync.syncAppConfig();
-            const { dialog } = require('electron');
+            
+            const reportDetails = `✅ Sync completed in ${result.durationFormatted}\n\n` +
+              `📊 Details:\n` +
+              `• Files synced: ${result.fileCount || 0}\n` +
+              `• Total size: ${result.totalSizeFormatted || '0 Bytes'}\n` +
+              `• Source: ${result.localPath}\n` +
+              `• Destination: GSX Files/${result.remotePath}\n\n` +
+              `📁 Includes:\n` +
+              `• App settings & preferences\n` +
+              `• IDW environment configs\n` +
+              `• GSX links & shortcuts\n` +
+              `• Reading logs\n` +
+              `• Clipboard configurations`;
+            
             dialog.showMessageBox({
               type: 'info',
-              title: 'Sync Complete',
+              title: '✅ App Config Sync Complete',
               message: 'App configuration synced successfully',
-              detail: 'Synced: Settings, IDW entries, GSX links, reading logs, and preferences\n\nLocation: GSX Files/App-Config-Backup'
+              detail: reportDetails
             });
           } catch (error) {
-            const { dialog } = require('electron');
             dialog.showErrorBox('Sync Failed', error.message);
           }
         }

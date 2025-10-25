@@ -138,6 +138,9 @@ class GSXFileSync {
         throw new Error('Local path is not a directory');
       }
       
+      // Get directory size and file count
+      const dirInfo = await this.getDirectoryInfo(localPath);
+      
       // Set default options
       const syncOptions = {
         isPublic: options.isPublic || false,
@@ -145,18 +148,27 @@ class GSXFileSync {
         ...options
       };
       
+      const startTime = Date.now();
+      
       // Perform the sync
       // Note: The SDK automatically creates remote directories on GSX Files
       // The remotePath will be created if it doesn't exist
       await this.client.pushLocalPathToFiles(localPath, remotePath, syncOptions);
       
+      const duration = Date.now() - startTime;
+      
       console.log(`✓ Successfully synced to GSX Files/${remotePath}`);
       
-      // Record sync history
+      // Record sync history with detailed info
       const syncRecord = {
         timestamp: new Date().toISOString(),
         localPath,
         remotePath,
+        fileCount: dirInfo.fileCount,
+        totalSize: dirInfo.totalSize,
+        totalSizeFormatted: this.formatBytes(dirInfo.totalSize),
+        duration: duration,
+        durationFormatted: this.formatDuration(duration),
         options: syncOptions,
         status: 'success'
       };
@@ -242,6 +254,7 @@ class GSXFileSync {
   async syncCompleteBackup(options = {}) {
     console.log('[GSX Sync] Starting complete backup...');
     const results = [];
+    const startTime = Date.now();
     
     try {
       // Initialize first
@@ -268,16 +281,79 @@ class GSXFileSync {
       results.push({ ...configResult, name: 'App-Config' });
       console.log('[GSX Sync] ✓ App Config backup complete');
       
+      const totalDuration = Date.now() - startTime;
+      const totalFiles = results.reduce((sum, r) => sum + (r.fileCount || 0), 0);
+      const totalSize = results.reduce((sum, r) => sum + (r.totalSize || 0), 0);
+      
       console.log('[GSX Sync] ✓ Complete backup finished successfully');
+      
+      // Log to event logger
+      this.logBackupEvent({
+        type: 'complete-backup',
+        status: 'success',
+        results,
+        totalFiles,
+        totalSize,
+        duration: totalDuration
+      });
+      
       return {
         timestamp: new Date().toISOString(),
         status: 'success',
-        results: results
+        results: results,
+        summary: {
+          totalFiles,
+          totalSize,
+          totalSizeFormatted: this.formatBytes(totalSize),
+          duration: totalDuration,
+          durationFormatted: this.formatDuration(totalDuration),
+          environment: this.settingsManager.get('gsxEnvironment') || 'production'
+        }
       };
     } catch (error) {
       console.error('[GSX Sync] ✗ Complete backup failed:', error.message || error);
       console.error('[GSX Sync] Error stack:', error.stack);
+      
+      // Log failure to event logger
+      this.logBackupEvent({
+        type: 'complete-backup',
+        status: 'failed',
+        error: error.message || 'Complete backup failed'
+      });
+      
       throw new Error(error.message || 'Complete backup failed');
+    }
+  }
+  
+  /**
+   * Log backup event to app event logger
+   */
+  logBackupEvent(event) {
+    try {
+      const getLogger = require('./event-logger');
+      const logger = getLogger();
+      
+      if (event.status === 'success') {
+        logger.info('GSX Backup Completed', {
+          type: event.type,
+          filesCount: event.totalFiles,
+          totalSize: this.formatBytes(event.totalSize),
+          duration: this.formatDuration(event.duration),
+          results: event.results.map(r => ({
+            name: r.name,
+            files: r.fileCount,
+            size: r.totalSizeFormatted,
+            path: r.remotePath
+          }))
+        });
+      } else {
+        logger.error('GSX Backup Failed', {
+          type: event.type,
+          error: event.error
+        });
+      }
+    } catch (error) {
+      console.error('[GSX Sync] Failed to log event:', error);
     }
   }
   
@@ -370,6 +446,67 @@ class GSXFileSync {
    */
   getHistory() {
     return this.syncHistory;
+  }
+  
+  /**
+   * Get directory info (file count and total size)
+   */
+  async getDirectoryInfo(dirPath) {
+    let fileCount = 0;
+    let totalSize = 0;
+    
+    const processDirectory = async (dir) => {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        
+        if (entry.isDirectory()) {
+          await processDirectory(fullPath);
+        } else if (entry.isFile()) {
+          fileCount++;
+          try {
+            const stats = await fs.stat(fullPath);
+            totalSize += stats.size;
+          } catch (error) {
+            console.warn(`Could not stat file: ${fullPath}`);
+          }
+        }
+      }
+    };
+    
+    try {
+      await processDirectory(dirPath);
+    } catch (error) {
+      console.error('Error getting directory info:', error);
+    }
+    
+    return { fileCount, totalSize };
+  }
+  
+  /**
+   * Format bytes to human readable
+   */
+  formatBytes(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+  }
+  
+  /**
+   * Format duration to human readable
+   */
+  formatDuration(ms) {
+    const seconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    
+    if (minutes > 0) {
+      return `${minutes}m ${remainingSeconds}s`;
+    }
+    return `${seconds}s`;
   }
   
   /**

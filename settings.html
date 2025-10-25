@@ -729,7 +729,28 @@
             try {
                 const result = await window.api.syncGSXCompleteBackup();
                 if (result.success) {
-                    showStatus('Complete backup successful! All your data is now in GSX Files.', 'success');
+                    // Build detailed success message
+                    const summary = result.result.summary;
+                    const results = result.result.results;
+                    
+                    let message = `✅ Backup completed in ${summary.durationFormatted}\n\n`;
+                    message += `📊 Summary:\n`;
+                    message += `• Total Files: ${summary.totalFiles}\n`;
+                    message += `• Total Size: ${summary.totalSizeFormatted}\n`;
+                    message += `• Environment: ${summary.environment}\n\n`;
+                    message += `📁 What was backed up:\n\n`;
+                    
+                    results.forEach(r => {
+                        message += `${r.name}:\n`;
+                        message += `  • Files: ${r.fileCount || 0}\n`;
+                        message += `  • Size: ${r.totalSizeFormatted || '0 Bytes'}\n`;
+                        message += `  • Duration: ${r.durationFormatted || '0s'}\n`;
+                        message += `  • Location: GSX Files/${r.remotePath}\n\n`;
+                    });
+                    
+                    // Show detailed modal
+                    alert(message);
+                    showStatus(`✅ Backup complete! ${summary.totalFiles} files (${summary.totalSizeFormatted}) backed up in ${summary.durationFormatted}`, 'success');
                 } else {
                     showStatus(`Backup failed: ${result.error}`, 'error');
                 }
