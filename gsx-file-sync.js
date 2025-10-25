@@ -34,8 +34,13 @@ class GSXFileSync {
       const token = this.settingsManager.get('gsxToken');
       const environment = this.settingsManager.get('gsxEnvironment') || 'production';
       
-      if (!token) {
-        throw new Error('GSX token not configured. Please add your token in Settings.');
+      console.log('[GSX Sync] Checking token...', token ? `Token exists (length: ${token.length})` : 'NO TOKEN FOUND');
+      console.log('[GSX Sync] Environment:', environment);
+      
+      if (!token || token.trim() === '') {
+        const errorMsg = 'GSX token not configured. Please add your token in Settings (GSX File Sync Configuration section).';
+        console.error('[GSX Sync] ERROR:', errorMsg);
+        throw new Error(errorMsg);
       }
       
       // Set up discovery URL based on environment
@@ -47,21 +52,23 @@ class GSXFileSync {
       
       const discoveryUrl = discoveryUrls[environment] || discoveryUrls.production;
       
-      console.log(`Initializing GSX Files Sync with environment: ${environment}`);
+      console.log(`[GSX Sync] Initializing with environment: ${environment}`);
+      console.log(`[GSX Sync] Discovery URL: ${discoveryUrl}`);
       
       this.client = new FilesSyncNode({
-        token: token,
+        token: token.trim(),
         discoveryUrl: discoveryUrl
       });
       
       this.isInitialized = true;
-      console.log('GSX Files Sync initialized successfully');
+      console.log('[GSX Sync] ✓ Initialized successfully');
       
       return true;
     } catch (error) {
-      console.error('Failed to initialize GSX Files Sync:', error);
+      console.error('[GSX Sync] ✗ Failed to initialize:', error.message || error);
+      console.error('[GSX Sync] Error details:', JSON.stringify(error, null, 2));
       this.isInitialized = false;
-      throw error;
+      throw new Error(error.message || 'Failed to initialize GSX sync');
     }
   }
   
@@ -130,7 +137,11 @@ class GSXFileSync {
       };
       
       // Perform the sync
+      // Note: The SDK automatically creates remote directories on GSX Files
+      // The remotePath will be created if it doesn't exist
       await this.client.pushLocalPathToFiles(localPath, remotePath, syncOptions);
+      
+      console.log(`✓ Successfully synced to GSX Files/${remotePath}`);
       
       // Record sync history
       const syncRecord = {
@@ -204,8 +215,14 @@ class GSXFileSync {
     const userDataPath = app.getPath('userData');
     const remotePath = options.remotePath || 'App-Config-Backup';
     
-    console.log('Syncing app configuration from:', userDataPath);
-    console.log('Files to sync: settings, IDW entries, GSX links, reading logs, and more');
+    // Check if userData exists (it should always exist, but be safe)
+    try {
+      await fs.stat(userDataPath);
+      console.log('Syncing app configuration from:', userDataPath);
+      console.log('Files to sync: settings, IDW entries, GSX links, reading logs, and more');
+    } catch (error) {
+      throw new Error(`User data directory not found: ${userDataPath}`);
+    }
     
     return await this.syncDirectory(userDataPath, remotePath, options);
   }
@@ -214,35 +231,44 @@ class GSXFileSync {
    * Complete backup - syncs everything needed to restore on a new machine
    */
   async syncCompleteBackup(options = {}) {
-    console.log('Starting complete backup...');
+    console.log('[GSX Sync] Starting complete backup...');
     const results = [];
     
     try {
+      // Initialize first
+      if (!this.isInitialized) {
+        console.log('[GSX Sync] Not initialized, initializing now...');
+        await this.initialize();
+      }
+      
       // 1. Sync OR-Spaces (clipboard data)
-      console.log('Backing up OR-Spaces...');
+      console.log('[GSX Sync] Step 1/2: Backing up OR-Spaces...');
       const orSpacesResult = await this.syncORSpaces({
         ...options,
         remotePath: 'Complete-Backup/OR-Spaces'
       });
       results.push({ ...orSpacesResult, name: 'OR-Spaces' });
+      console.log('[GSX Sync] ✓ OR-Spaces backup complete');
       
       // 2. Sync App Config (settings, preferences, logs)
-      console.log('Backing up app configuration...');
+      console.log('[GSX Sync] Step 2/2: Backing up app configuration...');
       const configResult = await this.syncAppConfig({
         ...options,
         remotePath: 'Complete-Backup/App-Config'
       });
       results.push({ ...configResult, name: 'App-Config' });
+      console.log('[GSX Sync] ✓ App Config backup complete');
       
-      console.log('Complete backup finished successfully');
+      console.log('[GSX Sync] ✓ Complete backup finished successfully');
       return {
         timestamp: new Date().toISOString(),
         status: 'success',
         results: results
       };
     } catch (error) {
-      console.error('Complete backup failed:', error);
-      throw error;
+      console.error('[GSX Sync] ✗ Complete backup failed:', error.message || error);
+      console.error('[GSX Sync] Error stack:', error.stack);
+      throw new Error(error.message || 'Complete backup failed');
     }
   }
   
