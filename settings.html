@@ -332,11 +332,13 @@
             
             <div class="form-group">
                 <label for="gsxEnvironment">GSX Environment</label>
-                <select id="gsxEnvironment">
+                <select id="gsxEnvironment" onchange="console.log('Environment changed to:', this.value)">
                     <option value="production">Production</option>
+                    <option value="edison">Edison</option>
                     <option value="staging">Staging</option>
                     <option value="qa">QA</option>
                 </select>
+                <div class="info-text">Select the environment where you obtained your token</div>
             </div>
             
             <div class="form-group api-key-group">

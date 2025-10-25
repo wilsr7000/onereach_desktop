@@ -47,14 +47,16 @@ class GSXFileSync {
       const discoveryUrls = {
         qa: 'https://discovery.qa.api.onereach.ai',
         staging: 'https://discovery.staging.api.onereach.ai',
-        production: 'https://discovery.api.onereach.ai'
+        production: 'https://discovery.api.onereach.ai',
+        edison: 'https://discovery.edison.onereach.ai'
       };
       
       // Direct Files API URLs as fallback
       const filesApiUrls = {
         qa: 'https://files.qa.api.onereach.ai',
         staging: 'https://files.staging.api.onereach.ai',
-        production: 'https://files.api.onereach.ai'
+        production: 'https://files.onereach.ai',  // No 'api' subdomain for production
+        edison: 'https://files.edison.onereach.ai'
       };
       
       const discoveryUrl = discoveryUrls[environment] || discoveryUrls.production;
