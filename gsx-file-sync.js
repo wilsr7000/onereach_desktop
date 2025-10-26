@@ -85,27 +85,53 @@ class GSXFileSync {
         };
         
         // Add accountId if available
-        if (accountId) {
-          sdkOptions.accountId = accountId;
+        if (accountId && accountId.trim()) {
+          sdkOptions.accountId = accountId.trim();
+          console.log('[GSX Sync] Including account ID in SDK options');
+        } else {
+          console.log('[GSX Sync] No account ID provided - SDK will use token to determine account');
         }
         
-        console.log('[GSX Sync] SDK options:', {
-          ...sdkOptions,
-          token: token.trim().substring(0, 10) + '...'
+        console.log('[GSX Sync] SDK options (sanitized):', {
+          discoveryUrl: sdkOptions.discoveryUrl,
+          accountId: sdkOptions.accountId || 'not-provided',
+          tokenLength: token.trim().length,
+          tokenPrefix: token.trim().substring(0, 8) + '...',
+          tokenSuffix: '...' + token.trim().substring(token.trim().length - 4)
         });
         
+        console.log('[GSX Sync] Creating FilesSyncNode instance...');
         this.client = new FilesSyncNode(sdkOptions);
         
-        console.log('[GSX Sync] ✓ SDK client object created');
+        console.log('[GSX Sync] ✓ SDK client object created (constructor completed)');
+        
+        // Log the client object properties (without sensitive data)
+        console.log('[GSX Sync] Client created with internal filesClient:', !!this.client.filesClient);
         
         this.isInitialized = true;
-        console.log('[GSX Sync] ✓ Client initialized successfully');
+        console.log('[GSX Sync] ✓ Client marked as initialized');
       } catch (sdkError) {
-        console.error('[GSX Sync] SDK initialization failed:', sdkError);
-        console.error('[GSX Sync] SDK error type:', sdkError.constructor.name);
-        console.error('[GSX Sync] SDK error message:', sdkError.message);
-        console.error('[GSX Sync] SDK error stack:', sdkError.stack);
-        throw new Error(`SDK initialization failed: ${sdkError.message}`);
+        console.error('[GSX Sync] ✗ SDK initialization threw exception');
+        console.error('[GSX Sync] Error type:', sdkError.constructor.name);
+        console.error('[GSX Sync] Error message:', sdkError.message);
+        console.error('[GSX Sync] Error code:', sdkError.code);
+        console.error('[GSX Sync] Full error:', sdkError);
+        
+        if (sdkError.stack) {
+          console.error('[GSX Sync] Stack trace:', sdkError.stack);
+        }
+        
+        // Provide helpful error message based on error type
+        let helpfulMessage = sdkError.message;
+        if (sdkError.message && sdkError.message.includes('401')) {
+          helpfulMessage = 'Token rejected (401 Unauthorized). Please verify:\n1. Token is correct and complete\n2. Environment matches where token was created\n3. Token has Files API permissions';
+        } else if (sdkError.message && sdkError.message.includes('403')) {
+          helpfulMessage = 'Access forbidden (403). Token may not have Files API permissions.';
+        } else if (sdkError.message && sdkError.message.includes('serviceUrl')) {
+          helpfulMessage = 'Service discovery failed. Check internet connection and environment setting.';
+        }
+        
+        throw new Error(helpfulMessage);
       }
       
       return true;
@@ -163,7 +189,7 @@ class GSXFileSync {
         await this.initialize();
       }
       
-      console.log(`Syncing ${localPath} to GSX Files/${remotePath}`);
+      console.log(`[GSX Sync] Syncing ${localPath} to GSX Files/${remotePath}`);
       
       // Check if local path exists
       const stats = await fs.stat(localPath);
@@ -171,8 +197,10 @@ class GSXFileSync {
         throw new Error('Local path is not a directory');
       }
       
+      console.log('[GSX Sync] Getting directory info...');
       // Get directory size and file count
       const dirInfo = await this.getDirectoryInfo(localPath);
+      console.log(`[GSX Sync] Directory contains ${dirInfo.fileCount} files (${this.formatBytes(dirInfo.totalSize)})`);
       
       // Set default options
       const syncOptions = {
@@ -183,10 +211,25 @@ class GSXFileSync {
       
       const startTime = Date.now();
       
+      console.log('[GSX Sync] Starting SDK upload...');
+      console.log('[GSX Sync] Upload options:', {
+        remotePath,
+        isPublic: syncOptions.isPublic,
+        hasTTL: !!syncOptions.ttl
+      });
+      
       // Perform the sync
       // Note: The SDK automatically creates remote directories on GSX Files
       // The remotePath will be created if it doesn't exist
-      await this.client.pushLocalPathToFiles(localPath, remotePath, syncOptions);
+      try {
+        await this.client.pushLocalPathToFiles(localPath, remotePath, syncOptions);
+        console.log('[GSX Sync] ✓ SDK upload completed successfully');
+      } catch (uploadError) {
+        console.error('[GSX Sync] ✗ SDK upload failed:', uploadError);
+        console.error('[GSX Sync] Upload error message:', uploadError.message);
+        console.error('[GSX Sync] Upload error details:', uploadError);
+        throw new Error(`Upload failed: ${uploadError.message}`);
+      }
       
       const duration = Date.now() - startTime;
       
