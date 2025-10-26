@@ -296,6 +296,14 @@ contextBridge.exposeInMainWorld(
     saveGSXSyncPaths: (paths) => ipcRenderer.invoke('gsx:save-sync-paths', paths),
     getGSXStatus: () => ipcRenderer.invoke('gsx:get-status'),
     
+    // Event Logging API  
+    logEvent: (eventType, eventData) => ipcRenderer.invoke('log:event', eventType, eventData),
+    logTabCreated: (tabId, url, metadata) => ipcRenderer.invoke('log:tab-created', tabId, url, metadata),
+    logTabClosed: (tabId, url) => ipcRenderer.invoke('log:tab-closed', tabId, url),
+    logTabSwitched: (fromTab, toTab) => ipcRenderer.invoke('log:tab-switched', fromTab, toTab),
+    logWindowNavigation: (windowId, url, from) => ipcRenderer.invoke('log:window-navigation', windowId, url, from),
+    logFeatureUsed: (featureName, metadata) => ipcRenderer.invoke('log:feature-used', featureName, metadata),
+    
     // Smart export API
     getSmartExportData: () => ipcRenderer.invoke('get-smart-export-data'),
     generateSmartExport: (data) => ipcRenderer.invoke('generate-smart-export', data),

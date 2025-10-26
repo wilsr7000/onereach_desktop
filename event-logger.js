@@ -218,6 +218,179 @@ class EventLogger {
             timestamp: new Date().toISOString()
         });
     }
+    
+    // === Application Lifecycle Events ===
+    
+    logAppLaunch(metadata = {}) {
+        this.info('App Launched', {
+            event: 'app:launch',
+            version: app.getVersion(),
+            platform: process.platform,
+            arch: process.arch,
+            nodeVersion: process.version,
+            electronVersion: process.versions.electron,
+            ...metadata
+        });
+    }
+    
+    logAppReady() {
+        this.info('App Ready', {
+            event: 'app:ready',
+            uptime: process.uptime()
+        });
+    }
+    
+    logAppQuit(reason = 'user-initiated') {
+        this.info('App Quit', {
+            event: 'app:quit',
+            reason,
+            uptime: process.uptime()
+        });
+        this.flush(); // Ensure this is written
+    }
+    
+    // === Window Management Events ===
+    
+    logWindowCreated(windowType, windowId, metadata = {}) {
+        this.info('Window Created', {
+            event: 'window:created',
+            windowType,
+            windowId,
+            ...metadata
+        });
+    }
+    
+    logWindowClosed(windowType, windowId, metadata = {}) {
+        this.info('Window Closed', {
+            event: 'window:closed',
+            windowType,
+            windowId,
+            ...metadata
+        });
+    }
+    
+    logWindowFocused(windowType, windowId) {
+        this.debug('Window Focused', {
+            event: 'window:focused',
+            windowType,
+            windowId
+        });
+    }
+    
+    logWindowNavigation(windowId, url, from = null) {
+        this.info('Window Navigation', {
+            event: 'window:navigation',
+            windowId,
+            url,
+            from
+        });
+    }
+    
+    // === Tab Management Events ===
+    
+    logTabCreated(tabId, url, metadata = {}) {
+        this.info('Tab Created', {
+            event: 'tab:created',
+            tabId,
+            url,
+            ...metadata
+        });
+    }
+    
+    logTabClosed(tabId, url) {
+        this.info('Tab Closed', {
+            event: 'tab:closed',
+            tabId,
+            url
+        });
+    }
+    
+    logTabSwitched(fromTab, toTab) {
+        this.info('Tab Switched', {
+            event: 'tab:switched',
+            from: fromTab,
+            to: toTab
+        });
+    }
+    
+    // === Menu & Settings Events ===
+    
+    logMenuAction(menuItem, metadata = {}) {
+        this.info('Menu Action', {
+            event: 'menu:action',
+            menuItem,
+            ...metadata
+        });
+    }
+    
+    logSettingsChanged(setting, oldValue, newValue) {
+        this.info('Settings Changed', {
+            event: 'settings:changed',
+            setting,
+            oldValue: oldValue ? '***' : null, // Hide sensitive values
+            newValue: newValue ? '***' : null
+        });
+    }
+    
+    // === File & Clipboard Events ===
+    
+    logFileOperation(operation, filePath, metadata = {}) {
+        this.info('File Operation', {
+            event: 'file:operation',
+            operation,
+            filePath,
+            ...metadata
+        });
+    }
+    
+    logClipboardOperation(operation, itemType, metadata = {}) {
+        this.info('Clipboard Operation', {
+            event: 'clipboard:operation',
+            operation,
+            itemType,
+            ...metadata
+        });
+    }
+    
+    // === Network & API Events ===
+    
+    logNetworkRequest(method, url, statusCode, duration) {
+        this.info('Network Request', {
+            event: 'network:request',
+            method,
+            url,
+            statusCode,
+            duration
+        });
+    }
+    
+    logAPIError(endpoint, error, metadata = {}) {
+        this.error('API Error', {
+            event: 'api:error',
+            endpoint,
+            error: error.message || error,
+            ...metadata
+        });
+    }
+    
+    // === Module & Feature Events ===
+    
+    logModuleInstalled(moduleId, moduleName, version) {
+        this.info('Module Installed', {
+            event: 'module:installed',
+            moduleId,
+            moduleName,
+            version
+        });
+    }
+    
+    logFeatureUsed(featureName, metadata = {}) {
+        this.info('Feature Used', {
+            event: 'feature:used',
+            feature: featureName,
+            ...metadata
+        });
+    }
 
     flush() {
         if (this.logBuffer.length === 0 || !this.logStream) return;

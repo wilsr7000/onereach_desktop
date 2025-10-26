@@ -1,6 +1,8 @@
 const { BrowserWindow, shell, app, dialog, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const getLogger = require('./event-logger');
+let logger;
 
 // Main browser window reference - kept global to prevent garbage collection
 let mainWindow = null;
@@ -15,8 +17,18 @@ let authTokens = new Map();
  * @returns {BrowserWindow} The created main window
  */
 function createMainWindow(app) {
+  // Initialize logger if not already
+  if (!logger) {
+    logger = getLogger();
+  }
+  
   // Use the PNG icon for all platforms for consistency
   const iconPath = path.join(__dirname, 'assets/tray-icon.png');
+  
+  logger.logWindowCreated('main-window', 'main', {
+    action: 'creating',
+    icon: iconPath
+  });
   console.log(`Using icon path for main window: ${iconPath}`);
 
   // Create the browser window
@@ -371,7 +383,13 @@ function createMainWindow(app) {
 
   // Handle window closed event
   mainWindow.on('closed', () => {
+    logger.logWindowClosed('main-window', 'main');
     mainWindow = null;
+  });
+  
+  // Log window focus events
+  mainWindow.on('focus', () => {
+    logger.logWindowFocused('main-window', 'main');
   });
 
   // Add context menu handler for right-click "Paste to Black Hole"
@@ -865,6 +883,15 @@ function getMainWindow() {
  */
 function openGSXWindow(url, title, idwEnvironment) {
   console.log(`Opening GSX window for ${title}: ${url}`);
+  
+  if (!logger) {
+    logger = getLogger();
+  }
+  
+  logger.logWindowCreated('gsx-window', title, {
+    url,
+    environment: idwEnvironment
+  });
   
   // Extract environment from URL if not provided
   if (!idwEnvironment) {

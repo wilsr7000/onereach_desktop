@@ -399,10 +399,18 @@ function openURLInMainWindow(url) {
   browserWindow.openURLInMainWindow(url);
 }
 
+// Log app launch (before app is ready)
+app.on('will-finish-launching', () => {
+  console.log('[App] Will finish launching...');
+});
+
 // Function to create the main window and setup app
 app.whenReady().then(() => {
   // Re-initialize logger now that app is ready
   logger = getLogger();
+  
+  // Log app ready
+  logger.logAppReady();
   console.log('App is ready, re-initialized logger. Is stub?', logger._isStub);
   
   // Initialize AI log analyzer
@@ -451,13 +459,12 @@ app.whenReady().then(() => {
   // Set up module manager IPC handlers
   setupModuleManagerIPC();
 
-  // Log app startup
-  logger.info('Application starting', {
-    version: app.getVersion(),
-    platform: process.platform,
-    arch: process.arch,
-    nodeVersion: process.version,
-    electronVersion: process.versions.electron
+  // Log app startup with lifecycle event
+  logger.logAppLaunch({
+    startTime: new Date().toISOString(),
+    workingDirectory: process.cwd(),
+    execPath: app.getPath('exe'),
+    userDataPath: app.getPath('userData')
   });
   
   // Add test logs to verify logging works
@@ -477,14 +484,20 @@ app.whenReady().then(() => {
 
   // Create the main window
   createWindow();
-  logger.info('Main window created');
+  logger.logWindowCreated('main', 1, {
+    bounds: { width: 1400, height: 900 },
+    url: 'index.html'
+  });
   
   // Initialize clipboard manager after app is ready
   clipboardManager = new ClipboardManager();
   clipboardManager.registerShortcut();
   global.clipboardManager = clipboardManager;
   console.log('Clipboard manager initialized');
-  logger.info('Clipboard manager initialized');
+  logger.logFeatureUsed('clipboard-manager', {
+    status: 'initialized',
+    shortcutRegistered: true
+  });
   
   // Initialize module manager
   moduleManager = new ModuleManager();
@@ -492,12 +505,18 @@ app.whenReady().then(() => {
   // Make updateApplicationMenu globally available for module manager
   global.updateApplicationMenu = updateApplicationMenu;
   console.log('Module manager initialized');
-  logger.info('Module manager initialized');
+  logger.logFeatureUsed('module-manager', {
+    status: 'initialized',
+    modulesPath: moduleManager.modulesPath
+  });
   
   // Initialize settings manager
   const { getSettingsManager } = require('./settings-manager');
   global.settingsManager = getSettingsManager();
   console.log('Settings manager initialized');
+  
+  // Make logger globally available
+  global.logger = logger;
   
   // Initialize module API bridge
   const { getModuleAPIBridge } = require('./module-api-bridge');
@@ -747,6 +766,8 @@ app.whenReady().then(() => {
   // Add a 'before-quit' event handler to save tab state
   app.on('before-quit', () => {
     console.log('App is about to quit, saving tab state');
+    logger.logAppQuit('user-initiated');
+    
     const mainWindow = browserWindow.getMainWindow();
     if (mainWindow) {
       mainWindow.webContents.send('save-tabs-state');
@@ -770,9 +791,12 @@ app.on('window-all-closed', () => {
 
 // Clean up clipboard manager on quit
 app.on('will-quit', () => {
+  logger.info('App will quit - cleaning up resources');
+  
   if (clipboardManager) {
     clipboardManager.destroy();
     console.log('Clipboard manager cleaned up');
+    logger.info('Clipboard manager destroyed');
   }
   
   // Unregister only our tracked shortcuts
@@ -784,6 +808,14 @@ app.on('will-quit', () => {
     }
   });
   console.log('Global shortcuts unregistered');
+  logger.info('Global shortcuts unregistered', {
+    shortcutsCount: registeredShortcuts.length
+  });
+  
+  // Final flush of logs before quit
+  if (logger && logger.flush) {
+    logger.flush();
+  }
 });
 
 // Set up module manager IPC handlers
@@ -960,6 +992,14 @@ function setupIPC() {
       console.error('Settings manager not initialized');
       return false;
     }
+    
+    // Log settings change (without sensitive values)
+    logger.logSettingsChanged('multiple-settings', 'updated', 'updated');
+    logger.info('Settings saved', {
+      event: 'settings:saved',
+      settingsCount: Object.keys(settings).length
+    });
+    
     return settingsManager.update(settings);
   });
   
@@ -1006,6 +1046,37 @@ function setupIPC() {
       console.error('GSX sync-all failed:', error);
       return { success: false, error: error.message };
     }
+  });
+  
+  // Event logging IPC handlers
+  ipcMain.handle('log:event', async (event, eventType, eventData) => {
+    logger.logEvent(eventType, eventData);
+    return { success: true };
+  });
+  
+  ipcMain.handle('log:tab-created', async (event, tabId, url, metadata) => {
+    logger.logTabCreated(tabId, url, metadata);
+    return { success: true };
+  });
+  
+  ipcMain.handle('log:tab-closed', async (event, tabId, url) => {
+    logger.logTabClosed(tabId, url);
+    return { success: true };
+  });
+  
+  ipcMain.handle('log:tab-switched', async (event, fromTab, toTab) => {
+    logger.logTabSwitched(fromTab, toTab);
+    return { success: true };
+  });
+  
+  ipcMain.handle('log:window-navigation', async (event, windowId, url, from) => {
+    logger.logWindowNavigation(windowId, url, from);
+    return { success: true };
+  });
+  
+  ipcMain.handle('log:feature-used', async (event, featureName, metadata) => {
+    logger.logFeatureUsed(featureName, metadata);
+    return { success: true };
   });
   
   // GSX test connection handler with token from settings
@@ -1529,10 +1600,12 @@ function setupIPC() {
   // Handle user actions from the renderer
   ipcMain.on('user-action', (event, data) => {
     console.log('Received user action:', data);
+    logger.logUserAction(data.action || 'unknown', data);
     
     // Handle settings window opening
     if (data && data.action === 'open-settings') {
       console.log('Opening settings window from user action');
+      logger.logMenuAction('open-settings');
       openSettingsWindow();
       return;
     }

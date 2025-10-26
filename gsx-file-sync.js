@@ -63,17 +63,20 @@ class GSXFileSync {
       const filesApiUrl = filesApiUrls[environment] || filesApiUrls.production;
       
       console.log(`[GSX Sync] Initializing with environment: ${environment}`);
-      console.log(`[GSX Sync] Files API URL: ${filesApiUrl}`);
+      console.log(`[GSX Sync] Discovery URL: ${discoveryUrl}`);
+      console.log(`[GSX Sync] Token length: ${token.trim().length}`);
       
-      // Use direct Files API URL (more reliable than service discovery)
-      console.log('[GSX Sync] Initializing SDK with direct Files API URL...');
+      // MUST use service discovery - direct URLs hit CloudFront which needs signed requests
+      // Service discovery returns the correct pre-signed endpoint
+      console.log('[GSX Sync] Using service discovery to get correct Files API endpoint...');
+      
       this.client = new FilesSyncNode({
         token: token.trim(),
-        filesApiUrl: filesApiUrl
+        discoveryUrl: discoveryUrl
       });
       
       this.isInitialized = true;
-      console.log('[GSX Sync] ✓ Client initialized and ready for sync operations');
+      console.log('[GSX Sync] ✓ Client initialized via service discovery');
       
       return true;
     } catch (error) {
