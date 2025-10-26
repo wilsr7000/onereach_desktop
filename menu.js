@@ -884,26 +884,44 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
           notification.show();
           
           try {
+            console.log('[Menu] Calling syncCompleteBackup...');
             const result = await gsxFileSync.syncCompleteBackup();
+            console.log('[Menu] Backup result:', JSON.stringify(result, null, 2));
+            
+            // Check if result has the expected structure
+            if (!result || !result.summary) {
+              console.error('[Menu] Result missing summary:', result);
+              throw new Error('Backup completed but result format is unexpected');
+            }
             
             // Build detailed report
-            let reportDetails = `✅ Backup completed in ${result.summary.durationFormatted}\n\n`;
+            let reportDetails = `✅ Backup completed in ${result.summary.durationFormatted || '0s'}\n\n`;
             reportDetails += `📊 Summary:\n`;
-            reportDetails += `• Total Files: ${result.summary.totalFiles}\n`;
-            reportDetails += `• Total Size: ${result.summary.totalSizeFormatted}\n`;
-            reportDetails += `• Environment: ${result.summary.environment}\n\n`;
+            reportDetails += `• Total Files: ${result.summary.totalFiles || 0}\n`;
+            reportDetails += `• Total Size: ${result.summary.totalSizeFormatted || '0 Bytes'}\n`;
+            reportDetails += `• Environment: ${result.summary.environment || 'unknown'}\n`;
+            reportDetails += `• Timestamp: ${result.timestamp || new Date().toISOString()}\n\n`;
             reportDetails += `📁 What was backed up:\n\n`;
             
-            result.results.forEach(r => {
-              reportDetails += `${r.name}:\n`;
-              reportDetails += `  • Files: ${r.fileCount || 0}\n`;
-              reportDetails += `  • Size: ${r.totalSizeFormatted || '0 Bytes'}\n`;
-              reportDetails += `  • Duration: ${r.durationFormatted || '0s'}\n`;
-              reportDetails += `  • Location: GSX Files/${r.remotePath}\n\n`;
-            });
+            if (result.results && result.results.length > 0) {
+              result.results.forEach(r => {
+                reportDetails += `${r.name || 'Unknown'}:\n`;
+                reportDetails += `  • Files: ${r.fileCount || 0}\n`;
+                reportDetails += `  • Size: ${r.totalSizeFormatted || '0 Bytes'}\n`;
+                reportDetails += `  • Duration: ${r.durationFormatted || '0s'}\n`;
+                reportDetails += `  • Location: GSX Files/${r.remotePath || 'unknown'}\n\n`;
+              });
+            } else {
+              reportDetails += `(Details not available)\n\n`;
+            }
             
             reportDetails += `🌐 Access your files at:\n`;
-            reportDetails += `https://studio.${result.summary.environment === 'production' ? '' : result.summary.environment + '.'}onereach.ai/files`;
+            const envPrefix = result.summary.environment && result.summary.environment !== 'production' 
+              ? result.summary.environment + '.' 
+              : '';
+            reportDetails += `https://studio.${envPrefix}onereach.ai/files`;
+            
+            console.log('[Menu] Showing success dialog...');
             
             dialog.showMessageBox({
               type: 'info',
@@ -913,14 +931,20 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
               buttons: ['OK']
             });
             
+            console.log('[Menu] Dialog shown, showing notification...');
+            
             // Show success notification
             const successNotification = new Notification({
               title: '✅ Backup Complete',
-              body: `Backed up ${result.summary.totalFiles} files (${result.summary.totalSizeFormatted})`
+              body: `Backed up ${result.summary.totalFiles || 0} files (${result.summary.totalSizeFormatted || '0 Bytes'})`
             });
             successNotification.show();
             
+            console.log('[Menu] Notification shown');
+            
           } catch (error) {
+            console.error('[Menu] Backup error:', error);
+            console.error('[Menu] Error details:', error.stack);
             dialog.showErrorBox('Backup Failed', error.message);
             
             // Show error notification
