@@ -31,11 +31,23 @@ class GSXFileSync {
    */
   async initialize() {
     try {
-      const token = this.settingsManager.get('gsxToken');
+      let token = this.settingsManager.get('gsxToken');
       const environment = this.settingsManager.get('gsxEnvironment') || 'production';
       
-      console.log('[GSX Sync] Checking token...', token ? `Token exists (length: ${token.length})` : 'NO TOKEN FOUND');
-      console.log('[GSX Sync] Environment:', environment);
+      console.log('[GSX Sync] Raw token from settings:', typeof token, token ? `(length: ${token.length})` : 'NULL/UNDEFINED');
+      console.log('[GSX Sync] Environment from settings:', environment);
+      
+      // Handle if token is an object instead of string (from encryption)
+      if (token && typeof token === 'object') {
+        console.log('[GSX Sync] Token is an object, extracting string value...');
+        if (token.data) {
+          console.log('[GSX Sync] Found encrypted token data, this should have been decrypted');
+          throw new Error('Token is still encrypted. Settings manager issue.');
+        }
+        token = String(token);
+      }
+      
+      console.log('[GSX Sync] Processed token:', token ? `Length: ${token.length}` : 'NO TOKEN FOUND');
       
       if (!token || token.trim() === '') {
         const errorMsg = 'GSX token not configured. Please add your token in Settings (GSX File Sync Configuration section).';

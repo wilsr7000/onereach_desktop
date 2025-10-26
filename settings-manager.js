@@ -69,7 +69,7 @@ class SettingsManager {
       
       // Encrypt sensitive fields
       for (const [key, value] of Object.entries(this.settings)) {
-        if ((key.includes('apiKey') || key.includes('secret') || key.includes('Token')) && value) {
+        if ((key.includes('apiKey') || key.includes('secret') || key.includes('Token')) && value && typeof value === 'string') {
           // Encrypt sensitive data
           if (safeStorage.isEncryptionAvailable()) {
             const encrypted = safeStorage.encryptString(value);
