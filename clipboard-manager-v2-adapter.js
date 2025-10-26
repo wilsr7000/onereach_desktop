@@ -3248,6 +3248,92 @@ class ClipboardManagerV2 {
     console.log(`Registered global shortcut: ${shortcut}`);
   }
   
+  // Create clipboard viewer window
+  createClipboardWindow() {
+    if (!BrowserWindow) {
+      console.error('BrowserWindow not available');
+      return;
+    }
+    
+    // If window already exists, focus it
+    if (this.clipboardWindow && !this.clipboardWindow.isDestroyed()) {
+      this.clipboardWindow.focus();
+      return;
+    }
+    
+    console.log('Creating clipboard viewer window');
+    
+    this.clipboardWindow = new BrowserWindow({
+      width: 900,
+      height: 700,
+      webPreferences: {
+        nodeIntegration: true,
+        contextIsolation: false,
+        enableRemoteModule: true
+      },
+      title: 'Clipboard Manager'
+    });
+    
+    this.clipboardWindow.loadFile('clipboard-viewer.html');
+    
+    this.clipboardWindow.on('closed', () => {
+      this.clipboardWindow = null;
+    });
+  }
+  
+  // Create black hole widget window
+  createBlackHoleWindow(position = null, expandedMode = false) {
+    if (!BrowserWindow) {
+      console.error('BrowserWindow not available');
+      return;
+    }
+    
+    // If window already exists, focus it
+    if (this.blackHoleWindow && !this.blackHoleWindow.isDestroyed()) {
+      this.blackHoleWindow.focus();
+      return;
+    }
+    
+    console.log('Creating black hole widget window', expandedMode ? '(expanded mode)' : '');
+    
+    // Get screen dimensions
+    const { screen } = require('electron');
+    const primaryDisplay = screen.getPrimaryDisplay();
+    const { width, height } = primaryDisplay.workAreaSize;
+    
+    // Default position: bottom-right corner
+    const defaultX = width - 320;
+    const defaultY = height - 180;
+    
+    this.blackHoleWindow = new BrowserWindow({
+      width: 300,
+      height: expandedMode ? 400 : 150,
+      x: position ? position.x : defaultX,
+      y: position ? position.y : defaultY,
+      frame: false,
+      alwaysOnTop: true,
+      transparent: true,
+      resizable: false,
+      webPreferences: {
+        nodeIntegration: true,
+        contextIsolation: false
+      }
+    });
+    
+    this.blackHoleWindow.loadFile('black-hole.html');
+    
+    // Pass expanded mode flag
+    this.blackHoleWindow.webContents.on('did-finish-load', () => {
+      if (expandedMode) {
+        this.blackHoleWindow.webContents.send('set-expanded-mode', true);
+      }
+    });
+    
+    this.blackHoleWindow.on('closed', () => {
+      this.blackHoleWindow = null;
+    });
+  }
+  
   startWebsiteMonitoring() {
     // Check websites every 30 minutes
     this.websiteCheckInterval = setInterval(async () => {
