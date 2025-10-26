@@ -706,16 +706,26 @@
         async function testGSXConnection() {
             const token = document.getElementById('gsxToken').value;
             const environment = document.getElementById('gsxEnvironment').value;
+            const accountId = document.getElementById('gsxAccountId').value;
             
             if (!token) {
                 showStatus('Please enter a GSX token first', 'error');
                 return;
             }
             
+            console.log('Testing connection with:');
+            console.log('- Environment:', environment);
+            console.log('- Token length:', token.length);
+            console.log('- Token starts:', token.substring(0, 20));
+            console.log('- Token ends:', token.substring(token.length - 20));
+            console.log('- Account ID:', accountId || 'not provided');
+            
             showStatus('Testing GSX connection...', 'success');
             
             try {
-                const result = await window.api.testGSXConnection({ token, environment });
+                const result = await window.api.testGSXConnection({ token, environment, accountId });
+                console.log('Test result:', result);
+                
                 if (result.success) {
                     showStatus('GSX connection successful!', 'success');
                     document.getElementById('gsxTokenStatus').textContent = '(Valid)';

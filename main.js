@@ -1082,24 +1082,44 @@ function setupIPC() {
   // GSX test connection handler with token from settings
   ipcMain.handle('gsx:test-connection', async (event, config) => {
     try {
+      console.log('[Main] Testing GSX connection with config:', {
+        hasToken: !!config.token,
+        tokenLength: config.token ? config.token.length : 0,
+        environment: config.environment,
+        hasAccountId: !!config.accountId
+      });
+      
       const settingsManager = global.settingsManager;
       if (config.token) {
         // Temporarily save the token to test it
+        console.log('[Main] Saving token to settings (length:', config.token.length, ')');
         settingsManager.set('gsxToken', config.token);
         settingsManager.set('gsxEnvironment', config.environment || 'production');
+        
+        if (config.accountId) {
+          console.log('[Main] Saving account ID:', config.accountId);
+          settingsManager.set('gsxAccountId', config.accountId);
+        }
       }
+      
+      // Verify token was saved
+      const savedToken = settingsManager.get('gsxToken');
+      console.log('[Main] Token after save - Type:', typeof savedToken, 'Length:', savedToken ? savedToken.length : 0);
       
       const gsxFileSync = getGSXFileSync();
       const result = await gsxFileSync.testConnection();
       
+      console.log('[Main] Test connection result:', result);
+      
       if (!result.success && config.token) {
         // If test failed, clear the temporary token
+        console.log('[Main] Test failed, clearing token');
         settingsManager.set('gsxToken', '');
       }
       
       return result;
     } catch (error) {
-      console.error('GSX connection test failed:', error);
+      console.error('[Main] GSX connection test failed:', error);
       return { success: false, error: error.message };
     }
   });
