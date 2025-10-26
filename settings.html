@@ -365,6 +365,16 @@
                 </div>
             </div>
             
+            <div class="form-group">
+                <label for="gsxAccountId">
+                    GSX Account ID (Optional)
+                </label>
+                <input type="text" id="gsxAccountId" placeholder="e.g. 05bd3c92-5d3c-4dc5-a95d-0c584695cea4">
+                <div class="info-text">
+                    Your account ID from GSX (optional - found in user preferences or URL)
+                </div>
+            </div>
+            
             <div class="divider"></div>
             
             <h3 style="font-size: 16px; margin-bottom: 16px;">Auto-Sync Settings</h3>
@@ -454,6 +464,7 @@
                 // GSX Settings
                 document.getElementById('gsxToken').value = settings.gsxToken || '';
                 document.getElementById('gsxEnvironment').value = settings.gsxEnvironment || 'production';
+                document.getElementById('gsxAccountId').value = settings.gsxAccountId || '';
                 document.getElementById('gsxAutoSync').checked = settings.gsxAutoSync === true;
                 document.getElementById('gsxSyncInterval').value = settings.gsxSyncInterval || 'daily';
                 
@@ -505,6 +516,7 @@
                 autoGenerateScreenshotMetadata: document.getElementById('autoGenerateScreenshotMetadata').checked,
                 gsxToken: document.getElementById('gsxToken').value,
                 gsxEnvironment: document.getElementById('gsxEnvironment').value,
+                gsxAccountId: document.getElementById('gsxAccountId').value,
                 gsxAutoSync: document.getElementById('gsxAutoSync').checked,
                 gsxSyncInterval: document.getElementById('gsxSyncInterval').value
             };

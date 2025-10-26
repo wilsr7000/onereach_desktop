@@ -56,6 +56,7 @@ class SettingsManager {
       claude4ThinkingLevel: 'default',
       gsxToken: '',
       gsxEnvironment: 'production',
+      gsxAccountId: '',
       gsxAutoSync: false,
       gsxSyncInterval: 'daily',
       gsxSyncPaths: null

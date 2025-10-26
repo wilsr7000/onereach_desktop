@@ -64,19 +64,49 @@ class GSXFileSync {
       
       console.log(`[GSX Sync] Initializing with environment: ${environment}`);
       console.log(`[GSX Sync] Discovery URL: ${discoveryUrl}`);
+      console.log(`[GSX Sync] Token (first 10 chars): ${token.trim().substring(0, 10)}...`);
       console.log(`[GSX Sync] Token length: ${token.trim().length}`);
       
       // MUST use service discovery - direct URLs hit CloudFront which needs signed requests
       // Service discovery returns the correct pre-signed endpoint
-      console.log('[GSX Sync] Using service discovery to get correct Files API endpoint...');
+      console.log('[GSX Sync] Initializing SDK with service discovery...');
+      console.log('[GSX Sync] This may take a moment as it queries the discovery service...');
       
-      this.client = new FilesSyncNode({
-        token: token.trim(),
-        discoveryUrl: discoveryUrl
-      });
+      // Get account ID if available (might be needed for SDK)
+      const accountId = this.settingsManager.get('gsxAccountId');
+      if (accountId) {
+        console.log(`[GSX Sync] Using account ID: ${accountId}`);
+      }
       
-      this.isInitialized = true;
-      console.log('[GSX Sync] ✓ Client initialized via service discovery');
+      try {
+        const sdkOptions = {
+          token: token.trim(),
+          discoveryUrl: discoveryUrl
+        };
+        
+        // Add accountId if available
+        if (accountId) {
+          sdkOptions.accountId = accountId;
+        }
+        
+        console.log('[GSX Sync] SDK options:', {
+          ...sdkOptions,
+          token: token.trim().substring(0, 10) + '...'
+        });
+        
+        this.client = new FilesSyncNode(sdkOptions);
+        
+        console.log('[GSX Sync] ✓ SDK client object created');
+        
+        this.isInitialized = true;
+        console.log('[GSX Sync] ✓ Client initialized successfully');
+      } catch (sdkError) {
+        console.error('[GSX Sync] SDK initialization failed:', sdkError);
+        console.error('[GSX Sync] SDK error type:', sdkError.constructor.name);
+        console.error('[GSX Sync] SDK error message:', sdkError.message);
+        console.error('[GSX Sync] SDK error stack:', sdkError.stack);
+        throw new Error(`SDK initialization failed: ${sdkError.message}`);
+      }
       
       return true;
     } catch (error) {
