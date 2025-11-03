@@ -1,5 +1,6 @@
 # Onereach.ai
 
+A cross-platform desktop application built with Electron for Mac and Windows.
 
 ## Features
 
