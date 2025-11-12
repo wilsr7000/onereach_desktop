@@ -12,6 +12,8 @@ class EventLogger {
         this.maxLogSize = 10 * 1024 * 1024; // 10MB per file
         this.maxLogFiles = 5; // Keep last 5 log files
         this.logLevel = 'info'; // debug, info, warn, error
+        this.currentLogDate = null; // Track which date the current log file is for
+        this.dailyRotationInterval = null; // Interval to check for daily rotation
         
         this.levels = {
             debug: 0,
@@ -35,6 +37,9 @@ class EventLogger {
         // Set up periodic flush
         this.flushInterval = setInterval(() => this.flush(), 5000); // Flush every 5 seconds
         
+        // Set up daily rotation check (every hour to catch date changes)
+        this.dailyRotationInterval = setInterval(() => this.checkDailyRotation(), 60 * 60 * 1000);
+        
         // Capture unhandled errors
         process.on('uncaughtException', (error) => {
             this.error('Uncaught Exception', { error: error.message, stack: error.stack });
@@ -54,9 +59,16 @@ class EventLogger {
             this.logStream.end();
         }
         
-        // Create new log file with timestamp
-        const timestamp = new Date().toISOString().replace(/:/g, '-').split('.')[0];
-        this.currentLogFile = path.join(this.logDir, `onereach-${timestamp}.log`);
+        // Get current date for filename and tracking
+        const now = new Date();
+        const dateStr = now.toISOString().split('T')[0]; // YYYY-MM-DD
+        const timeStr = now.toISOString().replace(/:/g, '-').split('.')[0].replace('T', '_');
+        
+        // Update current log date
+        this.currentLogDate = dateStr;
+        
+        // Create new log file with date and timestamp
+        this.currentLogFile = path.join(this.logDir, `onereach-${timeStr}.log`);
         
         // Create write stream
         this.logStream = fs.createWriteStream(this.currentLogFile, { flags: 'a' });
@@ -66,6 +78,7 @@ class EventLogger {
         
         this.info('Logger initialized', { 
             logFile: this.currentLogFile,
+            logDate: this.currentLogDate,
             pid: process.pid,
             platform: process.platform,
             appVersion: app.getVersion()
@@ -97,6 +110,16 @@ class EventLogger {
             if (global.originalConsole) {
                 global.originalConsole.error('Error cleaning up logs:', error);
             }
+        }
+    }
+
+    checkDailyRotation() {
+        // Check if the date has changed since the current log file was created
+        const currentDate = new Date().toISOString().split('T')[0];
+        
+        if (this.currentLogDate && currentDate !== this.currentLogDate) {
+            console.log(`[Logger] Date changed from ${this.currentLogDate} to ${currentDate}, rotating log file`);
+            this.rotateLogFile();
         }
     }
 
@@ -156,10 +179,15 @@ class EventLogger {
             global.originalConsole.log(`[${level.toUpperCase()}]`, message, data || '');
         }
         
-        // Check if we need to rotate log file
+        // Check if we need to rotate log file (size-based or date-based)
         if (this.currentLogFile && fs.existsSync(this.currentLogFile)) {
             const stats = fs.statSync(this.currentLogFile);
-            if (stats.size > this.maxLogSize) {
+            const currentDate = new Date().toISOString().split('T')[0];
+            
+            // Rotate if file is too large OR if date has changed
+            if (stats.size > this.maxLogSize || (this.currentLogDate && currentDate !== this.currentLogDate)) {
+                const reason = stats.size > this.maxLogSize ? 'size limit reached' : 'new day started';
+                console.log(`[Logger] Rotating log file (${reason})`);
                 this.rotateLogFile();
             }
         }

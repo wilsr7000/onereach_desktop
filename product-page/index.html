@@ -218,31 +218,94 @@
             z-index: 1;
         }
         
-        /* Add play button overlay that fades out */
-        .hero-video-showcase::after {
-            content: '▶';
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 80px;
-            height: 80px;
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 24px;
-            color: white;
-            opacity: 0;
-            transition: opacity 0.3s ease;
+        /* Removed play button overlay - not needed */
+        
+        /* Prevent play button on logo video */
+        #logo-video {
             pointer-events: none;
-            z-index: 2;
         }
         
-        .hero-video-showcase:hover::after {
-            opacity: 0.8;
+        /* Hide ALL webkit video controls */
+        #logo-video::-webkit-media-controls,
+        #logo-video::-webkit-media-controls-enclosure,
+        #logo-video::-webkit-media-controls-panel,
+        #logo-video::-webkit-media-controls-play-button,
+        #logo-video::-webkit-media-controls-start-playback-button,
+        #logo-video::-webkit-media-controls-overlay-play-button,
+        #logo-video::-webkit-media-controls-overlay-enclosure {
+            display: none !important;
+            -webkit-appearance: none !important;
+            opacity: 0 !important;
+        }
+        
+        /* Hide Mozilla video controls */
+        #logo-video::-moz-media-controls,
+        #logo-video::-moz-media-controls-play-button {
+            display: none !important;
+            opacity: 0 !important;
+        }
+        
+        /* Ensure no hover effects on logo video container */
+        #logo-video:hover {
+            cursor: default;
+        }
+        
+        /* Prevent any overlay on logo video container */
+        #logo-video-container::after,
+        #logo-video-container::before,
+        #logo-video::after,
+        #logo-video::before {
+            display: none !important;
+            content: none !important;
+            opacity: 0 !important;
+        }
+        
+        #logo-video-container:hover::after,
+        #logo-video-container:hover::before,
+        #logo-video:hover::after,
+        #logo-video:hover::before {
+            display: none !important;
+            content: none !important;
+            opacity: 0 !important;
+        }
+        
+        /* Make sure logo video container has no inherited styles */
+        #logo-video-container {
+            background: transparent !important;
+        }
+        
+        #logo-video-container * {
+            pointer-events: none !important;
+        }
+        
+        /* Nuclear option - block all pseudo elements in hero section on videos */
+        .hero video::after,
+        .hero video::before,
+        .hero div:has(video)::after,
+        .hero div:has(video)::before {
+            display: none !important;
+            content: none !important;
+        }
+        
+        .hero video:hover::after,
+        .hero video:hover::before,
+        .hero div:has(video):hover::after,
+        .hero div:has(video):hover::before {
+            display: none !important;
+            content: none !important;
+        }
+        
+        /* Ensure logo video wrapper doesn't inherit any video styles */
+        #logo-video-container.hero-video-showcase::after,
+        #logo-video-container.hero-video-showcase::before {
+            display: none !important;
+            content: none !important;
+        }
+        
+        /* Override any universal video styling */
+        section:first-of-type video::after,
+        section:first-of-type video::before {
+            display: none !important;
         }
         
         /* Trust Section - Redesigned */
@@ -1359,6 +1422,7 @@
             
             .comparison-visual {
                 gap: 30px;
+                flex-direction: column;
             }
             
             .comparison-metric {
@@ -1409,6 +1473,230 @@
             .section-content > div[style*="grid-template-columns: repeat(3, 1fr)"] {
                 grid-template-columns: 1fr !important;
             }
+            
+            /* Hero Product Expert - Mobile */
+            .hero-content > div {
+                padding: 80px 20px 20px !important;
+            }
+            
+            /* Capabilities Grid - Mobile */
+            div[style*="minmax(280px"] {
+                grid-template-columns: 1fr !important;
+            }
+            
+            /* Security Grid - Mobile */
+            div[style*="grid-template-columns: repeat(2, 1fr)"] {
+                grid-template-columns: 1fr !important;
+            }
+            
+            /* Total Experience Formula - Mobile */
+            div[style*="gap: 28px"][style*="flex-wrap: wrap"] > div {
+                margin-bottom: 16px;
+            }
+            
+            /* Mobile padding adjustments */
+            .section {
+                padding: 80px 0 !important;
+            }
+            
+            .section-content {
+                padding: 0 20px !important;
+            }
+            
+            /* Header mobile */
+            .header {
+                padding: 16px 0 !important;
+            }
+            
+            .header-content {
+                padding: 0 20px !important;
+            }
+            
+            /* Reduce hero video on mobile */
+            #logo-video {
+                height: 35vh !important;
+                max-height: 350px !important;
+            }
+            
+            /* Hero Team AI text - mobile */
+            div[style*="Introducing Your Team AI"] p:first-child {
+                font-size: 14px !important;
+            }
+            
+            div[style*="Introducing Your Team AI"] p:last-child {
+                font-size: 18px !important;
+            }
+            
+            /* PX² Formula - Mobile */
+            div[style*="PRODUCT EXPERTISE"] {
+                font-size: 11px !important;
+            }
+            
+            div[style*="PX"] sup {
+                font-size: 20px !important;
+            }
+            
+            /* Total Experience boxes - Mobile */
+            div[style*="width: 110px; height: 110px"] {
+                width: 90px !important;
+                height: 90px !important;
+            }
+            
+            div[style*="width: 110px; height: 110px"] p {
+                font-size: 28px !important;
+            }
+            
+            /* Comparison circles - Mobile */
+            div[style*="width: 100px; height: 100px"] {
+                width: 90px !important;
+                height: 90px !important;
+            }
+            
+            /* Comparison visual - stack vertically */
+            .comparison-vs {
+                transform: rotate(90deg);
+                margin: 20px 0 !important;
+            }
+            
+            /* Mobile font size adjustments for readability */
+            p[style*="font-size: 28px"] {
+                font-size: 22px !important;
+            }
+            
+            p[style*="font-size: 26px"] {
+                font-size: 20px !important;
+            }
+            
+            p[style*="font-size: 24px"] {
+                font-size: 20px !important;
+            }
+            
+            /* Security section mobile padding */
+            div[style*="padding: 60px 40px"] {
+                padding: 40px 20px !important;
+            }
+            
+            div[style*="padding: 48px 32px"] {
+                padding: 32px 20px !important;
+            }
+            
+            /* Timeline 4-column to single column on mobile */
+            div[style*="grid-template-columns: repeat(4, 1fr)"] {
+                grid-template-columns: 1fr !important;
+            }
+            
+            /* Capabilities grid - center text on mobile */
+            .capabilities-grid-wrapper {
+                text-align: center !important;
+            }
+            
+            .capabilities-grid-wrapper div[style*="display: flex"] {
+                justify-content: center;
+                text-align: center;
+            }
+        }
+        
+        /* Tablet breakpoint */
+        @media (max-width: 1024px) and (min-width: 769px) {
+            /* 4-column timeline becomes 2 columns on tablet */
+            div[style*="grid-template-columns: repeat(4, 1fr)"] {
+                grid-template-columns: repeat(2, 1fr) !important;
+            }
+        }
+        
+        /* Floating animation */
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-20px); }
+        }
+        
+        /* Demo Modal Styles */
+        .demo-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10000;
+            animation: fadeIn 0.3s ease;
+        }
+        
+        .demo-modal.active {
+            display: block;
+        }
+        
+        .demo-modal-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(10px);
+        }
+        
+        .demo-modal-content {
+            position: relative;
+            max-width: 900px;
+            margin: 60px auto;
+            background: linear-gradient(135deg, rgba(20, 20, 20, 0.98) 0%, rgba(10, 10, 10, 0.98) 100%);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 24px;
+            padding: 60px;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            animation: slideUp 0.4s ease;
+        }
+        
+        .demo-modal-close {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 40px;
+            height: 40px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 50%;
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 28px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+            line-height: 1;
+            padding: 0;
+        }
+        
+        .demo-modal-close:hover {
+            background: rgba(255, 255, 255, 0.1);
+            transform: rotate(90deg);
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        @keyframes slideUp {
+            from { 
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .demo-modal-content {
+                margin: 20px;
+                padding: 40px 24px;
+                max-height: 95vh;
+            }
         }
     </style>
 </head>
@@ -1443,17 +1731,145 @@
         </div>
     </header>
     
-    <!-- Hero -->
-    <section class="hero">
-        <div class="hero-content">
-            <h1>Your Digital Workforce,<br>One Interface.</h1>
-            <p class="subtitle" style="margin-bottom: 3rem;">Deploy specialized AI workers that understand your business.<br>Manage them like a team.</p>
+    <!-- Hero - Product Expert -->
+    <section class="hero" style="min-height: 100vh; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; background: #000000;">
+        <div class="hero-content" style="position: relative; z-index: 1;">
+            <div style="display: flex; flex-direction: column; align-items: center; max-width: 1400px; margin: 0 auto; min-height: 100vh; padding: 100px 60px 40px;">
+                <!-- Main Content Container -->
+                <div style="position: relative; text-align: center;">
+                    
+                    <!-- Logo Container with enhanced styling -->
+                    <div id="logo-video-container" style="position: relative; margin-bottom: 28px; display: inline-block;">
+                        <!-- Main Logo Video -->
+                        <video id="logo-video" autoplay muted loop playsinline disablepictureinpicture controlslist="nodownload nofullscreen noremoteplayback" style="position: relative; height: 40vh; max-height: 450px; width: auto; max-width: 90vw; opacity: 0.98; display: block;">
+                            <source src="assets/logo-video.mp4" type="video/mp4">
+                            <!-- Fallback image if video doesn't load -->
+                            <img src="assets/ProductExpertLogog-dark.png" alt="Product Expert" style="height: 40vh; max-height: 450px; width: auto; max-width: 90vw;">
+                        </video>
+                        <!-- Transparent overlay to block browser controls -->
+                        <div style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 10; pointer-events: none;"></div>
+                    </div>
+                    
+                    <script>
+                        // Slow down the logo video and ensure it plays
+                        document.addEventListener('DOMContentLoaded', function() {
+                            const logoVideo = document.getElementById('logo-video');
+                            if (logoVideo) {
+                                logoVideo.playbackRate = 0.3; // Smooth, elegant pace
+                                
+                                // Force play and handle any autoplay blocks
+                                const playPromise = logoVideo.play();
+                                if (playPromise !== undefined) {
+                                    playPromise.catch(error => {
+                                        // Autoplay was prevented, play on any user interaction
+                                        document.addEventListener('click', function() {
+                                            logoVideo.play();
+                                        }, { once: true });
+                                    });
+                                }
+                                
+                                // Remove controls attribute if browser adds it
+                                logoVideo.removeAttribute('controls');
+                            }
+                        });
+                    </script>
+                    
+                    <!-- Elegant Divider with decorative elements -->
+                    <div style="display: flex; align-items: center; justify-content: center; gap: 16px; margin-bottom: 24px;">
+                        <div style="width: 6px; height: 6px; border-radius: 50%; background: rgba(255, 255, 255, 0.3); box-shadow: 0 0 15px rgba(255, 255, 255, 0.3);"></div>
+                        <div style="width: 280px; height: 1px; background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.4), transparent);"></div>
+                        <div style="width: 6px; height: 6px; border-radius: 50%; background: rgba(255, 255, 255, 0.3); box-shadow: 0 0 15px rgba(255, 255, 255, 0.3);"></div>
+                    </div>
+                    
+                    <!-- Team AI Introduction -->
+                    <div style="text-align: center; margin-bottom: 32px;">
+                        <p style="font-size: 16px; color: rgba(255, 255, 255, 0.5); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 10px; font-weight: 500;">Introducing Your Team AI</p>
+                        <p style="font-size: 22px; color: rgba(255, 255, 255, 0.85); letter-spacing: -0.01em; margin: 0; font-weight: 300; line-height: 1.5; max-width: 700px; margin-left: auto; margin-right: auto;">
+                            A dedicated AI teammate that knows your product inside and out
+                        </p>
+                    </div>
+                    
+                    <!-- Concept Message -->
+                    <div style="max-width: 1000px; margin: 0 auto;">
+                        <!-- Main concept -->
+                        <p style="font-size: 28px; color: rgba(255, 255, 255, 0.75); letter-spacing: -0.02em; margin: 0 0 12px 0; font-weight: 300; line-height: 1.5;">
+                            Where <span style="color: rgba(255, 255, 255, 0.95); font-weight: 400;">Product Expertise</span> meets<br>
+                            <span style="color: rgba(255, 255, 255, 0.95); font-weight: 400;">Product Experience</span>
+                        </p>
+                        
+                        <!-- Agentic AI line -->
+                        <p style="font-size: 18px; color: rgba(255, 255, 255, 0.5); letter-spacing: 0.02em; margin: 0 0 36px 0; font-weight: 300;">
+                            through Agentic AI
+                        </p>
+                        
+                        <!-- PX² Formula - Simplified -->
+                        <div style="display: flex; align-items: center; justify-content: center; gap: 14px; margin-bottom: 36px; flex-wrap: wrap;">
+                            <div style="font-size: 14px; color: rgba(255, 255, 255, 0.4); font-weight: 300; letter-spacing: 0.03em;">PRODUCT EXPERTISE</div>
+                            <div style="font-size: 18px; color: rgba(255, 255, 255, 0.3);">+</div>
+                            <div style="font-size: 14px; color: rgba(255, 255, 255, 0.4); font-weight: 300; letter-spacing: 0.03em;">PRODUCT EXPERIENCE</div>
+                            <div style="font-size: 18px; color: rgba(255, 255, 255, 0.3);">=</div>
+                            <div style="font-size: 48px; color: rgba(255, 255, 255, 0.95); font-weight: 200; letter-spacing: -0.03em;">
+                                PX<sup style="font-size: 28px; vertical-align: super; font-weight: 300;">2</sup>
+                            </div>
+                        </div>
+                        
+                        <!-- Supporting text -->
+                        <p style="font-size: 16px; color: rgba(255, 255, 255, 0.5); letter-spacing: 0.01em; margin: 0; font-weight: 300; line-height: 1.6;">
+                            Intelligent product knowledge that powers exceptional experiences.<br>
+                            Everywhere your team and customers need it.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+    
+    <!-- Digital Workforce Section -->
+    <section style="padding: 120px 0; position: relative; background: radial-gradient(ellipse at top, rgba(255, 255, 255, 0.02) 0%, transparent 50%);">
+        <div style="max-width: 1200px; margin: 0 auto; padding: 0 40px; text-align: center;">
+            <h1 style="font-size: clamp(40px, 5vw, 64px); font-weight: 600; letter-spacing: -0.03em; line-height: 1.1; margin-bottom: 24px; background: linear-gradient(180deg, var(--text-primary) 0%, rgba(255, 255, 255, 0.8) 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+                Your Digital Workforce,<br>One Interface.
+            </h1>
+            <p style="font-size: clamp(18px, 2.5vw, 22px); font-weight: 400; color: var(--text-secondary); line-height: 1.5; margin-bottom: 32px; max-width: 700px; margin-left: auto; margin-right: auto;">
+                Beyond questions and answers. Deploy AI workers that <em>actually do the work</em>.
+            </p>
             
-            <!-- Primary CTA -->
-            <div style="display: flex; gap: 16px; justify-content: center; flex-wrap: wrap;">
-                <a href="#demo" class="download-button" style="background: var(--button-dark); border: 1px solid rgba(255, 255, 255, 0.1); padding: 16px 32px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3); position: relative; overflow: hidden;">
-                    <span style="position: relative; z-index: 1;">See a Demo</span>
-                </a>
+            <!-- Capabilities Grid -->
+            <div class="capabilities-grid-wrapper" style="max-width: 900px; margin: 0 auto 80px; text-align: left;">
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px 40px;">
+                    <div style="display: flex; align-items: start; gap: 12px;">
+                        <div style="width: 6px; height: 6px; border-radius: 50%; background: rgba(255, 255, 255, 0.6); margin-top: 10px; flex-shrink: 0;"></div>
+                        <p style="font-size: 17px; color: var(--text-secondary); margin: 0; line-height: 1.6;">Manage canonical knowledge across your organization</p>
+                    </div>
+                    <div style="display: flex; align-items: start; gap: 12px;">
+                        <div style="width: 6px; height: 6px; border-radius: 50%; background: rgba(255, 255, 255, 0.6); margin-top: 10px; flex-shrink: 0;"></div>
+                        <p style="font-size: 17px; color: var(--text-secondary); margin: 0; line-height: 1.6;">Automate project management and task coordination</p>
+                    </div>
+                    <div style="display: flex; align-items: start; gap: 12px;">
+                        <div style="width: 6px; height: 6px; border-radius: 50%; background: rgba(255, 255, 255, 0.6); margin-top: 10px; flex-shrink: 0;"></div>
+                        <p style="font-size: 17px; color: var(--text-secondary); margin: 0; line-height: 1.6;">Generate and maintain technical documentation</p>
+                    </div>
+                    <div style="display: flex; align-items: start; gap: 12px;">
+                        <div style="width: 6px; height: 6px; border-radius: 50%; background: rgba(255, 255, 255, 0.6); margin-top: 10px; flex-shrink: 0;"></div>
+                        <p style="font-size: 17px; color: var(--text-secondary); margin: 0; line-height: 1.6;">Orchestrate supply chain workflows</p>
+                    </div>
+                    <div style="display: flex; align-items: start; gap: 12px;">
+                        <div style="width: 6px; height: 6px; border-radius: 50%; background: rgba(255, 255, 255, 0.6); margin-top: 10px; flex-shrink: 0;"></div>
+                        <p style="font-size: 17px; color: var(--text-secondary); margin: 0; line-height: 1.6;">Accelerate sales cycles and close deals</p>
+                    </div>
+                    <div style="display: flex; align-items: start; gap: 12px;">
+                        <div style="width: 6px; height: 6px; border-radius: 50%; background: rgba(255, 255, 255, 0.6); margin-top: 10px; flex-shrink: 0;"></div>
+                        <p style="font-size: 17px; color: var(--text-secondary); margin: 0; line-height: 1.6;">Drive product roadmap decisions with data</p>
+                    </div>
+                    <div style="display: flex; align-items: start; gap: 12px;">
+                        <div style="width: 6px; height: 6px; border-radius: 50%; background: rgba(255, 255, 255, 0.6); margin-top: 10px; flex-shrink: 0;"></div>
+                        <p style="font-size: 17px; color: var(--text-secondary); margin: 0; line-height: 1.6;">Deliver 24/7 customer support at scale</p>
+                    </div>
+                    <div style="display: flex; align-items: start; gap: 12px;">
+                        <div style="width: 6px; height: 6px; border-radius: 50%; background: rgba(255, 255, 255, 0.6); margin-top: 10px; flex-shrink: 0;"></div>
+                        <p style="font-size: 17px; color: var(--text-secondary); margin: 0; line-height: 1.6;">Monitor compliance and risk continuously</p>
+                    </div>
+                </div>
             </div>
             
             <!-- Hero Product Preview -->
@@ -1463,6 +1879,13 @@
                         <source src="https://newonereach.wpenginepowered.com/wp-content/uploads/2023/12/hero-optimized.mp4" type="video/mp4">
                     </video>
                 </div>
+            </div>
+            
+            <!-- CTA Button -->
+            <div style="margin-top: 48px;">
+                <button onclick="openDemoModal()" class="download-button" style="background: linear-gradient(135deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.06) 100%); border: 1px solid rgba(255, 255, 255, 0.2); padding: 20px 48px; font-size: 18px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1) inset; position: relative; overflow: hidden; display: inline-flex; backdrop-filter: blur(10px); cursor: pointer;">
+                    <span style="position: relative; z-index: 1; font-weight: 500;">See Demo</span>
+                </button>
             </div>
         </div>
     </section>
@@ -1561,37 +1984,110 @@
         <!-- Add subtle background pattern -->
         <div style="position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle at 20% 50%, rgba(169, 75, 231, 0.03) 0%, transparent 50%), radial-gradient(circle at 80% 50%, rgba(169, 75, 231, 0.02) 0%, transparent 50%); transform: rotate(-5deg); pointer-events: none;"></div>
         
-        <div class="section-content">
-            <h2 class="section-header" style="text-align: center; margin-bottom: 24px;">When every competitor has AI,<br>how do you win?</h2>
-            <p class="section-description" style="margin: 0 auto 80px; text-align: center; max-width: 600px; font-size: 20px; line-height: 1.5; color: var(--text-secondary);">
-                Give each customer their own AI. Not one AI for all customers.<br>The difference is everything.
-            </p>
+        <div class="section-content" style="text-align: center;">
+            <h2 class="section-header" style="margin-bottom: 24px;">When every competitor has AI,<br>how do you win?</h2>
             
-            <div class="comparison-visual" style="position: relative; padding: 40px 0;">
+            <!-- AI First Strategy -->
+            <div style="margin-bottom: 48px;">
+                <p style="font-size: 24px; color: var(--text-primary); font-weight: 600; margin-bottom: 12px;">Go AI First</p>
+                <p style="margin: 0 auto; max-width: 680px; font-size: 17px; line-height: 1.5; color: var(--text-secondary);">
+                    Not AI as a feature. AI as your fundamental operating model—<span style="color: var(--text-primary); font-weight: 500;">powered by deep product knowledge.</span>
+                </p>
+            </div>
+            
+            <!-- The Choice: 1:∞ vs Total Experience -->
+            <div class="comparison-visual" style="position: relative; padding: 32px 0; margin-bottom: 56px;">
                 <!-- Add connecting line -->
                 <div style="position: absolute; top: 50%; left: 25%; right: 25%; height: 1px; background: linear-gradient(to right, transparent, var(--border), transparent); z-index: 0;"></div>
                 
                 <div class="comparison-item" style="position: relative; z-index: 1;">
-                    <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-light); border-radius: 100px; width: 120px; height: 120px; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center;">
-                        <p class="comparison-metric" style="margin: 0;">1:∞</p>
+                    <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-light); border-radius: 100px; width: 100px; height: 100px; margin: 0 auto 16px; display: flex; align-items: center; justify-content: center;">
+                        <p class="comparison-metric" style="margin: 0; font-size: 32px;">1:∞</p>
                     </div>
-                    <p class="comparison-label">One AI for everyone</p>
-                    <p class="comparison-detail">Forgets you. Generic answers. No relationship.</p>
+                    <p class="comparison-label" style="font-size: 15px;">One AI for everyone</p>
+                    <p class="comparison-detail" style="font-size: 13px;">Generic knowledge. Forgets you.</p>
                 </div>
-                <div class="comparison-vs">vs</div>
+                <div class="comparison-vs" style="font-size: 20px;">vs</div>
                 <div class="comparison-item comparison-highlight" style="position: relative; z-index: 1;">
-                    <div style="background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 100px; width: 120px; height: 120px; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 40px rgba(255, 255, 255, 0.1);">
-                        <p class="comparison-metric" style="margin: 0;">1:1</p>
+                    <div style="background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 100px; width: 100px; height: 100px; margin: 0 auto 16px; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 40px rgba(255, 255, 255, 0.1);">
+                        <p class="comparison-metric" style="margin: 0; font-size: 32px;">TX</p>
                     </div>
-                    <p class="comparison-label">One AI per customer</p>
-                    <p class="comparison-detail">Remembers everything. Learns you. Grows with you.</p>
+                    <p class="comparison-label" style="font-size: 15px;">Total Experience</p>
+                    <p class="comparison-detail" style="font-size: 13px;">Expert knowledge + personal AI for everyone.</p>
                 </div>
             </div>
             
-            <div style="text-align: center; margin-top: 60px;">
-                <p style="font-size: 18px; color: var(--text-secondary); margin-bottom: 12px;">The answer?</p>
-                <p style="font-size: 24px; color: var(--text-primary); font-weight: 600;">GSX. Your AI secret weapon.</p>
-                <p style="font-size: 16px; color: var(--text-secondary); margin-top: 12px; max-width: 500px; margin-left: auto; margin-right: auto;">Deploy unlimited AI workers. Each one dedicated to a single customer or employee.</p>
+            <!-- Total Experience Framework -->
+            <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-light); border-radius: 20px; padding: 48px 32px; margin-bottom: 56px; position: relative; overflow: hidden;">
+                <div style="position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 500px; height: 150px; background: radial-gradient(ellipse, rgba(255, 255, 255, 0.05) 0%, transparent 70%); filter: blur(60px); pointer-events: none;"></div>
+                
+                <div style="position: relative; z-index: 1;">
+                    <p style="text-align: center; font-size: 13px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 28px; font-weight: 500;">Total Experience</p>
+                    
+                    <div style="max-width: 850px; margin: 0 auto;">
+                        <!-- Main Visual -->
+                        <div style="display: flex; align-items: center; justify-content: center; gap: 28px; margin-bottom: 36px; flex-wrap: wrap;">
+                            <div style="text-align: center;">
+                                <div style="background: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 16px; width: 110px; height: 110px; margin: 0 auto 16px; display: flex; align-items: center; justify-content: center; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.2);">
+                                    <p style="font-size: 36px; font-weight: 300; margin: 0; color: rgba(255, 255, 255, 0.95);">1:1</p>
+                                </div>
+                                <p style="font-size: 15px; color: var(--text-secondary); margin: 0; font-weight: 500;">Customer Experience</p>
+                                <p style="font-size: 13px; color: var(--text-tertiary); margin-top: 6px;">Every customer<br>gets their own AI</p>
+                            </div>
+                            
+                            <div style="font-size: 28px; color: rgba(255, 255, 255, 0.3); font-weight: 200;">+</div>
+                            
+                            <div style="text-align: center;">
+                                <div style="background: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 16px; width: 110px; height: 110px; margin: 0 auto 16px; display: flex; align-items: center; justify-content: center; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.2);">
+                                    <p style="font-size: 36px; font-weight: 300; margin: 0; color: rgba(255, 255, 255, 0.95);">1:1</p>
+                                </div>
+                                <p style="font-size: 15px; color: var(--text-secondary); margin: 0; font-weight: 500;">Employee Experience</p>
+                                <p style="font-size: 13px; color: var(--text-tertiary); margin-top: 6px;">Every employee<br>gets their own AI</p>
+                            </div>
+                            
+                            <div style="font-size: 28px; color: rgba(255, 255, 255, 0.3); font-weight: 200;">=</div>
+                            
+                            <div style="text-align: center;">
+                                <div style="background: linear-gradient(135deg, rgba(255, 255, 255, 0.15) 0%, rgba(255, 255, 255, 0.08) 100%); border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 16px; width: 110px; height: 110px; margin: 0 auto 16px; display: flex; align-items: center; justify-content: center; box-shadow: 0 10px 32px rgba(255, 255, 255, 0.12);">
+                                    <p style="font-size: 36px; font-weight: 500; margin: 0; color: rgba(255, 255, 255, 0.98); text-shadow: 0 0 25px rgba(255, 255, 255, 0.3);">TX</p>
+                                </div>
+                                <p style="font-size: 15px; color: var(--text-primary); margin: 0; font-weight: 600;">Total Experience</p>
+                                <p style="font-size: 13px; color: var(--text-secondary); margin-top: 6px;">Unified, personalized,<br>exponential value</p>
+                            </div>
+                        </div>
+                        
+                        <!-- Description -->
+                        <div style="text-align: center; max-width: 750px; margin: 0 auto;">
+                            <p style="font-size: 17px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px;">
+                                Not one AI for all. <span style="color: var(--text-primary); font-weight: 500;">An AI for everyone.</span> Each powered by expert product knowledge.
+                            </p>
+                            
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-top: 36px;">
+                                <div style="text-align: center; padding: 16px;">
+                                    <p style="font-size: 14px; color: rgba(255, 255, 255, 0.9); font-weight: 500; margin-bottom: 6px;">Deep Product Expertise</p>
+                                    <p style="font-size: 13px; color: var(--text-tertiary); line-height: 1.4;">Understands products, services, and processes.</p>
+                                </div>
+                                <div style="text-align: center; padding: 16px;">
+                                    <p style="font-size: 14px; color: rgba(255, 255, 255, 0.9); font-weight: 500; margin-bottom: 6px;">Personal Memory</p>
+                                    <p style="font-size: 13px; color: var(--text-tertiary); line-height: 1.4;">Remembers preferences. Grows relationships.</p>
+                                </div>
+                                <div style="text-align: center; padding: 16px;">
+                                    <p style="font-size: 14px; color: rgba(255, 255, 255, 0.9); font-weight: 500; margin-bottom: 6px;">Infinite Scale</p>
+                                    <p style="font-size: 13px; color: var(--text-tertiary); line-height: 1.4;">Thousands of expert AI workers on demand.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Call to Action -->
+            <div style="text-align: center; margin-bottom: 48px;">
+                <p style="font-size: 17px; color: var(--text-secondary); margin-bottom: 10px;">The answer?</p>
+                <p style="font-size: 26px; color: var(--text-primary); font-weight: 600; margin-bottom: 12px;">GSX. Your AI-First Operating System.</p>
+                <p style="font-size: 16px; color: var(--text-secondary); max-width: 580px; margin: 0 auto; line-height: 1.5;">
+                    Deploy unlimited AI workers dedicated to each customer or employee. Creating a Total Experience that drives loyalty and competitive advantage.
+                </p>
             </div>
             
             <div class="testimonial" style="margin-top: 60px;">
@@ -1612,7 +2108,7 @@
     <section class="visual-section">
         <div class="section-content">
             <h2 class="section-header">What couldn't exist before</h2>
-            <p class="section-description">When you remove human limitations—the need to sleep, remember, context-switch—something beautiful happens. Technology becomes truly personal.</p>
+            <p class="section-description">When you remove human limitations—the impossibility of talking to every customer, listening to every conversation, reading every codebase and doc, answering every question simultaneously—something beautiful happens. AI that never sleeps. Never forgets. Scales exponentially.</p>
             
             <div class="feature-grid">
                 <div class="feature">
@@ -1659,28 +2155,37 @@
                 You don't need to transform everything overnight. Most companies see results in weeks, not years.
             </p>
             
-            <div class="timeline-grid">
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 48px; margin-bottom: 64px;">
                 <div class="timeline-item">
                     <div class="timeline-number">1</div>
                     <h3 class="timeline-title">Week 3</h3>
-                    <p class="timeline-description">Support tickets drop dramatically. Your team asks "what happened?"</p>
+                    <p class="timeline-description">Internal pain points vanish. Documentation writes itself. Product knowledge is finally accessible.</p>
                 </div>
                 <div class="timeline-item">
                     <div class="timeline-number">2</div>
                     <h3 class="timeline-title">Month 2</h3>
-                    <p class="timeline-description">Customers start buying differently. Engagement metrics soar.</p>
+                    <p class="timeline-description">Development velocity explodes with AI. Design is now the bottleneck—until AI-powered product design management catches up. Both move at the same exponential pace.</p>
                 </div>
                 <div class="timeline-item">
                     <div class="timeline-number">3</div>
                     <h3 class="timeline-title">Quarter 1</h3>
-                    <p class="timeline-description">Competitors start asking how. Your CFO becomes biggest advocate.</p>
+                    <p class="timeline-description">Systemic change kicks in. Customer-facing rollout begins. Every touchpoint transforms. The old way of working becomes impossible to imagine.</p>
+                </div>
+                <div class="timeline-item" style="position: relative;">
+                    <div style="width: 64px; height: 64px; margin: 0 auto 20px; background: rgba(255, 255, 255, 0.03); border: 2px dashed rgba(255, 255, 255, 0.3); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="rgba(255, 255, 255, 0.5)" stroke-width="2">
+                            <path d="M5 12h14M12 5l7 7-7 7" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </div>
+                    <h3 class="timeline-title" style="color: var(--text-secondary);">Beyond</h3>
+                    <p class="timeline-description">Scale continues. New possibilities emerge. Competitive advantage compounds.</p>
                 </div>
             </div>
             
             <div style="background: rgba(255, 255, 255, 0.03); border-left: 4px solid rgba(255, 255, 255, 0.8); padding: 24px; margin: 60px auto 0; max-width: 600px; text-align: left;">
                 <p style="font-size: 18px; font-weight: 600; margin-bottom: 8px; color: rgba(255, 255, 255, 0.95);">The best part?</p>
                 <p style="font-size: 16px; color: var(--text-secondary); margin: 0;">
-                    You're not building from scratch. You're orchestrating what already exists—your data, modern AI, and our platform—into something that feels magical to your customers.
+                    You're not building from scratch. You're orchestrating what already exists—your data, modern AI, and our platform—into something that feels magical to your team, organization, then customers.
                 </p>
             </div>
         </div>
@@ -1695,30 +2200,36 @@
                 <div class="demo-item">
                     <div class="demo-grid">
                         <div class="demo-content">
-                            <h3>Your AI Concierge</h3>
+                            <h3>A Personal Product Expert in Every Customer's Pocket</h3>
                             <p>
-                                Meet the AI concierge brands assign to you. It navigates their ecosystem, discovers opportunities, and maximizes value—with perfect memory across every channel.
+                                Give every customer their own AI product expert. It knows your products completely, remembers every interaction, and builds a deep relationship over time. Each expert is connected to an ecosystem of other product experts, sharing insights while maintaining personal context. Moving beyond shallow transactions to lasting partnerships.
                             </p>
                             <div class="demo-features">
-                                <h4>Key capabilities:</h4>
+                                <h4>From transactional to relational:</h4>
                                 <ul>
                                     <li>
                                         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                                             <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
                                         </svg>
-                                        Knows your complete history and preferences
+                                        Complete product expertise + full customer history
                                     </li>
                                     <li>
                                         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                                             <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
                                         </svg>
-                                        Proactively surfaces relevant opportunities
+                                        Long-term memory across every touchpoint
                                     </li>
                                     <li>
                                         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                                             <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
                                         </svg>
-                                        Available 24/7 across phone, text, and video
+                                        Connected to an ecosystem of product experts
+                                    </li>
+                                    <li>
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                                            <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+                                        </svg>
+                                        Always available: phone, text, video, app
                                     </li>
                                 </ul>
                             </div>
@@ -1730,11 +2241,11 @@
                                 </div>
                                 <div>
                                     <p class="demo-metric-value">Day 1</p>
-                                    <p class="demo-metric-label">Feel understood</p>
+                                    <p class="demo-metric-label">Deep connection</p>
                                 </div>
                                 <div>
-                                    <p class="demo-metric-value">11 min</p>
-                                    <p class="demo-metric-label">To "wow"</p>
+                                    <p class="demo-metric-value">Every</p>
+                                    <p class="demo-metric-label">Customer gets one</p>
                                 </div>
                             </div>
                         </div>
@@ -1746,13 +2257,13 @@
                 
                 <!-- Demo 2: BHX Platform -->
                 <div>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 60px; align-items: center;">
+                    <div class="demo-grid">
                         <div style="background: #0f0f0f; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 24px; padding: 0; height: 350px; display: flex; align-items: center; justify-content: flex-start; overflow: hidden; position: relative;">
                             <img src="assets/AgentOrchetration.webp" alt="Product Expert AI Knowledge Graph" style="width: 110%; height: 100%; object-fit: contain; object-position: left center; transform: translateX(-5%);">
                         </div>
-                        <div>
-                            <h3 style="font-size: 32px; margin-bottom: 20px; color: rgba(255, 255, 255, 0.95);">Your AI Product Expert</h3>
-                            <p style="font-size: 18px; line-height: 1.6; color: var(--text-secondary); margin-bottom: 24px;">
+                        <div class="demo-content">
+                            <h3>Your AI Product Expert</h3>
+                            <p>
                                 Meet ProductExpert AI - your intelligent product companion that learns, documents, and shares knowledge across your entire organization. Built on NASA's Knowledge Management principles.
                             </p>
                             <div style="background: rgba(255, 255, 255, 0.03); border-left: 3px solid rgba(255, 255, 255, 0.6); padding: 20px; margin-top: 24px;">
@@ -1862,18 +2373,118 @@
                 </p>
             </div>
             
+            <!-- Security Section -->
+            <div style="background: linear-gradient(135deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.01) 100%); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 24px; padding: 60px 40px; margin-bottom: 80px; position: relative; overflow: hidden;">
+                <!-- Shield glow effect -->
+                <div style="position: absolute; top: 20%; left: 50%; transform: translate(-50%, -50%); width: 400px; height: 400px; background: radial-gradient(circle, rgba(255, 255, 255, 0.06) 0%, transparent 70%); filter: blur(60px); pointer-events: none;"></div>
+                
+                <div style="position: relative; z-index: 1; max-width: 900px; margin: 0 auto;">
+                    <!-- Icon and Header -->
+                    <div style="text-align: center; margin-bottom: 48px;">
+                        <div style="width: 80px; height: 80px; margin: 0 auto 24px; background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%); border: 2px solid rgba(255, 255, 255, 0.2); border-radius: 20px; display: flex; align-items: center; justify-content: center;">
+                            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="rgba(255, 255, 255, 0.9)" stroke-width="1.5">
+                                <path d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5z" stroke-linejoin="round"/>
+                                <path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                        </div>
+                        <h2 style="font-size: 36px; font-weight: 600; margin-bottom: 16px; color: rgba(255, 255, 255, 0.95);">Your Secret Recipe Stays Secret</h2>
+                        <p style="font-size: 20px; color: var(--text-secondary); line-height: 1.5; max-width: 700px; margin: 0 auto;">
+                            Product knowledge is your competitive advantage. GSX protects it proactively with enterprise-grade security built into every layer.
+                        </p>
+                    </div>
+                    
+                    <!-- Security Features Grid -->
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 32px; margin-bottom: 48px;">
+                        <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16px; padding: 32px;">
+                            <div style="display: flex; align-items: start; gap: 16px;">
+                                <div style="width: 48px; height: 48px; flex-shrink: 0; background: rgba(255, 255, 255, 0.05); border-radius: 12px; display: flex; align-items: center; justify-content: center;">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="rgba(255, 255, 255, 0.8)" stroke-width="2">
+                                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                                        <path d="M7 11V7a5 5 0 0110 0v4" stroke-linecap="round" stroke-linejoin="round"/>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 8px; color: rgba(255, 255, 255, 0.95);">Deploy in Your AWS</h3>
+                                    <p style="font-size: 15px; color: var(--text-secondary); line-height: 1.6; margin: 0;">
+                                        Private dedicated environment. Your data never leaves your infrastructure.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16px; padding: 32px;">
+                            <div style="display: flex; align-items: start; gap: 16px;">
+                                <div style="width: 48px; height: 48px; flex-shrink: 0; background: rgba(255, 255, 255, 0.05); border-radius: 12px; display: flex; align-items: center; justify-content: center;">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="rgba(255, 255, 255, 0.8)" stroke-width="2">
+                                        <path d="M9 11l3 3L22 4" stroke-linecap="round" stroke-linejoin="round"/>
+                                        <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" stroke-linecap="round" stroke-linejoin="round"/>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 8px; color: rgba(255, 255, 255, 0.95);">Enterprise Certifications</h3>
+                                    <p style="font-size: 15px; color: var(--text-secondary); line-height: 1.6; margin: 0;">
+                                        SOC 2 Type II and FedRAMP certified. Every compliance box checked.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16px; padding: 32px;">
+                            <div style="display: flex; align-items: start; gap: 16px;">
+                                <div style="width: 48px; height: 48px; flex-shrink: 0; background: rgba(255, 255, 255, 0.05); border-radius: 12px; display: flex; align-items: center; justify-content: center;">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="rgba(255, 255, 255, 0.8)" stroke-width="2">
+                                        <circle cx="12" cy="12" r="10"/>
+                                        <path d="M12 6v6l4 2" stroke-linecap="round" stroke-linejoin="round"/>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 8px; color: rgba(255, 255, 255, 0.95);">Trusted by Sensitive Organizations</h3>
+                                    <p style="font-size: 15px; color: var(--text-secondary); line-height: 1.6; margin: 0;">
+                                        Healthcare providers. Major telcos. Federal government. Protecting the most sensitive data.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16px; padding: 32px;">
+                            <div style="display: flex; align-items: start; gap: 16px;">
+                                <div style="width: 48px; height: 48px; flex-shrink: 0; background: rgba(255, 255, 255, 0.05); border-radius: 12px; display: flex; align-items: center; justify-content: center;">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="rgba(255, 255, 255, 0.8)" stroke-width="2">
+                                        <path d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5z" stroke-linejoin="round"/>
+                                        <path d="M12 8v4M12 16h.01" stroke-linecap="round" stroke-linejoin="round"/>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 8px; color: rgba(255, 255, 255, 0.95);">Security as a Feature</h3>
+                                    <p style="font-size: 15px; color: var(--text-secondary); line-height: 1.6; margin: 0;">
+                                        Built into GSX infrastructure. Not bolted on. Proactive protection at every layer.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Bottom Statement -->
+                    <div style="text-align: center; padding: 32px; background: rgba(255, 255, 255, 0.02); border-left: 3px solid rgba(255, 255, 255, 0.4); border-radius: 12px;">
+                        <p style="font-size: 17px; color: rgba(255, 255, 255, 0.85); line-height: 1.6; margin: 0;">
+                            <strong>Your product knowledge is your moat.</strong> We make sure it stays that way—with security that's designed in, not added on.
+                        </p>
+                    </div>
+                </div>
+            </div>
+            
             <!-- Download Section -->
             <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-light); border-radius: 24px; padding: 48px; text-align: center; max-width: 800px; margin: 0 auto;">
-                <h3 style="font-size: 28px; margin-bottom: 16px; font-weight: 600;">Access your AI workforce</h3>
+                <h3 style="font-size: 28px; margin-bottom: 16px; font-weight: 600;">Activate Your Force Multiplier</h3>
                 <p style="font-size: 18px; color: var(--text-secondary); margin-bottom: 32px; max-width: 600px; margin-left: auto; margin-right: auto;">
-                    Download the OneReach.ai management app to connect to your GSX environment and control your intelligent digital workers.
+                    Deploy AI product experts that amplify your team's capabilities exponentially. Download the management app to orchestrate your intelligent product workforce.
                 </p>
                 
                 <!-- Desktop Downloads -->
                 <div style="margin-bottom: 40px;">
                     <p style="font-size: 14px; color: var(--text-tertiary); margin-bottom: 16px; text-transform: uppercase; letter-spacing: 0.08em;">Desktop</p>
                     <div style="display: flex; gap: 16px; justify-content: center; flex-wrap: wrap;">
-                        <a href="https://files.staging.api.onereach.ai/public/48cc49ef-ab05-4d51-acc6-559c7ff22150/IDW%20Desktop/assets/Onereach.ai-1.0.3-arm64.dmg" class="download-button" style="background: var(--button-dark); border: 1px solid rgba(255, 255, 255, 0.1); padding: 16px 32px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3); color: white;" download>
+                        <a href="https://github.com/wilsr7000/Onereach_Desktop_App/releases/latest" class="download-button" style="background: var(--button-dark); border: 1px solid rgba(255, 255, 255, 0.1); padding: 16px 32px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3); color: white;" target="_blank">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 8px;">
                                 <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
                             </svg>
@@ -1989,9 +2600,38 @@
     <div class="sticky-cta" id="sticky-cta">
         <div class="sticky-cta-content">
             <p class="sticky-cta-text">When every competitor has AI, how do you win?</p>
-            <a href="#demo" class="sticky-cta-button">
+            <a href="https://files.staging.api.onereach.ai/public/48cc49ef-ab05-4d51-acc6-559c7ff22150/Product%20Expert/index.html" target="_blank" class="sticky-cta-button">
                 See how →
             </a>
+        </div>
+    </div>
+    
+    <!-- Demo Scheduling Modal -->
+    <div id="demo-modal" class="demo-modal">
+        <div class="demo-modal-overlay" onclick="closeDemoModal()"></div>
+        <div class="demo-modal-content">
+            <button class="demo-modal-close" onclick="closeDemoModal()">×</button>
+            
+            <div style="text-align: center; margin-bottom: 32px;">
+                <h2 style="font-size: 32px; font-weight: 600; margin-bottom: 12px; color: rgba(255, 255, 255, 0.95);">Try Product Expert AI</h2>
+                <p style="font-size: 17px; color: var(--text-secondary); line-height: 1.5;">
+                    Experience the power of AI-driven product expertise firsthand.
+                </p>
+            </div>
+            
+            <!-- Interactive Demo -->
+            <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border); border-radius: 16px; padding: 40px; min-height: 500px;">
+                <div style="text-align: center; padding: 40px;">
+                    <p style="font-size: 18px; color: var(--text-secondary); margin-bottom: 24px;">
+                        Loading interactive demo...
+                    </p>
+                    <iframe src="https://ai-flow.chat.staging.onereach.ai/SMxJ76sFTVGsxlWcf_IhUA/0s56p06" 
+                            style="width: 100%; height: 600px; border: none; border-radius: 12px; background: #000;"
+                            allow="microphone; camera"
+                            frameborder="0"
+                            loading="lazy"></iframe>
+                </div>
+            </div>
         </div>
     </div>
     
@@ -2027,7 +2667,26 @@
         if (awards.length > 0) {
             setInterval(rotateAwards, 3000); // Change every 3 seconds
         }
+        
+        // Demo Modal Functions
+        function openDemoModal() {
+            const modal = document.getElementById('demo-modal');
+            modal.classList.add('active');
+            document.body.style.overflow = 'hidden'; // Prevent background scrolling
+        }
+        
+        function closeDemoModal() {
+            const modal = document.getElementById('demo-modal');
+            modal.classList.remove('active');
+            document.body.style.overflow = ''; // Restore scrolling
+        }
+        
+        // Close modal on Escape key
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closeDemoModal();
+            }
+        });
     </script>
 </body>
-</html> 
 </html> 

@@ -13,6 +13,7 @@ class GSXFileSync {
     this.lastSyncTime = null;
     this.syncHistory = [];
     this.maxHistorySize = 100;
+    this.alertShowing = false; // Track if error alert is already showing
     
     // Default sync paths - includes everything needed for full restore
     this.defaultSyncPaths = [
@@ -282,6 +283,9 @@ class GSXFileSync {
       
       this.addToHistory(syncRecord);
       
+      // Show alert to user (only if no alert is already showing)
+      this.showSyncErrorAlert(error.message, remotePath);
+      
       throw error;
     } finally {
       this.syncInProgress = false;
@@ -300,10 +304,11 @@ class GSXFileSync {
   
   /**
    * Sync OR-Spaces (clipboard data) to GSX Files
+   * Organizes items into folders named after their space names
    */
   async syncORSpaces(options = {}) {
     const orSpacesPath = path.join(app.getPath('documents'), 'OR-Spaces');
-    const remotePath = options.remotePath || 'OR-Spaces-Backup';
+    const baseRemotePath = options.remotePath || 'OR-Spaces-Backup';
     
     // Check if OR-Spaces exists
     try {
@@ -313,7 +318,246 @@ class GSXFileSync {
       await fs.mkdir(orSpacesPath, { recursive: true });
     }
     
-    return await this.syncDirectory(orSpacesPath, remotePath, options);
+    // Load the index to get space and item information
+    const indexPath = path.join(orSpacesPath, 'index.json');
+    let index;
+    
+    try {
+      const indexData = await fs.readFile(indexPath, 'utf8');
+      index = JSON.parse(indexData);
+      console.log(`[GSX Sync] Found ${index.spaces?.length || 0} spaces and ${index.items?.length || 0} items`);
+    } catch (error) {
+      console.warn('[GSX Sync] Could not read index.json, syncing entire directory as-is:', error.message);
+      // Fall back to syncing the entire directory
+      return await this.syncDirectory(orSpacesPath, baseRemotePath, options);
+    }
+    
+    if (!this.isInitialized) {
+      await this.initialize();
+    }
+    
+    const results = [];
+    const startTime = Date.now();
+    const itemsLocalDir = path.join(orSpacesPath, 'items');
+    const spacesLocalDir = path.join(orSpacesPath, 'spaces');
+    
+    // Sync index.json
+    console.log('[GSX Sync] Syncing index.json...');
+    try {
+      await this.client.pushLocalPathToFiles(
+        indexPath,
+        `${baseRemotePath}/index.json`,
+        options
+      );
+      results.push({ path: 'index.json', status: 'success' });
+    } catch (error) {
+      console.error('[GSX Sync] Failed to sync index.json:', error.message);
+      results.push({ path: 'index.json', status: 'failed', error: error.message });
+    }
+    
+    // Organize and sync items by space
+    const spaces = index.spaces || [];
+    const items = index.items || [];
+    
+    for (const space of spaces) {
+      const sanitizedSpaceName = this.sanitizeFileName(space.name);
+      const spaceRemotePath = `${baseRemotePath}/Spaces/${sanitizedSpaceName}`;
+      
+      // Get items for this space
+      const spaceItems = items.filter(item => item.spaceId === space.id);
+      
+      if (spaceItems.length === 0 && space.id !== 'unclassified') {
+        console.log(`[GSX Sync] Space "${space.name}" has no items, skipping...`);
+        continue;
+      }
+      
+      console.log(`[GSX Sync] Syncing space "${space.name}" with ${spaceItems.length} items...`);
+      
+      let itemsSynced = 0;
+      let itemsFailed = 0;
+      
+      // Sync each item in this space
+      for (const item of spaceItems) {
+        const itemLocalDir = path.join(itemsLocalDir, item.id);
+        
+        if (!(await this.pathExists(itemLocalDir))) {
+          console.warn(`[GSX Sync] Item directory not found: ${item.id}`);
+          itemsFailed++;
+          continue;
+        }
+        
+        try {
+          // Sync the entire item directory to the space folder
+          const itemRemotePath = `${spaceRemotePath}/${item.id}`;
+          await this.client.pushLocalPathToFiles(
+            itemLocalDir,
+            itemRemotePath,
+            options
+          );
+          itemsSynced++;
+        } catch (error) {
+          console.error(`[GSX Sync] Failed to sync item ${item.id}:`, error.message);
+          itemsFailed++;
+        }
+      }
+      
+      // Also sync the space's README.ipynb if it exists
+      const spaceNotebookPath = path.join(spacesLocalDir, space.id, 'README.ipynb');
+      if (await this.pathExists(spaceNotebookPath)) {
+        try {
+          await this.client.pushLocalPathToFiles(
+            spaceNotebookPath,
+            `${spaceRemotePath}/README.ipynb`,
+            options
+          );
+        } catch (error) {
+          console.warn(`[GSX Sync] Failed to sync README for space "${space.name}":`, error.message);
+        }
+      }
+      
+      results.push({
+        spaceName: space.name,
+        spaceId: space.id,
+        remotePath: spaceRemotePath,
+        itemsTotal: spaceItems.length,
+        itemsSynced,
+        itemsFailed,
+        status: itemsFailed === 0 ? 'success' : (itemsSynced > 0 ? 'partial' : 'failed')
+      });
+      
+      console.log(`[GSX Sync] ✓ Space "${space.name}": ${itemsSynced} items synced, ${itemsFailed} failed`);
+    }
+    
+    const duration = Date.now() - startTime;
+    const successCount = results.filter(r => r.status === 'success').length;
+    const failCount = results.filter(r => r.status === 'failed').length;
+    const totalItemsSynced = results.reduce((sum, r) => sum + (r.itemsSynced || 0), 0);
+    const totalItemsFailed = results.reduce((sum, r) => sum + (r.itemsFailed || 0), 0);
+    
+    console.log(`[GSX Sync] ✓ Sync completed: ${successCount} spaces successful, ${failCount} failed`);
+    console.log(`[GSX Sync] ✓ Total: ${totalItemsSynced} items synced, ${totalItemsFailed} items failed`);
+    
+    // Record sync history
+    const syncRecord = {
+      timestamp: new Date().toISOString(),
+      localPath: orSpacesPath,
+      remotePath: baseRemotePath,
+      spacesCount: spaces.length,
+      itemsCount: items.length,
+      itemsSynced: totalItemsSynced,
+      itemsFailed: totalItemsFailed,
+      successCount,
+      failCount,
+      duration: duration,
+      durationFormatted: this.formatDuration(duration),
+      options: options,
+      status: failCount === 0 && totalItemsFailed === 0 ? 'success' : 'partial',
+      results
+    };
+    
+    this.addToHistory(syncRecord);
+    this.lastSyncTime = new Date();
+    
+    return syncRecord;
+  }
+  
+  /**
+   * Sync a single item to the cloud (for auto-sync on add/edit)
+   * @param {string} itemId - ID of the item to sync
+   * @param {string} spaceId - ID of the space the item belongs to
+   * @param {string} spaceName - Name of the space for folder organization
+   */
+  async syncSingleItem(itemId, spaceId, spaceName) {
+    try {
+      if (!this.isInitialized) {
+        await this.initialize();
+      }
+      
+      const orSpacesPath = path.join(app.getPath('documents'), 'OR-Spaces');
+      const baseRemotePath = this.settingsManager.get('gsxAutoSyncRemotePath') || 'OR-Spaces-Backup';
+      
+      // Local path to the item
+      const itemLocalDir = path.join(orSpacesPath, 'items', itemId);
+      
+      // Check if item exists
+      if (!(await this.pathExists(itemLocalDir))) {
+        console.warn(`[GSX Auto-Sync] Item directory not found: ${itemId}`);
+        return { success: false, error: 'Item not found' };
+      }
+      
+      // Sanitize space name for remote path
+      const sanitizedSpaceName = this.sanitizeFileName(spaceName);
+      const itemRemotePath = `${baseRemotePath}/Spaces/${sanitizedSpaceName}/${itemId}`;
+      
+      console.log(`[GSX Auto-Sync] Syncing item ${itemId} to ${itemRemotePath}...`);
+      
+      // Upload the item
+      await this.client.pushLocalPathToFiles(
+        itemLocalDir,
+        itemRemotePath,
+        { isPublic: false, ttl: null }
+      );
+      
+      console.log(`[GSX Auto-Sync] ✓ Item ${itemId} synced successfully`);
+      
+      return { success: true, itemId, remotePath: itemRemotePath };
+    } catch (error) {
+      console.error(`[GSX Auto-Sync] Failed to sync item ${itemId}:`, error.message);
+      return { success: false, error: error.message };
+    }
+  }
+  
+  /**
+   * Auto-sync index.json to keep space metadata in sync
+   */
+  async syncIndex() {
+    try {
+      if (!this.isInitialized) {
+        await this.initialize();
+      }
+      
+      const orSpacesPath = path.join(app.getPath('documents'), 'OR-Spaces');
+      const baseRemotePath = this.settingsManager.get('gsxAutoSyncRemotePath') || 'OR-Spaces-Backup';
+      const indexPath = path.join(orSpacesPath, 'index.json');
+      
+      console.log('[GSX Auto-Sync] Syncing index.json...');
+      
+      await this.client.pushLocalPathToFiles(
+        indexPath,
+        `${baseRemotePath}/index.json`,
+        { isPublic: false, ttl: null }
+      );
+      
+      console.log('[GSX Auto-Sync] ✓ Index synced successfully');
+      return { success: true };
+    } catch (error) {
+      console.error('[GSX Auto-Sync] Failed to sync index:', error.message);
+      return { success: false, error: error.message };
+    }
+  }
+  
+  /**
+   * Check if a path exists
+   */
+  async pathExists(filePath) {
+    try {
+      await fs.stat(filePath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  
+  /**
+   * Sanitize filename to be safe for cloud storage
+   */
+  sanitizeFileName(name) {
+    // Replace characters that might cause issues in file paths
+    return name
+      .replace(/[/\\:*?"<>|]/g, '-') // Replace invalid characters
+      .replace(/\s+/g, '_')           // Replace spaces with underscores
+      .replace(/_{2,}/g, '_')         // Replace multiple underscores with single
+      .replace(/^[-_]+|[-_]+$/g, ''); // Remove leading/trailing dashes and underscores
   }
   
   /**
@@ -488,6 +732,67 @@ class GSXFileSync {
     return this.settingsManager.set('gsxSyncPaths', syncPaths);
   }
   
+  /**
+   * Show sync error alert to user (only if no alert is currently showing)
+   */
+  showSyncErrorAlert(errorMessage, remotePath) {
+    // Don't show alert if one is already showing
+    if (this.alertShowing) {
+      console.log('[GSX Sync] Alert already showing, skipping duplicate');
+      return;
+    }
+    
+    this.alertShowing = true;
+    
+    // Determine error type and provide helpful guidance
+    let title = 'GSX Sync Failed';
+    let message = `Failed to sync to GSX Files${remotePath ? `/${remotePath}` : ''}`;
+    let detail = errorMessage;
+    
+    // Add helpful guidance based on error type
+    if (errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
+      title = 'GSX Authentication Failed';
+      detail = `${errorMessage}\n\n💡 Try this:\n• Check your GSX token in Settings\n• Verify the environment matches where you created the token\n• Ensure the token has Files API permissions`;
+    } else if (errorMessage.includes('403') || errorMessage.includes('forbidden')) {
+      title = 'GSX Access Denied';
+      detail = `${errorMessage}\n\n💡 Try this:\n• Your token may not have Files API permissions\n• Contact your GSX administrator`;
+    } else if (errorMessage.includes('network') || errorMessage.includes('discovery') || errorMessage.includes('timeout')) {
+      title = 'GSX Connection Failed';
+      detail = `${errorMessage}\n\n💡 Try this:\n• Check your internet connection\n• Try again in a moment\n• GSX service may be temporarily unavailable`;
+    } else if (errorMessage.includes('token')) {
+      title = 'GSX Token Issue';
+      detail = `${errorMessage}\n\n💡 Try this:\n• Configure your GSX token in Settings\n• Make sure the token is complete and correct`;
+    }
+    
+    // Show the alert
+    dialog.showMessageBox({
+      type: 'error',
+      title: title,
+      message: message,
+      detail: detail,
+      buttons: ['OK', 'Open Settings'],
+      defaultId: 0,
+      cancelId: 0
+    }).then(result => {
+      // Reset the flag when dialog closes
+      this.alertShowing = false;
+      
+      // If user clicked "Open Settings", open settings window
+      if (result.response === 1) {
+        // Send IPC to open settings
+        const { BrowserWindow } = require('electron');
+        const mainWindow = BrowserWindow.getAllWindows()[0];
+        if (mainWindow) {
+          mainWindow.webContents.send('menu-action', { action: 'open-settings' });
+        }
+      }
+    }).catch(err => {
+      // Reset flag even if dialog fails
+      this.alertShowing = false;
+      console.error('[GSX Sync] Error showing alert:', err);
+    });
+  }
+
   /**
    * Add sync record to history
    */

@@ -458,6 +458,35 @@ app.whenReady().then(() => {
   
   // Set up module manager IPC handlers
   setupModuleManagerIPC();
+  
+  // CRITICAL: Register menu-action handler EARLY (before menu is created)
+  console.log('[Main] Registering menu-action handler early...');
+  ipcMain.on('menu-action', (event, data) => {
+    console.log('='.repeat(70));
+    console.log('[MENU-ACTION EARLY] 🔵 Handler called!');
+    console.log('[MENU-ACTION EARLY] Data:', data);
+    console.log('='.repeat(70));
+    
+    // Handle IDW URL opening
+    if (data.action === 'open-idw-url' && data.url) {
+      console.log(`[MENU-ACTION EARLY] Opening IDW: ${data.label}`);
+      const mainWindow = browserWindow.getMainWindow();
+      if (mainWindow) {
+        mainWindow.webContents.send('open-in-new-tab', {
+          url: data.url,
+          label: data.label || 'IDW'
+        });
+        console.log('[MENU-ACTION EARLY] ✅ Sent to main window');
+      } else {
+        console.error('[MENU-ACTION EARLY] ❌ Main window not found');
+      }
+      return;
+    }
+    
+    // For all other actions, they'll be handled by the full handler in setupIPC
+    console.log('[MENU-ACTION EARLY] Passing through to full handler...');
+  });
+  console.log('[Main] ✅ menu-action handler registered');
 
   // Log app startup with lifecycle event
   logger.logAppLaunch({
@@ -499,6 +528,24 @@ app.whenReady().then(() => {
     shortcutRegistered: true
   });
   
+  // Add keyboard shortcuts to open dev tools
+  const openDevTools = () => {
+    console.log('Opening Developer Tools via shortcut');
+    const focusedWindow = BrowserWindow.getFocusedWindow();
+    if (focusedWindow) {
+      focusedWindow.webContents.openDevTools();
+    } else {
+      const allWindows = BrowserWindow.getAllWindows();
+      if (allWindows.length > 0) {
+        allWindows[0].webContents.openDevTools();
+      }
+    }
+  };
+  
+  globalShortcut.register('CommandOrControl+Shift+I', openDevTools);
+  globalShortcut.register('F12', openDevTools);
+  console.log('Registered Cmd+Shift+I and F12 shortcuts for Developer Tools');
+  
   // Initialize module manager
   moduleManager = new ModuleManager();
   global.moduleManager = moduleManager;
@@ -514,6 +561,29 @@ app.whenReady().then(() => {
   const { getSettingsManager } = require('./settings-manager');
   global.settingsManager = getSettingsManager();
   console.log('Settings manager initialized');
+  
+  // MIGRATION: Migrate idw-entries.json to settings manager if needed
+  try {
+    const idwConfigPath = path.join(app.getPath('userData'), 'idw-entries.json');
+    const currentIDWs = global.settingsManager.get('idwEnvironments');
+    
+    if (!currentIDWs || currentIDWs.length === 0) {
+      // No IDWs in settings, check if file exists
+      if (fs.existsSync(idwConfigPath)) {
+        console.log('[Migration] Found idw-entries.json, migrating to settings...');
+        const fileData = JSON.parse(fs.readFileSync(idwConfigPath, 'utf8'));
+        global.settingsManager.set('idwEnvironments', fileData);
+        console.log('[Migration] ✅ Migrated', fileData.length, 'IDW environments to settings');
+      }
+    } else {
+      console.log('[Migration] Settings already has', currentIDWs.length, 'IDW environments');
+      // Ensure file is in sync
+      fs.writeFileSync(idwConfigPath, JSON.stringify(currentIDWs, null, 2));
+      console.log('[Migration] ✅ Synced settings to file');
+    }
+  } catch (error) {
+    console.error('[Migration] Error during IDW migration:', error);
+  }
   
   // Make logger globally available
   global.logger = logger;
@@ -960,6 +1030,202 @@ function setupModuleManagerIPC() {
       return { success: false, error: error.message };
     }
   });
+  
+  // IDW Store handlers
+  console.log('[setupModuleManagerIPC] Registering IDW Store handlers');
+  
+  // Fetch IDW directory from API
+  ipcMain.handle('idw-store:fetch-directory', async () => {
+    try {
+      console.log('[IDW Store] Fetching directory from API...');
+      const https = require('https');
+      
+      const options = {
+        hostname: 'em.staging.api.onereach.ai',
+        port: 443,
+        path: '/http/48cc49ef-ab05-4d51-acc6-559c7ff22150/idw_directory',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        timeout: 10000
+      };
+      
+      return new Promise((resolve, reject) => {
+        const req = https.request(options, (res) => {
+          console.log('[IDW Store] Response status:', res.statusCode);
+          
+          let data = '';
+          
+          res.on('data', (chunk) => {
+            data += chunk;
+          });
+          
+          res.on('end', () => {
+            console.log('[IDW Store] Response received, length:', data.length);
+            
+            try {
+              const jsonData = JSON.parse(data);
+              console.log('[IDW Store] Successfully parsed JSON');
+              resolve(jsonData);
+            } catch (error) {
+              console.error('[IDW Store] Failed to parse response:', error);
+              reject(new Error('Invalid JSON response from API'));
+            }
+          });
+        });
+        
+        req.on('error', (error) => {
+          console.error('[IDW Store] API request failed:', error);
+          reject(error);
+        });
+        
+        req.on('timeout', () => {
+          console.error('[IDW Store] Request timeout');
+          req.destroy();
+          reject(new Error('Request timeout'));
+        });
+        
+        req.write(JSON.stringify({}));
+        req.end();
+      });
+    } catch (error) {
+      console.error('[IDW Store] Error fetching directory:', error);
+      return { success: false, error: { message: error.message } };
+    }
+  });
+  
+  // Add IDW to menu from store
+  ipcMain.handle('idw-store:add-to-menu', async (event, idw) => {
+    try {
+      console.log('[IDW Store] Adding IDW to menu:', idw.name);
+      
+      // Get from settings manager (single source of truth)
+      const settingsManager = global.settingsManager;
+      let idwEnvironments = settingsManager.get('idwEnvironments') || [];
+      console.log('[IDW Store] Current IDWs in settings:', idwEnvironments.length);
+      
+      // Check if this IDW is already installed
+      const storeIdwId = `store-${idw.id}`;
+      const existingIndex = idwEnvironments.findIndex(env => {
+        if (env.id === storeIdwId) return true;
+        if (env.storeData && env.storeData.idwId === idw.id) return true;
+        if (env.chatUrl === idw.url) return true;
+        if (env.label === idw.name && env.storeData && env.storeData.developer === idw.developer) return true;
+        return false;
+      });
+      
+      if (existingIndex !== -1) {
+        console.log('[IDW Store] IDW already exists, updating...');
+        idwEnvironments[existingIndex] = {
+          id: storeIdwId,
+          label: idw.name,
+          chatUrl: idw.url,
+          environment: 'store',
+          description: idw.description,
+          category: idw.category,
+          storeData: {
+            idwId: idw.id,
+            developer: idw.developer,
+            version: idw.version,
+            installedAt: idwEnvironments[existingIndex].storeData?.installedAt || new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          }
+        };
+        
+        // Save to settings
+        settingsManager.set('idwEnvironments', idwEnvironments);
+        console.log('[IDW Store] ✅ Saved update to settings');
+        
+        // CRITICAL: Also sync to idw-entries.json for menu
+        const idwConfigPath = path.join(app.getPath('userData'), 'idw-entries.json');
+        fs.writeFileSync(idwConfigPath, JSON.stringify(idwEnvironments, null, 2));
+        console.log('[IDW Store] ✅ Synced to idw-entries.json');
+        
+        // Refresh menu
+        const { refreshApplicationMenu } = require('./menu');
+        refreshApplicationMenu();
+        console.log('[IDW Store] ✅ Menu refreshed');
+        
+        return { success: true, updated: true };
+      }
+      
+      // Add new IDW
+      const newEntry = {
+        id: storeIdwId,
+        label: idw.name,
+        chatUrl: idw.url,
+        environment: 'store',
+        description: idw.description,
+        category: idw.category,
+        storeData: {
+          idwId: idw.id,
+          developer: idw.developer,
+          version: idw.version,
+          installedAt: new Date().toISOString()
+        }
+      };
+      
+      idwEnvironments.push(newEntry);
+      
+      // Save to settings
+      settingsManager.set('idwEnvironments', idwEnvironments);
+      console.log('[IDW Store] ✅ Saved to settings, total:', idwEnvironments.length);
+      
+      // CRITICAL: Also sync to idw-entries.json for menu
+      const idwConfigPath = path.join(app.getPath('userData'), 'idw-entries.json');
+      fs.writeFileSync(idwConfigPath, JSON.stringify(idwEnvironments, null, 2));
+      console.log('[IDW Store] ✅ Synced to idw-entries.json');
+      
+      // Refresh menu
+      const { refreshApplicationMenu } = require('./menu');
+      refreshApplicationMenu();
+      console.log('[IDW Store] ✅ Menu refreshed');
+      
+      return { success: true, updated: false };
+    } catch (error) {
+      console.error('[IDW Store] Failed to add IDW to menu:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Web Tools handlers
+  
+  // Get all web tools
+  ipcMain.handle('module:get-web-tools', async () => {
+    return global.moduleManager.getWebTools();
+  });
+  
+  // Add web tool
+  ipcMain.handle('module:add-web-tool', async (event, tool) => {
+    try {
+      global.moduleManager.addWebTool(tool);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Open web tool
+  ipcMain.handle('module:open-web-tool', async (event, toolId) => {
+    try {
+      global.moduleManager.openWebTool(toolId);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Delete web tool
+  ipcMain.handle('module:delete-web-tool', async (event, toolId) => {
+    try {
+      global.moduleManager.deleteWebTool(toolId);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
 }
 
 // Set up IPC handlers for communication with renderer process
@@ -1000,7 +1266,26 @@ function setupIPC() {
       settingsCount: Object.keys(settings).length
     });
     
-    return settingsManager.update(settings);
+    const saved = settingsManager.update(settings);
+    
+    // If idwEnvironments was updated, also write to idw-entries.json for menu compatibility
+    if (settings.idwEnvironments) {
+      console.log('[Settings] idwEnvironments updated, syncing to idw-entries.json...');
+      try {
+        const idwConfigPath = path.join(app.getPath('userData'), 'idw-entries.json');
+        fs.writeFileSync(idwConfigPath, JSON.stringify(settings.idwEnvironments, null, 2));
+        console.log('[Settings] ✅ Synced', settings.idwEnvironments.length, 'IDW environments to file');
+        
+        // Refresh menu with new data
+        const { refreshApplicationMenu } = require('./menu');
+        refreshApplicationMenu();
+        console.log('[Settings] ✅ Menu refreshed');
+      } catch (error) {
+        console.error('[Settings] Error syncing idwEnvironments to file:', error);
+      }
+    }
+    
+    return saved;
   });
   
   ipcMain.handle('settings:test-llm', async (event, config) => {
@@ -1080,12 +1365,14 @@ function setupIPC() {
   });
   
   // GSX test connection handler with token from settings
-  ipcMain.handle('gsx:test-connection', async (event, config) => {
-    try {
-      console.log('[Main] Testing GSX connection with config:', {
-        hasToken: !!config.token,
-        tokenLength: config.token ? config.token.length : 0,
-        environment: config.environment,
+  // Wrapped in try-catch to skip if already registered by GSX File Sync
+  try {
+    ipcMain.handle('gsx:test-connection', async (event, config) => {
+      try {
+        console.log('[Main] Testing GSX connection with config:', {
+          hasToken: !!config.token,
+          tokenLength: config.token ? config.token.length : 0,
+          environment: config.environment,
         hasAccountId: !!config.accountId
       });
       
@@ -1118,11 +1405,14 @@ function setupIPC() {
       }
       
       return result;
-    } catch (error) {
-      console.error('[Main] GSX connection test failed:', error);
-      return { success: false, error: error.message };
-    }
-  });
+      } catch (error) {
+        console.error('[Main] GSX connection test failed:', error);
+        return { success: false, error: error.message };
+      }
+    });
+  } catch (error) {
+    console.log('[setupIPC] Skipping gsx:test-connection (already registered by GSX File Sync)');
+  }
   
   // Smart export IPC handlers
   ipcMain.handle('get-smart-export-data', async () => {
@@ -1710,6 +2000,28 @@ function setupIPC() {
     if (data.action === 'open-idw-url' && data.url) {
       console.log(`Opening IDW URL in new tab: ${data.label} (${data.url})`);
       
+      // Extract environment from URL
+      let environment = 'unknown';
+      try {
+        const urlObj = new URL(data.url);
+        const hostParts = urlObj.hostname.split('.');
+        environment = hostParts.find(part => 
+          ['staging', 'edison', 'production'].includes(part)
+        ) || 'unknown';
+      } catch (err) {
+        console.error('Error extracting environment from URL:', err);
+      }
+      
+      // Log IDW environment opening
+      logger.info('IDW Environment Opened', {
+        event: 'idw:opened',
+        environment: environment,
+        url: data.url,
+        label: data.label || 'IDW',
+        openedIn: 'tab',
+        timestamp: new Date().toISOString()
+      });
+      
       // Get the main window
       const mainWindow = browserWindow.getMainWindow();
       if (mainWindow) {
@@ -1747,6 +2059,17 @@ function setupIPC() {
     // Handle audio generator opening
     if (data.action === 'open-audio-generator' && data.url) {
       console.log('Opening audio generator in new tab:', data.label, data.url);
+      
+      // Log the AI tab opening
+      logger.info('Personal AI Opened in Tab', {
+        event: 'ai:opened',
+        service: data.label || 'Audio Generator',
+        type: 'audio-generation',
+        url: data.url,
+        category: data.category,
+        openedIn: 'tab',
+        timestamp: new Date().toISOString()
+      });
       
       // Get the main window
       const mainWindow = browserWindow.getMainWindow();
@@ -3026,33 +3349,93 @@ function setupIPC() {
     }
   });
   
-  // Handle saving IDW environments (from setup wizard)
-  ipcMain.on('save-idw-environments', (event, environments) => {
-    console.log(`[IDW] Saving ${environments.length} IDW environments from setup wizard`);
+  // NEW: Handle wizard save using invoke (returns promise)
+  ipcMain.handle('wizard:save-idw-environments', async (event, environments) => {
+    console.log('='.repeat(60));
+    console.log('[WIZARD SAVE] 🔵 INVOKE Handler called!');
+    console.log(`[WIZARD SAVE] Saving ${environments.length} IDW environments`);
+    console.log('[WIZARD SAVE] Environment IDs:', environments.map(e => e.id).join(', '));
+    
     try {
       const idwConfigPath = path.join(app.getPath('userData'), 'idw-entries.json');
+      console.log('[WIZARD SAVE] File path:', idwConfigPath);
+      
+      // Create backup
+      if (fs.existsSync(idwConfigPath)) {
+        const backupPath = idwConfigPath + '.backup';
+        fs.copyFileSync(idwConfigPath, backupPath);
+        console.log('[WIZARD SAVE] ✅ Backup created');
+      }
+      
+      // Write file
+      fs.writeFileSync(idwConfigPath, JSON.stringify(environments, null, 2));
+      console.log('[WIZARD SAVE] ✅ File written');
+      
+      // Verify
+      const savedData = JSON.parse(fs.readFileSync(idwConfigPath, 'utf8'));
+      console.log('[WIZARD SAVE] ✅ Verified:', savedData.length, 'in file');
+      
+      // Update menu
+      const { setApplicationMenu } = require('./menu');
+      setApplicationMenu(environments);
+      console.log('[WIZARD SAVE] ✅ Menu updated');
+      
+      // Re-register shortcuts
+      registerGlobalShortcuts();
+      console.log('[WIZARD SAVE] ✅ Shortcuts registered');
+      
+      console.log('[WIZARD SAVE] ✅ SUCCESS!');
+      console.log('='.repeat(60));
+      
+      return { success: true, count: environments.length };
+    } catch (error) {
+      console.error('[WIZARD SAVE] ❌ ERROR:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // OLD: Handle saving IDW environments (from setup wizard) - kept for compatibility
+  ipcMain.on('save-idw-environments', (event, environments) => {
+    console.log('='.repeat(60));
+    console.log('[IDW SAVE] 🔵 IPC Handler called!');
+    console.log(`[IDW SAVE] Saving ${environments.length} IDW environments from setup wizard`);
+    console.log('[IDW SAVE] Environment IDs:', environments.map(e => e.id).join(', '));
+    
+    try {
+      const idwConfigPath = path.join(app.getPath('userData'), 'idw-entries.json');
+      console.log('[IDW SAVE] File path:', idwConfigPath);
       
       // Create backup of existing file
       if (fs.existsSync(idwConfigPath)) {
         const backupPath = idwConfigPath + '.backup';
         fs.copyFileSync(idwConfigPath, backupPath);
-        console.log('[IDW] Created backup of existing environments');
+        console.log('[IDW SAVE] ✅ Created backup');
       }
       
       // Save the new environments
       fs.writeFileSync(idwConfigPath, JSON.stringify(environments, null, 2));
-      console.log('[IDW] IDW environments saved successfully to:', idwConfigPath);
+      console.log('[IDW SAVE] ✅ File written successfully');
+      
+      // Verify file was written
+      const savedData = JSON.parse(fs.readFileSync(idwConfigPath, 'utf8'));
+      console.log('[IDW SAVE] ✅ Verified:', savedData.length, 'environments in file');
       
       // Update the application menu with the new environments
+      console.log('[IDW SAVE] Updating menu...');
       const { setApplicationMenu } = require('./menu');
       setApplicationMenu(environments);
+      console.log('[IDW SAVE] ✅ Menu updated');
       
       // Re-register global shortcuts
       registerGlobalShortcuts();
+      console.log('[IDW SAVE] ✅ Shortcuts registered');
       
       event.reply('idw-environments-saved', true);
+      console.log('[IDW SAVE] ✅ COMPLETE - All done!');
+      console.log('='.repeat(60));
     } catch (error) {
-      console.error('[IDW] Error saving IDW environments:', error);
+      console.error('[IDW SAVE] ❌ ERROR:', error);
+      console.error('[IDW SAVE] Stack:', error.stack);
       event.reply('idw-environments-saved', false);
     }
   });
@@ -3119,31 +3502,41 @@ function setupIPC() {
   
   // Handle refresh menu request
   ipcMain.on('refresh-menu', (event) => {
-    console.log('[Menu] Refreshing application menu');
+    console.log('='.repeat(70));
+    console.log('[REFRESH-MENU] 🔵 Handler called!');
     try {
-      // Reload IDW environments from file
+      // Reload IDW environments from file AND settings
       const idwConfigPath = path.join(app.getPath('userData'), 'idw-entries.json');
-      let idwEnvironments = [];
       
-      if (fs.existsSync(idwConfigPath)) {
+      // Try settings first
+      let idwEnvironments = global.settingsManager.get('idwEnvironments') || [];
+      console.log(`[REFRESH-MENU] Loaded ${idwEnvironments.length} IDWs from settings`);
+      
+      // Fallback to file if settings empty
+      if (idwEnvironments.length === 0 && fs.existsSync(idwConfigPath)) {
         const data = fs.readFileSync(idwConfigPath, 'utf8');
         idwEnvironments = JSON.parse(data);
-        console.log(`[Menu] Loaded ${idwEnvironments.length} IDW environments`);
+        console.log(`[REFRESH-MENU] Loaded ${idwEnvironments.length} IDWs from file (fallback)`);
       }
       
       // Update the application menu
+      console.log('[REFRESH-MENU] Calling setApplicationMenu with', idwEnvironments.length, 'IDWs...');
       const { setApplicationMenu } = require('./menu');
       setApplicationMenu(idwEnvironments);
-      
-      console.log('[Menu] Menu refresh completed');
+      console.log('[REFRESH-MENU] ✅ Menu refreshed successfully!');
+      console.log('='.repeat(70));
     } catch (error) {
-      console.error('[Menu] Error refreshing menu:', error);
+      console.error('[REFRESH-MENU] ❌ Error refreshing menu:', error);
+      console.error('[REFRESH-MENU] Stack:', error.stack);
     }
   });
   
   // Handle menu actions from the menu.js
   ipcMain.on('menu-action', (event, data) => {
-    console.log('Received menu action from menu.js:', data);
+    console.log('='.repeat(70));
+    console.log('[MENU-ACTION] 🔵 Handler called!');
+    console.log('[MENU-ACTION] Received from menu.js:', data);
+    console.log('='.repeat(70));
     
     // Handle specific menu actions
     if (data.action === 'open-external-bot' && data.url) {
@@ -3220,6 +3613,96 @@ function setupIPC() {
   });
 
   /**
+   * Helper function to extract file metadata from JSON payloads
+   * Replaces large base64 data with metadata
+   */
+  function extractFileMetadata(obj) {
+    const files = [];
+    
+    function processObject(data, path = '') {
+      if (Array.isArray(data)) {
+        return data.map((item, index) => processObject(item, `${path}[${index}]`));
+      } else if (data && typeof data === 'object') {
+        const processed = {};
+        for (const [key, value] of Object.entries(data)) {
+          // Detect base64 image/file data
+          if ((key === 'data' || key === 'content' || key === 'image_url') && 
+              typeof value === 'string' && 
+              (value.startsWith('data:') || value.startsWith('/9j/') || value.startsWith('iVBOR') || value.length > 1000)) {
+            
+            // Extract metadata
+            let fileType = 'unknown';
+            let sizeKB = Math.round(value.length / 1024);
+            
+            if (value.startsWith('data:')) {
+              const match = value.match(/^data:([^;]+);/);
+              if (match) fileType = match[1];
+            } else if (value.startsWith('/9j/')) {
+              fileType = 'image/jpeg';
+            } else if (value.startsWith('iVBOR')) {
+              fileType = 'image/png';
+            }
+            
+            files.push({
+              field: `${path}.${key}`,
+              type: fileType,
+              sizeKB: sizeKB,
+              base64Length: value.length
+            });
+            
+            processed[key] = `[FILE_DATA_REMOVED: ${fileType}, ${sizeKB}KB]`;
+          } else {
+            processed[key] = processObject(value, `${path}.${key}`);
+          }
+        }
+        return processed;
+      }
+      return data;
+    }
+    
+    const processedPayload = processObject(obj);
+    return { payload: processedPayload, files: files.length > 0 ? files : undefined };
+  }
+  
+  /**
+   * Helper function to extract file metadata from multipart form data
+   */
+  function extractMultipartFileMetadata(data, contentType) {
+    const files = [];
+    
+    try {
+      // Extract boundary from content-type
+      const boundaryMatch = contentType.match(/boundary=([^;]+)/);
+      if (!boundaryMatch) return files;
+      
+      const boundary = boundaryMatch[1].replace(/^["']|["']$/g, '');
+      const parts = data.split(`--${boundary}`);
+      
+      for (const part of parts) {
+        // Look for Content-Disposition with filename
+        const filenameMatch = part.match(/filename="([^"]+)"/);
+        const contentTypeMatch = part.match(/Content-Type:\s*([^\r\n]+)/i);
+        
+        if (filenameMatch) {
+          const filename = filenameMatch[1];
+          const fileType = contentTypeMatch ? contentTypeMatch[1].trim() : 'unknown';
+          const sizeKB = Math.round(part.length / 1024);
+          
+          files.push({
+            filename: filename,
+            type: fileType,
+            sizeKB: sizeKB
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Error extracting multipart file metadata:', err);
+    }
+    
+    return files;
+  }
+
+  /**
    * Opens an external AI service in a separate window with proper authentication support
    * @param {string} url - The URL of the external AI service
    * @param {string} label - The display name of the service
@@ -3227,6 +3710,50 @@ function setupIPC() {
    */
   function openExternalAIWindow(url, label, options = {}) {
     console.log(`Opening external AI service in separate window: ${label} (${url})`);
+    
+    // Determine AI type based on URL and label
+    let aiType = 'unknown';
+    let aiService = label;
+    
+    if (url.includes('chatgpt.com') || url.includes('openai.com')) {
+      aiType = 'chat';
+      aiService = 'ChatGPT';
+    } else if (url.includes('claude.ai')) {
+      aiType = 'chat';
+      aiService = 'Claude';
+    } else if (url.includes('gemini.google.com') || url.includes('bard.google.com')) {
+      aiType = 'chat';
+      aiService = 'Gemini';
+    } else if (url.includes('perplexity.ai')) {
+      aiType = 'chat';
+      aiService = 'Perplexity';
+    } else if (label.toLowerCase().includes('image') || url.includes('midjourney') || url.includes('dalle')) {
+      aiType = 'image-generation';
+    } else if (label.toLowerCase().includes('video')) {
+      aiType = 'video-generation';
+    } else if (label.toLowerCase().includes('audio') || url.includes('elevenlabs')) {
+      aiType = 'audio-generation';
+    } else if (label.toLowerCase().includes('ui') || label.toLowerCase().includes('design')) {
+      aiType = 'ui-design';
+    }
+    
+    // Log the AI window opening
+    logger.logWindowCreated('external-ai', aiService, {
+      aiType: aiType,
+      aiService: aiService,
+      url: url,
+      windowTitle: label,
+      windowSize: `${options.width || 1400}x${options.height || 900}`,
+      partition: `persist:${label.toLowerCase().replace(/\s/g, '-')}`
+    });
+    
+    logger.info('Personal AI Opened', {
+      event: 'ai:opened',
+      service: aiService,
+      type: aiType,
+      url: url,
+      timestamp: new Date().toISOString()
+    });
     
     // Create window configuration
     const windowConfig = {
@@ -3245,6 +3772,192 @@ function setupIPC() {
 
     // Create the window
     const aiWindow = new BrowserWindow(windowConfig);
+    
+    // Set up network traffic logging using Chrome DevTools Protocol
+    try {
+      aiWindow.webContents.debugger.attach('1.3');
+      console.log(`[${label}] Debugger attached for network monitoring`);
+      
+      // Enable Network domain to capture all network traffic
+      aiWindow.webContents.debugger.sendCommand('Network.enable');
+      
+      // Listen for network requests
+      aiWindow.webContents.debugger.on('message', (event, method, params) => {
+        if (method === 'Network.requestWillBeSent') {
+          // Log outgoing request
+          const request = params.request;
+          logger.info('LLM Network Request', {
+            event: 'llm:network:request',
+            aiService: aiService,
+            requestId: params.requestId,
+            url: request.url,
+            method: request.method,
+            headers: request.headers,
+            postData: request.postData,
+            timestamp: new Date().toISOString()
+          });
+          
+          // Log detailed payload if it's an API call
+          if (request.postData && 
+              (request.url.includes('/api/') || 
+               request.url.includes('/v1/') ||
+               request.url.includes('chat') ||
+               request.url.includes('completions'))) {
+            try {
+              const payload = JSON.parse(request.postData);
+              
+              // Check if payload contains file/image data and extract metadata
+              const processedPayload = extractFileMetadata(payload);
+              
+              logger.info('LLM API Call Payload', {
+                event: 'llm:api:request',
+                aiService: aiService,
+                requestId: params.requestId,
+                url: request.url,
+                payload: processedPayload.payload,
+                filesDetected: processedPayload.files,
+                timestamp: new Date().toISOString()
+              });
+            } catch (err) {
+              // Not JSON, check if it's multipart form data (file upload)
+              const contentType = request.headers['content-type'] || request.headers['Content-Type'] || '';
+              
+              if (contentType.includes('multipart/form-data')) {
+                // Extract file metadata from multipart data
+                const fileMetadata = extractMultipartFileMetadata(request.postData, contentType);
+                logger.info('LLM File Upload (Multipart)', {
+                  event: 'llm:file:upload',
+                  aiService: aiService,
+                  requestId: params.requestId,
+                  url: request.url,
+                  files: fileMetadata,
+                  timestamp: new Date().toISOString()
+                });
+              } else {
+                // Log as text (but truncate if too large)
+                const truncatedData = request.postData.length > 1000 
+                  ? request.postData.substring(0, 1000) + `... [truncated, total size: ${request.postData.length} bytes]`
+                  : request.postData;
+                  
+                logger.info('LLM API Call Payload (Text)', {
+                  event: 'llm:api:request',
+                  aiService: aiService,
+                  requestId: params.requestId,
+                  url: request.url,
+                  payload: truncatedData,
+                  timestamp: new Date().toISOString()
+                });
+              }
+            }
+          }
+        } else if (method === 'Network.responseReceived') {
+          // Log response metadata
+          const response = params.response;
+          logger.info('LLM Network Response', {
+            event: 'llm:network:response',
+            aiService: aiService,
+            requestId: params.requestId,
+            url: response.url,
+            status: response.status,
+            statusText: response.statusText,
+            headers: response.headers,
+            mimeType: response.mimeType,
+            timestamp: new Date().toISOString()
+          });
+          
+          // Get response body if it's an API response
+          if (response.url.includes('/api/') || 
+              response.url.includes('/v1/') ||
+              response.url.includes('chat') ||
+              response.url.includes('completions')) {
+            aiWindow.webContents.debugger.sendCommand('Network.getResponseBody', {
+              requestId: params.requestId
+            }).then(responseBody => {
+              try {
+                const body = responseBody.base64Encoded 
+                  ? Buffer.from(responseBody.body, 'base64').toString('utf-8')
+                  : responseBody.body;
+                
+                // Try to parse as JSON
+                try {
+                  const jsonBody = JSON.parse(body);
+                  
+                  // Check if response contains file/image data and extract metadata
+                  const processedResponse = extractFileMetadata(jsonBody);
+                  
+                  logger.info('LLM API Response Payload', {
+                    event: 'llm:api:response',
+                    aiService: aiService,
+                    requestId: params.requestId,
+                    url: response.url,
+                    status: response.status,
+                    payload: processedResponse.payload,
+                    filesDetected: processedResponse.files,
+                    timestamp: new Date().toISOString()
+                  });
+                } catch (e) {
+                  // Not JSON, truncate if too large
+                  const truncatedBody = body.length > 1000 
+                    ? body.substring(0, 1000) + `... [truncated, total size: ${body.length} bytes]`
+                    : body;
+                    
+                  logger.info('LLM API Response Payload (Text)', {
+                    event: 'llm:api:response',
+                    aiService: aiService,
+                    requestId: params.requestId,
+                    url: response.url,
+                    status: response.status,
+                    payload: truncatedBody,
+                    timestamp: new Date().toISOString()
+                  });
+                }
+              } catch (err) {
+                console.error(`[${label}] Error getting response body:`, err);
+              }
+            }).catch(err => {
+              // Some responses can't be retrieved, that's okay
+              if (!err.message.includes('No resource')) {
+                console.error(`[${label}] Error getting response body:`, err);
+              }
+            });
+          }
+        } else if (method === 'Network.webSocketCreated') {
+          // Log WebSocket connections (used for streaming)
+          logger.info('LLM WebSocket Created', {
+            event: 'llm:websocket:created',
+            aiService: aiService,
+            requestId: params.requestId,
+            url: params.url,
+            timestamp: new Date().toISOString()
+          });
+        } else if (method === 'Network.webSocketFrameSent') {
+          // Log WebSocket messages sent (streaming requests)
+          logger.info('LLM WebSocket Message Sent', {
+            event: 'llm:websocket:sent',
+            aiService: aiService,
+            requestId: params.requestId,
+            message: params.response.payloadData,
+            timestamp: new Date().toISOString()
+          });
+        } else if (method === 'Network.webSocketFrameReceived') {
+          // Log WebSocket messages received (streaming responses)
+          logger.info('LLM WebSocket Message Received', {
+            event: 'llm:websocket:received',
+            aiService: aiService,
+            requestId: params.requestId,
+            message: params.response.payloadData,
+            timestamp: new Date().toISOString()
+          });
+        }
+      });
+      
+      // Handle debugger detach
+      aiWindow.webContents.debugger.on('detach', (event, reason) => {
+        console.log(`[${label}] Debugger detached:`, reason);
+      });
+    } catch (err) {
+      console.error(`[${label}] Error setting up network monitoring:`, err);
+    }
     
     // Set up authentication handling
     aiWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
@@ -3354,6 +4067,30 @@ function setupIPC() {
     // Clean up on close
     aiWindow.on('closed', () => {
       console.log(`[${label}] Window closed`);
+      
+      // Detach debugger if attached
+      try {
+        if (aiWindow.webContents.debugger.isAttached()) {
+          aiWindow.webContents.debugger.detach();
+          console.log(`[${label}] Debugger detached on window close`);
+        }
+      } catch (err) {
+        // Ignore errors during cleanup
+      }
+      
+      // Log the AI window closing
+      logger.logWindowClosed('external-ai', aiService, {
+        aiType: aiType,
+        aiService: aiService,
+        windowTitle: label
+      });
+      
+      logger.info('Personal AI Closed', {
+        event: 'ai:closed',
+        service: aiService,
+        type: aiType,
+        timestamp: new Date().toISOString()
+      });
     });
 
     return aiWindow;
