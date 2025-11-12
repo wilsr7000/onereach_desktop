@@ -3781,6 +3781,9 @@ function setupIPC() {
       // Enable Network domain to capture all network traffic
       aiWindow.webContents.debugger.sendCommand('Network.enable');
       
+      // Track streaming responses (SSE/text-event-stream)
+      const streamingResponses = new Map(); // requestId -> { url, chunks: [], complete: false }
+      
       // Listen for network requests
       aiWindow.webContents.debugger.on('message', (event, method, params) => {
         if (method === 'Network.requestWillBeSent') {
@@ -3865,6 +3868,26 @@ function setupIPC() {
             timestamp: new Date().toISOString()
           });
           
+          // Check if this is a streaming response (SSE)
+          const contentType = response.headers['content-type'] || response.headers['Content-Type'] || '';
+          const isStreaming = contentType.includes('text/event-stream') || 
+                            contentType.includes('application/stream') ||
+                            contentType.includes('text/stream');
+          
+          // Initialize streaming tracker for SSE responses
+          if (isStreaming && 
+              (response.url.includes('/conversation') || 
+               response.url.includes('/chat') ||
+               response.url.includes('/completions'))) {
+            console.log(`[${label}] Detected streaming response for request ${params.requestId}`);
+            streamingResponses.set(params.requestId, {
+              url: response.url,
+              chunks: [],
+              complete: false,
+              startTime: Date.now()
+            });
+          }
+          
           // Get response body if it's an API response
           if (response.url.includes('/api/') || 
               response.url.includes('/v1/') ||
@@ -3920,6 +3943,124 @@ function setupIPC() {
                 console.error(`[${label}] Error getting response body:`, err);
               }
             });
+          }
+        } else if (method === 'Network.dataReceived') {
+          // Capture streaming data chunks (SSE)
+          if (streamingResponses.has(params.requestId)) {
+            const streamData = streamingResponses.get(params.requestId);
+            console.log(`[${label}] Received ${params.dataLength} bytes for streaming request ${params.requestId}`);
+            
+            // Get the actual chunk data
+            aiWindow.webContents.debugger.sendCommand('Network.getResponseBody', {
+              requestId: params.requestId
+            }).then(responseBody => {
+              const body = responseBody.base64Encoded 
+                ? Buffer.from(responseBody.body, 'base64').toString('utf-8')
+                : responseBody.body;
+              
+              // Store the cumulative response
+              streamData.chunks.push(body);
+              streamData.lastUpdate = Date.now();
+              
+              console.log(`[${label}] Stream data length: ${body.length} chars`);
+            }).catch(err => {
+              // Might not be available yet, that's okay
+            });
+          }
+        } else if (method === 'Network.loadingFinished') {
+          // Stream completed - process all chunks
+          if (streamingResponses.has(params.requestId)) {
+            const streamData = streamingResponses.get(params.requestId);
+            streamData.complete = true;
+            
+            console.log(`[${label}] Stream finished for request ${params.requestId}`);
+            
+            // Get the final complete response
+            aiWindow.webContents.debugger.sendCommand('Network.getResponseBody', {
+              requestId: params.requestId
+            }).then(responseBody => {
+              try {
+                const body = responseBody.base64Encoded 
+                  ? Buffer.from(responseBody.body, 'base64').toString('utf-8')
+                  : responseBody.body;
+                
+                console.log(`[${label}] Complete stream data length: ${body.length} chars`);
+                
+                // Parse SSE format (data: ... \n\n)
+                const sseEvents = [];
+                const lines = body.split('\n');
+                let currentEvent = {};
+                
+                for (const line of lines) {
+                  if (line.startsWith('data: ')) {
+                    const data = line.substring(6);
+                    if (data === '[DONE]') {
+                      break;
+                    }
+                    try {
+                      const parsed = JSON.parse(data);
+                      sseEvents.push(parsed);
+                      
+                      // Extract the actual message content
+                      if (parsed.message && parsed.message.content) {
+                        currentEvent.content = parsed.message.content;
+                      }
+                      if (parsed.message && parsed.message.content && parsed.message.content.parts) {
+                        currentEvent.parts = parsed.message.content.parts;
+                      }
+                    } catch (e) {
+                      // Not JSON, might be plain text
+                    }
+                  }
+                }
+                
+                // Log the complete streaming response
+                logger.info('LLM Streaming Response Complete', {
+                  event: 'llm:stream:complete',
+                  aiService: aiService,
+                  requestId: params.requestId,
+                  url: streamData.url,
+                  eventCount: sseEvents.length,
+                  events: sseEvents,
+                  extractedContent: currentEvent,
+                  duration: Date.now() - streamData.startTime,
+                  timestamp: new Date().toISOString()
+                });
+                
+                // Extract and log just the final message text for easy reading
+                if (sseEvents.length > 0) {
+                  const lastEvent = sseEvents[sseEvents.length - 1];
+                  let messageText = null;
+                  
+                  // Try to extract the message text
+                  if (lastEvent.message && lastEvent.message.content) {
+                    if (typeof lastEvent.message.content === 'string') {
+                      messageText = lastEvent.message.content;
+                    } else if (lastEvent.message.content.parts) {
+                      messageText = lastEvent.message.content.parts.join('\n');
+                    }
+                  }
+                  
+                  if (messageText) {
+                    logger.info('LLM Final Response Text', {
+                      event: 'llm:response:final',
+                      aiService: aiService,
+                      requestId: params.requestId,
+                      responseText: messageText,
+                      timestamp: new Date().toISOString()
+                    });
+                  }
+                }
+                
+              } catch (err) {
+                console.error(`[${label}] Error parsing streaming response:`, err);
+              }
+            }).catch(err => {
+              console.error(`[${label}] Error getting streaming response body:`, err);
+            });
+            
+            // Clean up after logging
+            setTimeout(() => streamingResponses.delete(params.requestId), 5000);
           }
         } else if (method === 'Network.webSocketCreated') {
           // Log WebSocket connections (used for streaming)

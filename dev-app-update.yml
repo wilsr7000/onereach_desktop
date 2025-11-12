@@ -1,6 +1,12 @@
-owner: OneReachAI
-repo: desktop-app
-provider: github
-# For local testing, uncomment the lines below:
-# provider: generic
-# url: http://localhost:8080/ 
+# Development Update Configuration
+# For local testing, this points to localhost
+# For GitHub testing, comment out generic and uncomment github
+
+# GitHub (production):
+# owner: wilsr7000
+# repo: Onereach_Desktop_App
+# provider: github
+
+# Local testing (development):
+provider: generic
+url: http://localhost:8080/
