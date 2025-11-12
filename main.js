@@ -3375,6 +3375,11 @@ function setupIPC() {
       const savedData = JSON.parse(fs.readFileSync(idwConfigPath, 'utf8'));
       console.log('[WIZARD SAVE] ✅ Verified:', savedData.length, 'in file');
       
+      // Update the settings manager with the new environments
+      console.log('[WIZARD SAVE] Updating settings manager...');
+      global.settingsManager.set('idwEnvironments', environments);
+      console.log('[WIZARD SAVE] ✅ Settings manager updated');
+      
       // Update menu
       const { setApplicationMenu } = require('./menu');
       setApplicationMenu(environments);
@@ -3419,6 +3424,11 @@ function setupIPC() {
       // Verify file was written
       const savedData = JSON.parse(fs.readFileSync(idwConfigPath, 'utf8'));
       console.log('[IDW SAVE] ✅ Verified:', savedData.length, 'environments in file');
+      
+      // Update the settings manager with the new environments
+      console.log('[IDW SAVE] Updating settings manager...');
+      global.settingsManager.set('idwEnvironments', environments);
+      console.log('[IDW SAVE] ✅ Settings manager updated');
       
       // Update the application menu with the new environments
       console.log('[IDW SAVE] Updating menu...');
@@ -3589,14 +3599,32 @@ function setupIPC() {
     
     // Handle IDW URL opening
     if (data.action === 'open-idw-url' && data.url) {
-      console.log(`Opening IDW URL in new tab: ${data.label} (${data.url})`);
+      // Validate and clean the URL
+      let cleanUrl = data.url;
+      if (cleanUrl && typeof cleanUrl === 'string') {
+        cleanUrl = cleanUrl.trim();
+        // If URL has invalid prefix before http/https, remove it
+        if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
+          const httpsIndex = cleanUrl.indexOf('https://');
+          const httpIndex = cleanUrl.indexOf('http://');
+          if (httpsIndex > 0) {
+            cleanUrl = cleanUrl.substring(httpsIndex);
+            console.log(`[Menu Action] Cleaned malformed URL: ${data.url} -> ${cleanUrl}`);
+          } else if (httpIndex > 0) {
+            cleanUrl = cleanUrl.substring(httpIndex);
+            console.log(`[Menu Action] Cleaned malformed URL: ${data.url} -> ${cleanUrl}`);
+          }
+        }
+      }
+      
+      console.log(`Opening IDW URL in new tab: ${data.label} (${cleanUrl})`);
       
       // Get the main window
       const mainWindow = browserWindow.getMainWindow();
       if (mainWindow) {
         // Send to main window to open in a new tab
         mainWindow.webContents.send('open-in-new-tab', {
-          url: data.url,
+          url: cleanUrl,
           label: data.label || 'IDW'
         });
       } else {

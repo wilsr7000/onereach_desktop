@@ -227,8 +227,30 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
           } else {
             // If no browser window, try using shell to open the URL
             console.log(`[Menu Click] Opening IDW environment chat in external browser: ${env.chatUrl}`);
-            const { shell } = require('electron');
-            shell.openExternal(env.chatUrl);
+            
+            // Validate and clean the URL before opening
+            let urlToOpen = env.chatUrl;
+            if (urlToOpen && typeof urlToOpen === 'string') {
+              // Remove any leading invalid characters
+              urlToOpen = urlToOpen.trim();
+              // If URL doesn't start with http:// or https://, fix it
+              if (!urlToOpen.startsWith('http://') && !urlToOpen.startsWith('https://')) {
+                // Remove any invalid prefix before https
+                const httpsIndex = urlToOpen.indexOf('https://');
+                const httpIndex = urlToOpen.indexOf('http://');
+                if (httpsIndex > 0) {
+                  urlToOpen = urlToOpen.substring(httpsIndex);
+                } else if (httpIndex > 0) {
+                  urlToOpen = urlToOpen.substring(httpIndex);
+                }
+              }
+              console.log(`[Menu Click] Cleaned URL: ${urlToOpen}`);
+              
+              const { shell } = require('electron');
+              shell.openExternal(urlToOpen);
+            } else {
+              console.error(`[Menu Click] Invalid URL: ${env.chatUrl}`);
+            }
           }
         }
       });
