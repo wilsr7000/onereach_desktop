@@ -527,6 +527,7 @@ class ClipboardManagerV2 {
   
   // Window management (same as original)
   
+  // CRITICAL: For clipboard viewer window (NOT black hole widget)
   createClipboardWindow() {
     if (this.clipboardWindow && !this.clipboardWindow.isDestroyed()) {
       this.clipboardWindow.focus();
@@ -573,6 +574,9 @@ class ClipboardManagerV2 {
     });
   }
   
+  // CRITICAL: Black hole widget window - DO NOT DUPLICATE THIS METHOD!
+  // If broken, check TEST-BLACKHOLE.md for troubleshooting
+  // Must use app.getAppPath() for preload, NOT __dirname
   createBlackHoleWindow(position, startExpanded = false) {
     if (this.blackHoleWindow && !this.blackHoleWindow.isDestroyed()) {
       this.blackHoleWindow.focus();
