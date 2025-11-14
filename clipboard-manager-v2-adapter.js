@@ -533,6 +533,12 @@ class ClipboardManagerV2 {
       return;
     }
     
+    // Use app.getAppPath() instead of __dirname for packaged apps
+    const preloadPath = path.join(app.getAppPath(), 'preload.js');
+    console.log('[ClipboardManager] Creating clipboard window with preload:', preloadPath);
+    console.log('[ClipboardManager] App path:', app.getAppPath());
+    console.log('[ClipboardManager] Preload exists?', require('fs').existsSync(preloadPath));
+    
     this.clipboardWindow = new BrowserWindow({
       width: 1400,
       height: 900,
@@ -546,11 +552,21 @@ class ClipboardManagerV2 {
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
-        preload: path.join(__dirname, 'preload.js')
+        preload: preloadPath,
+        sandbox: false // Add this to ensure preload loads
       }
     });
     
     this.clipboardWindow.loadFile('clipboard-viewer.html');
+    
+    // Add debug logging
+    this.clipboardWindow.webContents.on('did-finish-load', () => {
+      console.log('[ClipboardManager] Clipboard viewer finished loading');
+    });
+    
+    this.clipboardWindow.webContents.on('preload-error', (event, preloadPath, error) => {
+      console.error('[ClipboardManager] Preload error:', preloadPath, error);
+    });
     
     this.clipboardWindow.on('closed', () => {
       this.clipboardWindow = null;
