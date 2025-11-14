@@ -458,7 +458,43 @@ class ClipboardManagerV2 {
   }
   
   stripHtml(html) {
-    return html.replace(/<[^>]*>/g, '');
+    if (!html) return '';
+    
+    // Remove script and style tags and their content
+    let text = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+    text = text.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '');
+    
+    // Remove all HTML tags
+    text = text.replace(/<[^>]*>/g, '');
+    
+    // Decode common HTML entities
+    text = text
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;/gi, "'")
+      .replace(/&mdash;/gi, '—')
+      .replace(/&ndash;/gi, '–')
+      .replace(/&hellip;/gi, '...')
+      .replace(/&bull;/gi, '•')
+      .replace(/&copy;/gi, '©')
+      .replace(/&reg;/gi, '®')
+      .replace(/&trade;/gi, '™')
+      .replace(/&#(\d+);/gi, (match, dec) => String.fromCharCode(dec))
+      .replace(/&#x([0-9a-f]+);/gi, (match, hex) => String.fromCharCode(parseInt(hex, 16)));
+    
+    // Clean up extra whitespace
+    text = text
+      .replace(/\t/g, ' ')  // Tabs to spaces
+      .replace(/ +/g, ' ')  // Multiple spaces to single
+      .replace(/\n +/g, '\n')  // Remove leading spaces on lines
+      .replace(/ +\n/g, '\n')  // Remove trailing spaces on lines
+      .replace(/\n\n+/g, '\n\n')  // Multiple newlines to double
+      .trim();
+    
+    return text;
   }
   
   detectSource(text) {
@@ -1028,23 +1064,19 @@ class ClipboardManagerV2 {
       
       // Paste logic based on type
       if (item.type === 'text') {
+        // For plain text, just write the text content
         clipboard.writeText(item.content);
       } else if (item.type === 'html') {
-        // For HTML items, prefer plainText if available, otherwise strip HTML tags
+        // For HTML items, ONLY copy plain text - no HTML formatting
         const textContent = item.plainText || this.stripHtml(item.content);
-        clipboard.writeText(textContent);
+        // Clean up any extra whitespace and formatting
+        const cleanText = textContent
+          .replace(/\s+/g, ' ')  // Replace multiple spaces/tabs with single space
+          .replace(/\n\s*\n/g, '\n')  // Replace multiple newlines with single
+          .trim();  // Remove leading/trailing whitespace
         
-        // Also write the HTML format for apps that support it
-        if (process.platform === 'darwin') {
-          // On macOS, we can write both HTML and plain text
-          clipboard.write({
-            text: textContent,
-            html: item.content
-          });
-        } else {
-          // On other platforms, just write the plain text
-          clipboard.writeText(textContent);
-        }
+        // Only write plain text - NO HTML format to avoid formatting issues
+        clipboard.writeText(cleanText);
       } else if (item.type === 'image' && item.content) {
         const image = nativeImage.createFromDataURL(item.content);
         clipboard.writeImage(image);

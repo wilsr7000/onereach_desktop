@@ -1542,44 +1542,10 @@ function setupEventListeners() {
                     }
                 }
                 
-                // Check if it's a generated document that needs special handling
-                if (historyItem && historyItem.type === 'generated-document') {
-                    // For generated documents, copy the HTML content to clipboard
-                    const htmlContent = historyItem.content || historyItem.html;
-                    if (htmlContent) {
-                        // Create a temporary div to convert HTML to rich text
-                        const tempDiv = document.createElement('div');
-                        tempDiv.innerHTML = htmlContent;
-                        
-                        // Copy as both HTML and plain text
-                        const selection = window.getSelection();
-                        const range = document.createRange();
-                        document.body.appendChild(tempDiv);
-                        range.selectNodeContents(tempDiv);
-                        selection.removeAllRanges();
-                        selection.addRange(range);
-                        
-                        try {
-                            document.execCommand('copy');
-                            showCopyNotification();
-                        } catch (err) {
-                            console.error('Failed to copy generated document:', err);
-                            // Fallback to regular paste
-                            await window.clipboard.pasteItem(itemId);
-                        } finally {
-                            selection.removeAllRanges();
-                            document.body.removeChild(tempDiv);
-                        }
-                    } else {
-                        // Fallback to regular paste
-                        await window.clipboard.pasteItem(itemId);
-                        showCopyNotification();
-                    }
-                } else {
-                    await window.clipboard.pasteItem(itemId);
-                    // Show a brief notification that item was copied
-                    showCopyNotification();
-                }
+                // Always use the backend paste handler to ensure consistent plain text copying
+                await window.clipboard.pasteItem(itemId);
+                // Show a brief notification that item was copied
+                showCopyNotification();
             } else if (actionType === 'edit-metadata') {
                 await showMetadataModal(itemId);
             } else if (actionType === 'menu') {
