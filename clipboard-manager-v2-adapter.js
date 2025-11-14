@@ -3264,38 +3264,6 @@ class ClipboardManagerV2 {
     console.log(`Registered global shortcut: ${shortcut}`);
   }
   
-  // Create clipboard viewer window
-  createClipboardWindow() {
-    if (!BrowserWindow) {
-      console.error('BrowserWindow not available');
-      return;
-    }
-    
-    // If window already exists, focus it
-    if (this.clipboardWindow && !this.clipboardWindow.isDestroyed()) {
-      this.clipboardWindow.focus();
-      return;
-    }
-    
-    console.log('Creating clipboard viewer window');
-    
-    this.clipboardWindow = new BrowserWindow({
-      width: 900,
-      height: 700,
-      webPreferences: {
-        nodeIntegration: true,
-        contextIsolation: false,
-        enableRemoteModule: true
-      },
-      title: 'Clipboard Manager'
-    });
-    
-    this.clipboardWindow.loadFile('clipboard-viewer.html');
-    
-    this.clipboardWindow.on('closed', () => {
-      this.clipboardWindow = null;
-    });
-  }
   
   // Create black hole widget window
   createBlackHoleWindow(position = null, expandedMode = false) {
