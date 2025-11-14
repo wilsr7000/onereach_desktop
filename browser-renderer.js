@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const loadingIndicator = document.getElementById('loading-indicator');
     
     // Set up event listeners
+    let isMenuToggle = false;
     newTabButton.addEventListener('click', () => {
         console.log('Plus button clicked, requesting IDW environments');
         
@@ -32,8 +33,17 @@ document.addEventListener('DOMContentLoaded', () => {
             // Also remove overlay if it exists
             const existingOverlay = document.querySelector('.idw-menu-overlay');
             if (existingOverlay) existingOverlay.remove();
-            return; // Just close the menu if it's already open
+            
+            // If this is a toggle (clicking button to close menu), just return
+            if (isMenuToggle) {
+                isMenuToggle = false;
+                return;
+            }
+            // Otherwise continue to regenerate menu with updated tabs
         }
+        
+        // Mark that menu is open and next button click will be a toggle
+        isMenuToggle = true;
         
         // Create a transparent overlay to capture clicks
         const overlay = document.createElement('div');
@@ -336,6 +346,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // If clicking on overlay or outside menu (but not the menu itself or new tab button)
                 if (e.target === overlay || (!menu.contains(e.target) && e.target !== newTabButton)) {
                     console.log('Closing menu due to outside click');
+                    isMenuToggle = false; // Reset toggle flag when menu closes from outside click
                     menu.remove();
                     overlay.remove();
                     document.removeEventListener('click', closeMenu);
@@ -354,6 +365,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                      
                 if (isWebviewClick) {
                     console.log('Closing menu due to webview click');
+                    isMenuToggle = false; // Reset toggle flag when menu closes from webview click
                     menu.remove();
                     overlay.remove();
                     document.removeEventListener('click', closeMenu);
@@ -363,6 +375,7 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // Helper function to close menu and cleanup
             const closeMenuAndCleanup = () => {
+                isMenuToggle = false; // Reset toggle flag when menu closes programmatically
                 menu.remove();
                 overlay.remove();
                 document.removeEventListener('click', closeMenu);
