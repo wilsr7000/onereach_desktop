@@ -565,11 +565,9 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log('Black Hole click event triggered'); // Debug log
         cancelAutoClose();
         
-        // If the Black Hole widget is already open, send the click to open clipboard viewer
-        if (isBlackHoleOpen) {
-            console.log('Sending request to open clipboard viewer');
-            window.api.send('open-clipboard-viewer');
-        }
+        // Always open the clipboard viewer when clicked
+        console.log('Sending request to open clipboard viewer');
+        window.api.send('open-clipboard-viewer');
     });
     
     blackHoleButton.addEventListener('drop', (e) => {
