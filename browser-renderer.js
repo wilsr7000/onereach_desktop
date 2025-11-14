@@ -533,11 +533,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
     
-    // Mouseover event
-    blackHoleButton.addEventListener('mouseover', () => {
-        console.log('Black Hole mouseover event triggered'); // Debug log
-        openBlackHole();
-    });
+    // NOTE: Removed mouseover handler as it blocks clicks by opening widget over the button
+    // The button should only respond to clicks (for clipboard) and drags (for files)
     
     // Drag events - open when dragging files over the button
     blackHoleButton.addEventListener('dragenter', (e) => {
