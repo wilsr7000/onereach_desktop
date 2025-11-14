@@ -2190,7 +2190,7 @@ function setupIPC() {
       console.error('Clipboard manager not initialized yet');
       // Try to initialize it if app is ready
       if (app.isReady()) {
-        const ClipboardManager = require('./clipboard-manager');
+        const ClipboardManager = require('./clipboard-manager-v2-adapter');
         global.clipboardManager = new ClipboardManager();
         global.clipboardManager.registerShortcut();
         console.log('Clipboard manager initialized on demand');
@@ -2211,7 +2211,7 @@ function setupIPC() {
       console.error('Clipboard manager not initialized yet');
       // Try to initialize it if app is ready
       if (app.isReady()) {
-        const ClipboardManager = require('./clipboard-manager');
+        const ClipboardManager = require('./clipboard-manager-v2-adapter');
         global.clipboardManager = new ClipboardManager();
         global.clipboardManager.registerShortcut();
         console.log('Clipboard manager initialized on demand');
