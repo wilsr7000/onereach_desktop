@@ -1027,8 +1027,24 @@ class ClipboardManagerV2 {
       }
       
       // Paste logic based on type
-      if (item.type === 'text' || item.type === 'html') {
+      if (item.type === 'text') {
         clipboard.writeText(item.content);
+      } else if (item.type === 'html') {
+        // For HTML items, prefer plainText if available, otherwise strip HTML tags
+        const textContent = item.plainText || this.stripHtml(item.content);
+        clipboard.writeText(textContent);
+        
+        // Also write the HTML format for apps that support it
+        if (process.platform === 'darwin') {
+          // On macOS, we can write both HTML and plain text
+          clipboard.write({
+            text: textContent,
+            html: item.content
+          });
+        } else {
+          // On other platforms, just write the plain text
+          clipboard.writeText(textContent);
+        }
       } else if (item.type === 'image' && item.content) {
         const image = nativeImage.createFromDataURL(item.content);
         clipboard.writeImage(image);
