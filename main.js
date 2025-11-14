@@ -2291,6 +2291,20 @@ function setupIPC() {
       global.clipboardManager.blackHoleWindow.webContents.send('paste-content', data);
     }
   });
+  
+  // Handle trigger paste in black hole widget
+  ipcMain.on('black-hole:trigger-paste', () => {
+    console.log('Received request to trigger paste in black hole widget');
+    if (global.clipboardManager && global.clipboardManager.blackHoleWindow) {
+      if (!global.clipboardManager.blackHoleWindow.isDestroyed()) {
+        // Focus the black hole window and trigger paste
+        global.clipboardManager.blackHoleWindow.focus();
+        // Send a message to the widget to programmatically trigger paste
+        global.clipboardManager.blackHoleWindow.webContents.send('trigger-paste');
+        console.log('Sent trigger-paste message to black hole widget');
+      }
+    }
+  });
 
   // Handle get clipboard text request
   ipcMain.on('get-clipboard-text', (event) => {

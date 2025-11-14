@@ -263,6 +263,28 @@ class BlackHoleWidget {
                     }
                 });
                 
+                // Handle trigger-paste from main process
+                window.electron.ipcRenderer.on('trigger-paste', () => {
+                    console.log('Black Hole: Received trigger-paste message');
+                    // Programmatically trigger paste by simulating Cmd+V / Ctrl+V
+                    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+                    const pasteEvent = new KeyboardEvent('keydown', {
+                        key: 'v',
+                        code: 'KeyV',
+                        ctrlKey: !isMac,
+                        metaKey: isMac,
+                        bubbles: true
+                    });
+                    document.dispatchEvent(pasteEvent);
+                    
+                    // Also try to directly execute paste command
+                    try {
+                        document.execCommand('paste');
+                    } catch (e) {
+                        console.log('Black Hole: execCommand paste not supported, relying on clipboard API');
+                    }
+                });
+                
                 // Handle ready check requests
                 window.electron.ipcRenderer.on('check-widget-ready', () => {
                     console.log('Black Hole: Received ready check, isReady:', this.isReady);
