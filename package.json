@@ -27,6 +27,7 @@
     "test:external-ai-interactive": "electron test/external-ai-interactive-test.js",
     "test:idw": "electron test/run-idw-tests.js",
     "test:gsx-sync": "node test/test-gsx-sync.js",
+    "test:blackhole": "node test-black-hole.js",
     "dist": "electron-builder",
     "build:signed": "./scripts/build-signed.sh",
     "build:signed:skip-notarize": "./scripts/build-signed.sh --skip-notarize",
