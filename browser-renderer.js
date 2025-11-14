@@ -296,8 +296,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     <span>${env.label}</span>
                 `;
                 menuItem.addEventListener('click', () => {
-                    console.log('Opening IDW environment in current tab:', env.label);
-                    navigateToUrl(env.homeUrl);
+                    console.log('Opening IDW environment in new tab:', env.label);
+                    createNewTab(env.homeUrl);
                     closeMenuAndCleanup();
                 });
                 menuItem.addEventListener('mouseover', () => {
