@@ -19,8 +19,15 @@ function getAssetPath(filename) {
 async function init() {
     try {
         console.log('Initializing clipboard viewer...');
+        console.log('window object keys:', Object.keys(window));
+        console.log('window.api available?', !!window.api);
         console.log('window.clipboard available?', !!window.clipboard);
         console.log('window.clipboard methods:', window.clipboard ? Object.keys(window.clipboard) : 'N/A');
+        
+        // If clipboard API is not available, show a helpful error
+        if (!window.clipboard) {
+            throw new Error('Clipboard API not loaded. Preload script may have failed to load. Check main process console logs.');
+        }
         
         // Test the getHistory method directly
         if (window.clipboard && window.clipboard.getHistory) {
