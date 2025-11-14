@@ -21,29 +21,39 @@ document.addEventListener('DOMContentLoaded', () => {
     const loadingIndicator = document.getElementById('loading-indicator');
     
     // Set up event listeners
-    let isMenuToggle = false;
-    newTabButton.addEventListener('click', () => {
+    let menuDebounceTimer = null;
+    let currentMenuRequest = null;
+    
+    newTabButton.addEventListener('click', (e) => {
+        e.stopPropagation();
         console.log('Plus button clicked, requesting IDW environments');
+        
+        // Prevent rapid clicks
+        if (menuDebounceTimer) {
+            console.log('Debouncing rapid menu clicks');
+            return;
+        }
         
         // Check if a menu already exists and remove it
         const existingMenu = document.querySelector('.idw-menu');
-        if (existingMenu) {
-            console.log('Removing existing menu');
-            existingMenu.remove();
-            // Also remove overlay if it exists
-            const existingOverlay = document.querySelector('.idw-menu-overlay');
+        const existingOverlay = document.querySelector('.idw-menu-overlay');
+        
+        if (existingMenu || existingOverlay) {
+            console.log('Closing existing menu');
+            if (existingMenu) existingMenu.remove();
             if (existingOverlay) existingOverlay.remove();
             
-            // If this is a toggle (clicking button to close menu), just return
-            if (isMenuToggle) {
-                isMenuToggle = false;
-                return;
-            }
-            // Otherwise continue to regenerate menu with updated tabs
+            // If menu was open, debounce next click
+            menuDebounceTimer = setTimeout(() => {
+                menuDebounceTimer = null;
+            }, 200);
+            return;
         }
         
-        // Mark that menu is open and next button click will be a toggle
-        isMenuToggle = true;
+        // Set debounce timer
+        menuDebounceTimer = setTimeout(() => {
+            menuDebounceTimer = null;
+        }, 100);
         
         // Create a transparent overlay to capture clicks
         const overlay = document.createElement('div');
@@ -78,213 +88,154 @@ document.addEventListener('DOMContentLoaded', () => {
             max-height: 400px;
             overflow-y: auto;
         `;
+        
+        // Show loading state initially
+        menu.innerHTML = `
+            <div style="padding: 16px; color: rgba(255,255,255,0.5); text-align: center;">
+                <div style="display: inline-block; width: 20px; height: 20px; border: 2px solid #666; border-top-color: #fff; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+                <style>
+                    @keyframes spin { to { transform: rotate(360deg); } }
+                </style>
+                <div style="margin-top: 8px;">Loading IDW environments...</div>
+            </div>
+        `;
+        
+        // Add menu to document immediately to show loading state
+        document.body.appendChild(overlay);
+        document.body.appendChild(menu);
 
+        // Track the current request to handle cancellation
+        const requestId = Date.now();
+        currentMenuRequest = requestId;
+        
         let environments = [];
         
-        // Get currently open tab URLs for filtering
-        const getOpenTabUrls = () => {
-            const openUrls = new Set();
-            const urlDetails = [];
+        // Get currently open tab URLs and their associated IDW IDs
+        const getOpenTabInfo = () => {
+            const openInfo = {
+                urls: new Set(),
+                idwIds: new Set(),
+                domains: new Set()
+            };
             
             tabs.forEach(tab => {
-                if (tab.webview && tab.webview.src) {
-                    try {
-                        // Store the full URL for exact matching
-                        openUrls.add(tab.webview.src);
-                        
-                        // If tab has a stored current URL (from navigation), add that too
-                        if (tab.currentUrl && tab.currentUrl !== tab.webview.src) {
-                            openUrls.add(tab.currentUrl);
-                            console.log(`Tab ${tab.id} has different currentUrl: ${tab.currentUrl} vs src: ${tab.webview.src}`);
-                            
-                            // Also process currentUrl for variations
-                            try {
-                                const currentTabUrl = new URL(tab.currentUrl);
-                                
-                                // Add variations for currentUrl
-                                const currentUrlWithoutFragment = currentTabUrl.origin + currentTabUrl.pathname + currentTabUrl.search;
-                                openUrls.add(currentUrlWithoutFragment);
-                                
-                                const currentUrlWithoutQuery = currentTabUrl.origin + currentTabUrl.pathname;
-                                openUrls.add(currentUrlWithoutQuery);
-                                
-                                if (currentTabUrl.pathname.endsWith('/')) {
-                                    openUrls.add(currentTabUrl.origin + currentTabUrl.pathname.slice(0, -1) + currentTabUrl.search);
-                                    openUrls.add(currentTabUrl.origin + currentTabUrl.pathname.slice(0, -1));
-                                }
-                                
-                                openUrls.add(currentTabUrl.origin);
-                                openUrls.add(currentTabUrl.origin + '/');
-                            } catch (e) {
-                                console.error('Error processing currentUrl:', e);
-                            }
-                        }
-                        
-                        // Also normalize for comparison
-                        const tabUrl = new URL(tab.webview.src);
-                        
-                        // Store different variations for matching
-                        // 1. Full URL without fragment
-                        const urlWithoutFragment = tabUrl.origin + tabUrl.pathname + tabUrl.search;
-                        openUrls.add(urlWithoutFragment);
-                        
-                        // 2. URL without query params
-                        const urlWithoutQuery = tabUrl.origin + tabUrl.pathname;
-                        openUrls.add(urlWithoutQuery);
-                        
-                        // 3. URL without trailing slash
-                        if (tabUrl.pathname.endsWith('/')) {
-                            openUrls.add(tabUrl.origin + tabUrl.pathname.slice(0, -1) + tabUrl.search);
-                            openUrls.add(tabUrl.origin + tabUrl.pathname.slice(0, -1));
-                        }
-                        
-                        // 4. Just the origin (for sites that redirect to subpaths)
-                        openUrls.add(tabUrl.origin);
-                        openUrls.add(tabUrl.origin + '/');
-                        
-                        // 5. Handle www vs non-www
-                        if (tabUrl.hostname.startsWith('www.')) {
-                            const nonWwwOrigin = tabUrl.protocol + '//' + tabUrl.hostname.substring(4);
-                            openUrls.add(nonWwwOrigin);
-                            openUrls.add(nonWwwOrigin + '/');
-                            openUrls.add(nonWwwOrigin + tabUrl.pathname);
-                        } else {
-                            const wwwOrigin = tabUrl.protocol + '//www.' + tabUrl.hostname;
-                            openUrls.add(wwwOrigin);
-                            openUrls.add(wwwOrigin + '/');
-                            openUrls.add(wwwOrigin + tabUrl.pathname);
-                        }
-                        
-                        // 6. Special handling for known redirects
-                        // ChatGPT might redirect from chat.openai.com to chatgpt.com
-                        if (tabUrl.hostname.includes('chatgpt.com')) {
-                            openUrls.add('https://chat.openai.com/');
-                            openUrls.add('https://chat.openai.com');
-                        } else if (tabUrl.hostname.includes('chat.openai.com')) {
-                            openUrls.add('https://chatgpt.com/');
-                            openUrls.add('https://chatgpt.com');
-                        }
-                        
-                        
-                        urlDetails.push({
-                            tabId: tab.id,
-                            title: tab.element.querySelector('.tab-title').textContent,
-                            url: tab.webview.src,
-                            origin: tabUrl.origin,
-                            pathname: tabUrl.pathname
-                        });
-                        
-                    } catch (e) {
-                        console.error('Error parsing tab URL:', e);
+                if (!tab.webview || !tab.webview.src) return;
+                
+                try {
+                    const tabUrl = new URL(tab.webview.src);
+                    const currentUrl = tab.currentUrl ? new URL(tab.currentUrl) : tabUrl;
+                    
+                    // Store the domain for this tab
+                    openInfo.domains.add(tabUrl.hostname);
+                    openInfo.domains.add(currentUrl.hostname);
+                    
+                    // Store full URLs
+                    openInfo.urls.add(tab.webview.src);
+                    if (tab.currentUrl) {
+                        openInfo.urls.add(tab.currentUrl);
                     }
+                    
+                    // Store normalized base URLs (without query/fragment)
+                    const baseUrl = tabUrl.origin + tabUrl.pathname.replace(/\/$/, '');
+                    const currentBaseUrl = currentUrl.origin + currentUrl.pathname.replace(/\/$/, '');
+                    openInfo.urls.add(baseUrl);
+                    openInfo.urls.add(currentBaseUrl);
+                    
+                    // Try to extract IDW ID from the URL or tab data
+                    // Store it if the tab has associated IDW metadata
+                    if (tab.idwId) {
+                        openInfo.idwIds.add(tab.idwId);
+                    }
+                } catch (e) {
+                    console.error('Error processing tab:', e);
                 }
             });
             
-            console.log('Open tab details:', urlDetails);
-            return openUrls;
+            console.log('Open tab info:', {
+                urlCount: openInfo.urls.size,
+                idwCount: openInfo.idwIds.size,
+                domainCount: openInfo.domains.size
+            });
+            
+            return openInfo;
         };
         
         const populateMenu = () => {
+            // Check if this request is still current
+            if (currentMenuRequest !== requestId) {
+                console.log('Menu request cancelled - newer request exists');
+                return;
+            }
+            
             console.log('PopulateMenu called');
             console.log('Environments:', environments);
             
             // Clear existing content
             menu.innerHTML = '';
             
-            // Get open tab URLs
-            const openUrls = getOpenTabUrls();
-            console.log('Currently open URLs set size:', openUrls.size);
-            console.log('Open URLs:', Array.from(openUrls));
-            
-            // Also log what tabs are currently open with their details
-            console.log('\nCurrently open tabs:');
-            tabs.forEach((tab, index) => {
-                console.log(`Tab ${index}: ${tab.element.querySelector('.tab-title').textContent}`);
-                console.log(`  - src: ${tab.webview.src}`);
-                console.log(`  - currentUrl: ${tab.currentUrl}`);
-            });
+            // Get open tab info
+            const openInfo = getOpenTabInfo();
+            console.log('Currently open tab info:', openInfo);
             
             let itemsAdded = 0;
             
-            // Helper function to check if URL is already open - for IDW environments
-            const isIdwUrlOpen = (url) => {
-                console.log(`\nChecking if IDW URL is open: ${url}`);
-                try {
-                    // For IDW, we need more precise matching to avoid false positives
-                    // since many IDWs share base URLs
-                    
-                    // First check exact match
-                    if (openUrls.has(url)) {
-                        console.log(`  ✓ IDW URL ${url} is open (exact match)`);
-                        return true;
-                    }
-                    
-                    // Parse the URL for more flexible matching
-                    const checkUrl = new URL(url);
-                    
-                    // Check without fragment
-                    const urlWithoutFragment = checkUrl.origin + checkUrl.pathname + checkUrl.search;
-                    if (openUrls.has(urlWithoutFragment)) {
-                        console.log(`IDW URL ${url} is open (without fragment match)`);
-                        return true;
-                    }
-                    
-                    // Check with normalized path (with and without trailing slash)
-                    const normalizedPath = checkUrl.pathname.endsWith('/') 
-                        ? checkUrl.pathname.slice(0, -1) 
-                        : checkUrl.pathname;
-                    const urlNormalized = checkUrl.origin + normalizedPath + checkUrl.search;
-                    
-                    if (openUrls.has(urlNormalized)) {
-                        console.log(`IDW URL ${url} is open (normalized match)`);
-                        return true;
-                    }
-                    
-                    // Also check with trailing slash added
-                    const urlWithSlash = checkUrl.origin + normalizedPath + '/' + checkUrl.search;
-                    if (openUrls.has(urlWithSlash)) {
-                        console.log(`IDW URL ${url} is open (with slash match)`);
-                        return true;
-                    }
-                    
-                    // For IDW URLs, also check if any open URL shares the same subdomain
-                    // This handles cases where IDW navigates between pages
-                    const checkDomain = checkUrl.hostname;
-                    console.log(`  Checking domain match for: ${checkDomain}`);
-                    for (const openUrl of openUrls) {
-                        try {
-                            const openUrlObj = new URL(openUrl);
-                            if (openUrlObj.hostname === checkDomain) {
-                                console.log(`  ✓ IDW URL ${url} is open (same domain match: ${openUrlObj.hostname})`);
-                                return true;
-                            }
-                        } catch (e) {
-                            // Skip invalid URLs
-                        }
-                    }
-                    
-                    console.log(`IDW URL ${url} is NOT open`);
-                    return false;
-                } catch (e) {
-                    console.error('Error checking IDW URL:', e);
-                    return false;
+            // Helper function to check if an IDW environment is already open
+            const isIdwOpen = (env) => {
+                // Check by IDW ID first (most accurate)
+                if (env.id && openInfo.idwIds.has(env.id)) {
+                    console.log(`IDW ${env.label} is open (ID match: ${env.id})`);
+                    return true;
                 }
+                
+                // Check if either URL is open
+                const urlsToCheck = [];
+                if (env.homeUrl) urlsToCheck.push(env.homeUrl);
+                if (env.chatUrl) urlsToCheck.push(env.chatUrl);
+                
+                for (const url of urlsToCheck) {
+                    try {
+                        const checkUrl = new URL(url);
+                        const baseUrl = checkUrl.origin + checkUrl.pathname.replace(/\/$/, '');
+                        
+                        // Check exact URL match
+                        if (openInfo.urls.has(url) || openInfo.urls.has(baseUrl)) {
+                            console.log(`IDW ${env.label} is open (URL match: ${url})`);
+                            return true;
+                        }
+                        
+                        // For IDW environments, be more strict about domain matching
+                        // Only match if it's an exact domain match AND the path is similar
+                        if (openInfo.domains.has(checkUrl.hostname)) {
+                            // Check if any open URL has a similar path structure
+                            for (const openUrl of openInfo.urls) {
+                                try {
+                                    const openUrlObj = new URL(openUrl);
+                                    if (openUrlObj.hostname === checkUrl.hostname) {
+                                        // Check if paths are similar (e.g., both are chat paths)
+                                        const pathMatch = openUrlObj.pathname.includes('chat') === checkUrl.pathname.includes('chat');
+                                        if (pathMatch) {
+                                            console.log(`IDW ${env.label} likely open (domain + path pattern match)`);
+                                            return true;
+                                        }
+                                    }
+                                } catch (e) {
+                                    // Skip invalid URLs
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.error(`Error checking URL ${url}:`, e);
+                    }
+                }
+                
+                return false;
             };
             
-            // Add IDW environments (filter out already open)
+            // Filter out already open IDW environments
             const filteredEnvironments = environments.filter(env => {
-                // For IDW environments, check both homeUrl and chatUrl
-                const homeUrlOpen = env.homeUrl ? isIdwUrlOpen(env.homeUrl) : false;
-                const chatUrlOpen = env.chatUrl ? isIdwUrlOpen(env.chatUrl) : false;
-                
-                console.log(`IDW ${env.label}:`);
-                console.log(`  - homeUrl: ${env.homeUrl}`);
-                console.log(`  - chatUrl: ${env.chatUrl}`);
-                console.log(`  - homeUrl open: ${homeUrlOpen}`);
-                console.log(`  - chatUrl open: ${chatUrlOpen}`);
-                
-                // Consider it "open" if either URL is open
-                return !homeUrlOpen && !chatUrlOpen;
+                const isOpen = isIdwOpen(env);
+                console.log(`IDW ${env.label}: ${isOpen ? 'OPEN' : 'AVAILABLE'}`);
+                return !isOpen;
             });
             
             console.log(`Filtered IDW environments: ${filteredEnvironments.length} out of ${environments.length}`);
@@ -307,7 +258,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 `;
                 menuItem.addEventListener('click', () => {
                     console.log('Opening IDW environment in new tab:', env.label);
-                    createNewTab(env.homeUrl);
+                    // Store the IDW ID in the tab for better tracking
+                    const newTab = createNewTab(env.homeUrl || env.chatUrl);
+                    if (newTab) {
+                        newTab.idwId = env.id;
+                        newTab.idwLabel = env.label;
+                    }
                     closeMenuAndCleanup();
                 });
                 menuItem.addEventListener('mouseover', () => {
@@ -338,6 +294,15 @@ document.addEventListener('DOMContentLoaded', () => {
             document.body.appendChild(overlay);
             document.body.appendChild(menu);
 
+            // Helper function to close menu and cleanup
+            const closeMenuAndCleanup = () => {
+                currentMenuRequest = null;
+                if (menu && menu.parentNode) menu.remove();
+                if (overlay && overlay.parentNode) overlay.remove();
+                document.removeEventListener('click', closeMenu);
+                document.removeEventListener('mousedown', closeMenuOnWebview);
+            };
+            
             // Close menu when clicking on overlay or outside menu
             const closeMenu = (e) => {
                 // Don't close if it's a right-click (context menu)
@@ -346,11 +311,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // If clicking on overlay or outside menu (but not the menu itself or new tab button)
                 if (e.target === overlay || (!menu.contains(e.target) && e.target !== newTabButton)) {
                     console.log('Closing menu due to outside click');
-                    isMenuToggle = false; // Reset toggle flag when menu closes from outside click
-                    menu.remove();
-                    overlay.remove();
-                    document.removeEventListener('click', closeMenu);
-                    document.removeEventListener('mousedown', closeMenuOnWebview);
+                    closeMenuAndCleanup();
                 }
             };
             
@@ -365,21 +326,8 @@ document.addEventListener('DOMContentLoaded', () => {
                                      
                 if (isWebviewClick) {
                     console.log('Closing menu due to webview click');
-                    isMenuToggle = false; // Reset toggle flag when menu closes from webview click
-                    menu.remove();
-                    overlay.remove();
-                    document.removeEventListener('click', closeMenu);
-                    document.removeEventListener('mousedown', closeMenuOnWebview);
+                    closeMenuAndCleanup();
                 }
-            };
-            
-            // Helper function to close menu and cleanup
-            const closeMenuAndCleanup = () => {
-                isMenuToggle = false; // Reset toggle flag when menu closes programmatically
-                menu.remove();
-                overlay.remove();
-                document.removeEventListener('click', closeMenu);
-                document.removeEventListener('mousedown', closeMenuOnWebview);
             };
             
             // Click on overlay should close menu
@@ -413,8 +361,25 @@ document.addEventListener('DOMContentLoaded', () => {
         // Request IDW environments
         console.log('Requesting IDW environments...');
         window.api.getIDWEnvironments((receivedEnvironments) => {
+            // Check if this request is still current
+            if (currentMenuRequest !== requestId) {
+                console.log('Ignoring IDW response - request was cancelled');
+                return;
+            }
+            
             console.log('Received IDW environments:', receivedEnvironments);
             environments = receivedEnvironments || [];
+            
+            // Handle error case
+            if (!environments || environments.length === 0) {
+                menu.innerHTML = `
+                    <div style="padding: 16px; color: rgba(255,255,255,0.5); text-align: center;">
+                        No IDW environments configured
+                    </div>
+                `;
+                return;
+            }
+            
             populateMenu();
         });
     });

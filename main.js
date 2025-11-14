@@ -760,13 +760,26 @@ app.whenReady().then(() => {
   setupAutoUpdater();
   
   // Check for updates in the background (non-blocking)
+  // Only check once per day to avoid frequent password prompts
   setTimeout(() => {
     if (app.isPackaged) {
-      checkForUpdates();
+      const lastCheckKey = 'lastUpdateCheck';
+      const lastCheck = global.settingsManager?.get(lastCheckKey);
+      const now = Date.now();
+      const oneDayMs = 24 * 60 * 60 * 1000;
+      
+      // Check if it's been more than 24 hours since last check
+      if (!lastCheck || (now - lastCheck) > oneDayMs) {
+        log.info('Performing daily update check');
+        checkForUpdates();
+        global.settingsManager?.set(lastCheckKey, now);
+      } else {
+        log.info('Skipping update check - already checked today');
+      }
     } else {
       log.info('Not checking for updates in development mode');
     }
-  }, 3000);  // 3 second delay
+  }, 5000);  // 5 second delay to ensure settings are loaded
   
   // Initialize menus once the window is fully loaded
   const mainWindow = browserWindow.getMainWindow();
