@@ -2297,11 +2297,35 @@ function setupIPC() {
     console.log('Received request to trigger paste in black hole widget');
     if (global.clipboardManager && global.clipboardManager.blackHoleWindow) {
       if (!global.clipboardManager.blackHoleWindow.isDestroyed()) {
-        // Focus the black hole window and trigger paste
+        const { clipboard, nativeImage } = require('electron');
+        
+        // Read clipboard content
+        const text = clipboard.readText();
+        const html = clipboard.readHTML();
+        const image = clipboard.readImage();
+        
+        console.log('Clipboard content - Text:', !!text, 'HTML:', !!html, 'Image:', !image.isEmpty());
+        
+        // Focus the window first
         global.clipboardManager.blackHoleWindow.focus();
-        // Send a message to the widget to programmatically trigger paste
-        global.clipboardManager.blackHoleWindow.webContents.send('trigger-paste');
-        console.log('Sent trigger-paste message to black hole widget');
+        
+        // Prepare clipboard data to send
+        const clipboardData = {
+          hasText: !!text,
+          hasHtml: !!html,
+          hasImage: !image.isEmpty(),
+          text: text,
+          html: html
+        };
+        
+        // If there's an image, convert it to data URL
+        if (!image.isEmpty()) {
+          clipboardData.imageDataUrl = image.toDataURL();
+        }
+        
+        // Send clipboard data to the widget
+        global.clipboardManager.blackHoleWindow.webContents.send('paste-clipboard-data', clipboardData);
+        console.log('Sent clipboard data to black hole widget');
       }
     }
   });

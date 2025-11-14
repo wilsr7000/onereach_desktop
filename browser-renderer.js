@@ -574,27 +574,33 @@ document.addEventListener('DOMContentLoaded', () => {
         // The actual drop will be handled by the Black Hole Widget itself
     });
     
-    // Handle paste event on the Black Hole button
-    blackHoleButton.addEventListener('paste', async (e) => {
-        console.log('Black Hole paste event triggered');
-        e.preventDefault();
-        e.stopPropagation();
-        
-        // Get clipboard data before we open the widget
-        const clipboardData = e.clipboardData || window.clipboardData;
-        
-        if (!clipboardData) {
-            console.log('No clipboard data available');
-            return;
-        }
-        
-        // Save the clipboard content to pass to the widget
-        const hasFiles = clipboardData.files && clipboardData.files.length > 0;
-        const hasText = clipboardData.types.includes('text/plain');
-        const hasHtml = clipboardData.types.includes('text/html');
-        
-        if (hasFiles || hasText || hasHtml) {
-            console.log('Pasted content to Black Hole - opening widget');
+    // Make the button focusable to receive keyboard events
+    blackHoleButton.setAttribute('tabindex', '0');
+    
+    // Track if mouse is over the button
+    let isMouseOverButton = false;
+    
+    blackHoleButton.addEventListener('mouseenter', () => {
+        isMouseOverButton = true;
+        console.log('Mouse entered Black Hole button');
+        // Add visual indicator
+        blackHoleButton.style.outline = '2px solid rgba(147, 51, 234, 0.5)';
+    });
+    
+    blackHoleButton.addEventListener('mouseleave', () => {
+        isMouseOverButton = false;
+        console.log('Mouse left Black Hole button');
+        // Remove visual indicator
+        blackHoleButton.style.outline = '';
+    });
+    
+    // Listen for paste events at the document level
+    document.addEventListener('paste', async (e) => {
+        // Check if the paste is happening over the black hole button
+        if (isMouseOverButton || document.activeElement === blackHoleButton) {
+            console.log('Paste detected over Black Hole button');
+            e.preventDefault();
+            e.stopPropagation();
             
             // Open the black hole widget
             openBlackHole();
@@ -604,30 +610,31 @@ document.addEventListener('DOMContentLoaded', () => {
             setTimeout(() => {
                 console.log('Sending paste trigger to Black Hole widget');
                 window.api.send('black-hole:trigger-paste');
-            }, 200);
-        } else {
-            console.log('No pasteable content found');
+            }, 300);
         }
     });
     
-    // Make the button focusable to receive paste events
-    blackHoleButton.setAttribute('tabindex', '0');
-    
-    // Add keyboard handler for Cmd+V / Ctrl+V when button is focused
-    blackHoleButton.addEventListener('keydown', (e) => {
-        const isCmdOrCtrl = process.platform === 'darwin' ? e.metaKey : e.ctrlKey;
+    // Also handle keyboard shortcut when button is focused or hovered
+    document.addEventListener('keydown', (e) => {
+        // Check for both Cmd and Ctrl to work on all platforms
+        const isCmdOrCtrl = e.metaKey || e.ctrlKey;
         
-        if (isCmdOrCtrl && e.key === 'v') {
-            console.log('Black Hole keyboard paste triggered (Cmd/Ctrl+V)');
-            e.preventDefault();
-            
-            // Focus the button and trigger paste programmatically
-            blackHoleButton.focus();
-            
-            // Open the black hole widget
-            openBlackHole();
-            
-            // The widget will listen for the actual paste event
+        if (isCmdOrCtrl && (e.key === 'v' || e.key === 'V')) {
+            // Check if mouse is over button or button is focused
+            if (isMouseOverButton || document.activeElement === blackHoleButton) {
+                console.log('Cmd/Ctrl+V detected over Black Hole button');
+                e.preventDefault();
+                e.stopPropagation();
+                
+                // Open the black hole widget
+                openBlackHole();
+                
+                // After a short delay, trigger paste in the widget
+                setTimeout(() => {
+                    console.log('Sending paste trigger to Black Hole widget');
+                    window.api.send('black-hole:trigger-paste');
+                }, 300);
+            }
         }
     });
     

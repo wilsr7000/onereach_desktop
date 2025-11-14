@@ -263,26 +263,45 @@ class BlackHoleWidget {
                     }
                 });
                 
-                // Handle trigger-paste from main process
-                window.electron.ipcRenderer.on('trigger-paste', () => {
-                    console.log('Black Hole: Received trigger-paste message');
-                    // Programmatically trigger paste by simulating Cmd+V / Ctrl+V
-                    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-                    const pasteEvent = new KeyboardEvent('keydown', {
-                        key: 'v',
-                        code: 'KeyV',
-                        ctrlKey: !isMac,
-                        metaKey: isMac,
-                        bubbles: true
-                    });
-                    document.dispatchEvent(pasteEvent);
+                // Store reference to this for use in callbacks
+                const widget = this;
+                
+                // Handle paste-clipboard-data from main process
+                window.electron.ipcRenderer.on('paste-clipboard-data', async (event, clipboardData) => {
+                    console.log('Black Hole: Received paste-clipboard-data', clipboardData);
                     
-                    // Also try to directly execute paste command
-                    try {
-                        document.execCommand('paste');
-                    } catch (e) {
-                        console.log('Black Hole: execCommand paste not supported, relying on clipboard API');
+                    // Notify that we're processing
+                    widget.sendIPC('black-hole:active');
+                    
+                    // Show visual feedback
+                    document.body.classList.add('paste-ready');
+                    
+                    // Create particle effect at center
+                    const rect = widget.dropZone.getBoundingClientRect();
+                    widget.createSuckInEffect(rect.left + rect.width / 2, rect.top + rect.height / 2);
+                    
+                    // Process the clipboard data
+                    if (clipboardData.hasImage && clipboardData.imageDataUrl) {
+                        console.log('Black Hole: Processing image from clipboard');
+                        // Convert data URL to blob
+                        const response = await fetch(clipboardData.imageDataUrl);
+                        const blob = await response.blob();
+                        const file = new File([blob], 'clipboard-image.png', { type: 'image/png' });
+                        await widget.handleFile(file);
+                    } else if (clipboardData.hasHtml && clipboardData.html) {
+                        console.log('Black Hole: Processing HTML from clipboard');
+                        await widget.handleHtml(clipboardData.html, clipboardData.text);
+                    } else if (clipboardData.hasText && clipboardData.text) {
+                        console.log('Black Hole: Processing text from clipboard');
+                        await widget.handleText(clipboardData.text);
+                    } else {
+                        console.log('Black Hole: No processable clipboard data');
                     }
+                    
+                    // Remove paste ready indicator after a delay
+                    setTimeout(() => {
+                        document.body.classList.remove('paste-ready');
+                    }, 1000);
                 });
                 
                 // Handle ready check requests
