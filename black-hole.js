@@ -280,6 +280,13 @@ class BlackHoleWidget {
                     const rect = widget.dropZone.getBoundingClientRect();
                     widget.createSuckInEffect(rect.left + rect.width / 2, rect.top + rect.height / 2);
                     
+                    // For paste operations, ensure we always ask which space (unless user has explicitly disabled it)
+                    const originalAlwaysAsk = widget.alwaysAskForSpace;
+                    // Default to true for paste if not explicitly set to false in localStorage
+                    if (localStorage.getItem('blackHoleAlwaysAsk') === null) {
+                        widget.alwaysAskForSpace = true;
+                    }
+                    
                     // Process the clipboard data
                     if (clipboardData.hasImage && clipboardData.imageDataUrl) {
                         console.log('Black Hole: Processing image from clipboard');
