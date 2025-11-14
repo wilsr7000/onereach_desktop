@@ -574,13 +574,19 @@ class ClipboardManagerV2 {
   }
   
   createBlackHoleWindow(position, startExpanded = false) {
-    if (this.blackHoleWindow) {
+    if (this.blackHoleWindow && !this.blackHoleWindow.isDestroyed()) {
       this.blackHoleWindow.focus();
       return;
     }
     
     const width = startExpanded ? 600 : 150;
     const height = startExpanded ? 800 : 150;
+    
+    console.log('[BlackHole] Creating window:', { position, width, height, startExpanded });
+    
+    // Use app.getAppPath() for preload path in packaged apps
+    const preloadPath = path.join(app.getAppPath(), 'preload.js');
+    console.log('[BlackHole] Preload path:', preloadPath);
     
     const windowConfig = {
       width: width,
@@ -598,32 +604,36 @@ class ClipboardManagerV2 {
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
-        preload: path.join(__dirname, 'preload.js')
+        preload: preloadPath,
+        sandbox: false // Ensure preload can load
       }
     };
     
-    this.blackHoleWindow = new BrowserWindow(windowConfig);
-    
+    // Add position to config if provided
     if (position && position.x !== undefined && position.y !== undefined) {
-      this.blackHoleWindow.setBounds({
-        x: position.x,
-        y: position.y,
-        width: width,
-        height: height
-      });
+      windowConfig.x = Math.round(position.x);
+      windowConfig.y = Math.round(position.y);
+      console.log('[BlackHole] Setting initial position:', windowConfig.x, windowConfig.y);
     }
+    
+    this.blackHoleWindow = new BrowserWindow(windowConfig);
     
     this.blackHoleWindow.loadFile('black-hole.html');
     
+    // Check for preload errors
+    this.blackHoleWindow.webContents.on('preload-error', (event, preloadPath, error) => {
+      console.error('[BlackHole] Preload error:', preloadPath, error);
+    });
+    
     this.blackHoleWindow.once('ready-to-show', () => {
-      if (position && position.x !== undefined && position.y !== undefined) {
-        this.blackHoleWindow.setPosition(position.x, position.y);
-      }
+      // Position is already set in the config, just show the window
       this.blackHoleWindow.show();
+      console.log('[BlackHole] Window shown at position:', this.blackHoleWindow.getBounds());
     });
     
     this.blackHoleWindow.on('closed', () => {
       this.blackHoleWindow = null;
+      console.log('[BlackHole] Window closed');
     });
   }
   
@@ -919,15 +929,28 @@ class ClipboardManagerV2 {
     // Black hole window handlers
     ipcMain.on('black-hole:resize-window', (event, { width, height }) => {
       if (this.blackHoleWindow && !this.blackHoleWindow.isDestroyed()) {
-        this.blackHoleWindow.setSize(width, height, true);
+        console.log('[BlackHole] Resizing window to:', width, 'x', height);
+        const currentBounds = this.blackHoleWindow.getBounds();
+        console.log('[BlackHole] Current bounds:', currentBounds);
         
-        // Center the window on screen when expanding
-        if (width > 150 && screen) {
-          const primaryDisplay = screen.getPrimaryDisplay();
-          const { width: screenWidth, height: screenHeight } = primaryDisplay.workArea;
-          const x = Math.round((screenWidth - width) / 2);
-          const y = Math.round((screenHeight - height) / 2);
-          this.blackHoleWindow.setPosition(x, y, true);
+        // Keep the window position relative to the button when expanding
+        if (width > 150) {
+          // When expanding for modal, adjust position to keep it visible
+          // but still near the original position
+          const newX = Math.max(10, currentBounds.x - (width - 150) / 2);
+          const newY = Math.max(10, currentBounds.y - 50); // Move up slightly
+          
+          this.blackHoleWindow.setBounds({
+            x: newX,
+            y: newY,
+            width: width,
+            height: height
+          }, true);
+          console.log('[BlackHole] Expanded to modal size at:', newX, newY);
+        } else {
+          // Just resize without moving
+          this.blackHoleWindow.setSize(width, height, true);
+          console.log('[BlackHole] Restored to normal size');
         }
       }
     });
@@ -3264,59 +3287,6 @@ class ClipboardManagerV2 {
     console.log(`Registered global shortcut: ${shortcut}`);
   }
   
-  
-  // Create black hole widget window
-  createBlackHoleWindow(position = null, expandedMode = false) {
-    if (!BrowserWindow) {
-      console.error('BrowserWindow not available');
-      return;
-    }
-    
-    // If window already exists, focus it
-    if (this.blackHoleWindow && !this.blackHoleWindow.isDestroyed()) {
-      this.blackHoleWindow.focus();
-      return;
-    }
-    
-    console.log('Creating black hole widget window', expandedMode ? '(expanded mode)' : '');
-    
-    // Get screen dimensions
-    const { screen } = require('electron');
-    const primaryDisplay = screen.getPrimaryDisplay();
-    const { width, height } = primaryDisplay.workAreaSize;
-    
-    // Default position: bottom-right corner
-    const defaultX = width - 320;
-    const defaultY = height - 180;
-    
-    this.blackHoleWindow = new BrowserWindow({
-      width: 300,
-      height: expandedMode ? 400 : 150,
-      x: position ? position.x : defaultX,
-      y: position ? position.y : defaultY,
-      frame: false,
-      alwaysOnTop: true,
-      transparent: true,
-      resizable: false,
-      webPreferences: {
-        nodeIntegration: true,
-        contextIsolation: false
-      }
-    });
-    
-    this.blackHoleWindow.loadFile('black-hole.html');
-    
-    // Pass expanded mode flag
-    this.blackHoleWindow.webContents.on('did-finish-load', () => {
-      if (expandedMode) {
-        this.blackHoleWindow.webContents.send('set-expanded-mode', true);
-      }
-    });
-    
-    this.blackHoleWindow.on('closed', () => {
-      this.blackHoleWindow = null;
-    });
-  }
   
   startWebsiteMonitoring() {
     // Check websites every 30 minutes
