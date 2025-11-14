@@ -759,14 +759,15 @@ app.whenReady().then(() => {
   // Set up auto updater
   setupAutoUpdater();
   
-  // Check for updates in the background (non-blocking)
-  setTimeout(() => {
-    if (app.isPackaged) {
-      checkForUpdates();
-    } else {
-      log.info('Not checking for updates in development mode');
-    }
-  }, 3000);  // 3 second delay
+  // DISABLED: Auto-check for updates at startup to avoid password prompt
+  // Users can still manually check for updates via menu
+  // setTimeout(() => {
+  //   if (app.isPackaged) {
+  //     checkForUpdates();
+  //   } else {
+  //     log.info('Not checking for updates in development mode');
+  //   }
+  // }, 3000);  // 3 second delay
   
   // Initialize menus once the window is fully loaded
   const mainWindow = browserWindow.getMainWindow();
