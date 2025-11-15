@@ -5,10 +5,42 @@ const { URL } = require('url');
 
 class LessonsAPI {
   constructor() {
-    // OneReach API endpoint for quick starts
-    this.baseUrl = 'https://em.staging.api.onereach.ai/http/48cc49ef-ab05-4d51-acc6-559c7ff22150';
+    // Default OneReach API endpoint for quick starts
+    this.defaultUrl = 'https://em.staging.api.onereach.ai/http/48cc49ef-ab05-4d51-acc6-559c7ff22150/idw_quick_starts';
+    this.baseUrl = null; // Will be set from settings
+    this.method = 'POST'; // Default method
     this.cache = new Map();
     this.cacheExpiry = 5 * 60 * 1000; // 5 minutes cache
+    this.cacheEnabled = true; // Default cache enabled
+    
+    // Load settings on initialization
+    this.loadSettings();
+  }
+  
+  /**
+   * Load settings from the global settings manager
+   */
+  loadSettings() {
+    try {
+      // Try to get settings from global settings manager if available
+      if (global && global.settingsManager) {
+        const settings = global.settingsManager.get();
+        this.baseUrl = settings.learningApiUrl || this.defaultUrl;
+        this.method = settings.learningApiMethod || 'POST';
+        this.cacheEnabled = settings.learningApiCache !== false;
+        
+        // Parse URL to separate base and path
+        if (this.baseUrl.includes('/idw_quick_starts')) {
+          this.baseUrl = this.baseUrl.replace('/idw_quick_starts', '');
+        }
+      } else {
+        // Fallback to defaults
+        this.baseUrl = this.defaultUrl.replace('/idw_quick_starts', '');
+      }
+    } catch (error) {
+      console.error('[LessonsAPI] Error loading settings, using defaults:', error);
+      this.baseUrl = this.defaultUrl.replace('/idw_quick_starts', '');
+    }
   }
   
   /**
@@ -22,6 +54,11 @@ class LessonsAPI {
    * Get cached data if available and not expired
    */
   getCached(key) {
+    // Check if caching is enabled
+    if (!this.cacheEnabled) {
+      return null;
+    }
+    
     const cached = this.cache.get(key);
     if (cached && Date.now() - cached.timestamp < this.cacheExpiry) {
       console.log(`[LessonsAPI] Using cached data for ${key}`);
@@ -46,6 +83,9 @@ class LessonsAPI {
    * @returns {Promise<Object>} Lesson data
    */
   async fetchUserLessons(userId) {
+    // Reload settings in case they changed
+    this.loadSettings();
+    
     const cacheKey = `lessons_${userId}`;
     const cached = this.getCached(cacheKey);
     
@@ -55,24 +95,35 @@ class LessonsAPI {
     
     try {
       // Fetching lessons from OneReach API
+      console.log(`[LessonsAPI] Fetching from ${this.baseUrl}/idw_quick_starts using ${this.method}`);
       
-      // Call the actual OneReach API endpoint - requires POST with empty body
-      const response = await this.makeApiCall('/idw_quick_starts', {
-        method: 'POST',
-        body: {},  // API requires POST with body (can be empty)
+      // Prepare request options based on method
+      const requestOptions = {
+        method: this.method,
         headers: {
           'Accept': 'application/json',
           'Content-Type': 'application/json'
         }
-      });
+      };
+      
+      // Add body for POST requests
+      if (this.method === 'POST') {
+        requestOptions.body = {};  // API may require POST with body (can be empty)
+      }
+      
+      // Call the actual OneReach API endpoint
+      const response = await this.makeApiCall('/idw_quick_starts', requestOptions);
       
       // Successfully received response from OneReach API
       
       // The API returns data in our exact format!
       const data = response;
       
-      // Cache the response
-      this.setCache(cacheKey, data);
+      // Cache the response if caching is enabled
+      if (this.cacheEnabled) {
+        this.setCache(cacheKey, data);
+      }
+      
       return data;
     } catch (error) {
       console.error('[LessonsAPI] Error fetching lessons from API:', error);
@@ -80,7 +131,9 @@ class LessonsAPI {
       
       // Fallback to mock data if API fails
       const mockData = await this.getMockLessonsData(userId);
-      this.setCache(cacheKey, mockData);
+      if (this.cacheEnabled) {
+        this.setCache(cacheKey, mockData);
+      }
       return mockData;
     }
   }

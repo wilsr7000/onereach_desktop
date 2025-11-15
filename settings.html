@@ -433,6 +433,37 @@
             </div>
         </div>
         
+        <div class="section">
+            <h2 class="section-title">Learning API Settings</h2>
+            
+            <div class="form-group">
+                <label for="learningApiUrl">Quick Starts API URL</label>
+                <div style="display: flex; gap: 10px;">
+                    <input type="text" id="learningApiUrl" placeholder="https://em.staging.api.onereach.ai/http/..." style="flex: 1;">
+                    <button class="btn-secondary" onclick="testLearningApi()" style="min-width: 100px;">Test API</button>
+                </div>
+                <div class="info-text">API endpoint for Quick Starts tutorials content</div>
+                <div id="learningApiStatus" class="api-key-status" style="display: none; margin-top: 5px;"></div>
+            </div>
+            
+            <div class="form-group">
+                <label for="learningApiMethod">API Method</label>
+                <select id="learningApiMethod">
+                    <option value="POST">POST</option>
+                    <option value="GET">GET</option>
+                </select>
+                <div class="info-text">HTTP method for the API request (usually POST)</div>
+            </div>
+            
+            <div class="form-group">
+                <div class="checkbox-group">
+                    <input type="checkbox" id="learningApiCache">
+                    <label for="learningApiCache" style="margin-bottom: 0;">Enable Response Caching</label>
+                </div>
+                <div class="info-text">Cache API responses for 5 minutes to improve performance</div>
+            </div>
+        </div>
+        
         <div class="button-group">
             <button class="btn-secondary" onclick="window.close()">Cancel</button>
             <button class="btn-primary" onclick="saveSettings()">Save Settings</button>
@@ -467,6 +498,11 @@
                 document.getElementById('gsxAccountId').value = settings.gsxAccountId || '';
                 document.getElementById('gsxAutoSync').checked = settings.gsxAutoSync === true;
                 document.getElementById('gsxSyncInterval').value = settings.gsxSyncInterval || 'daily';
+                
+                // Learning API Settings
+                document.getElementById('learningApiUrl').value = settings.learningApiUrl || 'https://em.staging.api.onereach.ai/http/48cc49ef-ab05-4d51-acc6-559c7ff22150/idw_quick_starts';
+                document.getElementById('learningApiMethod').value = settings.learningApiMethod || 'POST';
+                document.getElementById('learningApiCache').checked = settings.learningApiCache !== false;
                 
                 // Check if GSX token exists
                 if (settings.gsxToken) {
@@ -518,7 +554,10 @@
                 gsxEnvironment: document.getElementById('gsxEnvironment').value,
                 gsxAccountId: document.getElementById('gsxAccountId').value,
                 gsxAutoSync: document.getElementById('gsxAutoSync').checked,
-                gsxSyncInterval: document.getElementById('gsxSyncInterval').value
+                gsxSyncInterval: document.getElementById('gsxSyncInterval').value,
+                learningApiUrl: document.getElementById('learningApiUrl').value,
+                learningApiMethod: document.getElementById('learningApiMethod').value,
+                learningApiCache: document.getElementById('learningApiCache').checked
             };
             
             try {
@@ -535,6 +574,54 @@
                 console.error('Error saving settings:', error);
                 showStatus('Error saving settings', 'error');
             }
+        }
+        
+        async function testLearningApi() {
+            const url = document.getElementById('learningApiUrl').value;
+            const method = document.getElementById('learningApiMethod').value;
+            const statusDiv = document.getElementById('learningApiStatus');
+            
+            if (!url) {
+                showApiStatus(statusDiv, 'Please enter an API URL', 'error');
+                return;
+            }
+            
+            showApiStatus(statusDiv, 'Testing API connection...', 'info');
+            
+            try {
+                const response = await fetch(url, {
+                    method: method,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: method === 'POST' ? '{}' : undefined
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data && data.user && data.categories) {
+                        showApiStatus(statusDiv, `✅ API working! Found ${Object.keys(data.categories).length} categories`, 'success');
+                    } else {
+                        showApiStatus(statusDiv, '⚠️ API responded but data format may be incorrect', 'warning');
+                    }
+                } else {
+                    showApiStatus(statusDiv, `❌ API error: ${response.status} ${response.statusText}`, 'error');
+                }
+            } catch (error) {
+                showApiStatus(statusDiv, `❌ Connection failed: ${error.message}`, 'error');
+            }
+        }
+        
+        function showApiStatus(element, message, type) {
+            element.textContent = message;
+            element.className = 'api-key-status';
+            if (type === 'success') {
+                element.className += ' status-valid';
+            } else if (type === 'error') {
+                element.className += ' status-invalid';
+            }
+            element.style.display = 'block';
         }
         
         function toggleApiKeyVisibility() {

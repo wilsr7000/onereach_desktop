@@ -2233,6 +2233,9 @@ function setupIPC() {
   ipcMain.handle('fetch-user-lessons', async (event, userId) => {
     try {
       console.log(`[Main] Fetching lessons for user: ${userId}`);
+      
+      // Create a new instance to ensure settings are reloaded
+      delete require.cache[require.resolve('./lessons-api')];
       const lessonsAPI = require('./lessons-api');
       
       // If no userId provided, try to get from settings
