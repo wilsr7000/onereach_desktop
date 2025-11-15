@@ -130,7 +130,9 @@ contextBridge.exposeInMainWorld(
         'close-black-hole-widget',
         'black-hole:toggle-always-on-top',
         'black-hole:active',
-        'black-hole:inactive'
+        'black-hole:inactive',
+        'black-hole:trigger-paste',
+        'open-external-url'
       ];
       if (validChannels.includes(channel)) {
         ipcRenderer.send(channel, data);
@@ -438,7 +440,11 @@ contextBridge.exposeInMainWorld(
           'load-test-progress',
           'save-finalized-report',
           'save-test-history',
-          'clipboard:write-text'
+          'clipboard:write-text',
+          // Lessons/Tutorials API channels
+          'get-current-user',
+          'fetch-user-lessons',
+          'update-lesson-progress'
         ];
         if (validChannels.includes(channel)) {
           return ipcRenderer.invoke(channel, ...args);
