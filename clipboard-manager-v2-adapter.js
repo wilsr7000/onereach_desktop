@@ -567,6 +567,7 @@ class ClipboardManagerV2 {
   createClipboardWindow() {
     if (this.clipboardWindow && !this.clipboardWindow.isDestroyed()) {
       this.clipboardWindow.focus();
+      this.clipboardWindow.show();
       return;
     }
     
@@ -575,6 +576,14 @@ class ClipboardManagerV2 {
     console.log('[ClipboardManager] Creating clipboard window with preload:', preloadPath);
     console.log('[ClipboardManager] App path:', app.getAppPath());
     console.log('[ClipboardManager] Preload exists?', require('fs').existsSync(preloadPath));
+    
+    // Check if preload script exists
+    if (!require('fs').existsSync(preloadPath)) {
+      console.error('[ClipboardManager] Preload script not found at:', preloadPath);
+      const { dialog } = require('electron');
+      dialog.showErrorBox('Error', 'Failed to load clipboard manager: Preload script not found.');
+      return;
+    }
     
     this.clipboardWindow = new BrowserWindow({
       width: 1400,
@@ -586,12 +595,29 @@ class ClipboardManagerV2 {
       minWidth: 1200,
       minHeight: 700,
       skipTaskbar: false,
+      show: false, // Don't show until ready
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
         preload: preloadPath,
         sandbox: false // Add this to ensure preload loads
       }
+    });
+    
+    // Handle load errors
+    this.clipboardWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+      console.error('[ClipboardManager] Failed to load:', errorCode, errorDescription);
+      const { dialog } = require('electron');
+      dialog.showErrorBox('Error', `Failed to load clipboard manager: ${errorDescription}`);
+      if (this.clipboardWindow && !this.clipboardWindow.isDestroyed()) {
+        this.clipboardWindow.close();
+      }
+    });
+    
+    // Show window when ready
+    this.clipboardWindow.once('ready-to-show', () => {
+      console.log('[ClipboardManager] Clipboard window ready to show');
+      this.clipboardWindow.show();
     });
     
     this.clipboardWindow.loadFile('clipboard-viewer.html');

@@ -17,6 +17,10 @@ function getAssetPath(filename) {
 
 // Initialize
 async function init() {
+    const loadingOverlay = document.getElementById('loadingOverlay');
+    const errorDisplay = document.getElementById('errorDisplay');
+    const errorMessage = document.getElementById('errorMessage');
+    
     try {
         console.log('Initializing clipboard viewer...');
         console.log('window object keys:', Object.keys(window));
@@ -24,9 +28,15 @@ async function init() {
         console.log('window.clipboard available?', !!window.clipboard);
         console.log('window.clipboard methods:', window.clipboard ? Object.keys(window.clipboard) : 'N/A');
         
-        // If clipboard API is not available, show a helpful error
+        // Wait a bit for preload to fully initialize if needed
         if (!window.clipboard) {
-            throw new Error('Clipboard API not loaded. Preload script may have failed to load. Check main process console logs.');
+            console.log('Clipboard API not ready, waiting...');
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+        
+        // If clipboard API is still not available, show a helpful error
+        if (!window.clipboard) {
+            throw new Error('The clipboard manager is not initialized. Please close this window and try again.');
         }
         
         // Test the getHistory method directly
@@ -68,6 +78,11 @@ async function init() {
         // Focus search on load
         document.getElementById('searchInput').focus();
         
+        // Hide loading overlay on success
+        if (loadingOverlay) {
+            loadingOverlay.style.display = 'none';
+        }
+        
         // Listen for history updates to automatically refresh when documents are saved
         window.clipboard.onHistoryUpdate(async (updatedHistory) => {
             console.log('[Clipboard Viewer] History updated, refreshing...');
@@ -93,7 +108,20 @@ async function init() {
         });
     } catch (error) {
         console.error('Error initializing clipboard viewer:', error);
-        alert('Failed to initialize clipboard viewer: ' + error.message);
+        
+        // Hide loading overlay
+        if (loadingOverlay) {
+            loadingOverlay.style.display = 'none';
+        }
+        
+        // Show error display instead of alert
+        if (errorDisplay && errorMessage) {
+            errorMessage.textContent = error.message || 'An unknown error occurred while loading the clipboard manager.';
+            errorDisplay.style.display = 'block';
+        } else {
+            // Fallback to alert if error display elements don't exist
+            alert('Failed to initialize clipboard viewer: ' + error.message);
+        }
     }
 }
 
@@ -1977,4 +2005,8 @@ async function smartExportSpace(spaceId) {
 }
 
 // Initialize when DOM is ready
-document.addEventListener('DOMContentLoaded', init); 
+// Add a small delay to ensure preload script is fully loaded
+document.addEventListener('DOMContentLoaded', () => {
+    // Wait a moment for preload to be ready
+    setTimeout(init, 100);
+}); 

@@ -1247,6 +1247,74 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
       submenu: gsxMenuItems
     },
     
+    // Agentic University menu
+    {
+      label: 'Agentic University',
+      submenu: [
+        {
+          label: 'Open LMS',
+          click: () => {
+            const { shell } = require('electron');
+            shell.openExternal('https://learning.staging.onereach.ai/');
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Quick Starts',
+          submenu: [
+            {
+              label: 'View All Tutorials',
+              click: () => {
+                const { BrowserWindow } = require('electron');
+                const path = require('path');
+                
+                const tutorialsWindow = new BrowserWindow({
+                  width: 1400,
+                  height: 900,
+                  webPreferences: {
+                    nodeIntegration: false,
+                    contextIsolation: true,
+                    preload: path.join(__dirname, 'preload.js')
+                  }
+                });
+                
+                tutorialsWindow.loadFile('tutorials.html');
+              }
+            },
+            { type: 'separator' },
+            {
+              label: 'Getting Started',
+              click: () => {
+                const { shell } = require('electron');
+                shell.openExternal('https://learning.staging.onereach.ai/courses/getting-started');
+              }
+            },
+            {
+              label: 'Building Your First Agent',
+              click: () => {
+                const { shell } = require('electron');
+                shell.openExternal('https://learning.staging.onereach.ai/courses/first-agent');
+              }
+            },
+            {
+              label: 'Workflow Fundamentals',
+              click: () => {
+                const { shell } = require('electron');
+                shell.openExternal('https://learning.staging.onereach.ai/courses/workflow-basics');
+              }
+            },
+            {
+              label: 'API Integration',
+              click: () => {
+                const { shell } = require('electron');
+                shell.openExternal('https://learning.staging.onereach.ai/courses/api-integration');
+              }
+            }
+          ]
+        }
+      ]
+    },
+    
     // Clipboard menu
     {
       label: 'Manage Spaces',

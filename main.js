@@ -760,26 +760,13 @@ app.whenReady().then(() => {
   setupAutoUpdater();
   
   // Check for updates in the background (non-blocking)
-  // Only check once per day to avoid frequent password prompts
   setTimeout(() => {
     if (app.isPackaged) {
-      const lastCheckKey = 'lastUpdateCheck';
-      const lastCheck = global.settingsManager?.get(lastCheckKey);
-      const now = Date.now();
-      const oneDayMs = 24 * 60 * 60 * 1000;
-      
-      // Check if it's been more than 24 hours since last check
-      if (!lastCheck || (now - lastCheck) > oneDayMs) {
-        log.info('Performing daily update check');
-        checkForUpdates();
-        global.settingsManager?.set(lastCheckKey, now);
-      } else {
-        log.info('Skipping update check - already checked today');
-      }
+      checkForUpdates();
     } else {
       log.info('Not checking for updates in development mode');
     }
-  }, 5000);  // 5 second delay to ensure settings are loaded
+  }, 3000);  // 3 second delay
   
   // Initialize menus once the window is fully loaded
   const mainWindow = browserWindow.getMainWindow();
@@ -2194,26 +2181,54 @@ function setupIPC() {
   });
   
   // Handle opening clipboard viewer from widgets
-  ipcMain.on('open-clipboard-viewer', () => {
+  ipcMain.on('open-clipboard-viewer', async () => {
     console.log('Received request to open clipboard viewer');
-    if (global.clipboardManager) {
-      console.log('Clipboard manager exists, creating window');
-      global.clipboardManager.createClipboardWindow();
-    } else {
-      console.error('Clipboard manager not initialized yet');
-      // Try to initialize it if app is ready
-      if (app.isReady()) {
+    
+    // Ensure clipboard manager is initialized
+    const ensureClipboardManager = async () => {
+      if (global.clipboardManager) {
+        return true;
+      }
+      
+      if (!app.isReady()) {
+        console.log('App not ready, waiting...');
+        await app.whenReady();
+      }
+      
+      try {
+        console.log('Initializing clipboard manager on demand');
         const ClipboardManager = require('./clipboard-manager-v2-adapter');
         global.clipboardManager = new ClipboardManager();
         global.clipboardManager.registerShortcut();
-        console.log('Clipboard manager initialized on demand');
-        global.clipboardManager.createClipboardWindow();
-      } else {
-        console.error('App not ready, cannot initialize clipboard manager');
+        console.log('Clipboard manager initialized successfully');
+        return true;
+      } catch (error) {
+        console.error('Failed to initialize clipboard manager:', error);
+        return false;
       }
+    };
+    
+    // Try to ensure clipboard manager is ready
+    const isReady = await ensureClipboardManager();
+    if (isReady && global.clipboardManager) {
+      console.log('Clipboard manager ready, creating window');
+      global.clipboardManager.createClipboardWindow();
+    } else {
+      console.error('Failed to initialize clipboard manager');
+      const { dialog } = require('electron');
+      dialog.showErrorBox('Error', 'Failed to open Spaces Knowledge Manager. Please try again.');
     }
   });
 
+  // Handle opening external URLs from renderer
+  ipcMain.on('open-external-url', (event, url) => {
+    console.log('Opening external URL:', url);
+    const { shell } = require('electron');
+    if (url && url.startsWith('http')) {
+      shell.openExternal(url);
+    }
+  });
+  
   // Handle opening black hole widget
   ipcMain.on('open-black-hole-widget', (event, position) => {
     console.log('Received request to open black hole widget at position:', position);
