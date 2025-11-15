@@ -2229,6 +2229,61 @@ function setupIPC() {
     }
   });
   
+  // Handle fetching user lessons
+  ipcMain.handle('fetch-user-lessons', async (event, userId) => {
+    try {
+      console.log(`[Main] Fetching lessons for user: ${userId}`);
+      const lessonsAPI = require('./lessons-api');
+      
+      // If no userId provided, try to get from settings
+      if (!userId) {
+        userId = global.settingsManager?.get('userId') || 'default-user';
+      }
+      
+      const lessons = await lessonsAPI.fetchUserLessons(userId);
+      return { success: true, data: lessons };
+    } catch (error) {
+      console.error('[Main] Error fetching lessons:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Handle updating lesson progress
+  ipcMain.handle('update-lesson-progress', async (event, lessonId, progress) => {
+    try {
+      console.log(`[Main] Updating progress for lesson ${lessonId}: ${progress}%`);
+      // Store progress locally
+      const progressKey = `lessonProgress_${lessonId}`;
+      global.settingsManager?.set(progressKey, progress);
+      
+      // In future, also sync with API
+      // const lessonsAPI = require('./lessons-api');
+      // await lessonsAPI.updateProgress(lessonId, progress);
+      
+      return { success: true };
+    } catch (error) {
+      console.error('[Main] Error updating lesson progress:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Handle getting current user ID
+  ipcMain.handle('get-current-user', async () => {
+    try {
+      // Get user ID from settings or use default
+      const userId = global.settingsManager?.get('userId') || 'default-user';
+      const userName = global.settingsManager?.get('userName') || 'User';
+      
+      return { 
+        success: true, 
+        data: { id: userId, name: userName }
+      };
+    } catch (error) {
+      console.error('[Main] Error getting current user:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
   // Handle opening black hole widget
   ipcMain.on('open-black-hole-widget', (event, position) => {
     console.log('Received request to open black hole widget at position:', position);

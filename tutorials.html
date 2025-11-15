@@ -263,6 +263,87 @@
             margin-left: 5px;
         }
         
+        /* Badges */
+        .badge {
+            position: absolute;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            z-index: 2;
+        }
+        
+        .badge.new {
+            top: 15px;
+            left: 15px;
+            background: #ff5722;
+            color: white;
+        }
+        
+        .badge.completed {
+            top: 15px;
+            left: 15px;
+            background: #4CAF50;
+            color: white;
+            font-size: 1rem;
+        }
+        
+        .badge.recommended {
+            top: 15px;
+            left: 60px;
+            background: #ffc107;
+            color: #000;
+        }
+        
+        .feature-content .badge.recommended {
+            position: relative;
+            top: auto;
+            left: auto;
+            display: inline-block;
+            margin-left: 10px;
+            background: rgba(255, 193, 7, 0.2);
+            color: #ffc107;
+            border: 1px solid #ffc107;
+        }
+        
+        /* Progress Bar */
+        .progress-bar {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: rgba(0, 0, 0, 0.3);
+        }
+        
+        /* Loading Overlay */
+        #loadingOverlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.95);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+        }
+        
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            border-top-color: #4CAF50;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
         /* Loading State */
         .loading-placeholder {
             background: linear-gradient(90deg, #2a2a2a 0%, #3a3a3a 50%, #2a2a2a 100%);
@@ -275,6 +356,12 @@
         @keyframes shimmer {
             0% { background-position: 200% 0; }
             100% { background-position: -200% 0; }
+        }
+        
+        /* Error Container */
+        #errorContainer {
+            display: none;
+            padding: 40px;
         }
         
         /* Responsive */
@@ -306,6 +393,16 @@
     </style>
 </head>
 <body>
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay">
+        <div style="text-align: center;">
+            <div class="loading-spinner"></div>
+            <p style="color: rgba(255, 255, 255, 0.7); margin-top: 20px;">Loading personalized content...</p>
+        </div>
+    </div>
+    
+    <!-- Error Container -->
+    <div id="errorContainer"></div>
     <!-- Hero Section -->
     <div class="hero-section">
         <div class="hero-content">
@@ -317,11 +414,7 @@
     <!-- Navigation -->
     <nav class="nav-bar">
         <ul class="nav-items">
-            <li class="nav-item active" data-category="all">All</li>
-            <li class="nav-item" data-category="getting-started">Getting Started</li>
-            <li class="nav-item" data-category="workflows">Workflows</li>
-            <li class="nav-item" data-category="integrations">Integrations</li>
-            <li class="nav-item" data-category="advanced">Advanced</li>
+            <!-- Dynamically populated -->
         </ul>
     </nav>
     
@@ -329,213 +422,16 @@
     <div class="content-section">
         <h2 class="section-title">Featured</h2>
         <div class="feature-carousel">
-            <div class="feature-card">
-                <div class="play-button">
-                    <div class="play-icon"></div>
-                </div>
-                <div class="feature-content">
-                    <h3 class="feature-title">Welcome to OneReach</h3>
-                    <p class="feature-description">Get started with the basics of OneReach platform and discover its powerful features</p>
-                </div>
-            </div>
-            <div class="feature-card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
-                <div class="play-button">
-                    <div class="play-icon"></div>
-                </div>
-                <div class="feature-content">
-                    <h3 class="feature-title">Building Your First Agent</h3>
-                    <p class="feature-description">Step-by-step guide to creating and deploying your first intelligent agent</p>
-                </div>
-            </div>
-            <div class="feature-card" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
-                <div class="play-button">
-                    <div class="play-icon"></div>
-                </div>
-                <div class="feature-content">
-                    <h3 class="feature-title">Advanced Workflows</h3>
-                    <p class="feature-description">Master complex automation workflows and orchestration patterns</p>
-                </div>
-            </div>
+            <!-- Dynamically populated -->
         </div>
     </div>
     
-    <!-- Getting Started Section -->
-    <div class="content-section">
-        <h2 class="section-title">Getting Started</h2>
-        <div class="tutorial-grid" id="getting-started-grid">
-            <div class="tutorial-card" data-category="getting-started" data-url="https://learning.staging.onereach.ai/courses/intro-to-onereach">
-                <div class="tutorial-thumbnail"></div>
-                <div class="tutorial-duration">12 min</div>
-                <div class="tutorial-overlay">
-                    <h3 class="tutorial-title">Platform Overview</h3>
-                    <p class="tutorial-description">Introduction to the OneReach platform interface and navigation</p>
-                </div>
-            </div>
-            <div class="tutorial-card" data-category="getting-started" data-url="https://learning.staging.onereach.ai/courses/first-project">
-                <div class="tutorial-thumbnail" style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);"></div>
-                <div class="tutorial-duration">8 min</div>
-                <div class="tutorial-overlay">
-                    <h3 class="tutorial-title">Your First Project</h3>
-                    <p class="tutorial-description">Create your first project and understand the basics</p>
-                </div>
-            </div>
-            <div class="tutorial-card" data-category="getting-started" data-url="https://learning.staging.onereach.ai/courses/environment-setup">
-                <div class="tutorial-thumbnail" style="background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);"></div>
-                <div class="tutorial-duration">15 min</div>
-                <div class="tutorial-overlay">
-                    <h3 class="tutorial-title">Environment Setup</h3>
-                    <p class="tutorial-description">Configure your development environment for optimal productivity</p>
-                </div>
-            </div>
-        </div>
+    <!-- Dynamic Content Sections -->
+    <div id="contentSections">
+        <!-- Dynamically populated with category sections -->
     </div>
     
-    <!-- Workflows Section -->
-    <div class="content-section">
-        <h2 class="section-title">Workflows</h2>
-        <div class="tutorial-grid" id="workflows-grid">
-            <div class="tutorial-card" data-category="workflows" data-url="https://learning.staging.onereach.ai/courses/workflow-basics">
-                <div class="tutorial-thumbnail" style="background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%);"></div>
-                <div class="tutorial-duration">20 min</div>
-                <div class="tutorial-overlay">
-                    <h3 class="tutorial-title">Workflow Fundamentals</h3>
-                    <p class="tutorial-description">Understanding nodes, connections, and data flow</p>
-                </div>
-            </div>
-            <div class="tutorial-card" data-category="workflows" data-url="https://learning.staging.onereach.ai/courses/conditional-logic">
-                <div class="tutorial-thumbnail" style="background: linear-gradient(135deg, #a1c4fd 0%, #c2e9fb 100%);"></div>
-                <div class="tutorial-duration">18 min</div>
-                <div class="tutorial-overlay">
-                    <h3 class="tutorial-title">Conditional Logic</h3>
-                    <p class="tutorial-description">Implementing decision trees and branching logic</p>
-                </div>
-            </div>
-            <div class="tutorial-card" data-category="workflows" data-url="https://learning.staging.onereach.ai/courses/data-transformation">
-                <div class="tutorial-thumbnail" style="background: linear-gradient(135deg, #d299c2 0%, #fef9d7 100%);"></div>
-                <div class="tutorial-duration">25 min</div>
-                <div class="tutorial-overlay">
-                    <h3 class="tutorial-title">Data Transformation</h3>
-                    <p class="tutorial-description">Transform and manipulate data within your workflows</p>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Integrations Section -->
-    <div class="content-section">
-        <h2 class="section-title">Integrations</h2>
-        <div class="tutorial-grid" id="integrations-grid">
-            <div class="tutorial-card" data-category="integrations" data-url="https://learning.staging.onereach.ai/courses/api-integration">
-                <div class="tutorial-thumbnail" style="background: linear-gradient(135deg, #89f7fe 0%, #66a6ff 100%);"></div>
-                <div class="tutorial-duration">30 min</div>
-                <div class="tutorial-overlay">
-                    <h3 class="tutorial-title">API Integration</h3>
-                    <p class="tutorial-description">Connect external APIs and services to your workflows</p>
-                </div>
-            </div>
-            <div class="tutorial-card" data-category="integrations" data-url="https://learning.staging.onereach.ai/courses/database-connections">
-                <div class="tutorial-thumbnail" style="background: linear-gradient(135deg, #fddb92 0%, #d1fdff 100%);"></div>
-                <div class="tutorial-duration">22 min</div>
-                <div class="tutorial-overlay">
-                    <h3 class="tutorial-title">Database Connections</h3>
-                    <p class="tutorial-description">Connect and query databases in your applications</p>
-                </div>
-            </div>
-            <div class="tutorial-card" data-category="integrations" data-url="https://learning.staging.onereach.ai/courses/webhooks">
-                <div class="tutorial-thumbnail" style="background: linear-gradient(135deg, #9890e3 0%, #b1f4cf 100%);"></div>
-                <div class="tutorial-duration">15 min</div>
-                <div class="tutorial-overlay">
-                    <h3 class="tutorial-title">Webhooks</h3>
-                    <p class="tutorial-description">Set up and manage webhook integrations</p>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <script>
-        // Handle navigation
-        const navItems = document.querySelectorAll('.nav-item');
-        const sections = document.querySelectorAll('.content-section');
-        
-        navItems.forEach(item => {
-            item.addEventListener('click', () => {
-                // Update active state
-                navItems.forEach(nav => nav.classList.remove('active'));
-                item.classList.add('active');
-                
-                // Filter content based on category
-                const category = item.dataset.category;
-                filterTutorials(category);
-            });
-        });
-        
-        function filterTutorials(category) {
-            const allCards = document.querySelectorAll('.tutorial-card');
-            
-            if (category === 'all') {
-                allCards.forEach(card => card.style.display = 'block');
-                sections.forEach(section => section.style.display = 'block');
-            } else {
-                allCards.forEach(card => {
-                    if (card.dataset.category === category) {
-                        card.style.display = 'block';
-                    } else {
-                        card.style.display = 'none';
-                    }
-                });
-                
-                // Hide empty sections
-                sections.forEach(section => {
-                    const visibleCards = section.querySelectorAll(`.tutorial-card[data-category="${category}"]`);
-                    if (visibleCards.length > 0 || section.querySelector('.feature-carousel')) {
-                        section.style.display = 'block';
-                    } else {
-                        section.style.display = 'none';
-                    }
-                });
-            }
-        }
-        
-        // Handle tutorial clicks
-        document.querySelectorAll('.tutorial-card').forEach(card => {
-            card.addEventListener('click', () => {
-                const url = card.dataset.url;
-                if (url && window.api) {
-                    window.api.send('open-external-url', url);
-                } else if (url) {
-                    // Fallback for testing
-                    window.open(url, '_blank');
-                }
-            });
-        });
-        
-        // Handle feature card clicks
-        document.querySelectorAll('.feature-card').forEach((card, index) => {
-            card.addEventListener('click', () => {
-                const urls = [
-                    'https://learning.staging.onereach.ai/courses/welcome',
-                    'https://learning.staging.onereach.ai/courses/first-agent',
-                    'https://learning.staging.onereach.ai/courses/advanced-workflows'
-                ];
-                
-                if (window.api) {
-                    window.api.send('open-external-url', urls[index]);
-                } else {
-                    window.open(urls[index], '_blank');
-                }
-            });
-        });
-        
-        // Add smooth scrolling
-        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
-            anchor.addEventListener('click', function (e) {
-                e.preventDefault();
-                const target = document.querySelector(this.getAttribute('href'));
-                if (target) {
-                    target.scrollIntoView({ behavior: 'smooth' });
-                }
-            });
-        });
-    </script>
+    <!-- Load the dynamic tutorials script -->
+    <script src="tutorials.js"></script>
 </body>
 </html>

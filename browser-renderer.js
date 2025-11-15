@@ -36,7 +36,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // Check if a menu already exists and remove it
         const existingMenu = document.querySelector('.idw-menu');
-        const existingOverlay = document.querySelector('.idw-menu-overlay');
+            const existingOverlay = document.querySelector('.idw-menu-overlay');
         
         if (existingMenu || existingOverlay) {
             console.log('Closing existing menu');
@@ -88,7 +88,7 @@ document.addEventListener('DOMContentLoaded', () => {
             max-height: 400px;
             overflow-y: auto;
         `;
-        
+
         // Show loading state initially
         menu.innerHTML = `
             <div style="padding: 16px; color: rgba(255,255,255,0.5); text-align: center;">
@@ -99,7 +99,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div style="margin-top: 8px;">Loading IDW environments...</div>
             </div>
         `;
-        
+                                
         // Add menu to document immediately to show loading state
         document.body.appendChild(overlay);
         document.body.appendChild(menu);
@@ -122,19 +122,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!tab.webview || !tab.webview.src) return;
                 
                 try {
-                    const tabUrl = new URL(tab.webview.src);
+                        const tabUrl = new URL(tab.webview.src);
                     const currentUrl = tab.currentUrl ? new URL(tab.currentUrl) : tabUrl;
-                    
+                        
                     // Store the domain for this tab
                     openInfo.domains.add(tabUrl.hostname);
                     openInfo.domains.add(currentUrl.hostname);
-                    
+                        
                     // Store full URLs
                     openInfo.urls.add(tab.webview.src);
                     if (tab.currentUrl) {
                         openInfo.urls.add(tab.currentUrl);
-                    }
-                    
+                        }
+                        
                     // Store normalized base URLs (without query/fragment)
                     const baseUrl = tabUrl.origin + tabUrl.pathname.replace(/\/$/, '');
                     const currentBaseUrl = currentUrl.origin + currentUrl.pathname.replace(/\/$/, '');
@@ -146,7 +146,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (tab.idwId) {
                         openInfo.idwIds.add(tab.idwId);
                     }
-                } catch (e) {
+                    } catch (e) {
                     console.error('Error processing tab:', e);
                 }
             });
@@ -184,9 +184,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Check by IDW ID first (most accurate)
                 if (env.id && openInfo.idwIds.has(env.id)) {
                     console.log(`IDW ${env.label} is open (ID match: ${env.id})`);
-                    return true;
-                }
-                
+                        return true;
+                    }
+                    
                 // Check if either URL is open
                 const urlsToCheck = [];
                 if (env.homeUrl) urlsToCheck.push(env.homeUrl);
@@ -194,38 +194,38 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 for (const url of urlsToCheck) {
                     try {
-                        const checkUrl = new URL(url);
+                    const checkUrl = new URL(url);
                         const baseUrl = checkUrl.origin + checkUrl.pathname.replace(/\/$/, '');
                         
                         // Check exact URL match
                         if (openInfo.urls.has(url) || openInfo.urls.has(baseUrl)) {
                             console.log(`IDW ${env.label} is open (URL match: ${url})`);
-                            return true;
-                        }
-                        
+                        return true;
+                    }
+                    
                         // For IDW environments, be more strict about domain matching
                         // Only match if it's an exact domain match AND the path is similar
                         if (openInfo.domains.has(checkUrl.hostname)) {
                             // Check if any open URL has a similar path structure
                             for (const openUrl of openInfo.urls) {
-                                try {
-                                    const openUrlObj = new URL(openUrl);
+                        try {
+                            const openUrlObj = new URL(openUrl);
                                     if (openUrlObj.hostname === checkUrl.hostname) {
                                         // Check if paths are similar (e.g., both are chat paths)
                                         const pathMatch = openUrlObj.pathname.includes('chat') === checkUrl.pathname.includes('chat');
                                         if (pathMatch) {
                                             console.log(`IDW ${env.label} likely open (domain + path pattern match)`);
-                                            return true;
+                                return true;
                                         }
-                                    }
-                                } catch (e) {
-                                    // Skip invalid URLs
-                                }
                             }
+                        } catch (e) {
+                            // Skip invalid URLs
                         }
-                    } catch (e) {
-                        console.error(`Error checking URL ${url}:`, e);
                     }
+                        }
+                } catch (e) {
+                        console.error(`Error checking URL ${url}:`, e);
+                }
                 }
                 
                 return false;
@@ -302,7 +302,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.removeEventListener('click', closeMenu);
                 document.removeEventListener('mousedown', closeMenuOnWebview);
             };
-            
+
             // Close menu when clicking on overlay or outside menu
             const closeMenu = (e) => {
                 // Don't close if it's a right-click (context menu)
@@ -541,8 +541,8 @@ document.addEventListener('DOMContentLoaded', () => {
         cancelAutoClose();
         
         // Always open the clipboard viewer when clicked
-        console.log('Sending request to open clipboard viewer');
-        window.api.send('open-clipboard-viewer');
+            console.log('Sending request to open clipboard viewer');
+            window.api.send('open-clipboard-viewer');
     });
     
     blackHoleButton.addEventListener('drop', (e) => {
