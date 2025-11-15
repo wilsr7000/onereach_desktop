@@ -357,9 +357,46 @@ class TutorialsManager {
   }
   
   async openLesson(url, lessonId) {
-    console.log(`[Tutorials] Opening lesson: ${lessonId} - ${url}`);
+    // Find lesson details for comprehensive logging
+    let lessonDetails = null;
     
-    // Track lesson start
+    // Search in featured lessons
+    const featuredLesson = this.lessonsData?.featured?.find(l => l.id === lessonId);
+    if (featuredLesson) {
+      lessonDetails = featuredLesson;
+    } else {
+      // Search in categories
+      for (const category in (this.lessonsData?.categories || {})) {
+        const lesson = this.lessonsData.categories[category].find(l => l.id === lessonId);
+        if (lesson) {
+          lessonDetails = { ...lesson, category };
+          break;
+        }
+      }
+    }
+    
+    // Log the lesson click with comprehensive details
+    const logData = {
+      action: 'lesson_clicked',
+      lessonId: lessonId,
+      url: url,
+      title: lessonDetails?.title || 'Unknown',
+      category: lessonDetails?.category || 'Unknown', 
+      difficulty: lessonDetails?.difficulty || 'Unknown',
+      duration: lessonDetails?.duration || 'Unknown',
+      timestamp: new Date().toISOString(),
+      userProgress: this.lessonsData?.user?.progress || 0,
+      userLevel: this.lessonsData?.user?.level || 'Unknown'
+    };
+    
+    console.log(`[Tutorials] Opening lesson:`, logData);
+    
+    // Send log event to main process
+    if (window.api) {
+      await window.api.invoke('log-lesson-click', logData);
+    }
+    
+    // Track lesson start progress
     if (lessonId) {
       await window.api.invoke('update-lesson-progress', lessonId, 1);
     }

@@ -3,6 +3,95 @@ const fs = require('fs');
 const path = require('path');
 
 /**
+ * Helper function to open learning content in an app window
+ * @param {string} url The URL to load
+ * @param {string} title The window title
+ * @returns {BrowserWindow} The created window
+ */
+function openLearningWindow(url, title = 'Agentic University') {
+  const getLogger = require('./event-logger');
+  const logger = getLogger();
+  
+  // Log the learning content access
+  if (logger && logger.info) {
+    logger.info('Learning Content Accessed', {
+      action: 'learning_window_open',
+      title: title,
+      url: url,
+      timestamp: new Date().toISOString()
+    });
+  }
+  console.log(`[Menu] User opened learning content: ${title} - ${url}`);
+  
+  const learningWindow = new BrowserWindow({
+    width: 1600,
+    height: 1000,
+    title: `Agentic University - ${title}`,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
+      sandbox: false,
+      webSecurity: true,
+      webviewTag: false
+    },
+    backgroundColor: '#1a1a1a',
+    show: false
+  });
+  
+  // Show loading indicator
+  learningWindow.webContents.on('did-start-loading', () => {
+    learningWindow.webContents.insertCSS(`
+      body::before {
+        content: 'Loading...';
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 24px;
+        color: #666;
+        z-index: 9999;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      }
+    `);
+  });
+  
+  // Load the URL
+  learningWindow.loadURL(url);
+  
+  // Handle navigation to keep everything in the app window
+  learningWindow.webContents.on('new-window', (event, navUrl) => {
+    event.preventDefault();
+    // If it's a learning.staging.onereach.ai URL, navigate in the same window
+    if (navUrl.includes('learning.staging.onereach.ai') || navUrl.includes('learning.onereach.ai')) {
+      learningWindow.loadURL(navUrl);
+    } else {
+      // Otherwise open in external browser
+      shell.openExternal(navUrl);
+    }
+  });
+  
+  // Handle will-navigate for links
+  learningWindow.webContents.on('will-navigate', (event, navUrl) => {
+    // Allow navigation within the learning domain
+    if (!navUrl.includes('learning.staging.onereach.ai') && !navUrl.includes('learning.onereach.ai')) {
+      event.preventDefault();
+      shell.openExternal(navUrl);
+    }
+  });
+  
+  // Show window when ready
+  learningWindow.once('ready-to-show', () => {
+    learningWindow.show();
+  });
+  
+  // Log window creation
+  console.log(`[Menu] Created learning window for: ${title}`);
+  
+  return learningWindow;
+}
+
+/**
  * Creates and returns the application menu
  * @param {boolean} showTestMenu Whether to show the test menu
  * @param {Array} idwEnvironments Array of IDW environments to create menu items for
@@ -1254,8 +1343,7 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
         {
           label: 'Open LMS',
           click: () => {
-            const { shell } = require('electron');
-            shell.openExternal('https://learning.staging.onereach.ai/');
+            openLearningWindow('https://learning.staging.onereach.ai/', 'Learning Management System');
           }
         },
         { type: 'separator' },
@@ -1267,6 +1355,18 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
               click: () => {
                 const { BrowserWindow, app } = require('electron');
                 const path = require('path');
+                const getLogger = require('./event-logger');
+                const logger = getLogger();
+                
+                // Log the Quick Starts access
+                if (logger && logger.info) {
+                  logger.info('Quick Starts Accessed', {
+                    action: 'menu_click',
+                    menuPath: 'Agentic University > Quick Starts > View All Tutorials',
+                    timestamp: new Date().toISOString()
+                  });
+                }
+                console.log('[Menu] User opened Quick Starts tutorials page');
                 
                 // Use __dirname which works for other windows
                 const preloadPath = path.join(__dirname, 'preload.js');
@@ -1306,29 +1406,25 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
             {
               label: 'Getting Started',
               click: () => {
-                const { shell } = require('electron');
-                shell.openExternal('https://learning.staging.onereach.ai/courses/getting-started');
+                openLearningWindow('https://learning.staging.onereach.ai/courses/getting-started', 'Getting Started');
               }
             },
             {
               label: 'Building Your First Agent',
               click: () => {
-                const { shell } = require('electron');
-                shell.openExternal('https://learning.staging.onereach.ai/courses/first-agent');
+                openLearningWindow('https://learning.staging.onereach.ai/courses/first-agent', 'Building Your First Agent');
               }
             },
             {
               label: 'Workflow Fundamentals',
               click: () => {
-                const { shell } = require('electron');
-                shell.openExternal('https://learning.staging.onereach.ai/courses/workflow-basics');
+                openLearningWindow('https://learning.staging.onereach.ai/courses/workflow-basics', 'Workflow Fundamentals');
               }
             },
             {
               label: 'API Integration',
               click: () => {
-                const { shell } = require('electron');
-                shell.openExternal('https://learning.staging.onereach.ai/courses/api-integration');
+                openLearningWindow('https://learning.staging.onereach.ai/courses/api-integration', 'API Integration');
               }
             }
           ]

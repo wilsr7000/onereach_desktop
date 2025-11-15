@@ -1,7 +1,7 @@
 {
   "name": "onereach-ai",
   "productName": "Onereach.ai",
-  "version": "1.6.5",
+  "version": "1.6.6",
   "description": "Onereach.ai Desktop Application",
   "main": "main.js",
   "icon": "assets/icon.icns",

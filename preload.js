@@ -345,7 +345,8 @@ contextBridge.exposeInMainWorld(
         // Lessons/Tutorials API channels
         'get-current-user',
         'fetch-user-lessons',
-        'update-lesson-progress'
+        'update-lesson-progress',
+        'log-lesson-click'
       ];
       if (validChannels.includes(channel)) {
         return ipcRenderer.invoke(channel, ...args);

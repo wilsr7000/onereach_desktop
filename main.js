@@ -2276,10 +2276,61 @@ function setupIPC() {
       // In future, also sync with API
       // const lessonsAPI = require('./lessons-api');
       // await lessonsAPI.updateProgress(lessonId, progress);
-      
+
       return { success: true };
     } catch (error) {
       console.error('[Main] Error updating lesson progress:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Handle logging lesson clicks
+  ipcMain.handle('log-lesson-click', async (event, logData) => {
+    try {
+      // Log to event logger with detailed information
+      if (logger && logger.info) {
+        logger.info('Lesson Click', {
+          action: logData.action,
+          lessonId: logData.lessonId,
+          title: logData.title,
+          category: logData.category,
+          difficulty: logData.difficulty,
+          duration: logData.duration,
+          url: logData.url,
+          userProgress: logData.userProgress,
+          userLevel: logData.userLevel,
+          timestamp: logData.timestamp
+        });
+      }
+      
+      // Also log to console for immediate visibility
+      console.log('[Main] Lesson clicked:', {
+        title: logData.title,
+        category: logData.category,
+        lessonId: logData.lessonId,
+        url: logData.url
+      });
+      
+      // Store lesson view history
+      const viewHistoryKey = 'lessonViewHistory';
+      const viewHistory = global.settingsManager?.get(viewHistoryKey) || [];
+      viewHistory.unshift({
+        lessonId: logData.lessonId,
+        title: logData.title,
+        viewedAt: logData.timestamp
+      });
+      // Keep only last 50 viewed lessons
+      if (viewHistory.length > 50) {
+        viewHistory.splice(50);
+      }
+      global.settingsManager?.set(viewHistoryKey, viewHistory);
+      
+      // Track analytics if needed (future enhancement)
+      // await analyticsService.track('lesson_click', logData);
+      
+      return { success: true };
+    } catch (error) {
+      console.error('[Main] Error logging lesson click:', error);
       return { success: false, error: error.message };
     }
   });
