@@ -54,7 +54,7 @@ class LessonsAPI {
     }
     
     try {
-      console.log(`[LessonsAPI] Fetching lessons from OneReach API for user: ${userId}`);
+      // Fetching lessons from OneReach API
       
       // Call the actual OneReach API endpoint - requires POST with empty body
       const response = await this.makeApiCall('/idw_quick_starts', {
@@ -66,9 +66,7 @@ class LessonsAPI {
         }
       });
       
-      console.log('[LessonsAPI] Successfully received response from OneReach API');
-      console.log('[LessonsAPI] Response keys:', Object.keys(response));
-      console.log('[LessonsAPI] Has success field:', response.success);
+      // Successfully received response from OneReach API
       
       // The API returns data in our exact format!
       const data = response;
@@ -94,7 +92,7 @@ class LessonsAPI {
     return new Promise((resolve, reject) => {
       const url = new URL(`${this.baseUrl}${endpoint}`);
       
-      console.log(`[LessonsAPI] Making request to: ${url.toString()}`);
+      // Making API request
       
       const requestOptions = {
         method: options.method || 'GET',
@@ -120,7 +118,7 @@ class LessonsAPI {
         
         res.on('end', () => {
           try {
-            console.log(`[LessonsAPI] Response status: ${res.statusCode}`);
+            // Response received
             
             if (res.statusCode >= 200 && res.statusCode < 300) {
               const jsonData = JSON.parse(data);

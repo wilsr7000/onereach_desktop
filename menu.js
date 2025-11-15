@@ -1268,9 +1268,10 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
                 const { BrowserWindow, app } = require('electron');
                 const path = require('path');
                 
-                // Use app.getAppPath() for correct path in packaged app
-                const preloadPath = path.join(app.getAppPath(), 'preload.js');
-                console.log('[Menu] Creating tutorials window with preload:', preloadPath);
+                // Use __dirname which works for other windows
+                const preloadPath = path.join(__dirname, 'preload.js');
+                
+                // Creating tutorials window with preload
                 
                 const tutorialsWindow = new BrowserWindow({
                   width: 1400,
@@ -1279,19 +1280,25 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
                     nodeIntegration: false,
                     contextIsolation: true,
                     preload: preloadPath,
-                    sandbox: false
+                    sandbox: false,
+                    webSecurity: true,
+                    enableRemoteModule: false
                   }
                 });
                 
                 tutorialsWindow.loadFile('tutorials.html');
                 
-                // Add error handling
+                // Add debug info
+                tutorialsWindow.webContents.on('preload-error', (event, preloadPath, error) => {
+                  console.error('[Menu] Preload error:', error);
+                });
+                
                 tutorialsWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
                   console.error('[Menu] Failed to load tutorials:', errorDescription);
                 });
                 
                 tutorialsWindow.webContents.on('did-finish-load', () => {
-                  console.log('[Menu] Tutorials window loaded successfully');
+                  // Tutorials window loaded successfully
                 });
               }
             },

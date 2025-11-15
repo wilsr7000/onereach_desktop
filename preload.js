@@ -341,7 +341,11 @@ contextBridge.exposeInMainWorld(
         'logger:get-recent-logs',
         'logger:get-stats',
         'logger:export',
-        'logger:get-files'
+        'logger:get-files',
+        // Lessons/Tutorials API channels
+        'get-current-user',
+        'fetch-user-lessons',
+        'update-lesson-progress'
       ];
       if (validChannels.includes(channel)) {
         return ipcRenderer.invoke(channel, ...args);

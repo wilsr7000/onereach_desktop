@@ -42,22 +42,22 @@ class TutorialsManager {
       console.log('[Tutorials] Fetching lessons...');
       const result = await window.api.invoke('fetch-user-lessons', this.currentUser?.id);
       
-      console.log('[Tutorials] Raw API result:', result);
+      // Debug: Raw API result
       
       if (result.success) {
         this.lessonsData = result.data;
-        console.log('[Tutorials] Lessons data structure:', {
-          hasUser: !!this.lessonsData.user,
-          hasFeatured: !!this.lessonsData.featured,
-          hasCategories: !!this.lessonsData.categories,
-          featuredCount: this.lessonsData.featured?.length || 0,
-          categoryCount: Object.keys(this.lessonsData.categories || {}).length
-        });
+      // Validate data structure
+      const validation = {
+        hasUser: !!this.lessonsData.user,
+        hasFeatured: !!this.lessonsData.featured,
+        hasCategories: !!this.lessonsData.categories,
+        featuredCount: this.lessonsData.featured?.length || 0,
+        categoryCount: Object.keys(this.lessonsData.categories || {}).length
+      };
         
         // Validate required fields
         if (!this.lessonsData.user || !this.lessonsData.featured || !this.lessonsData.categories) {
-          console.warn('[Tutorials] Missing required fields in API response');
-          console.log('[Tutorials] Available keys:', Object.keys(this.lessonsData));
+        console.warn('[Tutorials] Missing required fields in API response:', Object.keys(this.lessonsData));
         }
       } else {
         throw new Error(result.error || 'Failed to fetch lessons');
