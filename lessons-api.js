@@ -5,8 +5,8 @@ const { URL } = require('url');
 
 class LessonsAPI {
   constructor() {
-    // Default API endpoint - can be configured
-    this.baseUrl = 'https://learning.staging.onereach.ai/api';
+    // OneReach API endpoint for quick starts
+    this.baseUrl = 'https://em.staging.api.onereach.ai/http/48cc49ef-ab05-4d51-acc6-559c7ff22150';
     this.cache = new Map();
     this.cacheExpiry = 5 * 60 * 1000; // 5 minutes cache
   }
@@ -54,35 +54,51 @@ class LessonsAPI {
     }
     
     try {
-      console.log(`[LessonsAPI] Fetching lessons for user: ${userId}`);
+      console.log(`[LessonsAPI] Fetching lessons from OneReach API for user: ${userId}`);
       
-      // For now, return mock data that matches the OneReach learning platform structure
-      // Replace this with actual API call when endpoint is available
+      // Call the actual OneReach API endpoint - requires POST with empty body
+      const response = await this.makeApiCall('/idw_quick_starts', {
+        method: 'POST',
+        body: {},  // API requires POST with body (can be empty)
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      console.log('[LessonsAPI] Successfully received response from OneReach API');
+      
+      // The API returns data in our exact format!
+      const data = response;
+      
+      // Cache the response
+      this.setCache(cacheKey, data);
+      return data;
+    } catch (error) {
+      console.error('[LessonsAPI] Error fetching lessons from API:', error);
+      console.log('[LessonsAPI] Falling back to mock data');
+      
+      // Fallback to mock data if API fails
       const mockData = await this.getMockLessonsData(userId);
-      
-      // Uncomment and use this when real API is available:
-      // const response = await this.makeApiCall(`/users/${userId}/lessons`);
-      // const data = response;
-      
       this.setCache(cacheKey, mockData);
       return mockData;
-    } catch (error) {
-      console.error('[LessonsAPI] Error fetching lessons:', error);
-      throw error;
     }
   }
   
   /**
-   * Make an API call (when real endpoint is available)
+   * Make an API call to OneReach endpoint
    */
   async makeApiCall(endpoint, options = {}) {
     return new Promise((resolve, reject) => {
       const url = new URL(`${this.baseUrl}${endpoint}`);
       
+      console.log(`[LessonsAPI] Making request to: ${url.toString()}`);
+      
       const requestOptions = {
         method: options.method || 'GET',
         protocol: url.protocol,
         hostname: url.hostname,
+        port: url.port || (url.protocol === 'https:' ? 443 : 80),
         path: url.pathname + url.search,
         headers: {
           'Content-Type': 'application/json',
@@ -100,20 +116,32 @@ class LessonsAPI {
         
         res.on('end', () => {
           try {
-            const jsonData = JSON.parse(data);
+            console.log(`[LessonsAPI] Response status: ${res.statusCode}`);
+            
             if (res.statusCode >= 200 && res.statusCode < 300) {
+              const jsonData = JSON.parse(data);
               resolve(jsonData);
             } else {
-              reject(new Error(`API error: ${res.statusCode} - ${jsonData.message || 'Unknown error'}`));
+              console.error(`[LessonsAPI] API error response: ${data}`);
+              reject(new Error(`API error: ${res.statusCode}`));
             }
           } catch (error) {
+            console.error(`[LessonsAPI] Failed to parse response: ${error.message}`);
+            console.error(`[LessonsAPI] Raw response: ${data}`);
             reject(new Error(`Failed to parse API response: ${error.message}`));
           }
         });
       });
       
       req.on('error', (error) => {
+        console.error(`[LessonsAPI] Request error: ${error.message}`);
         reject(error);
+      });
+      
+      // Set timeout
+      req.setTimeout(30000, () => {
+        req.abort();
+        reject(new Error('Request timeout'));
       });
       
       if (options.body) {
