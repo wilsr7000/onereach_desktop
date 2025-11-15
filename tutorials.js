@@ -42,14 +42,29 @@ class TutorialsManager {
       console.log('[Tutorials] Fetching lessons...');
       const result = await window.api.invoke('fetch-user-lessons', this.currentUser?.id);
       
+      console.log('[Tutorials] Raw API result:', result);
+      
       if (result.success) {
         this.lessonsData = result.data;
-        console.log('[Tutorials] Lessons loaded:', this.lessonsData);
+        console.log('[Tutorials] Lessons data structure:', {
+          hasUser: !!this.lessonsData.user,
+          hasFeatured: !!this.lessonsData.featured,
+          hasCategories: !!this.lessonsData.categories,
+          featuredCount: this.lessonsData.featured?.length || 0,
+          categoryCount: Object.keys(this.lessonsData.categories || {}).length
+        });
+        
+        // Validate required fields
+        if (!this.lessonsData.user || !this.lessonsData.featured || !this.lessonsData.categories) {
+          console.warn('[Tutorials] Missing required fields in API response');
+          console.log('[Tutorials] Available keys:', Object.keys(this.lessonsData));
+        }
       } else {
         throw new Error(result.error || 'Failed to fetch lessons');
       }
     } catch (error) {
       console.error('[Tutorials] Error fetching lessons:', error);
+      console.error('[Tutorials] Error stack:', error.stack);
       throw error;
     }
   }
@@ -88,20 +103,26 @@ class TutorialsManager {
   renderContent() {
     if (!this.lessonsData) {
       console.error('[Tutorials] No lessons data to render');
+      this.showError('No lesson data available. Please try refreshing the page.');
       return;
     }
     
-    // Update user progress display
-    this.renderUserProgress();
-    
-    // Render featured carousel
-    this.renderFeaturedCarousel();
-    
-    // Render category sections
-    this.renderCategorySections();
-    
-    // Update navigation items based on available categories
-    this.updateNavigation();
+    try {
+      // Update user progress display
+      this.renderUserProgress();
+      
+      // Render featured carousel
+      this.renderFeaturedCarousel();
+      
+      // Render category sections
+      this.renderCategorySections();
+      
+      // Update navigation items based on available categories
+      this.updateNavigation();
+    } catch (error) {
+      console.error('[Tutorials] Error rendering content:', error);
+      this.showError(`Failed to display content: ${error.message}`);
+    }
   }
   
   renderUserProgress() {

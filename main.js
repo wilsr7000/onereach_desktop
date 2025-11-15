@@ -2241,6 +2241,20 @@ function setupIPC() {
       }
       
       const lessons = await lessonsAPI.fetchUserLessons(userId);
+      
+      // The API already returns { success: true, ... data ... }
+      // So if it has a success field, return it directly
+      if (lessons && typeof lessons.success !== 'undefined') {
+        console.log('[Main] API returned success field, using API response directly');
+        // If API call succeeded but returned success: false, treat as error
+        if (!lessons.success) {
+          return { success: false, error: lessons.error || 'API returned error' };
+        }
+        // Return the API response but ensure it has the expected structure
+        return { success: true, data: lessons };
+      }
+      
+      // Otherwise wrap it (for mock data or different format)
       return { success: true, data: lessons };
     } catch (error) {
       console.error('[Main] Error fetching lessons:', error);

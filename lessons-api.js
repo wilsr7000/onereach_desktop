@@ -67,6 +67,8 @@ class LessonsAPI {
       });
       
       console.log('[LessonsAPI] Successfully received response from OneReach API');
+      console.log('[LessonsAPI] Response keys:', Object.keys(response));
+      console.log('[LessonsAPI] Has success field:', response.success);
       
       // The API returns data in our exact format!
       const data = response;
@@ -103,6 +105,8 @@ class LessonsAPI {
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
+          'User-Agent': 'OneReach-Desktop/1.0',
+          'Origin': 'file://',
           ...options.headers
         }
       };
