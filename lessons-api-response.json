@@ -1,0 +1,605 @@
+{
+  "success": true,
+  "timestamp": "2024-11-15T10:00:00Z",
+  "user": {
+    "id": "user-123456",
+    "name": "John Doe",
+    "email": "john.doe@example.com",
+    "role": "learner",
+    "enrollmentDate": "2024-01-15T08:00:00Z",
+    "lastActive": "2024-11-15T09:45:00Z",
+    "preferences": {
+      "difficulty": "intermediate",
+      "categories": ["workflows", "integrations"],
+      "learningPace": "moderate"
+    },
+    "progress": {
+      "completed": 12,
+      "inProgress": 3,
+      "total": 45,
+      "totalMinutes": 480,
+      "completedMinutes": 285,
+      "averageScore": 85.5,
+      "streak": 7,
+      "badges": ["quick-learner", "workflow-master", "7-day-streak"]
+    },
+    "subscription": {
+      "plan": "premium",
+      "expiresAt": "2025-01-15T08:00:00Z"
+    }
+  },
+  "featured": [
+    {
+      "id": "feat-001",
+      "title": "Welcome to OneReach",
+      "description": "Get started with the basics of OneReach platform and discover its powerful features",
+      "duration": "15 min",
+      "category": "getting-started",
+      "url": "https://learning.staging.onereach.ai/courses/welcome",
+      "thumbnail": {
+        "type": "gradient",
+        "colors": ["#667eea", "#764ba2"],
+        "imageUrl": null
+      },
+      "featured": true,
+      "progress": 0,
+      "difficulty": "beginner",
+      "instructor": {
+        "name": "Sarah Johnson",
+        "avatar": "https://example.com/avatars/sarah.jpg"
+      },
+      "rating": 4.8,
+      "enrollments": 15234,
+      "tags": ["introduction", "platform", "basics"],
+      "lastUpdated": "2024-11-01T10:00:00Z"
+    },
+    {
+      "id": "feat-002",
+      "title": "Building Your First Agent",
+      "description": "Step-by-step guide to creating and deploying your first intelligent agent",
+      "duration": "25 min",
+      "category": "getting-started",
+      "url": "https://learning.staging.onereach.ai/courses/first-agent",
+      "thumbnail": {
+        "type": "gradient",
+        "colors": ["#f093fb", "#f5576c"],
+        "imageUrl": null
+      },
+      "featured": true,
+      "progress": 30,
+      "difficulty": "beginner",
+      "recommended": true,
+      "instructor": {
+        "name": "Michael Chen",
+        "avatar": "https://example.com/avatars/michael.jpg"
+      },
+      "rating": 4.9,
+      "enrollments": 12543,
+      "tags": ["agents", "deployment", "hands-on"],
+      "lastUpdated": "2024-11-05T14:30:00Z",
+      "nextLesson": "feat-003"
+    },
+    {
+      "id": "feat-003",
+      "title": "Advanced Workflows",
+      "description": "Master complex automation workflows and orchestration patterns",
+      "duration": "45 min",
+      "category": "advanced",
+      "url": "https://learning.staging.onereach.ai/courses/advanced-workflows",
+      "thumbnail": {
+        "type": "gradient",
+        "colors": ["#4facfe", "#00f2fe"],
+        "imageUrl": null
+      },
+      "featured": true,
+      "progress": 0,
+      "difficulty": "advanced",
+      "instructor": {
+        "name": "David Martinez",
+        "avatar": "https://example.com/avatars/david.jpg"
+      },
+      "rating": 4.7,
+      "enrollments": 8765,
+      "tags": ["workflows", "automation", "advanced"],
+      "prerequisites": ["wf-001", "wf-002"],
+      "lastUpdated": "2024-10-28T09:15:00Z"
+    }
+  ],
+  "categories": {
+    "getting-started": {
+      "name": "Getting Started",
+      "description": "Begin your journey with OneReach platform",
+      "icon": "rocket",
+      "color": "#667eea",
+      "totalLessons": 8,
+      "totalDuration": "2h 15min",
+      "lessons": [
+        {
+          "id": "gs-001",
+          "title": "Platform Overview",
+          "description": "Introduction to the OneReach platform interface and navigation",
+          "duration": "12 min",
+          "url": "https://learning.staging.onereach.ai/courses/intro-to-onereach",
+          "thumbnail": {
+            "type": "gradient",
+            "colors": ["#667eea", "#764ba2"],
+            "imageUrl": "https://example.com/thumbnails/platform-overview.jpg"
+          },
+          "progress": 100,
+          "completed": true,
+          "completedAt": "2024-11-10T14:30:00Z",
+          "score": 92,
+          "difficulty": "beginner",
+          "videoUrl": "https://example.com/videos/gs-001.mp4",
+          "transcriptUrl": "https://example.com/transcripts/gs-001.pdf",
+          "resourcesUrl": "https://example.com/resources/gs-001.zip",
+          "tags": ["interface", "navigation", "basics"],
+          "chapters": [
+            {
+              "title": "Welcome",
+              "startTime": 0,
+              "endTime": 120
+            },
+            {
+              "title": "Interface Tour",
+              "startTime": 120,
+              "endTime": 480
+            },
+            {
+              "title": "Basic Navigation",
+              "startTime": 480,
+              "endTime": 720
+            }
+          ]
+        },
+        {
+          "id": "gs-002",
+          "title": "Your First Project",
+          "description": "Create your first project and understand the basics",
+          "duration": "8 min",
+          "url": "https://learning.staging.onereach.ai/courses/first-project",
+          "thumbnail": {
+            "type": "gradient",
+            "colors": ["#fa709a", "#fee140"],
+            "imageUrl": null
+          },
+          "progress": 100,
+          "completed": true,
+          "completedAt": "2024-11-11T10:15:00Z",
+          "score": 88,
+          "difficulty": "beginner",
+          "videoUrl": "https://example.com/videos/gs-002.mp4",
+          "tags": ["project", "setup", "basics"]
+        },
+        {
+          "id": "gs-003",
+          "title": "Environment Setup",
+          "description": "Configure your development environment for optimal productivity",
+          "duration": "15 min",
+          "url": "https://learning.staging.onereach.ai/courses/environment-setup",
+          "thumbnail": {
+            "type": "gradient",
+            "colors": ["#a8edea", "#fed6e3"],
+            "imageUrl": null
+          },
+          "progress": 60,
+          "inProgress": true,
+          "startedAt": "2024-11-14T16:00:00Z",
+          "lastViewedAt": "2024-11-14T16:09:00Z",
+          "difficulty": "beginner",
+          "videoUrl": "https://example.com/videos/gs-003.mp4",
+          "currentChapter": 2,
+          "bookmarks": [180, 420],
+          "notes": [
+            {
+              "timestamp": 180,
+              "note": "Important configuration step"
+            }
+          ],
+          "tags": ["environment", "setup", "configuration"]
+        },
+        {
+          "id": "gs-004",
+          "title": "Understanding Workspaces",
+          "description": "Learn how to organize your projects with workspaces",
+          "duration": "10 min",
+          "url": "https://learning.staging.onereach.ai/courses/workspaces",
+          "thumbnail": {
+            "type": "gradient",
+            "colors": ["#ffecd2", "#fcb69f"],
+            "imageUrl": null
+          },
+          "progress": 0,
+          "new": true,
+          "difficulty": "beginner",
+          "releasedAt": "2024-11-12T08:00:00Z",
+          "videoUrl": "https://example.com/videos/gs-004.mp4",
+          "tags": ["workspaces", "organization", "projects"]
+        }
+      ]
+    },
+    "workflows": {
+      "name": "Workflows",
+      "description": "Master workflow creation and management",
+      "icon": "flow-chart",
+      "color": "#ffecd2",
+      "totalLessons": 10,
+      "totalDuration": "3h 45min",
+      "lessons": [
+        {
+          "id": "wf-001",
+          "title": "Workflow Fundamentals",
+          "description": "Understanding nodes, connections, and data flow",
+          "duration": "20 min",
+          "url": "https://learning.staging.onereach.ai/courses/workflow-basics",
+          "thumbnail": {
+            "type": "gradient",
+            "colors": ["#ffecd2", "#fcb69f"],
+            "imageUrl": null
+          },
+          "progress": 75,
+          "inProgress": true,
+          "startedAt": "2024-11-13T14:00:00Z",
+          "lastViewedAt": "2024-11-14T11:30:00Z",
+          "difficulty": "intermediate",
+          "videoUrl": "https://example.com/videos/wf-001.mp4",
+          "currentChapter": 3,
+          "estimatedCompletion": "5 min",
+          "tags": ["workflows", "nodes", "connections"],
+          "relatedLessons": ["wf-002", "wf-003"]
+        },
+        {
+          "id": "wf-002",
+          "title": "Conditional Logic",
+          "description": "Implementing decision trees and branching logic",
+          "duration": "18 min",
+          "url": "https://learning.staging.onereach.ai/courses/conditional-logic",
+          "thumbnail": {
+            "type": "gradient",
+            "colors": ["#a1c4fd", "#c2e9fb"],
+            "imageUrl": null
+          },
+          "progress": 0,
+          "recommended": true,
+          "difficulty": "intermediate",
+          "videoUrl": "https://example.com/videos/wf-002.mp4",
+          "prerequisites": ["wf-001"],
+          "tags": ["logic", "conditions", "branching"],
+          "quiz": {
+            "questions": 10,
+            "passingScore": 70
+          }
+        },
+        {
+          "id": "wf-003",
+          "title": "Data Transformation",
+          "description": "Transform and manipulate data within your workflows",
+          "duration": "25 min",
+          "url": "https://learning.staging.onereach.ai/courses/data-transformation",
+          "thumbnail": {
+            "type": "gradient",
+            "colors": ["#d299c2", "#fef9d7"],
+            "imageUrl": null
+          },
+          "progress": 0,
+          "difficulty": "intermediate",
+          "videoUrl": "https://example.com/videos/wf-003.mp4",
+          "tags": ["data", "transformation", "manipulation"],
+          "exercises": [
+            {
+              "title": "Transform JSON Data",
+              "difficulty": "medium",
+              "estimatedTime": "10 min"
+            }
+          ]
+        },
+        {
+          "id": "wf-004",
+          "title": "Error Handling",
+          "description": "Best practices for handling errors in workflows",
+          "duration": "15 min",
+          "url": "https://learning.staging.onereach.ai/courses/error-handling",
+          "thumbnail": {
+            "type": "gradient",
+            "colors": ["#89f7fe", "#66a6ff"],
+            "imageUrl": null
+          },
+          "progress": 0,
+          "new": true,
+          "difficulty": "intermediate",
+          "releasedAt": "2024-11-08T10:00:00Z",
+          "videoUrl": "https://example.com/videos/wf-004.mp4",
+          "tags": ["errors", "debugging", "best-practices"],
+          "certification": true
+        },
+        {
+          "id": "wf-005",
+          "title": "Parallel Processing",
+          "description": "Execute multiple workflow branches simultaneously",
+          "duration": "22 min",
+          "url": "https://learning.staging.onereach.ai/courses/parallel-processing",
+          "thumbnail": {
+            "type": "gradient",
+            "colors": ["#fddb92", "#d1fdff"],
+            "imageUrl": null
+          },
+          "progress": 0,
+          "difficulty": "advanced",
+          "videoUrl": "https://example.com/videos/wf-005.mp4",
+          "prerequisites": ["wf-001", "wf-002", "wf-003"],
+          "tags": ["parallel", "performance", "optimization"],
+          "labExercise": true
+        }
+      ]
+    },
+    "integrations": {
+      "name": "Integrations",
+      "description": "Connect with external systems and services",
+      "icon": "plug",
+      "color": "#89f7fe",
+      "totalLessons": 8,
+      "totalDuration": "3h 10min",
+      "lessons": [
+        {
+          "id": "int-001",
+          "title": "API Integration",
+          "description": "Connect external APIs and services to your workflows",
+          "duration": "30 min",
+          "url": "https://learning.staging.onereach.ai/courses/api-integration",
+          "thumbnail": {
+            "type": "gradient",
+            "colors": ["#89f7fe", "#66a6ff"],
+            "imageUrl": null
+          },
+          "progress": 25,
+          "inProgress": true,
+          "startedAt": "2024-11-12T09:00:00Z",
+          "lastViewedAt": "2024-11-13T15:45:00Z",
+          "difficulty": "intermediate",
+          "videoUrl": "https://example.com/videos/int-001.mp4",
+          "currentChapter": 1,
+          "tags": ["api", "rest", "integration"],
+          "codeExamples": [
+            {
+              "language": "javascript",
+              "title": "REST API Call",
+              "url": "https://example.com/code/int-001-rest.js"
+            },
+            {
+              "language": "python",
+              "title": "Python Integration",
+              "url": "https://example.com/code/int-001-python.py"
+            }
+          ]
+        },
+        {
+          "id": "int-002",
+          "title": "Database Connections",
+          "description": "Connect and query databases in your applications",
+          "duration": "22 min",
+          "url": "https://learning.staging.onereach.ai/courses/database-connections",
+          "thumbnail": {
+            "type": "gradient",
+            "colors": ["#fddb92", "#d1fdff"],
+            "imageUrl": null
+          },
+          "progress": 0,
+          "difficulty": "intermediate",
+          "videoUrl": "https://example.com/videos/int-002.mp4",
+          "tags": ["database", "sql", "nosql"],
+          "supportedDatabases": ["PostgreSQL", "MySQL", "MongoDB", "Redis"]
+        },
+        {
+          "id": "int-003",
+          "title": "Webhooks",
+          "description": "Set up and manage webhook integrations",
+          "duration": "15 min",
+          "url": "https://learning.staging.onereach.ai/courses/webhooks",
+          "thumbnail": {
+            "type": "gradient",
+            "colors": ["#9890e3", "#b1f4cf"],
+            "imageUrl": null
+          },
+          "progress": 0,
+          "difficulty": "intermediate",
+          "videoUrl": "https://example.com/videos/int-003.mp4",
+          "tags": ["webhooks", "events", "real-time"],
+          "practicalExample": {
+            "title": "GitHub Webhook Integration",
+            "description": "Build a workflow triggered by GitHub events"
+          }
+        },
+        {
+          "id": "int-004",
+          "title": "OAuth Authentication",
+          "description": "Implement secure OAuth flows for third-party services",
+          "duration": "28 min",
+          "url": "https://learning.staging.onereach.ai/courses/oauth",
+          "thumbnail": {
+            "type": "gradient",
+            "colors": ["#f093fb", "#f5576c"],
+            "imageUrl": null
+          },
+          "progress": 0,
+          "recommended": true,
+          "difficulty": "advanced",
+          "videoUrl": "https://example.com/videos/int-004.mp4",
+          "prerequisites": ["int-001"],
+          "tags": ["oauth", "authentication", "security"],
+          "providers": ["Google", "Microsoft", "GitHub", "Salesforce"]
+        }
+      ]
+    },
+    "advanced": {
+      "name": "Advanced Topics",
+      "description": "Deep dive into advanced concepts and techniques",
+      "icon": "graduation-cap",
+      "color": "#4facfe",
+      "totalLessons": 6,
+      "totalDuration": "4h 20min",
+      "lessons": [
+        {
+          "id": "adv-001",
+          "title": "Performance Optimization",
+          "description": "Optimize your workflows for maximum performance",
+          "duration": "35 min",
+          "url": "https://learning.staging.onereach.ai/courses/performance",
+          "thumbnail": {
+            "type": "gradient",
+            "colors": ["#4facfe", "#00f2fe"],
+            "imageUrl": null
+          },
+          "progress": 0,
+          "difficulty": "advanced",
+          "videoUrl": "https://example.com/videos/adv-001.mp4",
+          "prerequisites": ["wf-001", "wf-005"],
+          "tags": ["performance", "optimization", "scaling"],
+          "benchmarks": {
+            "before": "500ms average",
+            "after": "50ms average"
+          }
+        },
+        {
+          "id": "adv-002",
+          "title": "Custom Components",
+          "description": "Build reusable custom components for your workflows",
+          "duration": "40 min",
+          "url": "https://learning.staging.onereach.ai/courses/custom-components",
+          "thumbnail": {
+            "type": "gradient",
+            "colors": ["#fa709a", "#fee140"],
+            "imageUrl": null
+          },
+          "progress": 0,
+          "difficulty": "advanced",
+          "videoUrl": "https://example.com/videos/adv-002.mp4",
+          "tags": ["components", "reusability", "architecture"],
+          "projectFiles": "https://example.com/projects/custom-components.zip",
+          "certification": true
+        },
+        {
+          "id": "adv-003",
+          "title": "Security Best Practices",
+          "description": "Implement security best practices in your applications",
+          "duration": "30 min",
+          "url": "https://learning.staging.onereach.ai/courses/security",
+          "thumbnail": {
+            "type": "gradient",
+            "colors": ["#667eea", "#764ba2"],
+            "imageUrl": null
+          },
+          "progress": 0,
+          "new": true,
+          "difficulty": "advanced",
+          "releasedAt": "2024-11-10T12:00:00Z",
+          "videoUrl": "https://example.com/videos/adv-003.mp4",
+          "tags": ["security", "encryption", "authentication"],
+          "securityChecklist": [
+            "Input validation",
+            "Authentication",
+            "Authorization",
+            "Encryption",
+            "Audit logging"
+          ]
+        }
+      ]
+    }
+  },
+  "recommendations": [
+    "wf-002",
+    "int-004",
+    "feat-002",
+    "adv-003",
+    "gs-004"
+  ],
+  "recentlyViewed": [
+    {
+      "lessonId": "gs-001",
+      "viewedAt": "2024-11-10T14:30:00Z"
+    },
+    {
+      "lessonId": "gs-002",
+      "viewedAt": "2024-11-11T10:15:00Z"
+    },
+    {
+      "lessonId": "wf-001",
+      "viewedAt": "2024-11-14T11:30:00Z"
+    },
+    {
+      "lessonId": "int-001",
+      "viewedAt": "2024-11-13T15:45:00Z"
+    },
+    {
+      "lessonId": "gs-003",
+      "viewedAt": "2024-11-14T16:09:00Z"
+    }
+  ],
+  "continueWatching": ["gs-003", "wf-001", "int-001"],
+  "achievements": [
+    {
+      "id": "first-lesson",
+      "title": "First Steps",
+      "description": "Completed your first lesson",
+      "earnedAt": "2024-11-10T14:30:00Z",
+      "icon": "trophy"
+    },
+    {
+      "id": "streak-7",
+      "title": "Week Warrior",
+      "description": "7-day learning streak",
+      "earnedAt": "2024-11-14T10:00:00Z",
+      "icon": "fire"
+    }
+  ],
+  "learningPath": {
+    "id": "path-beginner",
+    "name": "Beginner to Pro",
+    "description": "Complete learning path from basics to advanced",
+    "totalLessons": 25,
+    "completedLessons": 2,
+    "currentLesson": "gs-003",
+    "nextLesson": "gs-004",
+    "estimatedCompletion": "3 weeks",
+    "milestones": [
+      {
+        "name": "Foundation",
+        "lessons": ["gs-001", "gs-002", "gs-003", "gs-004"],
+        "completed": 2
+      },
+      {
+        "name": "Core Workflows",
+        "lessons": ["wf-001", "wf-002", "wf-003"],
+        "completed": 0
+      },
+      {
+        "name": "Integration Master",
+        "lessons": ["int-001", "int-002", "int-003", "int-004"],
+        "completed": 0
+      }
+    ]
+  },
+  "upcomingEvents": [
+    {
+      "id": "event-001",
+      "type": "webinar",
+      "title": "Advanced Workflow Techniques",
+      "date": "2024-11-20T18:00:00Z",
+      "instructor": "David Martinez",
+      "registrationUrl": "https://example.com/register/event-001"
+    },
+    {
+      "id": "event-002",
+      "type": "workshop",
+      "title": "Building Production-Ready Agents",
+      "date": "2024-11-25T15:00:00Z",
+      "instructor": "Michael Chen",
+      "registrationUrl": "https://example.com/register/event-002"
+    }
+  ],
+  "metadata": {
+    "apiVersion": "1.0.0",
+    "responseTime": "245ms",
+    "cacheStatus": "miss",
+    "nextUpdateCheck": "2024-11-15T11:00:00Z"
+  }
+}
