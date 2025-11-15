@@ -83,3 +83,10 @@ debug-*.js
 # test-*.html
 # test-*.js
 # *-test.js 
+
+# Certification and notarization credentials
+.env.notarization
+.env.apple
+.env.signing
+**/notarization-credentials.json
+certify-*.log
