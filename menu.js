@@ -1265,8 +1265,12 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
             {
               label: 'View All Tutorials',
               click: () => {
-                const { BrowserWindow } = require('electron');
+                const { BrowserWindow, app } = require('electron');
                 const path = require('path');
+                
+                // Use app.getAppPath() for correct path in packaged app
+                const preloadPath = path.join(app.getAppPath(), 'preload.js');
+                console.log('[Menu] Creating tutorials window with preload:', preloadPath);
                 
                 const tutorialsWindow = new BrowserWindow({
                   width: 1400,
@@ -1274,11 +1278,21 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
                   webPreferences: {
                     nodeIntegration: false,
                     contextIsolation: true,
-                    preload: path.join(__dirname, 'preload.js')
+                    preload: preloadPath,
+                    sandbox: false
                   }
                 });
                 
                 tutorialsWindow.loadFile('tutorials.html');
+                
+                // Add error handling
+                tutorialsWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+                  console.error('[Menu] Failed to load tutorials:', errorDescription);
+                });
+                
+                tutorialsWindow.webContents.on('did-finish-load', () => {
+                  console.log('[Menu] Tutorials window loaded successfully');
+                });
               }
             },
             { type: 'separator' },
