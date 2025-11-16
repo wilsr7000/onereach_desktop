@@ -461,32 +461,10 @@ app.whenReady().then(() => {
   
   // CRITICAL: Register menu-action handler EARLY (before menu is created)
   console.log('[Main] Registering menu-action handler early...');
-  ipcMain.on('menu-action', (event, data) => {
-    console.log('='.repeat(70));
-    console.log('[MENU-ACTION EARLY] 🔵 Handler called!');
-    console.log('[MENU-ACTION EARLY] Data:', data);
-    console.log('='.repeat(70));
-    
-    // Handle IDW URL opening
-    if (data.action === 'open-idw-url' && data.url) {
-      console.log(`[MENU-ACTION EARLY] Opening IDW: ${data.label}`);
-      const mainWindow = browserWindow.getMainWindow();
-      if (mainWindow) {
-        mainWindow.webContents.send('open-in-new-tab', {
-          url: data.url,
-          label: data.label || 'IDW'
-        });
-        console.log('[MENU-ACTION EARLY] ✅ Sent to main window');
-      } else {
-        console.error('[MENU-ACTION EARLY] ❌ Main window not found');
-      }
-      return;
-    }
-    
-    // For all other actions, they'll be handled by the full handler in setupIPC
-    console.log('[MENU-ACTION EARLY] Passing through to full handler...');
-  });
-  console.log('[Main] ✅ menu-action handler registered');
+  // REMOVED: Early menu-action handler for IDW URLs
+  // This was causing duplicate tab opens because setupIPC() also has a menu-action handler
+  // The setupIPC handler at line 3734 already handles 'open-idw-url' with better URL cleaning
+  console.log('[Main] ✅ Skipping early menu-action handler (handled in setupIPC)');
 
   // Log app startup with lifecycle event
   logger.logAppLaunch({
