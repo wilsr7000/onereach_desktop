@@ -1304,11 +1304,10 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
           };
           
           try {
-            const orSpacesPath = path.join(app.getPath('userData'), 'OR-Spaces');
-            const remotePath = 'OR-Spaces-Backup';
-            
-            const result = await gsxFileSync.syncDirectory(orSpacesPath, remotePath, {
-              progressCallback
+            // Use the syncORSpaces method which properly handles the OR-Spaces directory
+            const result = await gsxFileSync.syncORSpaces({
+              progressCallback,
+              remotePath: 'OR-Spaces-Backup'
             });
             
             progressCallback({
