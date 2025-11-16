@@ -912,6 +912,34 @@
 
         <div class="step" id="step1">
             <h2>Setup Your Digital Worker</h2>
+            
+            <!-- Browse Available Agents Button -->
+            <div class="browse-agents-container" style="margin-bottom: 25px;">
+                <button class="browse-btn" onclick="openAgentExplorer()" style="
+                    width: 100%;
+                    padding: 12px;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    border: none;
+                    border-radius: 8px;
+                    cursor: pointer;
+                    font-size: 15px;
+                    font-weight: 500;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 8px;
+                    transition: transform 0.2s, box-shadow 0.2s;
+                " onmouseover="this.style.transform='scale(1.02)'; this.style.boxShadow='0 4px 12px rgba(102, 126, 234, 0.4)'" 
+                   onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='none'">
+                    <span>🔍</span>
+                    Browse Available Agents
+                </button>
+                <div style="text-align: center; margin: 15px 0; color: rgba(255, 255, 255, 0.5);">
+                    — OR —
+                </div>
+            </div>
+            
             <div class="url-group">
                 <div class="url-label-container">
                     <label for="idw-home-url">IDW Home URL</label>
@@ -1292,6 +1320,120 @@
                 <div class="right-buttons">
                     <button class="remove-custom-btn" id="delete-ui-design-btn" style="display: none;" onclick="deleteCurrentUIDesign()">Delete</button>
                     <button class="next-btn" id="ui-design-save-btn" onclick="saveUIDesign()" disabled>Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Agent Explorer Modal -->
+    <div id="agentExplorerModal" class="modal-overlay" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.7); z-index: 10000; overflow-y: auto;">
+        <div class="modal-content" style="
+            background: linear-gradient(135deg, #2c2c3e 0%, #1a1a2e 100%);
+            border-radius: 12px;
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 0;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        ">
+            <div class="modal-header" style="
+                padding: 20px 30px;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            ">
+                <h2 style="margin: 0; color: white; font-size: 24px;">🔍 Explore Available Agents</h2>
+                <button onclick="closeAgentExplorer()" style="
+                    background: none;
+                    border: none;
+                    color: white;
+                    font-size: 28px;
+                    cursor: pointer;
+                    padding: 0;
+                    width: 32px;
+                    height: 32px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    border-radius: 4px;
+                    transition: background 0.2s;
+                " onmouseover="this.style.background='rgba(255, 255, 255, 0.1)'" 
+                   onmouseout="this.style.background='none'">×</button>
+            </div>
+            
+            <div class="modal-body" style="padding: 20px 30px;">
+                <!-- Search and Filter Bar -->
+                <div class="search-filter-bar" style="margin-bottom: 20px; display: flex; gap: 15px;">
+                    <input type="text" id="agentSearchInput" placeholder="Search agents..." style="
+                        flex: 1;
+                        padding: 10px 15px;
+                        border: 1px solid rgba(255, 255, 255, 0.2);
+                        background: rgba(255, 255, 255, 0.05);
+                        color: white;
+                        border-radius: 8px;
+                        font-size: 14px;
+                    " oninput="filterAgents()">
+                    
+                    <select id="environmentFilter" onchange="filterAgents()" style="
+                        padding: 10px 15px;
+                        border: 1px solid rgba(255, 255, 255, 0.2);
+                        background: rgba(255, 255, 255, 0.05);
+                        color: white;
+                        border-radius: 8px;
+                        font-size: 14px;
+                        cursor: pointer;
+                    ">
+                        <option value="">All Environments</option>
+                        <option value="production">Production</option>
+                        <option value="staging">Staging</option>
+                        <option value="edison">Edison</option>
+                    </select>
+                    
+                    <select id="categoryFilter" onchange="filterAgents()" style="
+                        padding: 10px 15px;
+                        border: 1px solid rgba(255, 255, 255, 0.2);
+                        background: rgba(255, 255, 255, 0.05);
+                        color: white;
+                        border-radius: 8px;
+                        font-size: 14px;
+                        cursor: pointer;
+                    ">
+                        <option value="">All Categories</option>
+                    </select>
+                </div>
+                
+                <!-- Loading State -->
+                <div id="agentLoadingState" style="
+                    display: none;
+                    text-align: center;
+                    padding: 40px;
+                    color: rgba(255, 255, 255, 0.7);
+                ">
+                    <div style="font-size: 48px; margin-bottom: 10px;">⏳</div>
+                    <div>Loading available agents...</div>
+                </div>
+                
+                <!-- Agents Grid -->
+                <div id="agentsGrid" style="
+                    display: grid;
+                    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+                    gap: 15px;
+                    max-height: 500px;
+                    overflow-y: auto;
+                    padding: 5px;
+                ">
+                    <!-- Agent cards will be populated here -->
+                </div>
+                
+                <!-- Empty State -->
+                <div id="agentEmptyState" style="
+                    display: none;
+                    text-align: center;
+                    padding: 40px;
+                    color: rgba(255, 255, 255, 0.5);
+                ">
+                    <div style="font-size: 48px; margin-bottom: 10px;">🔍</div>
+                    <div>No agents found matching your criteria</div>
                 </div>
             </div>
         </div>
@@ -3176,6 +3318,245 @@
                 // Fallback for when window.close() doesn't work
                 alert('You can close this window manually.');
             }
+        }
+        
+        // Agent Explorer state
+        let agentExplorerAPI = null;
+        let availableAgents = [];
+        let filteredAgents = [];
+        
+        // Agent Explorer Functions
+        async function openAgentExplorer() {
+            console.log('[AgentExplorer] Opening agent explorer...');
+            const modal = document.getElementById('agentExplorerModal');
+            modal.style.display = 'block';
+            
+            // Show loading state
+            document.getElementById('agentLoadingState').style.display = 'block';
+            document.getElementById('agentsGrid').style.display = 'none';
+            document.getElementById('agentEmptyState').style.display = 'none';
+            
+            // Load the API module dynamically
+            try {
+                // Initialize API
+                if (typeof AgentExplorerAPI === 'undefined') {
+                    // Load agent explorer API
+                    const script = document.createElement('script');
+                    script.src = 'agent-explorer-api.js';
+                    document.head.appendChild(script);
+                    
+                    // Wait for script to load
+                    await new Promise((resolve) => {
+                        script.onload = resolve;
+                        setTimeout(resolve, 1000); // Fallback timeout
+                    });
+                }
+                
+                if (typeof AgentExplorerAPI !== 'undefined') {
+                    agentExplorerAPI = new AgentExplorerAPI();
+                    
+                    // Load agents
+                    availableAgents = await agentExplorerAPI.searchAgents('');
+                    
+                    // Load categories
+                    const categories = await agentExplorerAPI.getCategories();
+                    const categorySelect = document.getElementById('categoryFilter');
+                    categorySelect.innerHTML = '<option value="">All Categories</option>';
+                    categories.forEach(cat => {
+                        const option = document.createElement('option');
+                        option.value = cat;
+                        option.textContent = cat;
+                        categorySelect.appendChild(option);
+                    });
+                    
+                    // Display agents
+                    displayAgents(availableAgents);
+                } else {
+                    // Fallback to sample data
+                    availableAgents = getSampleAgents();
+                    displayAgents(availableAgents);
+                }
+            } catch (error) {
+                console.error('[AgentExplorer] Error loading agents:', error);
+                // Use sample data as fallback
+                availableAgents = getSampleAgents();
+                displayAgents(availableAgents);
+            }
+        }
+        
+        function closeAgentExplorer() {
+            document.getElementById('agentExplorerModal').style.display = 'none';
+        }
+        
+        function displayAgents(agents) {
+            const grid = document.getElementById('agentsGrid');
+            const loadingState = document.getElementById('agentLoadingState');
+            const emptyState = document.getElementById('agentEmptyState');
+            
+            loadingState.style.display = 'none';
+            
+            if (!agents || agents.length === 0) {
+                grid.style.display = 'none';
+                emptyState.style.display = 'block';
+                return;
+            }
+            
+            grid.style.display = 'grid';
+            emptyState.style.display = 'none';
+            grid.innerHTML = '';
+            
+            agents.forEach(agent => {
+                const card = document.createElement('div');
+                card.className = 'agent-card';
+                card.style.cssText = `
+                    background: rgba(255, 255, 255, 0.05);
+                    border: 1px solid rgba(255, 255, 255, 0.1);
+                    border-radius: 8px;
+                    padding: 15px;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                    position: relative;
+                `;
+                
+                card.innerHTML = `
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                        <span style="font-size: 28px;">${agent.icon || '🤖'}</span>
+                        <div style="flex: 1;">
+                            <h3 style="margin: 0; font-size: 14px; font-weight: 600; color: white;">
+                                ${agent.name}
+                            </h3>
+                            ${agent.environment ? `<span style="font-size: 11px; color: rgba(255, 255, 255, 0.5);">${agent.environment}</span>` : ''}
+                        </div>
+                    </div>
+                    <p style="font-size: 12px; color: rgba(255, 255, 255, 0.7); margin: 8px 0; line-height: 1.4;">
+                        ${agent.description || 'No description available'}
+                    </p>
+                    ${agent.category ? `
+                        <div style="margin-top: 10px;">
+                            <span style="
+                                background: rgba(102, 126, 234, 0.2);
+                                color: #667eea;
+                                padding: 2px 8px;
+                                border-radius: 12px;
+                                font-size: 11px;
+                            ">${agent.category}</span>
+                        </div>
+                    ` : ''}
+                `;
+                
+                card.onmouseover = function() {
+                    this.style.background = 'rgba(255, 255, 255, 0.1)';
+                    this.style.borderColor = '#667eea';
+                    this.style.transform = 'scale(1.02)';
+                };
+                
+                card.onmouseout = function() {
+                    this.style.background = 'rgba(255, 255, 255, 0.05)';
+                    this.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+                    this.style.transform = 'scale(1)';
+                };
+                
+                card.onclick = () => selectAgent(agent);
+                
+                grid.appendChild(card);
+            });
+        }
+        
+        function selectAgent(agent) {
+            console.log('[AgentExplorer] Selected agent:', agent);
+            
+            // Fill in the form fields based on agent type
+            if (agent.type === 'external') {
+                // External agent - populate external form
+                document.getElementById('bot-name').value = agent.name;
+                document.getElementById('bot-chat-url').value = agent.url || agent.chatUrl || '';
+            } else {
+                // IDW - populate IDW form
+                document.getElementById('idw-home-url').value = agent.homeUrl || '';
+                document.getElementById('idw-chat-url').value = agent.chatUrl || '';
+            }
+            
+            // Close the modal
+            closeAgentExplorer();
+            
+            // Trigger validation
+            if (agent.type === 'external') {
+                validateExternalBot();
+            } else {
+                validateIDWUrls();
+            }
+        }
+        
+        function filterAgents() {
+            const searchQuery = document.getElementById('agentSearchInput').value.toLowerCase();
+            const environmentFilter = document.getElementById('environmentFilter').value;
+            const categoryFilter = document.getElementById('categoryFilter').value;
+            
+            filteredAgents = availableAgents.filter(agent => {
+                // Search filter
+                if (searchQuery && 
+                    !agent.name.toLowerCase().includes(searchQuery) &&
+                    !(agent.description && agent.description.toLowerCase().includes(searchQuery))) {
+                    return false;
+                }
+                
+                // Environment filter
+                if (environmentFilter && agent.environment !== environmentFilter) {
+                    return false;
+                }
+                
+                // Category filter
+                if (categoryFilter && agent.category !== categoryFilter) {
+                    return false;
+                }
+                
+                return true;
+            });
+            
+            displayAgents(filteredAgents);
+        }
+        
+        function getSampleAgents() {
+            return [
+                {
+                    id: 'idw-sample-1',
+                    name: 'Marvin Development Bot',
+                    description: 'Your helpful development assistant',
+                    environment: 'edison',
+                    homeUrl: 'https://idw.edison.onereach.ai/idw-marvin-dev',
+                    chatUrl: 'https://flow-desc.chat.edison.onereach.ai/05bd3c92-5d3c-4dc5-a95d-0c584695cea4',
+                    icon: '🤖',
+                    category: 'Development'
+                },
+                {
+                    id: 'idw-sample-2',
+                    name: 'Customer Service Bot',
+                    description: 'AI-powered customer support',
+                    environment: 'production',
+                    homeUrl: 'https://idw.onereach.ai/customer-service',
+                    chatUrl: 'https://chat.onereach.ai/cs-bot',
+                    icon: '🤝',
+                    category: 'Customer Service'
+                },
+                {
+                    id: 'ext-chatgpt',
+                    name: 'ChatGPT',
+                    description: 'OpenAI\'s conversational AI assistant',
+                    url: 'https://chat.openai.com',
+                    icon: '🤖',
+                    category: 'General AI',
+                    type: 'external'
+                },
+                {
+                    id: 'ext-claude',
+                    name: 'Claude',
+                    description: 'Anthropic\'s AI assistant',
+                    url: 'https://claude.ai',
+                    icon: '🎭',
+                    category: 'General AI',
+                    type: 'external'
+                }
+            ];
         }
 
         function validateIDWUrls() {
