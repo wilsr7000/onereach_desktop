@@ -41,21 +41,47 @@ function openGSXLargeWindow(url, title, windowTitle, loadingMessage = 'Loading..
     show: false
   });
   
-  // Show loading indicator
+  // Show loading indicator with a unique class
+  let loadingIndicatorInserted = false;
   gsxWindow.webContents.on('did-start-loading', () => {
-    gsxWindow.webContents.insertCSS(`
-      body::before {
-        content: '${loadingMessage}';
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        font-size: 24px;
-        color: #666;
-        z-index: 9999;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      }
-    `);
+    if (!loadingIndicatorInserted) {
+      loadingIndicatorInserted = true;
+      gsxWindow.webContents.insertCSS(`
+        body::before {
+          content: '${loadingMessage}';
+          position: fixed;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          font-size: 24px;
+          color: #666;
+          z-index: 99999;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          background: rgba(255, 255, 255, 0.95);
+          padding: 20px 40px;
+          border-radius: 8px;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+        body.gsx-loaded::before {
+          display: none !important;
+        }
+      `);
+    }
+  });
+  
+  // Remove loading indicator when page finishes loading
+  gsxWindow.webContents.on('did-finish-load', () => {
+    // Add class to hide the loading indicator
+    gsxWindow.webContents.executeJavaScript(`
+      document.body.classList.add('gsx-loaded');
+    `).catch(err => console.error('[GSX Window] Error hiding loading indicator:', err));
+  });
+  
+  // Also remove on did-stop-loading as a fallback
+  gsxWindow.webContents.on('did-stop-loading', () => {
+    gsxWindow.webContents.executeJavaScript(`
+      document.body.classList.add('gsx-loaded');
+    `).catch(err => console.error('[GSX Window] Error hiding loading indicator:', err));
   });
   
   // Load the URL
@@ -118,21 +144,47 @@ function openLearningWindow(url, title = 'Agentic University') {
     show: false
   });
   
-  // Show loading indicator
+  // Show loading indicator with a unique class
+  let loadingIndicatorInserted = false;
   learningWindow.webContents.on('did-start-loading', () => {
-    learningWindow.webContents.insertCSS(`
-      body::before {
-        content: 'Loading...';
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        font-size: 24px;
-        color: #666;
-        z-index: 9999;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      }
-    `);
+    if (!loadingIndicatorInserted) {
+      loadingIndicatorInserted = true;
+      learningWindow.webContents.insertCSS(`
+        body::before {
+          content: 'Loading...';
+          position: fixed;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          font-size: 24px;
+          color: #666;
+          z-index: 99999;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          background: rgba(255, 255, 255, 0.95);
+          padding: 20px 40px;
+          border-radius: 8px;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+        body.learning-loaded::before {
+          display: none !important;
+        }
+      `);
+    }
+  });
+  
+  // Remove loading indicator when page finishes loading
+  learningWindow.webContents.on('did-finish-load', () => {
+    // Add class to hide the loading indicator
+    learningWindow.webContents.executeJavaScript(`
+      document.body.classList.add('learning-loaded');
+    `).catch(err => console.error('[Learning Window] Error hiding loading indicator:', err));
+  });
+  
+  // Also remove on did-stop-loading as a fallback
+  learningWindow.webContents.on('did-stop-loading', () => {
+    learningWindow.webContents.executeJavaScript(`
+      document.body.classList.add('learning-loaded');
+    `).catch(err => console.error('[Learning Window] Error hiding loading indicator:', err));
   });
   
   // Load the URL
