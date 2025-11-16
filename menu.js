@@ -1653,6 +1653,122 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
               console.error('[Menu] Clipboard manager not available');
             }
           }
+        },
+        { type: 'separator' },
+        {
+          label: 'Validate & Clean Storage',
+          click: async () => {
+            const { dialog } = require('electron');
+            const ClipboardStorageValidator = require('./clipboard-storage-validator');
+            const validator = new ClipboardStorageValidator();
+            
+            // Ask user if they want to auto-fix issues
+            const result = await dialog.showMessageBox({
+              type: 'question',
+              title: 'Validate Clipboard Storage',
+              message: 'Check for and fix storage issues?',
+              detail: 'This will:\n• Remove orphaned metadata entries\n• Clean up files without metadata\n• Fix corrupted index entries\n• Remove inaccessible files',
+              buttons: ['Check Only', 'Check & Fix', 'Cancel'],
+              defaultId: 1,
+              cancelId: 2
+            });
+            
+            if (result.response === 2) return; // Cancel
+            
+            const autoFix = result.response === 1;
+            
+            // Show progress
+            const progressDialog = dialog.showMessageBox({
+              type: 'info',
+              title: 'Validating Storage',
+              message: 'Please wait...',
+              detail: 'Checking clipboard storage integrity...',
+              buttons: []
+            });
+            
+            // Run validation
+            const report = await validator.validateStorage(autoFix);
+            
+            // Show results
+            const summary = report.summary;
+            const issueCount = report.issues.length;
+            
+            let message = `Validation ${autoFix ? 'and cleanup ' : ''}complete!`;
+            let detail = `Items checked: ${summary.totalItems}\n`;
+            detail += `Valid items: ${summary.validItems}\n`;
+            
+            if (issueCount > 0) {
+              detail += `\nIssues found:\n`;
+              if (summary.orphanedMetadata > 0) {
+                detail += `• Orphaned metadata: ${summary.orphanedMetadata}\n`;
+              }
+              if (summary.missingFiles > 0) {
+                detail += `• Missing files: ${summary.missingFiles}\n`;
+              }
+              if (summary.orphanedDirectories > 0) {
+                detail += `• Orphaned directories: ${summary.orphanedDirectories}\n`;
+              }
+              
+              if (autoFix && summary.fixedIssues > 0) {
+                detail += `\n✅ Fixed ${summary.fixedIssues} issues`;
+              }
+            } else {
+              detail += '\n✅ No issues found!';
+            }
+            
+            dialog.showMessageBox({
+              type: issueCount > 0 && !autoFix ? 'warning' : 'info',
+              title: 'Storage Validation Results',
+              message: message,
+              detail: detail,
+              buttons: ['OK']
+            });
+          }
+        },
+        {
+          label: 'Storage Summary',
+          click: async () => {
+            const { dialog } = require('electron');
+            const ClipboardStorageValidator = require('./clipboard-storage-validator');
+            const validator = new ClipboardStorageValidator();
+            
+            const summary = await validator.getStorageSummary();
+            
+            // Format file size
+            const formatBytes = (bytes) => {
+              if (bytes === 0) return '0 Bytes';
+              const k = 1024;
+              const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+              const i = Math.floor(Math.log(bytes) / Math.log(k));
+              return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+            };
+            
+            let detail = `Total Size: ${formatBytes(summary.totalSize)}\n`;
+            detail += `Total Items: ${summary.itemCount}\n`;
+            detail += `Spaces: ${summary.spaceCount}\n\n`;
+            
+            if (Object.keys(summary.fileTypes).length > 0) {
+              detail += 'Item Types:\n';
+              for (const [type, count] of Object.entries(summary.fileTypes)) {
+                detail += `• ${type}: ${count}\n`;
+              }
+            }
+            
+            if (summary.largestFiles.length > 0) {
+              detail += '\nLargest Files:\n';
+              for (const file of summary.largestFiles.slice(0, 5)) {
+                detail += `• ${file.name || 'Unnamed'}: ${formatBytes(file.size)}\n`;
+              }
+            }
+            
+            dialog.showMessageBox({
+              type: 'info',
+              title: 'Clipboard Storage Summary',
+              message: 'Storage Usage',
+              detail: detail,
+              buttons: ['OK']
+            });
+          }
         }
       ]
     },

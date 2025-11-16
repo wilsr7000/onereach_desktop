@@ -269,15 +269,42 @@ class GSXFileSync {
         // Track files processed for progress
         let filesProcessed = 0;
         let bytesTransferred = 0;
+        let skippedFiles = [];
         
         // Since the SDK doesn't expose progress, we'll simulate it based on file discovery
         // Get all files first
         const allFiles = await this.getAllFiles(localPath);
         
-        // Upload files with progress tracking
+        // Validate files before upload
+        const validFiles = [];
         for (const file of allFiles) {
-          const fileName = path.relative(localPath, file);
-          const fileStats = await fs.stat(file);
+          try {
+            // Check if file exists and is accessible
+            const stats = await fs.stat(file);
+            if (stats.size > 0) {
+              validFiles.push({ path: file, size: stats.size });
+            } else {
+              console.warn(`[GSX Sync] Skipping empty file: ${file}`);
+              skippedFiles.push({ file, reason: 'empty' });
+            }
+          } catch (error) {
+            console.warn(`[GSX Sync] Skipping inaccessible file: ${file}`, error.message);
+            skippedFiles.push({ file, reason: error.code || 'inaccessible' });
+          }
+        }
+        
+        // Report skipped files if any
+        if (skippedFiles.length > 0 && options.progressCallback) {
+          options.progressCallback({
+            type: 'warning',
+            message: `Skipping ${skippedFiles.length} problematic files`,
+            skippedFiles
+          });
+        }
+        
+        // Upload valid files with progress tracking
+        for (const fileInfo of validFiles) {
+          const fileName = path.relative(localPath, fileInfo.path);
           
           if (options.progressCallback) {
             options.progressCallback({
@@ -285,18 +312,23 @@ class GSXFileSync {
               message: `Uploading ${fileName}...`,
               fileName,
               processed: filesProcessed,
-              total: allFiles.length,
-              bytesTransferred: bytesTransferred
+              total: validFiles.length,
+              bytesTransferred: bytesTransferred,
+              skipped: skippedFiles.length
             });
           }
           
           filesProcessed++;
-          bytesTransferred += fileStats.size;
+          bytesTransferred += fileInfo.size;
         }
         
         // Perform the actual sync
         await this.client.pushLocalPathToFiles(localPath, remotePath, syncOptions);
         console.log('[GSX Sync] ✓ SDK upload completed successfully');
+        
+        if (skippedFiles.length > 0) {
+          console.log(`[GSX Sync] Completed with ${skippedFiles.length} files skipped`);
+        }
       } catch (uploadError) {
         console.error('[GSX Sync] ✗ SDK upload failed:', uploadError);
         console.error('[GSX Sync] Upload error message:', uploadError.message);
