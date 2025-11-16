@@ -332,99 +332,70 @@ class GSXFileSync {
           }
         }
         
-        // Try individual file upload for better control and timeout handling
-        let uploadMethod = 'bulk'; // Default to bulk for small directories
+        // If we have problematic files, create a filtered copy
+        let pathToUpload = localPath;
+        let tempDir = null;
         
-        // Use individual upload for directories with large files or many files
-        if (validFiles.length > 50 || largeFiles.length > 0 || localPath.includes('OR-Spaces')) {
-          uploadMethod = 'individual';
-          console.log('[GSX Sync] Using individual file upload method for better control');
+        if (skippedFiles.length > 0 || largeFiles.some(f => f.size > 500 * 1024 * 1024)) {
+          console.log('[GSX Sync] Creating filtered copy without problematic files...');
           
-          // Upload files individually with timeout protection
-          for (const fileInfo of validFiles) {
-            const fileName = path.relative(localPath, fileInfo.path);
-            
-            if (options.progressCallback) {
-              options.progressCallback({
-                type: 'file',
-                message: `Uploading ${fileName}...`,
-                fileName,
-                processed: filesProcessed,
-                total: validFiles.length,
-                bytesTransferred: bytesTransferred,
-                skipped: skippedFiles.length
-              });
+          tempDir = path.join(os.tmpdir(), 'gsx-filtered-' + Date.now());
+          const excludePaths = skippedFiles.map(s => s.file);
+          
+          // Add very large videos to exclude list
+          for (const large of largeFiles) {
+            if (large.size > 500 * 1024 * 1024) {
+              excludePaths.push(large.path);
             }
-            
+          }
+          
+          await this.createFilteredCopy(localPath, tempDir, excludePaths);
+          pathToUpload = tempDir;
+          console.log(`[GSX Sync] Filtered copy created, excluding ${excludePaths.length} files`);
+        }
+        
+        // Show progress for upload
+        for (const fileInfo of validFiles) {
+          const fileName = path.relative(localPath, fileInfo.path);
+          
+          if (options.progressCallback) {
+            options.progressCallback({
+              type: 'file',
+              message: `Processing ${fileName}...`,
+              fileName,
+              processed: filesProcessed,
+              total: validFiles.length,
+              bytesTransferred: bytesTransferred,
+              skipped: skippedFiles.length
+            });
+          }
+          
+          filesProcessed++;
+          bytesTransferred += fileInfo.size;
+        }
+        
+        // Perform sync with timeout
+        const uploadTimeoutMs = 5 * 60 * 1000; // 5 minutes max
+        const uploadPromise = this.client.pushLocalPathToFiles(pathToUpload, remotePath, syncOptions);
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Upload timeout - this may indicate network issues or large files')), uploadTimeoutMs)
+        );
+        
+        try {
+          await Promise.race([uploadPromise, timeoutPromise]);
+          console.log('[GSX Sync] ✓ Upload completed successfully');
+        } catch (uploadError) {
+          console.error('[GSX Sync] Upload failed:', uploadError.message);
+          throw new Error(`Upload failed: ${uploadError.message}. Try running "Validate & Clean Storage" first.`);
+        } finally {
+          // Clean up temp directory if we created one
+          if (tempDir) {
             try {
-              // Create a timeout promise
-              const timeoutMs = Math.max(30000, fileInfo.size / 1000); // At least 30s, or 1s per KB
-              const uploadPromise = this.uploadSingleFile(fileInfo.path, path.join(remotePath, fileName), syncOptions);
-              const timeoutPromise = new Promise((_, reject) => 
-                setTimeout(() => reject(new Error(`Timeout uploading ${fileName}`)), timeoutMs)
-              );
-              
-              // Race between upload and timeout
-              await Promise.race([uploadPromise, timeoutPromise]);
-              
-              filesProcessed++;
-              bytesTransferred += fileInfo.size;
-              console.log(`[GSX Sync] ✓ Uploaded: ${fileName}`);
-              
-            } catch (fileError) {
-              console.error(`[GSX Sync] Failed to upload ${fileName}:`, fileError.message);
-              skippedFiles.push({ file: fileInfo.path, reason: fileError.message });
-              
-              if (options.progressCallback) {
-                options.progressCallback({
-                  type: 'warning', 
-                  message: `Skipped ${fileName}: ${fileError.message}`,
-                  fileName,
-                  skipped: skippedFiles.length
-                });
-              }
+              await fs.rm(tempDir, { recursive: true, force: true });
+              console.log('[GSX Sync] Cleaned up temp directory');
+            } catch (cleanupError) {
+              console.warn('[GSX Sync] Failed to clean up temp directory:', cleanupError);
             }
-          }
-          
-          console.log(`[GSX Sync] ✓ Individual upload completed: ${filesProcessed}/${validFiles.length} files`);
-          
-        } else {
-          // Use bulk upload for small directories without issues
-          console.log('[GSX Sync] Using bulk upload method');
-          
-          // Show progress simulation for bulk upload
-          for (const fileInfo of validFiles) {
-            const fileName = path.relative(localPath, fileInfo.path);
-            
-            if (options.progressCallback) {
-              options.progressCallback({
-                type: 'file',
-                message: `Processing ${fileName}...`,
-                fileName,
-                processed: filesProcessed,
-                total: validFiles.length,
-                bytesTransferred: bytesTransferred,
-                skipped: skippedFiles.length
-              });
-            }
-            
-            filesProcessed++;
-            bytesTransferred += fileInfo.size;
-          }
-          
-          // Perform bulk sync with timeout
-          const bulkTimeoutMs = 5 * 60 * 1000; // 5 minutes max for bulk
-          const bulkUploadPromise = this.client.pushLocalPathToFiles(localPath, remotePath, syncOptions);
-          const bulkTimeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Bulk upload timeout - directory may contain problematic files')), bulkTimeoutMs)
-          );
-          
-          try {
-            await Promise.race([bulkUploadPromise, bulkTimeoutPromise]);
-            console.log('[GSX Sync] ✓ Bulk upload completed successfully');
-          } catch (bulkError) {
-            console.error('[GSX Sync] Bulk upload failed:', bulkError.message);
-            throw new Error(`Upload failed: ${bulkError.message}. Try running "Validate & Clean Storage" first.`);
           }
         }
         
@@ -497,42 +468,38 @@ class GSXFileSync {
   }
   
   /**
-   * Upload a single file to GSX
-   * @param {string} localFilePath - Local file path
-   * @param {string} remoteFilePath - Remote file path in GSX
-   * @param {Object} options - Upload options
+   * Create a filtered copy of directory excluding problematic files
+   * @param {string} sourcePath - Source directory path
+   * @param {string} targetPath - Target directory path
+   * @param {Array} excludeFiles - Files to exclude
    */
-  async uploadSingleFile(localFilePath, remoteFilePath, options = {}) {
-    try {
-      // Read the file
-      const fileContent = await fs.readFile(localFilePath);
-      const fileName = path.basename(localFilePath);
+  async createFilteredCopy(sourcePath, targetPath, excludeFiles = []) {
+    await fs.mkdir(targetPath, { recursive: true });
+    
+    const copyDir = async (src, dest) => {
+      const entries = await fs.readdir(src, { withFileTypes: true });
       
-      // Create a simple file upload using the SDK
-      // The SDK should handle single file uploads more reliably than directory syncs
-      if (this.client.filesClient && this.client.filesClient.uploadFile) {
-        await this.client.filesClient.uploadFile(fileContent, remoteFilePath, options);
-      } else {
-        // Fallback: use pushLocalPathToFiles with a temp directory containing just this file
-        const tempDir = path.join(os.tmpdir(), 'gsx-upload-' + Date.now());
-        const tempFile = path.join(tempDir, fileName);
+      for (const entry of entries) {
+        const srcPath = path.join(src, entry.name);
+        const destPath = path.join(dest, entry.name);
         
-        await fs.mkdir(tempDir, { recursive: true });
-        await fs.copyFile(localFilePath, tempFile);
+        // Check if this file should be excluded
+        const shouldExclude = excludeFiles.some(exc => srcPath.includes(exc));
+        if (shouldExclude) {
+          console.log(`[GSX Sync] Excluding file from sync: ${entry.name}`);
+          continue;
+        }
         
-        try {
-          await this.client.pushLocalPathToFiles(tempDir, path.dirname(remoteFilePath), options);
-        } finally {
-          // Clean up temp directory
-          await fs.rm(tempDir, { recursive: true, force: true });
+        if (entry.isDirectory()) {
+          await fs.mkdir(destPath, { recursive: true });
+          await copyDir(srcPath, destPath);
+        } else {
+          await fs.copyFile(srcPath, destPath);
         }
       }
-      
-      return true;
-    } catch (error) {
-      console.error(`[GSX Sync] Single file upload failed for ${localFilePath}:`, error);
-      throw error;
-    }
+    };
+    
+    await copyDir(sourcePath, targetPath);
   }
   
   /**
