@@ -287,7 +287,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     color: rgba(255,255,255,0.5);
                     text-align: center;
                 `;
-                emptyMessage.textContent = 'All IDW environments are already open';
+                emptyMessage.textContent = 'All IDW environments are already open in tabs';
                 menu.appendChild(emptyMessage);
             }
 
@@ -371,43 +371,8 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log('Received IDW environments:', receivedEnvironments);
             environments = receivedEnvironments || [];
             
-            // Always add a "New Tab" option at the top
+            // Clear menu and show appropriate content
             menu.innerHTML = '';
-            
-            // Add "New Tab" option
-            const newTabItem = document.createElement('div');
-            newTabItem.className = 'idw-menu-item';
-            newTabItem.style.cssText = `
-                padding: 12px 16px;
-                cursor: pointer;
-                color: #ffffff;
-                transition: background-color 0.2s;
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                border-bottom: 1px solid rgba(255,255,255,0.1);
-            `;
-            newTabItem.innerHTML = `
-                <div style="width: 16px; height: 16px; display: flex; align-items: center; justify-content: center;">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
-                    </svg>
-                </div>
-                <span>New Tab</span>
-            `;
-            newTabItem.addEventListener('click', () => {
-                console.log('Creating new blank tab');
-                // Create a new tab with a default URL or blank page
-                createNewTab('https://www.google.com');
-                closeMenuAndCleanup();
-            });
-            newTabItem.addEventListener('mouseover', () => {
-                newTabItem.style.backgroundColor = '#3a3a3a';
-            });
-            newTabItem.addEventListener('mouseout', () => {
-                newTabItem.style.backgroundColor = 'transparent';
-            });
-            menu.appendChild(newTabItem);
             
             // Handle case where no environments are configured
             if (!environments || environments.length === 0) {
@@ -420,9 +385,36 @@ document.addEventListener('DOMContentLoaded', () => {
                 `;
                 noEnvItem.textContent = 'No IDW environments configured';
                 menu.appendChild(noEnvItem);
+                
+                // Add link to settings/setup
+                const setupLink = document.createElement('div');
+                setupLink.className = 'idw-menu-item';
+                setupLink.style.cssText = `
+                    padding: 12px 16px;
+                    cursor: pointer;
+                    color: #4CAF50;
+                    transition: background-color 0.2s;
+                    text-align: center;
+                    font-size: 12px;
+                    border-top: 1px solid rgba(255,255,255,0.1);
+                `;
+                setupLink.textContent = 'Configure IDW Environments';
+                setupLink.addEventListener('click', () => {
+                    console.log('Opening IDW setup');
+                    window.api.send('open-setup-wizard');
+                    closeMenuAndCleanup();
+                });
+                setupLink.addEventListener('mouseover', () => {
+                    setupLink.style.backgroundColor = '#3a3a3a';
+                });
+                setupLink.addEventListener('mouseout', () => {
+                    setupLink.style.backgroundColor = 'transparent';
+                });
+                menu.appendChild(setupLink);
                 return;
             }
             
+            // Populate menu with available IDW environments
             populateMenu();
         });
     });
@@ -998,6 +990,12 @@ function updateTabFavicon(tabId, url) {
 
 // Create a new tab with the given URL and partition
 function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = null) {
+    // Close any open IDW menu as available environments will change
+    const existingMenu = document.querySelector('.idw-menu');
+    const existingOverlay = document.querySelector('.idw-menu-overlay');
+    if (existingMenu) existingMenu.remove();
+    if (existingOverlay) existingOverlay.remove();
+    
     // Check if this is a problematic site that should open in default browser
     const problematicSites = ['elevenlabs.io'];
     const shouldOpenExternal = problematicSites.some(site => url.includes(site));
@@ -1762,6 +1760,12 @@ function closeTab(tabId) {
     if (tabIndex !== -1) {
         const tab = tabs[tabIndex];
         
+        // Close any open IDW menu as available environments have changed
+        const existingMenu = document.querySelector('.idw-menu');
+        const existingOverlay = document.querySelector('.idw-menu-overlay');
+        if (existingMenu) existingMenu.remove();
+        if (existingOverlay) existingOverlay.remove();
+        
         // Remove DOM elements
         tab.element.remove();
         tab.container.remove();
@@ -1858,15 +1862,7 @@ const debugShortcutHandler = (e) => {
 window.addEventListener('keydown', debugShortcutHandler, true);
 document.addEventListener('keydown', debugShortcutHandler, true);
 
-// Add "New Tab" hotkey - Ctrl/Cmd + T
-window.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 't') {
-        e.preventDefault();
-        console.log('New Tab hotkey triggered!');
-        // Create a new tab with Google as default
-        createNewTab('https://www.google.com');
-    }
-});
+// Remove Cmd+T shortcut as plus button is only for IDW environments
 
 // Add "Close Tab" hotkey - Ctrl/Cmd + W
 window.addEventListener('keydown', (e) => {
