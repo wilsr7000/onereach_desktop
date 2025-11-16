@@ -5654,7 +5654,7 @@ function checkForUpdates() {
           type: 'info',
           title: 'No Updates Available',
           message: 'Update repository not configured',
-          detail: 'The public releases repository has not been created yet.\n\nTo enable auto-updates:\n1. Create repository: github.com/wilsr7000/Onereach_Desktop_App\n2. Make it PUBLIC\n3. Publish a release using: npm run release',
+          detail: 'The public releases repository has not been created yet.\n\nTo enable auto-updates:\n1. Create repository: github.com/wilsr7000/onereach_desktop\n2. Make it PUBLIC\n3. Publish a release using: npm run release',
           buttons: ['OK']
         });
       }

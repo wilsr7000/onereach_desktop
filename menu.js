@@ -2118,7 +2118,7 @@ END OF AUTOMATED REPORT
                   type: 'info',
                   title: 'Updates Not Available',
                   message: 'Auto-update repository not configured',
-                  detail: 'The public releases repository needs to be created first:\n\n1. Go to github.com/new\n2. Create repository: onereach-desktop-releases\n3. Make it PUBLIC\n4. Run: npm run release',
+                  detail: 'The public releases repository needs to be created first:\n\n1. Go to github.com/new\n2. Create repository: onereach_desktop\n3. Make it PUBLIC\n4. Run: npm run release',
                   buttons: ['OK']
                 });
               }
