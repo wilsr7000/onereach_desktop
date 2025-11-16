@@ -170,8 +170,9 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log('PopulateMenu called');
             console.log('Environments:', environments);
             
-            // Clear existing content
-            menu.innerHTML = '';
+            // Since we already added the "New Tab" option in the main handler,
+            // and it was added before populateMenu is called, we don't clear it.
+            // Instead, just add the IDW environments after it.
             
             // Get open tab info
             const openInfo = getOpenTabInfo();
@@ -370,13 +371,55 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log('Received IDW environments:', receivedEnvironments);
             environments = receivedEnvironments || [];
             
-            // Handle error case
+            // Always add a "New Tab" option at the top
+            menu.innerHTML = '';
+            
+            // Add "New Tab" option
+            const newTabItem = document.createElement('div');
+            newTabItem.className = 'idw-menu-item';
+            newTabItem.style.cssText = `
+                padding: 12px 16px;
+                cursor: pointer;
+                color: #ffffff;
+                transition: background-color 0.2s;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                border-bottom: 1px solid rgba(255,255,255,0.1);
+            `;
+            newTabItem.innerHTML = `
+                <div style="width: 16px; height: 16px; display: flex; align-items: center; justify-content: center;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+                    </svg>
+                </div>
+                <span>New Tab</span>
+            `;
+            newTabItem.addEventListener('click', () => {
+                console.log('Creating new blank tab');
+                // Create a new tab with a default URL or blank page
+                createNewTab('https://www.google.com');
+                closeMenuAndCleanup();
+            });
+            newTabItem.addEventListener('mouseover', () => {
+                newTabItem.style.backgroundColor = '#3a3a3a';
+            });
+            newTabItem.addEventListener('mouseout', () => {
+                newTabItem.style.backgroundColor = 'transparent';
+            });
+            menu.appendChild(newTabItem);
+            
+            // Handle case where no environments are configured
             if (!environments || environments.length === 0) {
-                menu.innerHTML = `
-                    <div style="padding: 16px; color: rgba(255,255,255,0.5); text-align: center;">
-                        No IDW environments configured
-                    </div>
+                const noEnvItem = document.createElement('div');
+                noEnvItem.style.cssText = `
+                    padding: 16px;
+                    color: rgba(255,255,255,0.5);
+                    text-align: center;
+                    font-size: 12px;
                 `;
+                noEnvItem.textContent = 'No IDW environments configured';
+                menu.appendChild(noEnvItem);
                 return;
             }
             
@@ -1814,6 +1857,28 @@ const debugShortcutHandler = (e) => {
 // Add to window to capture even when webview has focus
 window.addEventListener('keydown', debugShortcutHandler, true);
 document.addEventListener('keydown', debugShortcutHandler, true);
+
+// Add "New Tab" hotkey - Ctrl/Cmd + T
+window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 't') {
+        e.preventDefault();
+        console.log('New Tab hotkey triggered!');
+        // Create a new tab with Google as default
+        createNewTab('https://www.google.com');
+    }
+});
+
+// Add "Close Tab" hotkey - Ctrl/Cmd + W
+window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'w') {
+        e.preventDefault();
+        console.log('Close Tab hotkey triggered!');
+        // Close the active tab
+        if (activeTabId && tabs.length > 1) {
+            closeTab(activeTabId);
+        }
+    }
+});
 
 // Add "Start Fresh" hotkey - Ctrl/Cmd + Shift + R
 window.addEventListener('keydown', (e) => {
