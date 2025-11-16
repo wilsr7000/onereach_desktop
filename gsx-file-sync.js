@@ -204,6 +204,16 @@ class GSXFileSync {
       
       console.log(`[GSX Sync] Syncing ${localPath} to GSX Files/${remotePath}`);
       
+      // Notify progress start
+      if (options.progressCallback) {
+        options.progressCallback({
+          type: 'start',
+          message: 'Preparing sync...',
+          localPath,
+          remotePath
+        });
+      }
+      
       // Check if local path exists
       const stats = await fs.stat(localPath);
       if (!stats.isDirectory()) {
@@ -212,14 +222,35 @@ class GSXFileSync {
       
       console.log('[GSX Sync] Getting directory info...');
       // Get directory size and file count
-      const dirInfo = await this.getDirectoryInfo(localPath);
+      const dirInfo = await this.getDirectoryInfo(localPath, options.progressCallback);
       console.log(`[GSX Sync] Directory contains ${dirInfo.fileCount} files (${this.formatBytes(dirInfo.totalSize)})`);
+      
+      // Notify total files
+      if (options.progressCallback) {
+        options.progressCallback({
+          type: 'start',
+          message: `Syncing ${dirInfo.fileCount} files...`,
+          totalFiles: dirInfo.fileCount,
+          totalBytes: dirInfo.totalSize
+        });
+      }
       
       // Set default options
       const syncOptions = {
         isPublic: options.isPublic || false,
         ttl: options.ttl || null, // No expiration by default
-        ...options
+        ...options,
+        // Add progress tracking wrapper
+        onFileProgress: options.progressCallback ? (fileName, bytesTransferred, fileNumber) => {
+          options.progressCallback({
+            type: 'file',
+            message: `Uploading ${fileName}...`,
+            fileName,
+            processed: fileNumber,
+            total: dirInfo.fileCount,
+            bytesTransferred
+          });
+        } : undefined
       };
       
       const startTime = Date.now();
@@ -235,6 +266,35 @@ class GSXFileSync {
       // Note: The SDK automatically creates remote directories on GSX Files
       // The remotePath will be created if it doesn't exist
       try {
+        // Track files processed for progress
+        let filesProcessed = 0;
+        let bytesTransferred = 0;
+        
+        // Since the SDK doesn't expose progress, we'll simulate it based on file discovery
+        // Get all files first
+        const allFiles = await this.getAllFiles(localPath);
+        
+        // Upload files with progress tracking
+        for (const file of allFiles) {
+          const fileName = path.relative(localPath, file);
+          const fileStats = await fs.stat(file);
+          
+          if (options.progressCallback) {
+            options.progressCallback({
+              type: 'file',
+              message: `Uploading ${fileName}...`,
+              fileName,
+              processed: filesProcessed,
+              total: allFiles.length,
+              bytesTransferred: bytesTransferred
+            });
+          }
+          
+          filesProcessed++;
+          bytesTransferred += fileStats.size;
+        }
+        
+        // Perform the actual sync
         await this.client.pushLocalPathToFiles(localPath, remotePath, syncOptions);
         console.log('[GSX Sync] ✓ SDK upload completed successfully');
       } catch (uploadError) {
@@ -842,9 +902,38 @@ class GSXFileSync {
   }
   
   /**
+   * Get all files in a directory recursively
+   */
+  async getAllFiles(dirPath) {
+    const files = [];
+    
+    const processDirectory = async (dir) => {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        
+        if (entry.isDirectory()) {
+          await processDirectory(fullPath);
+        } else if (entry.isFile()) {
+          files.push(fullPath);
+        }
+      }
+    };
+    
+    try {
+      await processDirectory(dirPath);
+    } catch (error) {
+      console.error('Error getting all files:', error);
+    }
+    
+    return files;
+  }
+  
+  /**
    * Get directory info (file count and total size)
    */
-  async getDirectoryInfo(dirPath) {
+  async getDirectoryInfo(dirPath, progressCallback = null) {
     let fileCount = 0;
     let totalSize = 0;
     
@@ -861,6 +950,15 @@ class GSXFileSync {
           try {
             const stats = await fs.stat(fullPath);
             totalSize += stats.size;
+            
+            // Report scanning progress
+            if (progressCallback && fileCount % 10 === 0) {
+              progressCallback({
+                type: 'scanning',
+                message: `Scanning files... (${fileCount} found)`,
+                filesScanned: fileCount
+              });
+            }
           } catch (error) {
             console.warn(`Could not stat file: ${fullPath}`);
           }

@@ -1227,19 +1227,48 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
           console.log('[Menu] Sync Desktop to GSX clicked');
           const { getGSXFileSync } = require('./gsx-file-sync');
           const gsxFileSync = getGSXFileSync();
+          const { BrowserWindow } = require('electron');
+          
+          // Create progress window
+          const progressWindow = new BrowserWindow({
+            width: 500,
+            height: 600,
+            title: 'GSX Sync Progress',
+            webPreferences: {
+              nodeIntegration: true,
+              contextIsolation: false
+            },
+            resizable: false,
+            minimizable: false,
+            maximizable: false,
+            alwaysOnTop: true,
+            backgroundColor: '#667eea'
+          });
+          
+          progressWindow.loadFile('gsx-sync-progress.html');
+          
+          // Set up progress callback
+          const progressCallback = (data) => {
+            progressWindow.webContents.send('sync-progress', data);
+          };
           
           try {
-            const result = await gsxFileSync.syncDesktop();
-            const { dialog } = require('electron');
-            dialog.showMessageBox({
-              type: 'info',
-              title: 'Sync Complete',
-              message: 'Desktop files synced to GSX successfully',
-              detail: `Synced to: GSX Files/Desktop-Backup`
+            const desktopPath = path.join(require('os').homedir(), 'Desktop');
+            const result = await gsxFileSync.syncDirectory(desktopPath, 'Desktop-Backup', {
+              progressCallback
+            });
+            
+            progressCallback({
+              type: 'complete',
+              message: 'Sync complete!',
+              result
             });
           } catch (error) {
-            const { dialog } = require('electron');
-            dialog.showErrorBox('Sync Failed', error.message);
+            progressCallback({
+              type: 'error',
+              message: 'Sync failed',
+              error: error.message
+            });
           }
         }
       },
@@ -1249,26 +1278,50 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
           console.log('[Menu] Sync OR-Spaces to GSX clicked');
           const { getGSXFileSync } = require('./gsx-file-sync');
           const gsxFileSync = getGSXFileSync();
-          const { dialog } = require('electron');
+          const { BrowserWindow, app } = require('electron');
+          
+          // Create progress window
+          const progressWindow = new BrowserWindow({
+            width: 500,
+            height: 600,
+            title: 'GSX Sync Progress - OR-Spaces',
+            webPreferences: {
+              nodeIntegration: true,
+              contextIsolation: false
+            },
+            resizable: false,
+            minimizable: false,
+            maximizable: false,
+            alwaysOnTop: true,
+            backgroundColor: '#667eea'
+          });
+          
+          progressWindow.loadFile('gsx-sync-progress.html');
+          
+          // Set up progress callback
+          const progressCallback = (data) => {
+            progressWindow.webContents.send('sync-progress', data);
+          };
           
           try {
-            const result = await gsxFileSync.syncORSpaces();
+            const orSpacesPath = path.join(app.getPath('userData'), 'OR-Spaces');
+            const remotePath = 'OR-Spaces-Backup';
             
-            const reportDetails = `✅ Sync completed in ${result.durationFormatted}\n\n` +
-              `📊 Details:\n` +
-              `• Files synced: ${result.fileCount || 0}\n` +
-              `• Total size: ${result.totalSizeFormatted || '0 Bytes'}\n` +
-              `• Source: ${result.localPath}\n` +
-              `• Destination: GSX Files/${result.remotePath}`;
+            const result = await gsxFileSync.syncDirectory(orSpacesPath, remotePath, {
+              progressCallback
+            });
             
-            dialog.showMessageBox({
-              type: 'info',
-              title: '✅ OR-Spaces Sync Complete',
-              message: 'OR-Spaces synced to GSX successfully',
-              detail: reportDetails
+            progressCallback({
+              type: 'complete',
+              message: 'OR-Spaces sync complete!',
+              result
             });
           } catch (error) {
-            dialog.showErrorBox('Sync Failed', error.message);
+            progressCallback({
+              type: 'error',
+              message: 'Sync failed',
+              error: error.message
+            });
           }
         }
       },
