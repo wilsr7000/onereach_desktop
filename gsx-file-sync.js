@@ -2,7 +2,6 @@ const { FilesSyncNode } = require('@or-sdk/files-sync-node');
 const { app, dialog, ipcMain } = require('electron');
 const fs = require('fs').promises;
 const path = require('path');
-const os = require('os');
 const { getSettingsManager } = require('./settings-manager');
 
 class GSXFileSync {
@@ -270,138 +269,34 @@ class GSXFileSync {
         // Track files processed for progress
         let filesProcessed = 0;
         let bytesTransferred = 0;
-        let skippedFiles = [];
         
         // Since the SDK doesn't expose progress, we'll simulate it based on file discovery
         // Get all files first
         const allFiles = await this.getAllFiles(localPath);
         
-        // Validate files before upload
-        const validFiles = [];
+        // Upload files with progress tracking
         for (const file of allFiles) {
-          try {
-            // Check if file exists and is accessible
-            const stats = await fs.stat(file);
-            if (stats.size > 0) {
-              validFiles.push({ path: file, size: stats.size });
-            } else {
-              console.warn(`[GSX Sync] Skipping empty file: ${file}`);
-              skippedFiles.push({ file, reason: 'empty' });
-            }
-          } catch (error) {
-            console.warn(`[GSX Sync] Skipping inaccessible file: ${file}`, error.message);
-            skippedFiles.push({ file, reason: error.code || 'inaccessible' });
-          }
-        }
-        
-        // Report skipped files if any
-        if (skippedFiles.length > 0 && options.progressCallback) {
-          options.progressCallback({
-            type: 'warning',
-            message: `Skipping ${skippedFiles.length} problematic files`,
-            skippedFiles
-          });
-        }
-        
-        // Check for large files and warn
-        const LARGE_FILE_THRESHOLD = 100 * 1024 * 1024; // 100MB
-        const largeFiles = validFiles.filter(f => f.size > LARGE_FILE_THRESHOLD);
-        if (largeFiles.length > 0) {
-          console.warn(`[GSX Sync] Found ${largeFiles.length} large files (>100MB)`);
-          for (const large of largeFiles) {
-            const fileName = path.relative(localPath, large.path);
-            console.warn(`[GSX Sync] Large file: ${fileName} (${this.formatBytes(large.size)})`);
-            
-            // Skip very large video files that might hang
-            if (fileName.toLowerCase().match(/\.(mp4|mov|avi|mkv|wmv)$/i) && large.size > 500 * 1024 * 1024) {
-              console.warn(`[GSX Sync] Skipping very large video file: ${fileName}`);
-              skippedFiles.push({ file: large.path, reason: 'too_large_video' });
-              // Remove from validFiles
-              const idx = validFiles.indexOf(large);
-              if (idx > -1) validFiles.splice(idx, 1);
-              
-              if (options.progressCallback) {
-                options.progressCallback({
-                  type: 'warning',
-                  message: `Skipped large video: ${fileName} (${this.formatBytes(large.size)})`,
-                  fileName,
-                  skipped: skippedFiles.length
-                });
-              }
-            }
-          }
-        }
-        
-        // If we have problematic files, create a filtered copy
-        let pathToUpload = localPath;
-        let tempDir = null;
-        
-        if (skippedFiles.length > 0 || largeFiles.some(f => f.size > 500 * 1024 * 1024)) {
-          console.log('[GSX Sync] Creating filtered copy without problematic files...');
-          
-          tempDir = path.join(os.tmpdir(), 'gsx-filtered-' + Date.now());
-          const excludePaths = skippedFiles.map(s => s.file);
-          
-          // Add very large videos to exclude list
-          for (const large of largeFiles) {
-            if (large.size > 500 * 1024 * 1024) {
-              excludePaths.push(large.path);
-            }
-          }
-          
-          await this.createFilteredCopy(localPath, tempDir, excludePaths);
-          pathToUpload = tempDir;
-          console.log(`[GSX Sync] Filtered copy created, excluding ${excludePaths.length} files`);
-        }
-        
-        // Show progress for upload
-        for (const fileInfo of validFiles) {
-          const fileName = path.relative(localPath, fileInfo.path);
+          const fileName = path.relative(localPath, file);
+          const fileStats = await fs.stat(file);
           
           if (options.progressCallback) {
             options.progressCallback({
               type: 'file',
-              message: `Processing ${fileName}...`,
+              message: `Uploading ${fileName}...`,
               fileName,
               processed: filesProcessed,
-              total: validFiles.length,
-              bytesTransferred: bytesTransferred,
-              skipped: skippedFiles.length
+              total: allFiles.length,
+              bytesTransferred: bytesTransferred
             });
           }
           
           filesProcessed++;
-          bytesTransferred += fileInfo.size;
+          bytesTransferred += fileStats.size;
         }
         
-        // Perform sync with timeout
-        const uploadTimeoutMs = 5 * 60 * 1000; // 5 minutes max
-        const uploadPromise = this.client.pushLocalPathToFiles(pathToUpload, remotePath, syncOptions);
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Upload timeout - this may indicate network issues or large files')), uploadTimeoutMs)
-        );
-        
-        try {
-          await Promise.race([uploadPromise, timeoutPromise]);
-          console.log('[GSX Sync] ✓ Upload completed successfully');
-        } catch (uploadError) {
-          console.error('[GSX Sync] Upload failed:', uploadError.message);
-          throw new Error(`Upload failed: ${uploadError.message}. Try running "Validate & Clean Storage" first.`);
-        } finally {
-          // Clean up temp directory if we created one
-          if (tempDir) {
-            try {
-              await fs.rm(tempDir, { recursive: true, force: true });
-              console.log('[GSX Sync] Cleaned up temp directory');
-            } catch (cleanupError) {
-              console.warn('[GSX Sync] Failed to clean up temp directory:', cleanupError);
-            }
-          }
-        }
-        
-        if (skippedFiles.length > 0) {
-          console.log(`[GSX Sync] Completed with ${skippedFiles.length} files skipped`);
-        }
+        // Perform the actual sync
+        await this.client.pushLocalPathToFiles(localPath, remotePath, syncOptions);
+        console.log('[GSX Sync] ✓ SDK upload completed successfully');
       } catch (uploadError) {
         console.error('[GSX Sync] ✗ SDK upload failed:', uploadError);
         console.error('[GSX Sync] Upload error message:', uploadError.message);
@@ -465,41 +360,6 @@ class GSXFileSync {
     const remotePath = options.remotePath || 'Desktop-Backup';
     
     return await this.syncDirectory(desktopPath, remotePath, options);
-  }
-  
-  /**
-   * Create a filtered copy of directory excluding problematic files
-   * @param {string} sourcePath - Source directory path
-   * @param {string} targetPath - Target directory path
-   * @param {Array} excludeFiles - Files to exclude
-   */
-  async createFilteredCopy(sourcePath, targetPath, excludeFiles = []) {
-    await fs.mkdir(targetPath, { recursive: true });
-    
-    const copyDir = async (src, dest) => {
-      const entries = await fs.readdir(src, { withFileTypes: true });
-      
-      for (const entry of entries) {
-        const srcPath = path.join(src, entry.name);
-        const destPath = path.join(dest, entry.name);
-        
-        // Check if this file should be excluded
-        const shouldExclude = excludeFiles.some(exc => srcPath.includes(exc));
-        if (shouldExclude) {
-          console.log(`[GSX Sync] Excluding file from sync: ${entry.name}`);
-          continue;
-        }
-        
-        if (entry.isDirectory()) {
-          await fs.mkdir(destPath, { recursive: true });
-          await copyDir(srcPath, destPath);
-        } else {
-          await fs.copyFile(srcPath, destPath);
-        }
-      }
-    };
-    
-    await copyDir(sourcePath, targetPath);
   }
   
   /**
