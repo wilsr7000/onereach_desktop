@@ -3,6 +3,85 @@ const fs = require('fs');
 const path = require('path');
 
 /**
+ * Helper function to open GSX content in a large app window
+ * @param {string} url The URL to load
+ * @param {string} title The window title
+ * @param {string} windowTitle The full window title
+ * @param {string} loadingMessage The loading message to display
+ * @returns {BrowserWindow} The created window
+ */
+function openGSXLargeWindow(url, title, windowTitle, loadingMessage = 'Loading...') {
+  const getLogger = require('./event-logger');
+  const logger = getLogger();
+  
+  // Log the window access
+  if (logger && logger.info) {
+    logger.info('GSX Large Window Opened', {
+      action: 'window_open',
+      title: title,
+      url: url,
+      timestamp: new Date().toISOString()
+    });
+  }
+  console.log(`[Menu] Opening GSX large window: ${title} - ${url}`);
+  
+  const gsxWindow = new BrowserWindow({
+    width: 1600,
+    height: 1000,
+    title: windowTitle || title,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
+      sandbox: false,
+      webSecurity: true,
+      webviewTag: false
+    },
+    backgroundColor: '#1a1a1a',
+    show: false
+  });
+  
+  // Show loading indicator
+  gsxWindow.webContents.on('did-start-loading', () => {
+    gsxWindow.webContents.insertCSS(`
+      body::before {
+        content: '${loadingMessage}';
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 24px;
+        color: #666;
+        z-index: 9999;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      }
+    `);
+  });
+  
+  // Load the URL
+  gsxWindow.loadURL(url);
+  
+  // Handle navigation to keep everything in the app window
+  gsxWindow.webContents.on('new-window', (event, navUrl) => {
+    event.preventDefault();
+    // Navigate in the same window for onereach domains
+    if (navUrl.includes('onereach.ai')) {
+      gsxWindow.loadURL(navUrl);
+    } else {
+      // Open external URLs in browser
+      shell.openExternal(navUrl);
+    }
+  });
+  
+  // Show window when ready
+  gsxWindow.once('ready-to-show', () => {
+    gsxWindow.show();
+  });
+  
+  return gsxWindow;
+}
+
+/**
  * Helper function to open learning content in an app window
  * @param {string} url The URL to load
  * @param {string} title The window title
@@ -458,12 +537,14 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
             click: async () => {
               console.log(`[Menu Click] GSX menu item clicked: ${link.label} (URL: ${link.url}, Env: ${env.environment})`);
               try {
-                // Use the browserWindow.openGSXWindow method directly
-                console.log('[Menu Click] Attempting to call openGSXWindow...');
-                const { openGSXWindow } = require('./browserWindow');
-                // Pass the environment name to create truly isolated sessions
-                openGSXWindow(link.url, link.label, env.environment);
-                 console.log('[Menu Click] openGSXWindow called successfully.');
+                // Open GSX in a large window using helper function
+                openGSXLargeWindow(
+                  link.url,
+                  link.label,
+                  `${link.label} - ${env.label}`,
+                  `Loading ${link.label}...`
+                );
+                console.log('[Menu Click] GSX window created successfully.');
               } catch (error) {
                 console.error('[Menu Click] Failed to open GSX URL:', error);
                 // Show error dialog
@@ -809,7 +890,12 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
           label: `${bot.name} API`,
           click: async () => {
             console.log(`[Menu Click] Opening API docs for ${bot.name} at ${bot.apiUrl}`);
-            await shell.openExternal(bot.apiUrl);
+            openGSXLargeWindow(
+              bot.apiUrl,
+              `${bot.name} API`,
+              `${bot.name} API Documentation`,
+              `Loading ${bot.name} API documentation...`
+            );
           }
         });
       });
@@ -850,7 +936,12 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
           label: `${creator.name} API`,
           click: async () => {
             console.log(`[Menu Click] Opening API docs for ${creator.name} at ${creator.apiUrl}`);
-            await shell.openExternal(creator.apiUrl);
+            openGSXLargeWindow(
+              creator.apiUrl,
+              `${creator.name} API`,
+              `${creator.name} API Documentation`,
+              `Loading ${creator.name} API documentation...`
+            );
           }
         });
       });
@@ -892,7 +983,12 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
           label: `${creator.name} API`,
           click: async () => {
             console.log(`[Menu Click] Opening API docs for ${creator.name} at ${creator.apiUrl}`);
-            await shell.openExternal(creator.apiUrl);
+            openGSXLargeWindow(
+              creator.apiUrl,
+              `${creator.name} API`,
+              `${creator.name} API Documentation`,
+              `Loading ${creator.name} API documentation...`
+            );
           }
         });
       });
@@ -935,7 +1031,12 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
           label: `${generator.name} API`,
           click: async () => {
             console.log(`[Menu Click] Opening API docs for ${generator.name} at ${generator.apiUrl}`);
-            await shell.openExternal(generator.apiUrl);
+            openGSXLargeWindow(
+              generator.apiUrl,
+              `${generator.name} API`,
+              `${generator.name} API Documentation`,
+              `Loading ${generator.name} API documentation...`
+            );
           }
         });
       });
