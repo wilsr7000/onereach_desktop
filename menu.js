@@ -2578,6 +2578,7 @@ function generateDefaultGSXLinks(idwEnvironments=[], accountId='') {
       { id:`hitl-${envName}-${idwId}`,       label:'HITL',       url: withAccount(`https://hitl.${envName}.onereach.ai/`),              environment: envName, idwId },
       { id:`actiondesk-${envName}-${idwId}`, label:'Action Desk',url: withAccount(`https://actiondesk.${envName}.onereach.ai/dashboard/`), environment: envName, idwId },
       { id:`designer-${envName}-${idwId}`,   label:'Designer',   url: withAccount(`https://studio.${envName}.onereach.ai/bots`),         environment: envName, idwId },
+      { id:`agents-${envName}-${idwId}`,     label:'Agents',     url: withAccount(`https://agents.${envName}.onereach.ai/agents`),       environment: envName, idwId },
       { id:`tickets-${envName}-${idwId}`,    label:'Tickets',    url: withAccount(`https://tickets.${envName}.onereach.ai/`),            environment: envName, idwId },
       { id:`calendar-${envName}-${idwId}`,   label:'Calendar',   url: withAccount(`https://calendar.${envName}.onereach.ai/`),           environment: envName, idwId },
       { id:`developer-${envName}-${idwId}`,  label:'Developer',  url: withAccount(`https://docs.${envName}.onereach.ai/`),               environment: envName, idwId }
