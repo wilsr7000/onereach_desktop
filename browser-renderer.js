@@ -4,6 +4,9 @@ let activeTabId = null;
 let tabCounter = 0;
 let openChatLinksInNewTab = false; // Preference for chat link behavior
 
+// Initialize IDW Registry for reliable tab tracking
+const idwRegistry = new IDWRegistry();
+
 // Initialize when the document is loaded
 document.addEventListener('DOMContentLoaded', () => {
     // Load preferences
@@ -180,64 +183,8 @@ document.addEventListener('DOMContentLoaded', () => {
             
             let itemsAdded = 0;
             
-            // Helper function to check if an IDW environment is already open
-            const isIdwOpen = (env) => {
-                // Check by IDW ID first (most accurate)
-                if (env.id && openInfo.idwIds.has(env.id)) {
-                    console.log(`IDW ${env.label} is open (ID match: ${env.id})`);
-                        return true;
-                    }
-                    
-                // Check if either URL is open
-                const urlsToCheck = [];
-                if (env.homeUrl) urlsToCheck.push(env.homeUrl);
-                if (env.chatUrl) urlsToCheck.push(env.chatUrl);
-                
-                for (const url of urlsToCheck) {
-                    try {
-                    const checkUrl = new URL(url);
-                        const baseUrl = checkUrl.origin + checkUrl.pathname.replace(/\/$/, '');
-                        
-                        // Check exact URL match
-                        if (openInfo.urls.has(url) || openInfo.urls.has(baseUrl)) {
-                            console.log(`IDW ${env.label} is open (URL match: ${url})`);
-                        return true;
-                    }
-                    
-                        // For IDW environments, be more strict about domain matching
-                        // Only match if it's an exact domain match AND the path is similar
-                        if (openInfo.domains.has(checkUrl.hostname)) {
-                            // Check if any open URL has a similar path structure
-                            for (const openUrl of openInfo.urls) {
-                        try {
-                            const openUrlObj = new URL(openUrl);
-                                    if (openUrlObj.hostname === checkUrl.hostname) {
-                                        // Check if paths are similar (e.g., both are chat paths)
-                                        const pathMatch = openUrlObj.pathname.includes('chat') === checkUrl.pathname.includes('chat');
-                                        if (pathMatch) {
-                                            console.log(`IDW ${env.label} likely open (domain + path pattern match)`);
-                                return true;
-                                        }
-                            }
-                        } catch (e) {
-                            // Skip invalid URLs
-                        }
-                    }
-                        }
-                } catch (e) {
-                        console.error(`Error checking URL ${url}:`, e);
-                }
-                }
-                
-                return false;
-            };
-            
-            // Filter out already open IDW environments
-            const filteredEnvironments = environments.filter(env => {
-                const isOpen = isIdwOpen(env);
-                console.log(`IDW ${env.label}: ${isOpen ? 'OPEN' : 'AVAILABLE'}`);
-                return !isOpen;
-            });
+            // Use IDW Registry to get available environments (not already open)
+            const filteredEnvironments = idwRegistry.getAvailableIDWs();
             
             console.log(`Filtered IDW environments: ${filteredEnvironments.length} out of ${environments.length}`);
             
@@ -264,6 +211,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (newTab) {
                         newTab.idwId = env.id;
                         newTab.idwLabel = env.label;
+                        // Explicitly register with IDW Registry (in case createNewTab didn't detect it)
+                        idwRegistry.registerTab(newTab.id, env.id, env);
+                        console.log(`[Menu Click] Registered tab ${newTab.id} with IDW ${env.id}`);
                     }
                     closeMenuAndCleanup();
                 });
@@ -370,6 +320,15 @@ document.addEventListener('DOMContentLoaded', () => {
             
             console.log('Received IDW environments:', receivedEnvironments);
             environments = receivedEnvironments || [];
+            
+            // Initialize IDW Registry with the environments
+            if (!idwRegistry.initialized) {
+                idwRegistry.initialize(environments);
+                idwRegistry.restoreState();
+            } else {
+                // Update registry with latest environments
+                idwRegistry.initialize(environments);
+            }
             
             // Clear menu and show appropriate content
             menu.innerHTML = '';
@@ -1467,6 +1426,21 @@ function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = 
         if (tab) {
             tab.currentUrl = e.url;
             console.log(`Updated tab ${tabId} currentUrl to: ${e.url}`);
+            
+            // Update IDW Registry with the new URL
+            const idwChanged = idwRegistry.updateTabURL(tabId, e.url);
+            if (idwChanged) {
+                // Update tab metadata if IDW changed
+                tab.idwId = idwChanged.id;
+                tab.idwLabel = idwChanged.label;
+                console.log(`[Navigation] Tab ${tabId} IDW changed to ${idwChanged.id}`);
+                
+                // Close any open IDW menu as available environments changed
+                const existingMenu = document.querySelector('.idw-menu');
+                const existingOverlay = document.querySelector('.idw-menu-overlay');
+                if (existingMenu) existingMenu.remove();
+                if (existingOverlay) existingOverlay.remove();
+            }
         }
         
         // Keep track of navigation for the tab
@@ -1490,6 +1464,21 @@ function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = 
         if (tab) {
             tab.currentUrl = e.url;
             console.log(`Updated tab ${tabId} currentUrl (in-page) to: ${e.url}`);
+            
+            // Update IDW Registry with the new URL (even for in-page navigation)
+            const idwChanged = idwRegistry.updateTabURL(tabId, e.url);
+            if (idwChanged) {
+                // Update tab metadata if IDW changed
+                tab.idwId = idwChanged.id;
+                tab.idwLabel = idwChanged.label;
+                console.log(`[In-Page Navigation] Tab ${tabId} IDW changed to ${idwChanged.id}`);
+                
+                // Close any open IDW menu as available environments changed
+                const existingMenu = document.querySelector('.idw-menu');
+                const existingOverlay = document.querySelector('.idw-menu-overlay');
+                if (existingMenu) existingMenu.remove();
+                if (existingOverlay) existingOverlay.remove();
+            }
         }
         
         // This is critical for chat interfaces that use history API
@@ -1666,6 +1655,16 @@ function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = 
     };
     tabs.push(tab);
     
+    // Check if this tab is an IDW and register it with the registry
+    const detectedIDW = idwRegistry.detectIDWFromURL(url);
+    if (detectedIDW) {
+        console.log(`[Tab Creation] Detected IDW ${detectedIDW.id} for tab ${tabId}`);
+        idwRegistry.registerTab(tabId, detectedIDW.id, detectedIDW);
+        // Store IDW info in the tab object for reference
+        tab.idwId = detectedIDW.id;
+        tab.idwLabel = detectedIDW.label;
+    }
+    
     // Activate the newly created tab
     activateTab(tabId);
     
@@ -1759,6 +1758,10 @@ function closeTab(tabId) {
     const tabIndex = tabs.findIndex(t => t.id === tabId);
     if (tabIndex !== -1) {
         const tab = tabs[tabIndex];
+        
+        // Unregister from IDW Registry
+        idwRegistry.unregisterTab(tabId);
+        console.log(`[Tab Close] Unregistered tab ${tabId} from IDW Registry`);
         
         // Close any open IDW menu as available environments have changed
         const existingMenu = document.querySelector('.idw-menu');
