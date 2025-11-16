@@ -191,6 +191,10 @@ class GSXFileSync {
    * @param {Object} options - Sync options
    */
   async syncDirectory(localPath, remotePath, options = {}) {
+    console.log('[GSX Sync DEBUG] syncDirectory called');
+    console.log('[GSX Sync DEBUG] localPath:', localPath);
+    console.log('[GSX Sync DEBUG] remotePath:', remotePath);
+    
     if (this.syncInProgress) {
       throw new Error('Sync already in progress');
     }
@@ -370,9 +374,14 @@ class GSXFileSync {
     const orSpacesPath = path.join(app.getPath('documents'), 'OR-Spaces');
     const baseRemotePath = options.remotePath || 'OR-Spaces-Backup';
     
+    console.log('[GSX Sync] syncORSpaces called');
+    console.log('[GSX Sync] OR-Spaces path:', orSpacesPath);
+    console.log('[GSX Sync] Documents path:', app.getPath('documents'));
+    
     // Check if OR-Spaces exists
     try {
       await fs.stat(orSpacesPath);
+      console.log('[GSX Sync] OR-Spaces directory exists');
     } catch (error) {
       console.log('OR-Spaces directory not found, creating it...');
       await fs.mkdir(orSpacesPath, { recursive: true });
@@ -388,6 +397,7 @@ class GSXFileSync {
       console.log(`[GSX Sync] Found ${index.spaces?.length || 0} spaces and ${index.items?.length || 0} items`);
     } catch (error) {
       console.warn('[GSX Sync] Could not read index.json, syncing entire directory as-is:', error.message);
+      console.log('[GSX Sync] Falling back to syncDirectory with path:', orSpacesPath);
       // Fall back to syncing the entire directory
       return await this.syncDirectory(orSpacesPath, baseRemotePath, options);
     }
