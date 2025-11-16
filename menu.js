@@ -632,6 +632,44 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
     console.log('[Menu] No valid IDW environments found or loaded.');
   }
   
+  // Add Explore IDW Store menu item
+  idwMenuItems.push({
+    label: '🔍 Explore IDW Store',
+    click: () => {
+      const { BrowserWindow } = require('electron');
+      const path = require('path');
+      
+      console.log('[Menu] Opening IDW Store...');
+      
+      // Create the IDW Store window
+      const storeWindow = new BrowserWindow({
+        width: 1200,
+        height: 800,
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          preload: path.join(__dirname, 'preload.js'),
+          webSecurity: true,
+          sandbox: false
+        },
+        title: 'Explore IDW Store',
+        backgroundColor: '#000000',
+        show: false
+      });
+      
+      storeWindow.loadFile('idw-store.html');
+      
+      storeWindow.once('ready-to-show', () => {
+        storeWindow.show();
+      });
+      
+      console.log('[Menu] IDW Store window created');
+    }
+  });
+  
+  // Add separator
+  idwMenuItems.push({ type: 'separator' });
+  
   // Add the Add/Remove menu item to IDW menu
   idwMenuItems.push({
     label: 'Add/Remove',

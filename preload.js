@@ -346,7 +346,10 @@ contextBridge.exposeInMainWorld(
         'get-current-user',
         'fetch-user-lessons',
         'update-lesson-progress',
-        'log-lesson-click'
+        'log-lesson-click',
+        // IDW Store channels
+        'idw-store:fetch-directory',
+        'idw-store:add-to-menu'
       ];
       if (validChannels.includes(channel)) {
         return ipcRenderer.invoke(channel, ...args);
