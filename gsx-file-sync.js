@@ -392,12 +392,16 @@ class GSXFileSync {
     let index;
     
     try {
+      console.log('[GSX Sync] Reading index from:', indexPath);
       const indexData = await fs.readFile(indexPath, 'utf8');
       index = JSON.parse(indexData);
+      console.log(`[GSX Sync] Index parsed successfully`);
       console.log(`[GSX Sync] Found ${index.spaces?.length || 0} spaces and ${index.items?.length || 0} items`);
     } catch (error) {
-      console.warn('[GSX Sync] Could not read index.json, syncing entire directory as-is:', error.message);
-      console.log('[GSX Sync] Falling back to syncDirectory with path:', orSpacesPath);
+      console.error('[GSX Sync] ERROR: Could not read/parse index.json:', error);
+      console.error('[GSX Sync] Index path was:', indexPath);
+      console.error('[GSX Sync] OR-Spaces path was:', orSpacesPath);
+      console.warn('[GSX Sync] Falling back to syncDirectory with path:', orSpacesPath);
       // Fall back to syncing the entire directory
       return await this.syncDirectory(orSpacesPath, baseRemotePath, options);
     }
@@ -944,8 +948,10 @@ class GSXFileSync {
    * Get directory info (file count and total size)
    */
   async getDirectoryInfo(dirPath, progressCallback = null) {
+    console.log('[GSX Sync DEBUG] getDirectoryInfo called for path:', dirPath);
     let fileCount = 0;
     let totalSize = 0;
+    let firstFiles = [];
     
     const processDirectory = async (dir) => {
       const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -957,6 +963,17 @@ class GSXFileSync {
           await processDirectory(fullPath);
         } else if (entry.isFile()) {
           fileCount++;
+          
+          // Log sample files to debug
+          if (firstFiles.length < 5) {
+            firstFiles.push(fullPath);
+          }
+          
+          if (fileCount === 100 || fileCount === 1000 || fileCount === 10000) {
+            console.log(`[GSX Sync DEBUG] Hit ${fileCount} files, samples:`, firstFiles);
+            console.log(`[GSX Sync DEBUG] Current file:`, fullPath);
+          }
+          
           try {
             const stats = await fs.stat(fullPath);
             totalSize += stats.size;
