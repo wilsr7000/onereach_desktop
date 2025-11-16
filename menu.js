@@ -1247,9 +1247,17 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
           
           progressWindow.loadFile('gsx-sync-progress.html');
           
+          // Send initial reset message to clear any previous state
+          progressWindow.webContents.once('did-finish-load', () => {
+            progressWindow.webContents.send('sync-progress', {
+              type: 'reset',
+              source: 'desktop'
+            });
+          });
+          
           // Set up progress callback
           const progressCallback = (data) => {
-            progressWindow.webContents.send('sync-progress', data);
+            progressWindow.webContents.send('sync-progress', { ...data, source: 'desktop' });
           };
           
           try {
@@ -1298,9 +1306,17 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
           
           progressWindow.loadFile('gsx-sync-progress.html');
           
+          // Send initial reset message to clear any previous state
+          progressWindow.webContents.once('did-finish-load', () => {
+            progressWindow.webContents.send('sync-progress', {
+              type: 'reset',
+              source: 'or-spaces'
+            });
+          });
+          
           // Set up progress callback
           const progressCallback = (data) => {
-            progressWindow.webContents.send('sync-progress', data);
+            progressWindow.webContents.send('sync-progress', { ...data, source: 'or-spaces' });
           };
           
           try {

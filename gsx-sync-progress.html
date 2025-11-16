@@ -283,7 +283,25 @@
         
         // Handle progress updates
         ipcRenderer.on('sync-progress', (event, data) => {
+            // Reset state if requested
+            if (data.type === 'reset') {
+                console.log('[Progress] Resetting state for:', data.source);
+                startTime = Date.now();
+                totalFiles = 0;
+                processedFiles = 0;
+                totalBytes = 0;
+                transferredBytes = 0;
+                document.getElementById('progressBar').style.width = '0%';
+                document.getElementById('progressBar').textContent = '0%';
+                document.getElementById('filesProcessed').textContent = '0 / 0';
+                document.getElementById('dataTransferred').textContent = '0 B / 0 B';
+                document.getElementById('currentFile').textContent = 'Initializing...';
+                document.getElementById('status').innerHTML = '<span class="spinner"></span>Initializing...';
+                return;
+            }
+            
             if (data.type === 'start') {
+                console.log('[Progress] Starting sync - Files:', data.totalFiles);
                 document.getElementById('status').innerHTML = 
                     '<span class="spinner"></span>' + (data.message || 'Starting sync...');
                 totalFiles = data.totalFiles || 0;
