@@ -492,7 +492,9 @@ contextBridge.exposeInMainWorld('aider', {
   getRepoMap: () => ipcRenderer.invoke('aider:get-repo-map'),
   setTestCmd: (command) => ipcRenderer.invoke('aider:set-test-cmd', command),
   setLintCmd: (command) => ipcRenderer.invoke('aider:set-lint-cmd', command),
-  shutdown: () => ipcRenderer.invoke('aider:shutdown')
+  shutdown: () => ipcRenderer.invoke('aider:shutdown'),
+  getAppPath: () => ipcRenderer.invoke('aider:get-app-path'),
+  selectFolder: () => ipcRenderer.invoke('aider:select-folder')
 });
 
 // Expose auth API

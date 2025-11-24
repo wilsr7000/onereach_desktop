@@ -1980,9 +1980,9 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
               height: 900,
               title: 'AI Pair Programming - Aider',
               webPreferences: {
-                nodeIntegration: true,
-                contextIsolation: false,
-                enableRemoteModule: true
+                nodeIntegration: false,
+                contextIsolation: true,
+                preload: path.join(__dirname, 'preload.js')
               }
             });
             

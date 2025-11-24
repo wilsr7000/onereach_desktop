@@ -1357,6 +1357,26 @@ function setupAiderIPC() {
     }
   });
   
+  // Get app path for Aider
+  ipcMain.handle('aider:get-app-path', async () => {
+    return app.getAppPath();
+  });
+  
+  // Select folder dialog for Aider
+  ipcMain.handle('aider:select-folder', async () => {
+    const { dialog } = require('electron');
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory'],
+      title: 'Select Project Folder'
+    });
+    
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+    
+    return result.filePaths[0];
+  });
+  
   console.log('[setupAiderIPC] Aider Bridge IPC handlers registered');
 }
 

@@ -431,6 +431,22 @@
             <h2>Start AI Pair Programming</h2>
             <p>Aider will help you write and modify code using AI</p>
             
+            <button class="folder-btn" onclick="Aider.selectFolder()" style="
+                padding: 12px 24px;
+                background: rgba(255, 255, 255, 0.1);
+                border: 2px dashed rgba(255, 255, 255, 0.3);
+                border-radius: 8px;
+                color: #fff;
+                font-size: 14px;
+                cursor: pointer;
+                margin-bottom: 20px;
+                transition: all 0.2s;
+            ">
+                📁 Select Project Folder
+            </button>
+            
+            <div class="repo-info" id="repoInfo" style="display: none; margin-bottom: 20px;"></div>
+            
             <div class="model-selector">
                 <label for="modelSelect">Select AI Model:</label>
                 <select id="modelSelect">
@@ -443,10 +459,12 @@
             </div>
             
             <button class="start-btn" onclick="Aider.initialize()">
-                Start Aider
+                Select Folder & Start
             </button>
             
-            <div class="repo-info" id="repoInfo" style="display: none;"></div>
+            <p style="margin-top: 20px; font-size: 12px; opacity: 0.7;">
+                ⚠️ Requires OPENAI_API_KEY or ANTHROPIC_API_KEY environment variable
+            </p>
         </div>
         
         <!-- Main Chat Interface (hidden initially) -->
@@ -485,30 +503,56 @@
     <script>
         const Aider = {
             files: [],
+            repoPath: null,
+            
+            async selectFolder() {
+                try {
+                    const folder = await window.aider.selectFolder();
+                    if (folder) {
+                        this.repoPath = folder;
+                        document.getElementById('repoInfo').textContent = `Project: ${folder}`;
+                        document.getElementById('repoInfo').style.display = 'block';
+                        document.querySelector('.start-btn').textContent = 'Start Aider';
+                    }
+                } catch (error) {
+                    this.addMessage('error', `Failed to select folder: ${error.message}`);
+                }
+            },
             
             async initialize() {
                 const modelName = document.getElementById('modelSelect').value;
                 const repoInfo = document.getElementById('repoInfo');
                 const startBtn = document.querySelector('.start-btn');
                 
+                // If no folder selected, prompt to select one
+                if (!this.repoPath) {
+                    await this.selectFolder();
+                    if (!this.repoPath) {
+                        this.addMessage('error', 'Please select a project folder first');
+                        return;
+                    }
+                }
+                
                 startBtn.disabled = true;
                 startBtn.textContent = 'Starting...';
                 
                 try {
-                    // Start Aider
-                    await window.aider.start();
-                    this.updateStatus('Starting...', false);
+                    // Start Aider Python sidecar
+                    this.updateStatus('Starting Python...', false);
+                    const startResult = await window.aider.start();
                     
-                    // Initialize with current project
-                    const repoPath = require('electron').remote ? 
-                        require('electron').remote.app.getAppPath() : 
-                        process.cwd();
+                    if (!startResult.success) {
+                        throw new Error(startResult.error || 'Failed to start Aider');
+                    }
                     
-                    const result = await window.aider.initialize(repoPath, modelName);
+                    this.updateStatus('Initializing...', false);
+                    
+                    // Initialize with selected project
+                    const result = await window.aider.initialize(this.repoPath, modelName);
                     
                     if (result.success) {
                         this.updateStatus('Connected', true);
-                        repoInfo.textContent = `Repository: ${result.repo_path}`;
+                        repoInfo.textContent = `Repository: ${result.repo_path || this.repoPath}`;
                         repoInfo.style.display = 'block';
                         
                         // Show chat interface
@@ -516,11 +560,12 @@
                             document.getElementById('setupPanel').style.display = 'none';
                             document.getElementById('sidebar').style.display = 'block';
                             document.getElementById('chatArea').style.display = 'flex';
-                        }, 1000);
+                        }, 500);
                     } else {
-                        throw new Error(result.error);
+                        throw new Error(result.error || 'Failed to initialize');
                     }
                 } catch (error) {
+                    this.updateStatus('Error', false);
                     this.addMessage('error', `Failed to start: ${error.message}`);
                     startBtn.disabled = false;
                     startBtn.textContent = 'Start Aider';
