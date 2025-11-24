@@ -352,6 +352,7 @@
         // Module Manager namespace
         window.ModuleManager = {
             modules: [],
+            webTools: [],
             currentStep: null,
             tempModuleData: null,
             
@@ -364,6 +365,7 @@
             async loadModules() {
                 try {
                     this.modules = await ipcRenderer.invoke('module:get-installed');
+                    this.webTools = await ipcRenderer.invoke('module:get-web-tools') || [];
                     this.renderModules();
                 } catch (error) {
                     console.error('Error loading modules:', error);
@@ -373,8 +375,9 @@
             // Render module list
             renderModules() {
                 const content = document.getElementById('content');
+                const allTools = [...this.modules, ...(this.webTools || [])];
                 
-                if (this.modules.length === 0) {
+                if (allTools.length === 0) {
                     content.innerHTML = `
                         <div class="empty-state">
                             <h2>No Tools Installed</h2>
@@ -391,11 +394,21 @@
                     <div class="module-grid">
                         ${this.modules.map(module => `
                             <div class="module-card">
-                                <div class="module-name">${module.name || module.id}</div>
+                                <div class="module-name">📦 ${module.name || module.id}</div>
                                 <div class="module-description">${module.description || 'No description'}</div>
                                 <div class="module-actions">
                                     <button class="btn btn-secondary" onclick="ModuleManager.openModule('${module.id}')">Open</button>
                                     <button class="btn btn-danger" onclick="ModuleManager.uninstallModule('${module.id}')">Uninstall</button>
+                                </div>
+                            </div>
+                        `).join('')}
+                        ${(this.webTools || []).map(tool => `
+                            <div class="module-card">
+                                <div class="module-name">🔗 ${tool.name}</div>
+                                <div class="module-description">${tool.description || tool.url}</div>
+                                <div class="module-actions">
+                                    <button class="btn btn-secondary" onclick="ModuleManager.openWebTool('${tool.id}')">Open</button>
+                                    <button class="btn btn-danger" onclick="ModuleManager.deleteWebTool('${tool.id}')">Remove</button>
                                 </div>
                             </div>
                         `).join('')}
@@ -419,6 +432,11 @@
                             <i>🌐</i>
                             <h3>Download from URL</h3>
                             <p>Install from a web address</p>
+                        </div>
+                        <div class="source-option" onclick="ModuleManager.selectSource('weblink')">
+                            <i>🔗</i>
+                            <h3>Add Web Tool Link</h3>
+                            <p>Add a website or web app link</p>
                         </div>
                     </div>
                 `;
@@ -454,6 +472,35 @@
                             <button class="btn btn-primary" onclick="ModuleManager.downloadFromUrl()">Next</button>
                         </div>
                     `;
+                } else if (type === 'weblink') {
+                    body.innerHTML = `
+                        <div class="form-group">
+                            <label>Tool Name</label>
+                            <input type="text" id="webToolName" placeholder="My Web Tool">
+                        </div>
+                        <div class="form-group">
+                            <label>Web URL</label>
+                            <input type="text" id="webToolUrl" placeholder="https://example.com">
+                        </div>
+                        <div class="form-group">
+                            <label>Window Size</label>
+                            <select id="webToolWindowSize" style="width: 100%; padding: 10px; background: #1a1a1a; border: 1px solid #3a3a3a; border-radius: 4px; color: #e0e0e0; font-size: 14px;">
+                                <option value="fullscreen">Full Screen (Maximized)</option>
+                                <option value="large">Large (1400x900)</option>
+                                <option value="medium" selected>Medium (1200x800)</option>
+                                <option value="small">Small (1000x700)</option>
+                                <option value="mobile">Mobile (375x812)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Description (Optional)</label>
+                            <input type="text" id="webToolDescription" placeholder="A useful web tool">
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-secondary" onclick="ModuleManager.showAddModule()">Back</button>
+                            <button class="btn btn-primary" onclick="ModuleManager.addWebToolLink()">Add Tool</button>
+                        </div>
+                    `;
                 }
             },
             
@@ -464,6 +511,67 @@
                 
                 this.tempModuleData = { type: 'url', url: url };
                 this.showValidationStep();
+            },
+            
+            // Add web tool link
+            async addWebToolLink() {
+                const name = document.getElementById('webToolName').value.trim();
+                const url = document.getElementById('webToolUrl').value.trim();
+                const description = document.getElementById('webToolDescription').value.trim();
+                const windowSize = document.getElementById('webToolWindowSize').value;
+                
+                if (!name || !url) {
+                    alert('Please provide both a name and URL for the web tool.');
+                    return;
+                }
+                
+                const body = document.getElementById('addModuleBody');
+                body.innerHTML = `
+                    <h3>Adding Web Tool...</h3>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: 50%"></div>
+                    </div>
+                `;
+                
+                try {
+                    const tool = {
+                        id: 'webtool-' + Date.now(),
+                        name: name,
+                        url: url,
+                        description: description || '',
+                        windowSize: windowSize,
+                        type: 'weblink'
+                    };
+                    
+                    const result = await ipcRenderer.invoke('module:add-web-tool', tool);
+                    
+                    if (result.success) {
+                        body.innerHTML = `
+                            <h3>✅ Web Tool Added!</h3>
+                            <p>${name} has been added successfully.</p>
+                            <div class="modal-footer">
+                                <button class="btn btn-primary" onclick="ModuleManager.finishWebToolAdd()">Done</button>
+                            </div>
+                        `;
+                    } else {
+                        throw new Error(result.error || 'Failed to add web tool');
+                    }
+                } catch (error) {
+                    body.innerHTML = `
+                        <h3>❌ Failed to Add Web Tool</h3>
+                        <p style="color: #ff3b30;">${error.message}</p>
+                        <div class="modal-footer">
+                            <button class="btn btn-secondary" onclick="ModuleManager.closeModal('addModuleModal')">Close</button>
+                        </div>
+                    `;
+                }
+            },
+            
+            // Finish web tool addition
+            finishWebToolAdd() {
+                this.closeModal('addModuleModal');
+                this.loadModules();
+                ipcRenderer.send('refresh-menu');
             },
             
             // Show validation step
@@ -707,6 +815,35 @@
                         ipcRenderer.send('refresh-menu');
                     } else {
                         alert(`Failed to uninstall: ${result.error}`);
+                    }
+                }
+            },
+            
+            // Open web tool
+            async openWebTool(toolId) {
+                try {
+                    await ipcRenderer.invoke('module:open-web-tool', toolId);
+                } catch (error) {
+                    alert(`Failed to open web tool: ${error.message}`);
+                }
+            },
+            
+            // Delete web tool
+            async deleteWebTool(toolId) {
+                const tool = (this.webTools || []).find(t => t.id === toolId);
+                if (!tool) return;
+                
+                if (confirm(`Are you sure you want to remove "${tool.name}"?`)) {
+                    try {
+                        const result = await ipcRenderer.invoke('module:delete-web-tool', toolId);
+                        if (result.success) {
+                            await this.loadModules();
+                            ipcRenderer.send('refresh-menu');
+                        } else {
+                            alert(`Failed to remove: ${result.error}`);
+                        }
+                    } catch (error) {
+                        alert(`Failed to remove: ${error.message}`);
                     }
                 }
             },

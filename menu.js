@@ -1835,6 +1835,9 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
         // Dynamic module/tool items will be inserted here
         ...(global.moduleManager ? global.moduleManager.getModuleMenuItems() : []),
         ...(global.moduleManager && global.moduleManager.getInstalledModules().length > 0 ? [{ type: 'separator' }] : []),
+        // Web tool items
+        ...(global.moduleManager ? global.moduleManager.getWebToolMenuItems() : []),
+        ...(global.moduleManager && global.moduleManager.getWebTools().length > 0 ? [{ type: 'separator' }] : []),
         {
           label: 'AI Run Times',
           click: () => {

@@ -333,6 +333,20 @@ class ModuleManager {
     return items;
   }
   
+  getWebToolMenuItems() {
+    const items = [];
+    const webTools = this.loadWebTools();
+    
+    for (const tool of webTools) {
+      items.push({
+        label: tool.name,
+        click: () => this.openWebTool(tool.id)
+      });
+    }
+    
+    return items;
+  }
+  
   updateApplicationMenu() {
     // This will be called to refresh the app menu with module items
     // The main app will need to integrate this
@@ -353,6 +367,105 @@ class ModuleManager {
       return null;
     }
     return path.join(this.modulesDataPath, module.dataDirectory || moduleId);
+  }
+  
+  // Web Tools Management
+  getWebToolsPath() {
+    return path.join(app.getPath('userData'), 'web-tools.json');
+  }
+  
+  loadWebTools() {
+    try {
+      const webToolsPath = this.getWebToolsPath();
+      if (fs.existsSync(webToolsPath)) {
+        return JSON.parse(fs.readFileSync(webToolsPath, 'utf8'));
+      }
+    } catch (error) {
+      console.error('Error loading web tools:', error);
+    }
+    return [];
+  }
+  
+  saveWebTools(tools) {
+    try {
+      const webToolsPath = this.getWebToolsPath();
+      fs.writeFileSync(webToolsPath, JSON.stringify(tools, null, 2));
+      return true;
+    } catch (error) {
+      console.error('Error saving web tools:', error);
+      return false;
+    }
+  }
+  
+  getWebTools() {
+    return this.loadWebTools();
+  }
+  
+  addWebTool(tool) {
+    const tools = this.loadWebTools();
+    tools.push(tool);
+    this.saveWebTools(tools);
+    this.updateApplicationMenu();
+    return tool;
+  }
+  
+  openWebTool(toolId) {
+    const tools = this.loadWebTools();
+    const tool = tools.find(t => t.id === toolId);
+    
+    if (!tool) {
+      throw new Error(`Web tool not found: ${toolId}`);
+    }
+    
+    // Get screen dimensions
+    const { screen } = require('electron');
+    const primaryDisplay = screen.getPrimaryDisplay();
+    const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
+    
+    // Define window sizes
+    const windowSizes = {
+      fullscreen: { width: screenWidth, height: screenHeight },
+      large: { width: 1400, height: 900 },
+      medium: { width: 1200, height: 800 },
+      small: { width: 1000, height: 700 },
+      mobile: { width: 375, height: 812 }
+    };
+    
+    // Get the selected window size or default to medium
+    const size = windowSizes[tool.windowSize] || windowSizes.medium;
+    
+    // Create new window for the web tool
+    const window = new BrowserWindow({
+      width: size.width,
+      height: size.height,
+      title: tool.name,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        webSecurity: true
+      }
+    });
+    
+    // Center the window for non-fullscreen sizes
+    if (tool.windowSize !== 'fullscreen') {
+      window.center();
+    }
+    
+    window.loadURL(tool.url);
+    console.log(`Opened web tool: ${tool.name} (${tool.url}) - Size: ${tool.windowSize || 'medium'}`);
+  }
+  
+  deleteWebTool(toolId) {
+    const tools = this.loadWebTools();
+    const filteredTools = tools.filter(t => t.id !== toolId);
+    
+    if (tools.length === filteredTools.length) {
+      throw new Error(`Web tool not found: ${toolId}`);
+    }
+    
+    this.saveWebTools(filteredTools);
+    this.updateApplicationMenu();
+    return true;
   }
 }
 
