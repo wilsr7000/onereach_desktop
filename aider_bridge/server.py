@@ -69,15 +69,30 @@ class AiderBridge:
             # Initialize model
             self.model = Model(model_name)
             
-            # Create Coder instance
-            self.coder = Coder.create(
-                main_model=self.model,
-                io=self.io,
-                fnames=[],  # Start with no files
-                auto_commits=True,
-                dirty_commits=True,
-                git_dname=str(self.repo_path)
-            )
+            # Change to repo directory for git operations
+            import os
+            original_cwd = os.getcwd()
+            os.chdir(str(self.repo_path))
+            
+            try:
+                # Create Coder instance
+                # Note: Different aider versions have different APIs
+                try:
+                    self.coder = Coder.create(
+                        main_model=self.model,
+                        io=self.io,
+                        fnames=[],  # Start with no files
+                        auto_commits=True,
+                        dirty_commits=True,
+                    )
+                except TypeError as e:
+                    # Fallback for older/newer API versions
+                    self.coder = Coder.create(
+                        main_model=self.model,
+                        io=self.io,
+                    )
+            finally:
+                os.chdir(original_cwd)
             
             return {
                 "success": True,
@@ -596,7 +611,9 @@ class JSONRPCServer:
     
     def run(self):
         """Main server loop - read from stdin, write to stdout"""
-        # Send ready signal
+        # Send ready signal to stderr (for process monitoring)
+        print("AIDER_BRIDGE_READY", file=sys.stderr, flush=True)
+        # Send ready signal to stdout (JSON-RPC notification)
         print(json.dumps({"jsonrpc": "2.0", "method": "ready", "params": {}}), flush=True)
         
         # Read requests line by line

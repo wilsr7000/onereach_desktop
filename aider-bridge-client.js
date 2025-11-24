@@ -22,47 +22,94 @@ class AiderBridgeClient extends events_1.EventEmitter {
      */
     async start() {
         return new Promise((resolve, reject) => {
-            const scriptPath = path.join(__dirname, '../aider_bridge/server.py');
+            // Try multiple possible paths for the server script
+            const possiblePaths = [
+                path.join(__dirname, 'aider_bridge', 'server.py'),
+                path.join(__dirname, '../aider_bridge/server.py'),
+                path.join(process.cwd(), 'aider_bridge', 'server.py'),
+            ];
+            
+            let scriptPath = null;
+            const fs = require('fs');
+            
+            for (const p of possiblePaths) {
+                console.log(`[Aider Bridge] Checking path: ${p}`);
+                if (fs.existsSync(p)) {
+                    scriptPath = p;
+                    console.log(`[Aider Bridge] Found server.py at: ${p}`);
+                    break;
+                }
+            }
+            
+            if (!scriptPath) {
+                const error = new Error(`Cannot find aider_bridge/server.py. Searched: ${possiblePaths.join(', ')}`);
+                console.error('[Aider Bridge]', error.message);
+                reject(error);
+                return;
+            }
+            
+            console.log(`[Aider Bridge] Starting Python process: ${this.pythonPath} ${scriptPath}`);
+            
             // Spawn Python process
             this.process = (0, child_process_1.spawn)(this.pythonPath, [scriptPath], {
-                stdio: ['pipe', 'pipe', 'pipe']
+                stdio: ['pipe', 'pipe', 'pipe'],
+                cwd: path.dirname(scriptPath)
             });
+            
             if (!this.process.stdout || !this.process.stdin || !this.process.stderr) {
                 reject(new Error('Failed to create process stdio'));
                 return;
             }
+            
             // Handle stdout (responses)
             this.process.stdout.on('data', (data) => {
+                console.log('[Aider Bridge stdout]:', data.toString().trim());
                 this.handleData(data.toString());
             });
-            // Handle stderr (logs)
+            
+            // Handle stderr (logs/ready signal)
             this.process.stderr.on('data', (data) => {
-                console.error('[Aider Bridge stderr]:', data.toString());
-                this.emit('error', new Error(data.toString()));
+                const msg = data.toString().trim();
+                console.log('[Aider Bridge stderr]:', msg);
+                
+                // Check for ready signal in stderr
+                if (msg.includes('AIDER_BRIDGE_READY')) {
+                    console.log('[Aider Bridge] Received ready signal from stderr');
+                    this.emit('notification', { method: 'ready' });
+                }
             });
+            
             // Handle process exit
-            this.process.on('exit', (code) => {
-                console.log(`[Aider Bridge] Process exited with code ${code}`);
+            this.process.on('exit', (code, signal) => {
+                console.log(`[Aider Bridge] Process exited with code ${code}, signal ${signal}`);
                 this.emit('exit', code);
             });
+            
             // Handle errors
             this.process.on('error', (error) => {
                 console.error('[Aider Bridge] Process error:', error);
                 this.emit('error', error);
                 reject(error);
             });
+            
             // Wait for ready signal
             const readyHandler = (notification) => {
                 if (notification.method === 'ready') {
+                    console.log('[Aider Bridge] Ready signal received, resolving start()');
                     this.removeListener('notification', readyHandler);
                     resolve();
                 }
             };
             this.on('notification', readyHandler);
+            
             // Timeout after 10 seconds
             setTimeout(() => {
-                this.removeListener('notification', readyHandler);
-                reject(new Error('Timeout waiting for Aider Bridge to start'));
+                if (this.pendingRequests.size === 0 && this.process && !this.process.killed) {
+                    this.removeListener('notification', readyHandler);
+                    const error = new Error('Timeout waiting for Aider Bridge to start. Check if Python and aider-chat are installed.');
+                    console.error('[Aider Bridge]', error.message);
+                    reject(error);
+                }
             }, 10000);
         });
     }
