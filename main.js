@@ -1226,7 +1226,15 @@ function setupAiderIPC() {
   ipcMain.handle('aider:start', async () => {
     try {
       if (!aiderBridge) {
-        aiderBridge = new AiderBridgeClient();
+        // Get API key from settings
+        const SettingsManager = require('./settings-manager');
+        const settings = new SettingsManager();
+        const apiKey = settings.getLLMApiKey();
+        const provider = settings.getLLMProvider();
+        
+        console.log(`[Aider] Starting with provider: ${provider}, API key present: ${!!apiKey}`);
+        
+        aiderBridge = new AiderBridgeClient('python3', apiKey, provider);
         await aiderBridge.start();
         console.log('[Aider] Bridge started successfully');
       }

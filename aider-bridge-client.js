@@ -9,9 +9,11 @@ const child_process_1 = require("child_process");
 const events_1 = require("events");
 const path = require("path");
 class AiderBridgeClient extends events_1.EventEmitter {
-    constructor(pythonPath = 'python3') {
+    constructor(pythonPath = 'python3', apiKey = null, apiProvider = 'openai') {
         super();
         this.pythonPath = pythonPath;
+        this.apiKey = apiKey;
+        this.apiProvider = apiProvider;
         this.process = null;
         this.requestId = 0;
         this.pendingRequests = new Map();
@@ -50,10 +52,26 @@ class AiderBridgeClient extends events_1.EventEmitter {
             
             console.log(`[Aider Bridge] Starting Python process: ${this.pythonPath} ${scriptPath}`);
             
+            // Build environment with API key
+            const env = { ...process.env };
+            if (this.apiKey) {
+                // Set the appropriate API key based on provider
+                if (this.apiProvider === 'anthropic' || this.apiProvider === 'claude') {
+                    env.ANTHROPIC_API_KEY = this.apiKey;
+                    console.log('[Aider Bridge] Using Anthropic API key from settings');
+                } else {
+                    env.OPENAI_API_KEY = this.apiKey;
+                    console.log('[Aider Bridge] Using OpenAI API key from settings');
+                }
+            } else {
+                console.log('[Aider Bridge] No API key provided, using environment variables');
+            }
+            
             // Spawn Python process
             this.process = (0, child_process_1.spawn)(this.pythonPath, [scriptPath], {
                 stdio: ['pipe', 'pipe', 'pipe'],
-                cwd: path.dirname(scriptPath)
+                cwd: path.dirname(scriptPath),
+                env: env
             });
             
             if (!this.process.stdout || !this.process.stdin || !this.process.stderr) {
