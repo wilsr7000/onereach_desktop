@@ -1221,6 +1221,14 @@ function setupIPC() {
   
   // Settings IPC handlers
   console.log('[setupIPC] Setting up settings handlers');
+  
+  // Mission Control trigger for GSX toolbar
+  ipcMain.on('trigger-mission-control', () => {
+    const { exec } = require('child_process');
+    exec('open -a "Mission Control"');
+    console.log('[IPC] Mission Control triggered from GSX toolbar');
+  });
+  
   ipcMain.handle('settings:get-all', async () => {
     const settingsManager = global.settingsManager;
     if (!settingsManager) {

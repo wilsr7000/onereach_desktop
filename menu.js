@@ -69,12 +69,120 @@ function openGSXLargeWindow(url, title, windowTitle, loadingMessage = 'Loading..
     }
   });
   
-  // Remove loading indicator when page finishes loading
+  // Inject minimal toolbar after page loads
   gsxWindow.webContents.on('did-finish-load', () => {
     // Add class to hide the loading indicator
     gsxWindow.webContents.executeJavaScript(`
       document.body.classList.add('gsx-loaded');
     `).catch(err => console.error('[GSX Window] Error hiding loading indicator:', err));
+    
+    // Inject the minimal toolbar
+    gsxWindow.webContents.executeJavaScript(`
+      (function() {
+        // Check if toolbar already exists
+        if (document.getElementById('gsx-minimal-toolbar')) return;
+        
+        // Create toolbar
+        const toolbar = document.createElement('div');
+        toolbar.id = 'gsx-minimal-toolbar';
+        toolbar.innerHTML = \`
+          <button id="gsx-back" title="Back">◀</button>
+          <button id="gsx-forward" title="Forward">▶</button>
+          <button id="gsx-refresh" title="Refresh">↻</button>
+          <button id="gsx-mission-control" title="Show All Windows">⊞</button>
+        \`;
+        
+        // Add styles
+        const style = document.createElement('style');
+        style.textContent = \`
+          #gsx-minimal-toolbar {
+            position: fixed;
+            bottom: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 999999;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(8px);
+            padding: 4px 8px;
+            display: flex;
+            gap: 4px;
+            border-radius: 8px 8px 0 0;
+            opacity: 0.4;
+            transition: opacity 0.3s, padding 0.2s;
+          }
+          
+          #gsx-minimal-toolbar:hover {
+            opacity: 1;
+            padding: 6px 10px;
+          }
+          
+          #gsx-minimal-toolbar button {
+            background: transparent;
+            border: none;
+            color: rgba(255, 255, 255, 0.7);
+            width: 28px;
+            height: 28px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+          }
+          
+          #gsx-minimal-toolbar button:hover {
+            background: rgba(255, 255, 255, 0.15);
+            color: rgba(255, 255, 255, 1);
+            transform: scale(1.1);
+          }
+          
+          #gsx-minimal-toolbar button:active {
+            transform: scale(0.95);
+          }
+          
+          #gsx-minimal-toolbar button:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+          }
+        \`;
+        
+        document.head.appendChild(style);
+        document.body.appendChild(toolbar);
+        
+        // Add event listeners
+        document.getElementById('gsx-back').addEventListener('click', () => {
+          window.history.back();
+        });
+        
+        document.getElementById('gsx-forward').addEventListener('click', () => {
+          window.history.forward();
+        });
+        
+        document.getElementById('gsx-refresh').addEventListener('click', () => {
+          window.location.reload();
+        });
+        
+        document.getElementById('gsx-mission-control').addEventListener('click', () => {
+          // This will be handled by IPC
+          if (window.electronAPI && window.electronAPI.triggerMissionControl) {
+            window.electronAPI.triggerMissionControl();
+          }
+        });
+        
+        // Update button states based on history
+        function updateNavigationButtons() {
+          const backBtn = document.getElementById('gsx-back');
+          const forwardBtn = document.getElementById('gsx-forward');
+          
+          if (backBtn) backBtn.disabled = !window.history.length || window.history.length <= 1;
+          if (forwardBtn) forwardBtn.disabled = false; // Can't easily check forward history
+        }
+        
+        updateNavigationButtons();
+        window.addEventListener('popstate', updateNavigationButtons);
+      })();
+    `).catch(err => console.error('[GSX Window] Error injecting toolbar:', err));
   });
   
   // Also remove on did-stop-loading as a fallback

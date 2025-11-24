@@ -477,6 +477,11 @@ contextBridge.exposeInMainWorld('flipboardAPI', {
   saveReadingLogSync: (log) => ipcRenderer.sendSync('save-reading-log-sync', log)
 });
 
+// Expose electronAPI for GSX toolbar functionality
+contextBridge.exposeInMainWorld('electronAPI', {
+  triggerMissionControl: () => ipcRenderer.send('trigger-mission-control')
+});
+
 // Expose auth API
 contextBridge.exposeInMainWorld('auth', {
   // Get stored token
