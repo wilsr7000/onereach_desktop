@@ -41,7 +41,7 @@ export * from './types';
 
 // Class exports
 export { AiderClient } from './AiderClient';
-export { AiderService } from './AiderService';
+export { AiderService, AiderNotInstalledError } from './AiderService';
 
 // Re-export commonly used types for convenience
 export type {
@@ -55,6 +55,9 @@ export type {
   TestResult,
   LintResult,
   TokenUsage,
+  PingResult,
+  InstallationCheckResult,
+  StreamNotification,
 } from './types';
 
 // Import for factory function

@@ -5,19 +5,30 @@ Wraps Aider's core functionality for Electron integration
 """
 
 import sys
+import os
 import json
+import time
 import traceback
+import threading
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 
-# Aider imports
+# Track if aider is available
+AIDER_AVAILABLE = False
+AIDER_IMPORT_ERROR = None
+
+# Aider imports - graceful handling if not installed
 try:
     from aider.coders import Coder
     from aider.models import Model
     from aider.io import InputOutput
-except ImportError:
-    print("ERROR: Aider not installed. Run: pip install aider-chat", file=sys.stderr)
-    sys.exit(1)
+    AIDER_AVAILABLE = True
+except ImportError as e:
+    AIDER_IMPORT_ERROR = str(e)
+    # Don't exit - allow check_installation to report the error
+    Coder = None
+    Model = None
+    InputOutput = None
 
 
 class AiderBridge:
@@ -328,6 +339,168 @@ class AiderBridge:
                 "error": str(e),
                 "traceback": traceback.format_exc()
             }
+    
+    def ping(self) -> Dict[str, Any]:
+        """
+        Health check ping - returns pong with timestamp and status
+        
+        Returns:
+            Pong response with server status
+        """
+        return {
+            "success": True,
+            "pong": True,
+            "timestamp": time.time(),
+            "initialized": self.coder is not None,
+            "aider_available": AIDER_AVAILABLE,
+            "pid": os.getpid(),
+            "files_in_context": len(self.get_context_files()) if self.coder else 0
+        }
+    
+    def check_installation(self) -> Dict[str, Any]:
+        """
+        Check if aider-chat is properly installed
+        
+        Returns:
+            Installation status with helpful error messages
+        """
+        result = {
+            "success": True,
+            "aider_installed": AIDER_AVAILABLE,
+            "aider_version": None,
+            "python_version": sys.version,
+            "python_executable": sys.executable,
+            "missing_packages": [],
+            "error": AIDER_IMPORT_ERROR,
+            "install_instructions": None
+        }
+        
+        if AIDER_AVAILABLE:
+            try:
+                import aider
+                result["aider_version"] = getattr(aider, '__version__', 'unknown')
+            except:
+                pass
+        else:
+            result["success"] = False
+            result["missing_packages"].append("aider-chat")
+            result["install_instructions"] = {
+                "pip": "pip install aider-chat",
+                "pip3": "pip3 install aider-chat",
+                "pipx": "pipx install aider-chat",
+                "note": "Make sure you have an OpenAI or Anthropic API key set in your environment"
+            }
+        
+        # Check for API keys
+        result["api_keys"] = {
+            "openai": bool(os.environ.get("OPENAI_API_KEY")),
+            "anthropic": bool(os.environ.get("ANTHROPIC_API_KEY")),
+            "azure": bool(os.environ.get("AZURE_API_KEY")),
+        }
+        
+        if not any(result["api_keys"].values()):
+            result["warning"] = "No API keys found. Set OPENAI_API_KEY or ANTHROPIC_API_KEY environment variable."
+        
+        return result
+    
+    def run_prompt_streaming(self, message: str) -> Dict[str, Any]:
+        """
+        Send a prompt to Aider with token-by-token streaming
+        
+        Sends stream notifications for real-time UI updates.
+        
+        Args:
+            message: The prompt/instruction for Aider
+            
+        Returns:
+            Final response with file changes
+        """
+        if not self.coder:
+            return {
+                "success": False,
+                "error": "Not initialized. Call initialize() first."
+            }
+        
+        if not AIDER_AVAILABLE:
+            return {
+                "success": False,
+                "error": "Aider is not installed. Run: pip install aider-chat"
+            }
+        
+        try:
+            # Send start notification
+            self._send_stream_notification("start", "")
+            
+            # Capture streaming output
+            collected_response = []
+            
+            # Create a custom IO that streams tokens
+            class StreamingIO(InputOutput):
+                def __init__(self, bridge, *args, **kwargs):
+                    self.bridge = bridge
+                    super().__init__(*args, **kwargs)
+                
+                def tool_output(self, msg="", log_only=False, bold=False):
+                    if msg and not log_only:
+                        self.bridge._send_stream_notification("token", msg)
+                        collected_response.append(msg)
+                
+                def tool_error(self, msg=""):
+                    if msg:
+                        self.bridge._send_stream_notification("error", msg)
+                
+                def ai_output(self, msg):
+                    if msg:
+                        self.bridge._send_stream_notification("token", msg)
+                        collected_response.append(msg)
+            
+            # Temporarily swap IO for streaming
+            original_io = self.coder.io
+            streaming_io = StreamingIO(self, yes=True, chat_history_file=None)
+            self.coder.io = streaming_io
+            
+            try:
+                # Run the prompt
+                response = self.coder.run(message)
+            finally:
+                # Restore original IO
+                self.coder.io = original_io
+            
+            # Send complete notification
+            self._send_stream_notification("complete", "")
+            
+            # Get files that were modified
+            modified_files = []
+            if hasattr(self.coder, 'abs_fnames'):
+                modified_files = [str(f) for f in self.coder.abs_fnames]
+            
+            return {
+                "success": True,
+                "response": response or "".join(collected_response),
+                "modified_files": modified_files,
+                "files_in_context": self.get_context_files()
+            }
+            
+        except Exception as e:
+            self._send_stream_notification("error", str(e))
+            return {
+                "success": False,
+                "error": str(e),
+                "traceback": traceback.format_exc()
+            }
+    
+    def _send_stream_notification(self, event_type: str, content: str):
+        """Send a streaming notification to the client"""
+        notification = {
+            "jsonrpc": "2.0",
+            "method": "stream",
+            "params": {
+                "type": event_type,
+                "content": content,
+                "timestamp": time.time()
+            }
+        }
+        print(json.dumps(notification), flush=True)
     
     def _send_notification(self, level: str, message: str):
         """Send a notification to the client"""

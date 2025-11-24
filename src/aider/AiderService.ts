@@ -16,6 +16,8 @@ import {
   PromptResult,
   FilesResult,
   RepoMapResult,
+  PingResult,
+  InstallationCheckResult,
 } from './types';
 
 /**
@@ -102,10 +104,28 @@ export class AiderService {
   /**
    * Initialize the Aider service
    * Starts the Python sidecar and initializes with the repository
+   * 
+   * @throws Error if aider-chat is not installed (with installation instructions)
    */
   async initialize(): Promise<void> {
     // Start the Python process
     await this.client.start();
+    
+    // Check if aider is properly installed
+    const installCheck = await this.client.checkInstallation();
+    if (!installCheck.aider_installed) {
+      const instructions = installCheck.install_instructions;
+      throw new AiderNotInstalledError(
+        `Aider is not installed. ${installCheck.error || ''}`,
+        instructions?.pip || 'pip install aider-chat',
+        installCheck
+      );
+    }
+    
+    // Check for API keys
+    if (installCheck.warning) {
+      console.warn('[AiderService]', installCheck.warning);
+    }
     
     // Initialize with repository
     const result = await this.client.initialize(
@@ -116,6 +136,9 @@ export class AiderService {
     if (!result.success) {
       throw new Error(result.error || 'Failed to initialize Aider');
     }
+    
+    // Start health checks
+    this.client.startHealthCheck();
   }
 
   /**
@@ -126,6 +149,34 @@ export class AiderService {
   async prompt(message: string): Promise<RunResult> {
     const result = await this.client.runPrompt(message);
     return this.transformPromptResult(result);
+  }
+
+  /**
+   * Send a prompt with token-by-token streaming
+   * Use onStream() to receive tokens in real-time
+   * 
+   * @param message The prompt message
+   * @returns Result including response and file changes
+   */
+  async promptStreaming(message: string): Promise<RunResult> {
+    const result = await this.client.runPromptStreaming(message);
+    return this.transformPromptResult(result);
+  }
+
+  /**
+   * Health check - verify the Python process is responsive
+   * @param timeout Optional timeout in ms
+   */
+  async ping(timeout?: number): Promise<PingResult> {
+    return this.client.ping(timeout);
+  }
+
+  /**
+   * Check if aider-chat is properly installed
+   * Returns detailed installation status and instructions
+   */
+  async checkInstallation(): Promise<InstallationCheckResult> {
+    return this.client.checkInstallation();
   }
 
   /**
@@ -259,11 +310,20 @@ export class AiderService {
    * Gracefully shutdown the service
    */
   async shutdown(): Promise<void> {
+    this.client.stopHealthCheck();
     await this.client.shutdown();
     this.streamCallbacks.clear();
     this.fileChangeCallbacks.clear();
     this.statusCallbacks.clear();
     this.errorCallbacks.clear();
+  }
+
+  /**
+   * Get time since last successful health check ping
+   * @returns Milliseconds since last ping, or -1 if never pinged
+   */
+  getTimeSinceLastPing(): number {
+    return this.client.getTimeSinceLastPing();
   }
 
   /**
@@ -382,6 +442,54 @@ export class AiderService {
     };
     
     return languageMap[ext.toLowerCase()] || ext;
+  }
+}
+
+/**
+ * Error thrown when aider-chat is not installed
+ * Includes installation instructions
+ */
+export class AiderNotInstalledError extends Error {
+  public readonly installCommand: string;
+  public readonly installationCheck: InstallationCheckResult;
+
+  constructor(
+    message: string,
+    installCommand: string,
+    installationCheck: InstallationCheckResult
+  ) {
+    super(message);
+    this.name = 'AiderNotInstalledError';
+    this.installCommand = installCommand;
+    this.installationCheck = installationCheck;
+  }
+
+  /**
+   * Get a user-friendly error message with instructions
+   */
+  getHelpfulMessage(): string {
+    const lines = [
+      'Aider AI pair programming is not installed.',
+      '',
+      'To install, run one of the following commands:',
+      `  pip install aider-chat`,
+      `  pip3 install aider-chat`,
+      `  pipx install aider-chat`,
+      '',
+    ];
+
+    if (!this.installationCheck.api_keys.openai && 
+        !this.installationCheck.api_keys.anthropic) {
+      lines.push(
+        'You will also need to set an API key:',
+        '  export OPENAI_API_KEY=your-key-here',
+        '  # or',
+        '  export ANTHROPIC_API_KEY=your-key-here',
+        ''
+      );
+    }
+
+    return lines.join('\n');
   }
 }
 

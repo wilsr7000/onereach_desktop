@@ -332,3 +332,50 @@ export interface RepoMapResult {
   error?: string;
 }
 
+/**
+ * Ping/pong health check result
+ */
+export interface PingResult {
+  success: boolean;
+  pong: boolean;
+  timestamp: number;
+  initialized: boolean;
+  aider_available: boolean;
+  pid: number;
+  files_in_context: number;
+}
+
+/**
+ * Installation check result
+ */
+export interface InstallationCheckResult {
+  success: boolean;
+  aider_installed: boolean;
+  aider_version: string | null;
+  python_version: string;
+  python_executable: string;
+  missing_packages: string[];
+  error: string | null;
+  install_instructions: {
+    pip: string;
+    pip3: string;
+    pipx: string;
+    note: string;
+  } | null;
+  api_keys: {
+    openai: boolean;
+    anthropic: boolean;
+    azure: boolean;
+  };
+  warning?: string;
+}
+
+/**
+ * Stream notification from server
+ */
+export interface StreamNotification {
+  type: 'start' | 'token' | 'complete' | 'error';
+  content: string;
+  timestamp: number;
+}
+

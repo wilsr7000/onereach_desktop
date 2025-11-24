@@ -18,6 +18,9 @@ import {
   FilesResult,
   PromptResult,
   RepoMapResult,
+  PingResult,
+  InstallationCheckResult,
+  StreamNotification,
 } from './types';
 
 // Default configuration
@@ -57,6 +60,9 @@ export class AiderClient extends EventEmitter {
   private restartCount = 0;
   private isShuttingDown = false;
   private initialized = false;
+  private healthCheckInterval: NodeJS.Timeout | null = null;
+  private lastPingTime = 0;
+  private pingTimeout = 5000; // 5 seconds
 
   constructor(config: Partial<AiderConfig> & { repoPath: string }) {
     super();
@@ -261,10 +267,29 @@ export class AiderClient extends EventEmitter {
   private handleNotification(notification: JsonRpcNotification): void {
     switch (notification.method) {
       case 'stream':
-        // Streaming content
-        const content = (notification.params as { content?: string })?.content;
-        if (content) {
-          this.emit('stream', content);
+        // Streaming content - handle both old and new format
+        const params = notification.params as StreamNotification | { content?: string };
+        
+        if ('type' in params) {
+          // New streaming format with type
+          const streamNotification = params as StreamNotification;
+          switch (streamNotification.type) {
+            case 'start':
+              this.emit('streamStart' as keyof AiderEvents);
+              break;
+            case 'token':
+              this.emit('stream', streamNotification.content);
+              break;
+            case 'complete':
+              this.emit('streamComplete' as keyof AiderEvents);
+              break;
+            case 'error':
+              this.emit('streamError' as keyof AiderEvents, new Error(streamNotification.content));
+              break;
+          }
+        } else if (params.content) {
+          // Legacy format
+          this.emit('stream', params.content);
         }
         break;
         
@@ -475,6 +500,92 @@ export class AiderClient extends EventEmitter {
   }
 
   /**
+   * Health check ping - verify Python process is responsive
+   * @param timeout Optional timeout in ms (default 5000)
+   */
+  async ping(timeout?: number): Promise<PingResult> {
+    const originalTimeout = this.config.timeout;
+    this.config.timeout = timeout || this.pingTimeout;
+    
+    try {
+      const result = await this.sendRequest<PingResult>('ping');
+      this.lastPingTime = Date.now();
+      return result;
+    } finally {
+      this.config.timeout = originalTimeout;
+    }
+  }
+
+  /**
+   * Check if aider-chat is installed
+   * Returns helpful installation instructions if not
+   */
+  async checkInstallation(): Promise<InstallationCheckResult> {
+    return this.sendRequest<InstallationCheckResult>('check_installation');
+  }
+
+  /**
+   * Run prompt with token-by-token streaming
+   * Use onStream() to receive tokens in real-time
+   */
+  async runPromptStreaming(message: string): Promise<PromptResult> {
+    if (!this.initialized) {
+      throw new Error('Not initialized. Call initialize() first.');
+    }
+
+    this.setStatus('busy');
+    
+    try {
+      const result = await this.sendRequest<PromptResult>('run_prompt_streaming', { message });
+      this.setStatus('ready');
+      return result;
+    } catch (error) {
+      this.setStatus('ready');
+      throw error;
+    }
+  }
+
+  /**
+   * Start periodic health checks
+   * @param intervalMs Check interval in milliseconds (default 30000)
+   */
+  startHealthCheck(intervalMs = 30000): void {
+    this.stopHealthCheck();
+    
+    this.healthCheckInterval = setInterval(async () => {
+      try {
+        await this.ping();
+      } catch (error) {
+        console.error('[AiderClient] Health check failed:', error);
+        this.emit('error', error as Error);
+        
+        // Process may be unresponsive, trigger restart if enabled
+        if (this.config.autoRestart && this.process) {
+          console.log('[AiderClient] Killing unresponsive process...');
+          this.process.kill('SIGKILL');
+        }
+      }
+    }, intervalMs);
+  }
+
+  /**
+   * Stop periodic health checks
+   */
+  stopHealthCheck(): void {
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = null;
+    }
+  }
+
+  /**
+   * Get time since last successful ping
+   */
+  getTimeSinceLastPing(): number {
+    return this.lastPingTime ? Date.now() - this.lastPingTime : -1;
+  }
+
+  /**
    * Graceful shutdown
    */
   async shutdown(): Promise<void> {
@@ -524,6 +635,7 @@ export class AiderClient extends EventEmitter {
     if (this.process) {
       this.process.kill('SIGKILL');
     }
+    this.stopHealthCheck();
     this.process = null;
     this.initialized = false;
     this.setStatus('disconnected');
@@ -531,6 +643,12 @@ export class AiderClient extends EventEmitter {
 }
 
 // Type augmentation for EventEmitter
+// Extended events for streaming
+interface ExtendedAiderEvents extends AiderEvents {
+  streamStart: void;
+  streamComplete: void;
+  streamError: Error;
+}
 declare interface AiderClient {
   on<K extends keyof AiderEvents>(event: K, listener: (arg: AiderEvents[K]) => void): this;
   emit<K extends keyof AiderEvents>(event: K, arg?: AiderEvents[K]): boolean;
