@@ -8,9 +8,10 @@ const path = require('path');
  * @param {string} title The window title
  * @param {string} windowTitle The full window title
  * @param {string} loadingMessage The loading message to display
+ * @param {string} idwEnvironment The IDW environment for session isolation
  * @returns {BrowserWindow} The created window
  */
-function openGSXLargeWindow(url, title, windowTitle, loadingMessage = 'Loading...') {
+function openGSXLargeWindow(url, title, windowTitle, loadingMessage = 'Loading...', idwEnvironment = null) {
   const getLogger = require('./event-logger');
   const logger = getLogger();
   
@@ -25,6 +26,28 @@ function openGSXLargeWindow(url, title, windowTitle, loadingMessage = 'Loading..
   }
   console.log(`[Menu] Opening GSX large window: ${title} - ${url}`);
   
+  // Extract environment from URL if not provided
+  if (!idwEnvironment) {
+    try {
+      const urlObj = new URL(url);
+      // Extract from hostname - e.g., studio.edison.onereach.ai -> edison
+      const hostParts = urlObj.hostname.split('.');
+      idwEnvironment = hostParts.find(part => 
+        ['staging', 'edison', 'production', 'store'].includes(part)
+      ) || 'default';
+    } catch (err) {
+      console.error('Error parsing GSX URL to extract environment:', err);
+      idwEnvironment = 'default';
+    }
+  }
+  
+  // Create session partition name based ONLY on the IDW environment
+  // This allows all GSX windows in the same IDW group to share cookies
+  // while keeping different IDW groups sandboxed from each other
+  const partitionName = `gsx-${idwEnvironment}`;
+  
+  console.log(`[Menu] Using shared session partition for IDW group: ${partitionName}`);
+  
   const gsxWindow = new BrowserWindow({
     width: 1600,
     height: 1000,
@@ -33,6 +56,7 @@ function openGSXLargeWindow(url, title, windowTitle, loadingMessage = 'Loading..
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
+      partition: `persist:${partitionName}`,  // Session partitioning for cookie isolation
       sandbox: false,
       webSecurity: true,
       webviewTag: false
@@ -702,7 +726,8 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
                   link.url,
                   link.label,
                   `${link.label} - ${env.label}`,
-                  `Loading ${link.label}...`
+                  `Loading ${link.label}...`,
+                  env.environment  // Pass the IDW environment for session isolation
                 );
                 console.log('[Menu Click] GSX window created successfully.');
               } catch (error) {

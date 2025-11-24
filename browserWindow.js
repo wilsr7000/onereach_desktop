@@ -900,7 +900,7 @@ function openGSXWindow(url, title, idwEnvironment) {
       // Extract from hostname - e.g., studio.edison.onereach.ai -> edison
       const hostParts = urlObj.hostname.split('.');
       idwEnvironment = hostParts.find(part => 
-        ['staging', 'edison', 'production'].includes(part)
+        ['staging', 'edison', 'production', 'store'].includes(part)
       ) || 'unknown';
     } catch (err) {
       console.error('Error parsing GSX URL to extract environment:', err);
@@ -908,22 +908,12 @@ function openGSXWindow(url, title, idwEnvironment) {
     }
   }
   
-  // Create a unique timestamp and random ID to ensure each window gets a completely separate session
-  const uniqueId = Date.now().toString(36) + Math.random().toString(36).substring(2, 5);
+  // Create session partition name based ONLY on the IDW environment
+  // This allows all GSX windows in the same IDW group to share cookies
+  // while keeping different IDW groups sandboxed from each other
+  const partitionName = `gsx-${idwEnvironment}`;
   
-  // Create a unique session partition name based on both the GSX service AND IDW environment
-  let serviceName = 'generic';
-  if (url.includes('actiondesk.')) serviceName = 'actiondesk';
-  else if (url.includes('studio.')) serviceName = 'designer';
-  else if (url.includes('hitl.')) serviceName = 'hitl';
-  else if (url.includes('tickets.')) serviceName = 'tickets';
-  else if (url.includes('calendar.')) serviceName = 'calendar';
-  else if (url.includes('docs.')) serviceName = 'docs';
-  
-  // Combine service, environment and unique ID for truly isolated partitions
-  const partitionName = `gsx-${serviceName}-${idwEnvironment}-${uniqueId}`;
-  
-  console.log(`Using completely isolated session partition: ${partitionName}`);
+  console.log(`Using shared session partition for IDW group: ${partitionName}`);
   
   // Create a window with proper security settings for GSX content
   const gsxWindow = new BrowserWindow({
