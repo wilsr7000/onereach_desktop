@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Pair Programming - Aider</title>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval'">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #e0e0e0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        /* Header */
+        .header {
+            background: rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            padding: 20px 30px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .header h1 {
+            font-size: 24px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .header h1::before {
+            content: '🤖';
+            font-size: 28px;
+        }
+        
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 20px;
+            font-size: 13px;
+        }
+        
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ff3b30;
+            animation: pulse 2s infinite;
+        }
+        
+        .status-dot.active {
+            background: #4cd964;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        /* Main Content */
+        .container {
+            flex: 1;
+            display: flex;
+            gap: 20px;
+            padding: 20px;
+            overflow: hidden;
+        }
+        
+        /* Sidebar */
+        .sidebar {
+            width: 300px;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            padding: 20px;
+            overflow-y: auto;
+        }
+        
+        .sidebar h3 {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            opacity: 0.7;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .file-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        .file-item {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 13px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: background 0.2s;
+        }
+        
+        .file-item:hover {
+            background: rgba(0, 0, 0, 0.3);
+        }
+        
+        .file-remove {
+            background: transparent;
+            border: none;
+            color: #ff3b30;
+            cursor: pointer;
+            font-size: 16px;
+            opacity: 0.7;
+            transition: opacity 0.2s;
+        }
+        
+        .file-remove:hover {
+            opacity: 1;
+        }
+        
+        .add-file-btn {
+            width: 100%;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px dashed rgba(255, 255, 255, 0.3);
+            border-radius: 6px;
+            color: #fff;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+            margin-top: 12px;
+        }
+        
+        .add-file-btn:hover {
+            background: rgba(255, 255, 255, 0.15);
+            border-color: rgba(255, 255, 255, 0.5);
+        }
+        
+        /* Chat Area */
+        .chat-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        
+        .messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        
+        .message {
+            max-width: 80%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-size: 14px;
+            line-height: 1.5;
+            animation: slideIn 0.3s ease;
+        }
+        
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .message.user {
+            align-self: flex-end;
+            background: rgba(0, 153, 255, 0.3);
+            border: 1px solid rgba(0, 153, 255, 0.5);
+        }
+        
+        .message.assistant {
+            align-self: flex-start;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .message.system {
+            align-self: center;
+            background: rgba(76, 217, 100, 0.2);
+            border: 1px solid rgba(76, 217, 100, 0.3);
+            font-size: 12px;
+            max-width: 60%;
+        }
+        
+        .message.error {
+            align-self: center;
+            background: rgba(255, 59, 48, 0.2);
+            border: 1px solid rgba(255, 59, 48, 0.3);
+            font-size: 12px;
+            max-width: 80%;
+        }
+        
+        .modified-files {
+            margin-top: 8px;
+            padding: 8px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 6px;
+            font-size: 12px;
+        }
+        
+        .modified-files-title {
+            font-weight: 600;
+            margin-bottom: 4px;
+            opacity: 0.8;
+        }
+        
+        .modified-file {
+            padding: 4px 8px;
+            background: rgba(76, 217, 100, 0.2);
+            border-radius: 4px;
+            margin-top: 4px;
+            font-family: 'SF Mono', 'Monaco', 'Courier New', monospace;
+        }
+        
+        /* Input Area */
+        .input-area {
+            padding: 20px;
+            background: rgba(0, 0, 0, 0.3);
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            gap: 12px;
+        }
+        
+        .input-wrapper {
+            flex: 1;
+            position: relative;
+        }
+        
+        #promptInput {
+            width: 100%;
+            padding: 14px 16px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            color: #fff;
+            font-size: 14px;
+            font-family: inherit;
+            resize: none;
+            min-height: 50px;
+            max-height: 150px;
+        }
+        
+        #promptInput:focus {
+            outline: none;
+            border-color: rgba(255, 255, 255, 0.4);
+            background: rgba(255, 255, 255, 0.15);
+        }
+        
+        #promptInput::placeholder {
+            color: rgba(255, 255, 255, 0.5);
+        }
+        
+        .send-btn {
+            padding: 14px 24px;
+            background: linear-gradient(135deg, #0099ff 0%, #0077cc 100%);
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            align-self: flex-end;
+        }
+        
+        .send-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 153, 255, 0.4);
+        }
+        
+        .send-btn:active {
+            transform: translateY(0);
+        }
+        
+        .send-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        /* Loading Spinner */
+        .spinner {
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            border-top: 2px solid #fff;
+            border-radius: 50%;
+            width: 16px;
+            height: 16px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-right: 8px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* Setup Panel */
+        .setup-panel {
+            padding: 40px;
+            text-align: center;
+            margin: auto;
+        }
+        
+        .setup-panel h2 {
+            font-size: 28px;
+            margin-bottom: 16px;
+        }
+        
+        .setup-panel p {
+            font-size: 16px;
+            opacity: 0.8;
+            margin-bottom: 32px;
+        }
+        
+        .model-selector {
+            margin: 24px 0;
+        }
+        
+        .model-selector label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+        
+        .model-selector select {
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            color: #fff;
+            font-size: 14px;
+            cursor: pointer;
+            min-width: 250px;
+        }
+        
+        .model-selector select:focus {
+            outline: none;
+            border-color: rgba(255, 255, 255, 0.4);
+        }
+        
+        .start-btn {
+            padding: 16px 32px;
+            background: linear-gradient(135deg, #4cd964 0%, #3dae50 100%);
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .start-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px rgba(76, 217, 100, 0.4);
+        }
+        
+        .repo-info {
+            margin-top: 16px;
+            padding: 12px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 6px;
+            font-size: 12px;
+            font-family: 'SF Mono', 'Monaco', 'Courier New', monospace;
+        }
+        
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.1);
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>AI Pair Programming</h1>
+        <div class="status">
+            <span class="status-dot" id="statusDot"></span>
+            <span id="statusText">Not Connected</span>
+        </div>
+    </div>
+    
+    <div class="container">
+        <!-- Setup Panel (shown initially) -->
+        <div class="setup-panel" id="setupPanel">
+            <h2>Start AI Pair Programming</h2>
+            <p>Aider will help you write and modify code using AI</p>
+            
+            <div class="model-selector">
+                <label for="modelSelect">Select AI Model:</label>
+                <select id="modelSelect">
+                    <option value="gpt-4">GPT-4 (OpenAI)</option>
+                    <option value="gpt-4-turbo">GPT-4 Turbo (OpenAI)</option>
+                    <option value="claude-3-opus-20240229">Claude 3 Opus (Anthropic)</option>
+                    <option value="claude-3-sonnet-20240229">Claude 3 Sonnet (Anthropic)</option>
+                    <option value="gpt-3.5-turbo">GPT-3.5 Turbo (Faster, Cheaper)</option>
+                </select>
+            </div>
+            
+            <button class="start-btn" onclick="Aider.initialize()">
+                Start Aider
+            </button>
+            
+            <div class="repo-info" id="repoInfo" style="display: none;"></div>
+        </div>
+        
+        <!-- Main Chat Interface (hidden initially) -->
+        <div class="sidebar" id="sidebar" style="display: none;">
+            <h3>Files in Context</h3>
+            <div class="file-list" id="fileList">
+                <div style="opacity: 0.6; font-size: 12px;">No files added yet</div>
+            </div>
+            <button class="add-file-btn" onclick="Aider.addFilesDialog()">
+                ➕ Add Files
+            </button>
+        </div>
+        
+        <div class="chat-area" id="chatArea" style="display: none;">
+            <div class="messages" id="messages">
+                <div class="message system">
+                    Aider is ready! Add files and start coding with AI assistance.
+                </div>
+            </div>
+            
+            <div class="input-area">
+                <div class="input-wrapper">
+                    <textarea 
+                        id="promptInput" 
+                        placeholder="Describe what you want to build or modify..."
+                        rows="1"
+                    ></textarea>
+                </div>
+                <button class="send-btn" onclick="Aider.sendPrompt()" id="sendBtn">
+                    Send
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const Aider = {
+            files: [],
+            
+            async initialize() {
+                const modelName = document.getElementById('modelSelect').value;
+                const repoInfo = document.getElementById('repoInfo');
+                const startBtn = document.querySelector('.start-btn');
+                
+                startBtn.disabled = true;
+                startBtn.textContent = 'Starting...';
+                
+                try {
+                    // Start Aider
+                    await window.aider.start();
+                    this.updateStatus('Starting...', false);
+                    
+                    // Initialize with current project
+                    const repoPath = require('electron').remote ? 
+                        require('electron').remote.app.getAppPath() : 
+                        process.cwd();
+                    
+                    const result = await window.aider.initialize(repoPath, modelName);
+                    
+                    if (result.success) {
+                        this.updateStatus('Connected', true);
+                        repoInfo.textContent = `Repository: ${result.repo_path}`;
+                        repoInfo.style.display = 'block';
+                        
+                        // Show chat interface
+                        setTimeout(() => {
+                            document.getElementById('setupPanel').style.display = 'none';
+                            document.getElementById('sidebar').style.display = 'block';
+                            document.getElementById('chatArea').style.display = 'flex';
+                        }, 1000);
+                    } else {
+                        throw new Error(result.error);
+                    }
+                } catch (error) {
+                    this.addMessage('error', `Failed to start: ${error.message}`);
+                    startBtn.disabled = false;
+                    startBtn.textContent = 'Start Aider';
+                }
+            },
+            
+            updateStatus(text, active) {
+                document.getElementById('statusText').textContent = text;
+                document.getElementById('statusDot').classList.toggle('active', active);
+            },
+            
+            async addFilesDialog() {
+                // For now, use prompt - in real impl, use file dialog
+                const files = prompt('Enter file paths (comma-separated):');
+                if (!files) return;
+                
+                const filePaths = files.split(',').map(f => f.trim());
+                await this.addFiles(filePaths);
+            },
+            
+            async addFiles(filePaths) {
+                try {
+                    const result = await window.aider.addFiles(filePaths);
+                    
+                    if (result.success) {
+                        this.files = result.files_in_context || [];
+                        this.renderFileList();
+                        this.addMessage('system', `Added ${result.files_added.length} file(s) to context`);
+                    } else {
+                        this.addMessage('error', `Failed to add files: ${result.error}`);
+                    }
+                } catch (error) {
+                    this.addMessage('error', `Error: ${error.message}`);
+                }
+            },
+            
+            async removeFile(filePath) {
+                try {
+                    const result = await window.aider.removeFiles([filePath]);
+                    
+                    if (result.success) {
+                        this.files = result.files_in_context || [];
+                        this.renderFileList();
+                        this.addMessage('system', `Removed file from context`);
+                    }
+                } catch (error) {
+                    this.addMessage('error', `Error: ${error.message}`);
+                }
+            },
+            
+            renderFileList() {
+                const fileList = document.getElementById('fileList');
+                
+                if (this.files.length === 0) {
+                    fileList.innerHTML = '<div style="opacity: 0.6; font-size: 12px;">No files added yet</div>';
+                    return;
+                }
+                
+                fileList.innerHTML = this.files.map(file => {
+                    const fileName = file.split('/').pop();
+                    return `
+                        <div class="file-item">
+                            <span title="${file}">${fileName}</span>
+                            <button class="file-remove" onclick="Aider.removeFile('${file}')">×</button>
+                        </div>
+                    `;
+                }).join('');
+            },
+            
+            async sendPrompt() {
+                const input = document.getElementById('promptInput');
+                const sendBtn = document.getElementById('sendBtn');
+                const message = input.value.trim();
+                
+                if (!message) return;
+                
+                // Add user message
+                this.addMessage('user', message);
+                input.value = '';
+                
+                // Disable input
+                sendBtn.disabled = true;
+                sendBtn.innerHTML = '<span class="spinner"></span>Thinking...';
+                
+                try {
+                    const result = await window.aider.runPrompt(message);
+                    
+                    if (result.success) {
+                        this.addMessage('assistant', result.response, result.modified_files);
+                        
+                        // Update file list if files were modified
+                        if (result.files_in_context) {
+                            this.files = result.files_in_context;
+                            this.renderFileList();
+                        }
+                    } else {
+                        this.addMessage('error', `Error: ${result.error}`);
+                    }
+                } catch (error) {
+                    this.addMessage('error', `Error: ${error.message}`);
+                } finally {
+                    sendBtn.disabled = false;
+                    sendBtn.textContent = 'Send';
+                }
+            },
+            
+            addMessage(type, text, modifiedFiles = null) {
+                const messages = document.getElementById('messages');
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${type}`;
+                messageDiv.textContent = text;
+                
+                // Add modified files if present
+                if (modifiedFiles && modifiedFiles.length > 0) {
+                    const filesDiv = document.createElement('div');
+                    filesDiv.className = 'modified-files';
+                    filesDiv.innerHTML = `
+                        <div class="modified-files-title">📝 Modified Files:</div>
+                        ${modifiedFiles.map(f => `<div class="modified-file">${f}</div>`).join('')}
+                    `;
+                    messageDiv.appendChild(filesDiv);
+                }
+                
+                messages.appendChild(messageDiv);
+                messages.scrollTop = messages.scrollHeight;
+            }
+        };
+        
+        // Handle Enter key in textarea
+        document.addEventListener('DOMContentLoaded', () => {
+            const promptInput = document.getElementById('promptInput');
+            
+            if (promptInput) {
+                promptInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        Aider.sendPrompt();
+                    }
+                });
+                
+                // Auto-resize textarea
+                promptInput.addEventListener('input', function() {
+                    this.style.height = 'auto';
+                    this.style.height = Math.min(this.scrollHeight, 150) + 'px';
+                });
+            }
+        });
+    </script>
+</body>
+</html>
+

@@ -13,6 +13,10 @@ const getLogger = require('./event-logger');
 let logger = getLogger(); // This might be a stub initially
 const { createConsoleInterceptor } = require('./console-interceptor');
 const { getGSXFileSync } = require('./gsx-file-sync');
+const { AiderBridgeClient } = require('./aider-bridge-client');
+
+// Global Aider Bridge instance
+let aiderBridge = null;
 
 // Configure logging for updates
 log.transports.file.level = 'info';
@@ -841,6 +845,14 @@ app.on('window-all-closed', () => {
 app.on('will-quit', () => {
   logger.info('App will quit - cleaning up resources');
   
+  // Shutdown Aider Bridge
+  if (aiderBridge) {
+    console.log('Shutting down Aider Bridge...');
+    aiderBridge.shutdown().catch(err => 
+      console.error('Error shutting down Aider:', err)
+    );
+  }
+  
   if (clipboardManager) {
     clipboardManager.destroy();
     console.log('Clipboard manager cleaned up');
@@ -1206,9 +1218,154 @@ function setupModuleManagerIPC() {
   });
 }
 
+// Set up Aider Bridge IPC handlers
+function setupAiderIPC() {
+  console.log('[setupAiderIPC] Setting up Aider Bridge handlers');
+  
+  // Start Aider
+  ipcMain.handle('aider:start', async () => {
+    try {
+      if (!aiderBridge) {
+        aiderBridge = new AiderBridgeClient();
+        await aiderBridge.start();
+        console.log('[Aider] Bridge started successfully');
+      }
+      return { success: true };
+    } catch (error) {
+      console.error('[Aider] Failed to start:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Initialize with repo
+  ipcMain.handle('aider:initialize', async (event, repoPath, modelName) => {
+    try {
+      if (!aiderBridge) {
+        throw new Error('Aider not started');
+      }
+      const result = await aiderBridge.initialize(repoPath, modelName || 'gpt-4');
+      console.log('[Aider] Initialized:', result);
+      return result;
+    } catch (error) {
+      console.error('[Aider] Initialize failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Run prompt
+  ipcMain.handle('aider:run-prompt', async (event, message) => {
+    try {
+      if (!aiderBridge) {
+        throw new Error('Aider not started');
+      }
+      console.log('[Aider] Running prompt:', message.substring(0, 100) + '...');
+      const result = await aiderBridge.runPrompt(message);
+      console.log('[Aider] Prompt result:', result.success ? 'Success' : 'Failed');
+      return result;
+    } catch (error) {
+      console.error('[Aider] Run prompt failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Add files
+  ipcMain.handle('aider:add-files', async (event, filePaths) => {
+    try {
+      if (!aiderBridge) {
+        throw new Error('Aider not started');
+      }
+      const result = await aiderBridge.addFiles(filePaths);
+      console.log('[Aider] Added files:', filePaths);
+      return result;
+    } catch (error) {
+      console.error('[Aider] Add files failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Remove files
+  ipcMain.handle('aider:remove-files', async (event, filePaths) => {
+    try {
+      if (!aiderBridge) {
+        throw new Error('Aider not started');
+      }
+      const result = await aiderBridge.removeFiles(filePaths);
+      console.log('[Aider] Removed files:', filePaths);
+      return result;
+    } catch (error) {
+      console.error('[Aider] Remove files failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Get repo map
+  ipcMain.handle('aider:get-repo-map', async () => {
+    try {
+      if (!aiderBridge) {
+        throw new Error('Aider not started');
+      }
+      const result = await aiderBridge.getRepoMap();
+      return result;
+    } catch (error) {
+      console.error('[Aider] Get repo map failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Set test command
+  ipcMain.handle('aider:set-test-cmd', async (event, command) => {
+    try {
+      if (!aiderBridge) {
+        throw new Error('Aider not started');
+      }
+      const result = await aiderBridge.setTestCmd(command);
+      console.log('[Aider] Set test command:', command);
+      return result;
+    } catch (error) {
+      console.error('[Aider] Set test command failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Set lint command
+  ipcMain.handle('aider:set-lint-cmd', async (event, command) => {
+    try {
+      if (!aiderBridge) {
+        throw new Error('Aider not started');
+      }
+      const result = await aiderBridge.setLintCmd(command);
+      console.log('[Aider] Set lint command:', command);
+      return result;
+    } catch (error) {
+      console.error('[Aider] Set lint command failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Shutdown
+  ipcMain.handle('aider:shutdown', async () => {
+    try {
+      if (aiderBridge) {
+        await aiderBridge.shutdown();
+        aiderBridge = null;
+        console.log('[Aider] Shutdown complete');
+      }
+      return { success: true };
+    } catch (error) {
+      console.error('[Aider] Shutdown failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  console.log('[setupAiderIPC] Aider Bridge IPC handlers registered');
+}
+
 // Set up IPC handlers for communication with renderer process
 function setupIPC() {
   console.log('[setupIPC] Function called');
+  
+  // Initialize Aider Bridge handlers
+  setupAiderIPC();
   
   // Initialize GSX File Sync handlers
   try {

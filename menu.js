@@ -1972,6 +1972,25 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
         ...(global.moduleManager ? global.moduleManager.getWebToolMenuItems() : []),
         ...(global.moduleManager && global.moduleManager.getWebTools().length > 0 ? [{ type: 'separator' }] : []),
         {
+          label: 'AI Pair Programming',
+          accelerator: 'CommandOrControl+Shift+A',
+          click: () => {
+            const aiderWindow = new BrowserWindow({
+              width: 1400,
+              height: 900,
+              title: 'AI Pair Programming - Aider',
+              webPreferences: {
+                nodeIntegration: true,
+                contextIsolation: false,
+                enableRemoteModule: true
+              }
+            });
+            
+            aiderWindow.loadFile('aider-ui.html');
+          }
+        },
+        { type: 'separator' },
+        {
           label: 'AI Run Times',
           click: () => {
             const aiWindow = new BrowserWindow({

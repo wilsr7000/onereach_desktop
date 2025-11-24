@@ -482,6 +482,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   triggerMissionControl: () => ipcRenderer.send('trigger-mission-control')
 });
 
+// Expose Aider API for AI pair programming
+contextBridge.exposeInMainWorld('aider', {
+  start: () => ipcRenderer.invoke('aider:start'),
+  initialize: (repoPath, modelName) => ipcRenderer.invoke('aider:initialize', repoPath, modelName),
+  runPrompt: (message) => ipcRenderer.invoke('aider:run-prompt', message),
+  addFiles: (filePaths) => ipcRenderer.invoke('aider:add-files', filePaths),
+  removeFiles: (filePaths) => ipcRenderer.invoke('aider:remove-files', filePaths),
+  getRepoMap: () => ipcRenderer.invoke('aider:get-repo-map'),
+  setTestCmd: (command) => ipcRenderer.invoke('aider:set-test-cmd', command),
+  setLintCmd: (command) => ipcRenderer.invoke('aider:set-lint-cmd', command),
+  shutdown: () => ipcRenderer.invoke('aider:shutdown')
+});
+
 // Expose auth API
 contextBridge.exposeInMainWorld('auth', {
   // Get stored token
