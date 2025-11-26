@@ -1972,13 +1972,13 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
         ...(global.moduleManager ? global.moduleManager.getWebToolMenuItems() : []),
         ...(global.moduleManager && global.moduleManager.getWebTools().length > 0 ? [{ type: 'separator' }] : []),
         {
-          label: 'AI Pair Programming',
+          label: 'GSX Create',
           accelerator: 'CommandOrControl+Shift+A',
           click: () => {
             const aiderWindow = new BrowserWindow({
               width: 1400,
               height: 900,
-              title: 'AI Pair Programming - Aider',
+              title: 'GSX Create',
               webPreferences: {
                 nodeIntegration: false,
                 contextIsolation: true,

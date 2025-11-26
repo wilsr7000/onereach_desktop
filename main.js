@@ -1227,8 +1227,8 @@ function setupAiderIPC() {
     try {
       if (!aiderBridge) {
         // Get API key from settings
-        const SettingsManager = require('./settings-manager');
-        const settings = new SettingsManager();
+        const { getSettingsManager } = require('./settings-manager');
+        const settings = getSettingsManager();
         const apiKey = settings.getLLMApiKey();
         const provider = settings.getLLMProvider();
         
@@ -1262,20 +1262,91 @@ function setupAiderIPC() {
   
   // Run prompt
   ipcMain.handle('aider:run-prompt', async (event, message) => {
+    const startTime = Date.now();
+    console.log('[GSX-IPC] >>> aider:run-prompt received');
+    console.log('[GSX-IPC]     Message length:', message.length);
+    console.log('[GSX-IPC]     Preview:', message.substring(0, 100) + '...');
+    
     try {
       if (!aiderBridge) {
+        console.error('[GSX-IPC] !!! ERROR: Aider bridge not started');
         throw new Error('Aider not started');
       }
-      console.log('[Aider] Running prompt:', message.substring(0, 100) + '...');
+      
+      console.log('[GSX-IPC]     Calling aiderBridge.runPrompt()...');
       const result = await aiderBridge.runPrompt(message);
-      console.log('[Aider] Prompt result:', result.success ? 'Success' : 'Failed');
+      const elapsed = Date.now() - startTime;
+      
+      console.log('[GSX-IPC] <<< Response from bridge in', elapsed, 'ms');
+      console.log('[GSX-IPC]     Success:', result.success);
+      if (result.error) console.log('[GSX-IPC]     Error:', result.error);
+      if (result.file_details) console.log('[GSX-IPC]     File details:', JSON.stringify(result.file_details));
+      if (result.response) console.log('[GSX-IPC]     Response length:', result.response.length);
+      
       return result;
     } catch (error) {
-      console.error('[Aider] Run prompt failed:', error);
+      const elapsed = Date.now() - startTime;
+      console.error('[GSX-IPC] !!! EXCEPTION after', elapsed, 'ms:', error.message);
+      console.error('[GSX-IPC]     Stack:', error.stack);
       return { success: false, error: error.message };
     }
   });
   
+
+  // Run prompt with streaming
+  ipcMain.handle('aider:run-prompt-streaming', async (event, message, options = {}) => {
+    const startTime = Date.now();
+    console.log('[GSX-IPC] >>> aider:run-prompt-streaming received');
+    console.log('[GSX-IPC]     Message length:', message.length);
+    
+    try {
+      if (!aiderBridge) {
+        throw new Error('Aider not started');
+      }
+      
+      // Create version backup before AI edit
+      if (options.spaceFolder && options.filesInContext) {
+        try {
+          const { getVersionManager } = require('./version-manager');
+          const versionManager = getVersionManager(options.spaceFolder);
+          const sessionId = 'session_' + Date.now();
+          const session = versionManager.createSessionBackup(
+            options.filesInContext,
+            sessionId,
+            message.substring(0, 200)
+          );
+          console.log('[GSX-IPC]     Version backup created:', sessionId, 'files:', session.filesBackedUp);
+        } catch (versionError) {
+          console.warn('[GSX-IPC]     Version backup failed:', versionError.message);
+        }
+      }
+      
+      // Set up stream forwarding to renderer
+      const streamHandler = (notification) => {
+        if (notification.method === 'stream' && notification.params) {
+          // Forward stream notification to the renderer that made the request
+          event.sender.send('aider:stream', notification.params);
+        }
+      };
+      
+      aiderBridge.on('notification', streamHandler);
+      
+      try {
+        console.log('[GSX-IPC]     Calling aiderBridge.runPromptStreaming()...');
+        const result = await aiderBridge.runPromptStreaming(message);
+        const elapsed = Date.now() - startTime;
+        console.log('[GSX-IPC] <<< Streaming response in', elapsed, 'ms');
+        return result;
+      } finally {
+        aiderBridge.removeListener('notification', streamHandler);
+      }
+    } catch (error) {
+      const elapsed = Date.now() - startTime;
+      console.error('[GSX-IPC] !!! Streaming EXCEPTION after', elapsed, 'ms:', error.message);
+      return { success: false, error: error.message };
+    }
+  });
+
   // Add files
   ipcMain.handle('aider:add-files', async (event, filePaths) => {
     try {
@@ -1320,6 +1391,70 @@ function setupAiderIPC() {
     }
   });
   
+
+  // Search code in repository
+  ipcMain.handle('aider:search-code', async (event, pattern, fileGlob) => {
+    try {
+      if (!aiderBridge) {
+        throw new Error('Aider not started');
+      }
+      const result = await aiderBridge.sendRequest('search_code', { pattern, file_glob: fileGlob });
+      console.log('[Aider] Search code:', pattern, '- found', result.total_matches || 0, 'matches');
+      return result;
+    } catch (error) {
+      console.error('[Aider] Search code failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Find symbol definition
+  ipcMain.handle('aider:find-definition', async (event, symbol) => {
+    try {
+      if (!aiderBridge) {
+        throw new Error('Aider not started');
+      }
+      const result = await aiderBridge.sendRequest('find_definition', { symbol });
+      console.log('[Aider] Find definition:', symbol, '- found', result.definitions?.length || 0, 'definitions');
+      return result;
+    } catch (error) {
+      console.error('[Aider] Find definition failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Find symbol usages
+  ipcMain.handle('aider:find-usages', async (event, symbol) => {
+    try {
+      if (!aiderBridge) {
+        throw new Error('Aider not started');
+      }
+      const result = await aiderBridge.sendRequest('find_usages', { symbol });
+      console.log('[Aider] Find usages:', symbol);
+      return result;
+    } catch (error) {
+      console.error('[Aider] Find usages failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Read file section
+  ipcMain.handle('aider:read-file-section', async (event, filePath, startLine, endLine) => {
+    try {
+      if (!aiderBridge) {
+        throw new Error('Aider not started');
+      }
+      const result = await aiderBridge.sendRequest('read_file_section', { 
+        file_path: filePath, 
+        start_line: startLine, 
+        end_line: endLine 
+      });
+      return result;
+    } catch (error) {
+      console.error('[Aider] Read file section failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
   // Set test command
   ipcMain.handle('aider:set-test-cmd', async (event, command) => {
     try {
@@ -1384,7 +1519,566 @@ function setupAiderIPC() {
     
     return result.filePaths[0];
   });
+
+  // Get API configuration for Aider UI
+  ipcMain.handle('aider:get-api-config', async () => {
+    const { getSettingsManager } = require('./settings-manager');
+    const settings = getSettingsManager();
+    
+    const apiKey = settings.getLLMApiKey();
+    const provider = settings.getLLMProvider();
+    
+    return {
+      hasApiKey: !!apiKey,
+      provider: provider || 'anthropic',
+    };
+  });
+
+  // Get spaces with folder paths for GSX Create
+  ipcMain.handle('aider:get-spaces', async () => {
+    try {
+      const ClipboardStorage = require('./clipboard-storage-v2');
+      const storage = new ClipboardStorage();
+      const spaces = storage.index.spaces || [];
+      return spaces.map(space => ({
+        id: space.id,
+        name: space.name,
+        icon: space.icon,
+        color: space.color,
+        path: path.join(storage.spacesDir, space.id)
+      }));
+    } catch (error) {
+      console.error('[GSX Create] Failed to get spaces:', error);
+      return [];
+    }
+  });
+
+  // List files in a directory for GSX Create
+  ipcMain.handle('aider:list-files', async (event, dirPath) => {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      
+      const files = [];
+      const walkDir = (dir, baseDir) => {
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry.name);
+          
+          // Skip hidden files and common non-code directories
+          if (entry.name.startsWith('.')) continue;
+          if (['node_modules', '__pycache__', 'venv', 'dist', 'build', '.git'].includes(entry.name)) continue;
+          
+          if (entry.isDirectory()) {
+            walkDir(fullPath, baseDir);
+          } else {
+            // Only include common code files
+            const ext = path.extname(entry.name).toLowerCase();
+            const codeExts = ['.js', '.ts', '.jsx', '.tsx', '.py', '.rb', '.go', '.rs', '.java', '.c', '.cpp', '.h', '.hpp', '.css', '.scss', '.html', '.json', '.yaml', '.yml', '.toml', '.md', '.txt', '.sh', '.bash', '.ipynb'];
+            if (codeExts.includes(ext) || entry.name === 'Makefile' || entry.name === 'Dockerfile') {
+              files.push(fullPath);
+            }
+          }
+        }
+      };
+      
+      if (fs.existsSync(dirPath)) {
+        walkDir(dirPath, dirPath);
+      }
+      
+      return { files: files.slice(0, 100) }; // Limit to 100 files
+    } catch (error) {
+      console.error('[GSX Create] Failed to list files:', error);
+      return { files: [] };
+    }
+  });
   
+  // Get space items for GSX Create context
+  ipcMain.handle('aider:get-space-items', async (event, spaceId) => {
+    try {
+      // Use the clipboard manager to get items
+      if (global.clipboardManager && global.clipboardManager.getSpaceItems) {
+        const items = global.clipboardManager.getSpaceItems(spaceId);
+        return items.map(item => ({
+          id: item.id,
+          type: item.type,
+          title: item.title || item.preview?.substring(0, 50) || 'Untitled',
+          preview: item.preview?.substring(0, 100) || '',
+          content: item.content || item.text || item.html || '',
+          timestamp: item.timestamp,
+          source: item.source
+        }));
+      }
+      return [];
+    } catch (error) {
+      console.error('[GSX Create] Failed to get space items:', error);
+      return [];
+    }
+  });
+  
+  
+  // Style Guide IPC Handlers
+  ipcMain.handle('aider:get-style-guides', async (event, spaceId) => {
+    try {
+      const fs = require('fs');
+      const styleGuidesPath = path.join(app.getPath('userData'), 'style-guides.json');
+      
+      let allStyleGuides = [];
+      if (fs.existsSync(styleGuidesPath)) {
+        allStyleGuides = JSON.parse(fs.readFileSync(styleGuidesPath, 'utf-8'));
+      }
+      
+      // Filter by spaceId if provided, otherwise return all
+      const styleGuides = spaceId 
+        ? allStyleGuides.filter(sg => sg.spaceId === spaceId || !sg.spaceId)
+        : allStyleGuides;
+      
+      return { success: true, styleGuides };
+    } catch (error) {
+      console.error('[GSX Create] Failed to get style guides:', error);
+      return { success: false, error: error.message, styleGuides: [] };
+    }
+  });
+  
+  ipcMain.handle('aider:save-style-guide', async (event, { id, spaceId, name, description, content }) => {
+    try {
+      const fs = require('fs');
+      const styleGuidesPath = path.join(app.getPath('userData'), 'style-guides.json');
+      
+      let styleGuides = [];
+      if (fs.existsSync(styleGuidesPath)) {
+        styleGuides = JSON.parse(fs.readFileSync(styleGuidesPath, 'utf-8'));
+      }
+      
+      const styleGuideId = id || `sg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      
+      if (id) {
+        // Update existing
+        const index = styleGuides.findIndex(sg => sg.id === id);
+        if (index >= 0) {
+          styleGuides[index] = {
+            ...styleGuides[index],
+            name,
+            description,
+            content,
+            updatedAt: new Date().toISOString()
+          };
+        }
+      } else {
+        // Create new
+        styleGuides.push({
+          id: styleGuideId,
+          spaceId,
+          name,
+          description,
+          content,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+      }
+      
+      fs.writeFileSync(styleGuidesPath, JSON.stringify(styleGuides, null, 2));
+      
+      console.log(`[GSX Create] Saved style guide: ${name}`);
+      return { success: true, styleGuideId };
+    } catch (error) {
+      console.error('[GSX Create] Failed to save style guide:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('aider:delete-style-guide', async (event, styleGuideId) => {
+    try {
+      const fs = require('fs');
+      const styleGuidesPath = path.join(app.getPath('userData'), 'style-guides.json');
+      
+      if (!fs.existsSync(styleGuidesPath)) {
+        return { success: true };
+      }
+      
+      let styleGuides = JSON.parse(fs.readFileSync(styleGuidesPath, 'utf-8'));
+      styleGuides = styleGuides.filter(sg => sg.id !== styleGuideId);
+      fs.writeFileSync(styleGuidesPath, JSON.stringify(styleGuides, null, 2));
+      
+      console.log(`[GSX Create] Deleted style guide: ${styleGuideId}`);
+      return { success: true };
+    } catch (error) {
+      console.error('[GSX Create] Failed to delete style guide:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+
+  // Journey Map handlers
+  ipcMain.handle('aider:get-journey-maps', async (event, spaceId) => {
+    try {
+      const journeyMapsPath = path.join(app.getPath('userData'), 'journey-maps.json');
+      
+      let allJourneyMaps = [];
+      if (fs.existsSync(journeyMapsPath)) {
+        allJourneyMaps = JSON.parse(fs.readFileSync(journeyMapsPath, 'utf-8'));
+      }
+      
+      // Filter by spaceId if provided, otherwise return all
+      const journeyMaps = spaceId 
+        ? allJourneyMaps.filter(jm => jm.spaceId === spaceId || !jm.spaceId)
+        : allJourneyMaps;
+      
+      return { success: true, journeyMaps };
+    } catch (error) {
+      console.error('[GSX Create] Failed to get journey maps:', error);
+      return { success: false, error: error.message, journeyMaps: [] };
+    }
+  });
+  
+  ipcMain.handle('aider:save-journey-map', async (event, { id, spaceId, name, contentType, content, mimeType }) => {
+    try {
+      const journeyMapsPath = path.join(app.getPath('userData'), 'journey-maps.json');
+      
+      let journeyMaps = [];
+      if (fs.existsSync(journeyMapsPath)) {
+        journeyMaps = JSON.parse(fs.readFileSync(journeyMapsPath, 'utf-8'));
+      }
+      
+      const journeyMapId = id || `jm-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      
+      if (id) {
+        // Update existing
+        const index = journeyMaps.findIndex(jm => jm.id === id);
+        if (index >= 0) {
+          journeyMaps[index] = {
+            ...journeyMaps[index],
+            name,
+            contentType,
+            content,
+            mimeType,
+            updatedAt: new Date().toISOString()
+          };
+        }
+      } else {
+        // Create new
+        journeyMaps.push({
+          id: journeyMapId,
+          spaceId,
+          name,
+          contentType,
+          content,
+          mimeType,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+      }
+      
+      fs.writeFileSync(journeyMapsPath, JSON.stringify(journeyMaps, null, 2));
+      
+      console.log(`[GSX Create] Saved journey map: ${name}`);
+      return { success: true, journeyMapId };
+    } catch (error) {
+      console.error('[GSX Create] Failed to save journey map:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('aider:delete-journey-map', async (event, journeyMapId) => {
+    try {
+      const journeyMapsPath = path.join(app.getPath('userData'), 'journey-maps.json');
+      
+      if (!fs.existsSync(journeyMapsPath)) {
+        return { success: true };
+      }
+      
+      let journeyMaps = JSON.parse(fs.readFileSync(journeyMapsPath, 'utf-8'));
+      journeyMaps = journeyMaps.filter(jm => jm.id !== journeyMapId);
+      fs.writeFileSync(journeyMapsPath, JSON.stringify(journeyMaps, null, 2));
+      
+      console.log(`[GSX Create] Deleted journey map: ${journeyMapId}`);
+      return { success: true };
+    } catch (error) {
+      console.error('[GSX Create] Failed to delete journey map:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // List project files for GSX Create sidebar
+
+  // Detect project tools (linters, test frameworks)
+  ipcMain.handle('aider:detect-project-tools', async (event, dirPath) => {
+    console.log('[GSX Create] Detecting tools in:', dirPath);
+    const result = { success: true, lint: null, test: null, detected: [] };
+    
+    try {
+      // Check for package.json (Node.js/JavaScript)
+      const packageJsonPath = path.join(dirPath, 'package.json');
+      if (fs.existsSync(packageJsonPath)) {
+        const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+        result.detected.push({ name: 'Node.js project', file: 'package.json' });
+        
+        // Check scripts
+        if (pkg.scripts) {
+          if (pkg.scripts.lint) {
+            result.lint = { name: 'npm lint', command: 'npm run lint' };
+          } else if (pkg.scripts.eslint) {
+            result.lint = { name: 'ESLint', command: 'npm run eslint' };
+          }
+          if (pkg.scripts.test) {
+            result.test = { name: 'npm test', command: 'npm test' };
+          }
+        }
+        
+        // Check devDependencies for linters
+        const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+        if (!result.lint) {
+          if (deps.eslint) result.lint = { name: 'ESLint', command: 'npx eslint --fix .' };
+          else if (deps.prettier) result.lint = { name: 'Prettier', command: 'npx prettier --check .' };
+          else if (deps.biome) result.lint = { name: 'Biome', command: 'npx biome check .' };
+        }
+        if (!result.test) {
+          if (deps.jest) result.test = { name: 'Jest', command: 'npx jest' };
+          else if (deps.vitest) result.test = { name: 'Vitest', command: 'npx vitest run' };
+          else if (deps.mocha) result.test = { name: 'Mocha', command: 'npx mocha' };
+        }
+        
+        // TypeScript
+        if (deps.typescript) {
+          result.detected.push({ name: 'TypeScript', file: 'package.json' });
+          if (!result.lint) result.lint = { name: 'TypeScript', command: 'npx tsc --noEmit' };
+        }
+      }
+      
+      // Check for pyproject.toml (Python)
+      const pyprojectPath = path.join(dirPath, 'pyproject.toml');
+      if (fs.existsSync(pyprojectPath)) {
+        result.detected.push({ name: 'Python project', file: 'pyproject.toml' });
+        const content = fs.readFileSync(pyprojectPath, 'utf8');
+        
+        if (content.includes('ruff')) {
+          result.lint = { name: 'Ruff', command: 'ruff check --fix .' };
+        } else if (content.includes('flake8')) {
+          result.lint = { name: 'Flake8', command: 'flake8' };
+        } else if (content.includes('pylint')) {
+          result.lint = { name: 'Pylint', command: 'pylint **/*.py' };
+        }
+        
+        if (content.includes('pytest')) {
+          result.test = { name: 'Pytest', command: 'pytest' };
+        }
+      }
+      
+      // Check for requirements.txt (Python)
+      const requirementsPath = path.join(dirPath, 'requirements.txt');
+      if (fs.existsSync(requirementsPath)) {
+        result.detected.push({ name: 'Python project', file: 'requirements.txt' });
+        const content = fs.readFileSync(requirementsPath, 'utf8');
+        
+        if (!result.lint) {
+          if (content.includes('ruff')) result.lint = { name: 'Ruff', command: 'ruff check --fix .' };
+          else if (content.includes('flake8')) result.lint = { name: 'Flake8', command: 'flake8' };
+        }
+        if (!result.test && content.includes('pytest')) {
+          result.test = { name: 'Pytest', command: 'pytest' };
+        }
+      }
+      
+      // Check for setup.py (Python)
+      if (fs.existsSync(path.join(dirPath, 'setup.py'))) {
+        result.detected.push({ name: 'Python package', file: 'setup.py' });
+        if (!result.lint) result.lint = { name: 'Flake8', command: 'flake8 --select=E9,F63,F7,F82' };
+        if (!result.test) result.test = { name: 'Pytest', command: 'pytest' };
+      }
+      
+      // Check for go.mod (Go)
+      if (fs.existsSync(path.join(dirPath, 'go.mod'))) {
+        result.detected.push({ name: 'Go project', file: 'go.mod' });
+        result.lint = { name: 'Go vet', command: 'go vet ./...' };
+        result.test = { name: 'Go test', command: 'go test ./...' };
+      }
+      
+      // Check for Cargo.toml (Rust)
+      if (fs.existsSync(path.join(dirPath, 'Cargo.toml'))) {
+        result.detected.push({ name: 'Rust project', file: 'Cargo.toml' });
+        result.lint = { name: 'Clippy', command: 'cargo clippy' };
+        result.test = { name: 'Cargo test', command: 'cargo test' };
+      }
+      
+      // Check for Makefile
+      if (fs.existsSync(path.join(dirPath, 'Makefile'))) {
+        const content = fs.readFileSync(path.join(dirPath, 'Makefile'), 'utf8');
+        if (content.includes('lint:') && !result.lint) {
+          result.lint = { name: 'make lint', command: 'make lint' };
+        }
+        if (content.includes('test:') && !result.test) {
+          result.test = { name: 'make test', command: 'make test' };
+        }
+      }
+      
+      console.log('[GSX Create] Detected tools:', result);
+      return result;
+    } catch (error) {
+      console.error('[GSX Create] Tool detection error:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('aider:list-project-files', async (event, dirPath) => {
+    try {
+      const files = [];
+      const walkDir = (dir, baseDir) => {
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry.name);
+          
+          // Skip hidden files and common non-code directories
+          if (entry.name.startsWith('.')) continue;
+          if (['node_modules', '__pycache__', 'venv', 'dist', 'build', '.git'].includes(entry.name)) continue;
+          
+          if (entry.isDirectory()) {
+            walkDir(fullPath, baseDir);
+          } else {
+            // Only include common code files
+            const ext = path.extname(entry.name).toLowerCase();
+            const codeExts = ['.js', '.ts', '.jsx', '.tsx', '.py', '.rb', '.go', '.rs', '.java', '.c', '.cpp', '.h', '.hpp', '.css', '.scss', '.html', '.json', '.yaml', '.yml', '.toml', '.md', '.txt', '.sh', '.bash', '.ipynb'];
+            if (codeExts.includes(ext) || entry.name === 'Makefile' || entry.name === 'Dockerfile') {
+              files.push({
+                name: entry.name,
+                path: fullPath,
+                isDirectory: false
+              });
+            }
+          }
+        }
+      };
+      
+      if (fs.existsSync(dirPath)) {
+        walkDir(dirPath, dirPath);
+      }
+      
+      return { success: true, files: files.slice(0, 100) };
+    } catch (error) {
+      console.error('[GSX Create] Failed to list project files:', error);
+      return { success: false, files: [], error: error.message };
+    }
+  });
+
+  // Register a file created by GSX Create as a clipboard item
+  ipcMain.handle('aider:register-created-file', async (event, data) => {
+    try {
+      const { spaceId, filePath, description, aiModel } = data;
+      console.log('[GSX Create] Registering file:', filePath, 'to space:', spaceId);
+      
+      if (!global.clipboardManager) {
+        console.error('[GSX Create] Clipboard manager not initialized');
+        return { success: false, error: 'Clipboard manager not initialized' };
+      }
+      
+      if (!fs.existsSync(filePath)) {
+        console.error('[GSX Create] File does not exist:', filePath);
+        return { success: false, error: 'File does not exist' };
+      }
+      
+      // Check if file already exists in history - UPDATE instead of creating duplicate
+      const existingIndex = global.clipboardManager.history.findIndex(
+        item => item.filePath === filePath && item.spaceId === spaceId
+      );
+      
+      const fileContent = fs.readFileSync(filePath, 'utf8');
+      const fileName = path.basename(filePath);
+      const fileExt = path.extname(filePath).substring(1) || 'txt';
+      const fileStats = fs.statSync(filePath);
+      
+      if (existingIndex !== -1) {
+        // UPDATE existing item instead of creating duplicate
+        const existingItem = global.clipboardManager.history[existingIndex];
+        console.log('[GSX Create] File already exists, updating:', existingItem.id);
+        
+        existingItem.content = fileContent;
+        existingItem.preview = fileContent.substring(0, 200);
+        existingItem.timestamp = Date.now();
+        existingItem.fileSize = fileStats.size;
+        existingItem.ai_model = aiModel || existingItem.ai_model;
+        
+        // Move to front of history
+        global.clipboardManager.history.splice(existingIndex, 1);
+        global.clipboardManager.history.unshift(existingItem);
+        
+        // Save changes
+        if (global.clipboardManager.saveHistory) {
+          global.clipboardManager.saveHistory();
+        }
+        if (global.clipboardManager.notifyHistoryUpdate) {
+          global.clipboardManager.notifyHistoryUpdate();
+        }
+        
+        console.log('[GSX Create] Updated existing file item:', existingItem.id);
+        return { success: true, item: existingItem, updated: true };
+      }
+      
+      // Create NEW item only if it doesn't exist
+      const itemId = 'gsx-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
+      
+      const item = {
+        id: itemId,
+        timestamp: Date.now(),
+        type: 'text',
+        content: fileContent,
+        preview: fileContent.substring(0, 200),
+        spaceId: spaceId,
+        pinned: false,
+        fileName: fileName,
+        filePath: filePath,
+        fileSize: fileStats.size,
+        fileExt: fileExt,
+        ai_generated: true,
+        ai_model: aiModel || 'claude-sonnet-4-5',
+        ai_provider: aiModel?.includes('gpt') ? 'OpenAI' : 'Anthropic',
+        source: 'GSX Create: ' + fileName,
+        tags: ['ai-generated', 'gsx-create', fileExt, 'code']
+      };
+      
+      console.log('[GSX Create] Creating new file item:', item.id);
+      global.clipboardManager.addToHistory(item);
+      console.log('[GSX Create] History length after add:', global.clipboardManager.history.length);
+      return { success: true, item: item, created: true };
+    } catch (error) {
+      console.error('[GSX Create] Failed to register file:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  ipcMain.handle('aider:update-file-metadata', async (event, data) => {
+    try {
+      const { spaceId, filePath, description } = data;
+      console.log('[GSX Create] Updating metadata for:', filePath);
+      
+      if (!global.clipboardManager) {
+        return { success: false, error: 'Clipboard manager not initialized' };
+      }
+      
+      // Find existing item by file path
+      const items = global.clipboardManager.getSpaceItems ? 
+        global.clipboardManager.getSpaceItems(spaceId) : [];
+      const existingItem = items.find(item => item.filePath === filePath);
+      
+      if (existingItem && global.clipboardManager.updateItemMetadata) {
+        const fileStats = fs.statSync(filePath);
+        const updatedMetadata = {
+          ...existingItem.metadata,
+          description: description || existingItem.metadata?.description,
+          lastModified: new Date(fileStats.mtime).toISOString(),
+          editCount: (existingItem.metadata?.editCount || 0) + 1
+        };
+        
+        global.clipboardManager.updateItemMetadata(existingItem.id, updatedMetadata);
+        console.log('[GSX Create] Updated metadata for item:', existingItem.id);
+        return { success: true };
+      }
+      
+      return { success: false, error: 'Item not found' };
+    } catch (error) {
+      console.error('[GSX Create] Failed to update metadata:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+
   console.log('[setupAiderIPC] Aider Bridge IPC handlers registered');
 }
 
@@ -1713,7 +2407,7 @@ function setupIPC() {
       const clipboardManager = global.clipboardManager;
       
       // Create the item to save
-      const item = {
+      const itemId = 'gsx-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);      const item = {        id: itemId,        timestamp: Date.now(),
         type: 'html',
         content: content.content,
         html: content.content,
@@ -5914,3 +6608,1013 @@ module.exports = {
   updateIDWMenu,
   updateGSXMenu
 }; 
+  // ============================================
+  // Screenshot Capture IPC Handlers
+  // ============================================
+  
+  const { getScreenshotCapture, captureScreenshot, captureScreenshotBase64 } = require('./screenshot-capture');
+  
+  ipcMain.handle('screenshot:capture', async (event, url, options = {}) => {
+    try {
+      console.log('[Screenshot] Capturing:', url);
+      const result = await captureScreenshot(url, options);
+      
+      // If result is a buffer, convert to base64
+      if (Buffer.isBuffer(result)) {
+        const format = options.format || 'png';
+        const mimeType = format === 'jpeg' ? 'image/jpeg' : 'image/png';
+        return {
+          success: true,
+          data: `data:${mimeType};base64,${result.toString('base64')}`,
+          format: format
+        };
+      }
+      
+      // If result is a file path
+      return { success: true, path: result };
+    } catch (error) {
+      console.error('[Screenshot] Capture failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('screenshot:capture-to-file', async (event, url, outputPath, options = {}) => {
+    try {
+      console.log('[Screenshot] Capturing to file:', url, '->', outputPath);
+      const result = await captureScreenshot(url, { ...options, outputPath });
+      return { success: true, path: result };
+    } catch (error) {
+      console.error('[Screenshot] Capture to file failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('screenshot:capture-responsive', async (event, url, viewports = null, options = {}) => {
+    try {
+      console.log('[Screenshot] Capturing responsive:', url);
+      const capture = getScreenshotCapture();
+      await capture.init();
+      const results = await capture.captureResponsive(url, viewports, options);
+      
+      // Convert buffers to base64
+      const processedResults = results.map(r => {
+        if (r.success && Buffer.isBuffer(r.result)) {
+          const format = options.format || 'png';
+          const mimeType = format === 'jpeg' ? 'image/jpeg' : 'image/png';
+          return {
+            ...r,
+            result: `data:${mimeType};base64,${r.result.toString('base64')}`
+          };
+        }
+        return r;
+      });
+      
+      return { success: true, results: processedResults };
+    } catch (error) {
+      console.error('[Screenshot] Responsive capture failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('screenshot:capture-thumbnail', async (event, url, options = {}) => {
+    try {
+      console.log('[Screenshot] Capturing thumbnail:', url);
+      const capture = getScreenshotCapture();
+      await capture.init();
+      const buffer = await capture.captureThumbnail(url, options);
+      
+      const format = options.format || 'jpeg';
+      const mimeType = format === 'jpeg' ? 'image/jpeg' : 'image/png';
+      return {
+        success: true,
+        data: `data:${mimeType};base64,${buffer.toString('base64')}`,
+        format: format
+      };
+    } catch (error) {
+      console.error('[Screenshot] Thumbnail capture failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+
+  // ============================================
+  // Web Scraper IPC Handlers
+  // ============================================
+  
+  const { getWebScraper, scrapeHTML, scrapeText, scrapeLinks, scrapeImages, extractData } = require('./web-scraper');
+  
+  ipcMain.handle('scraper:get-html', async (event, url, options = {}) => {
+    try {
+      console.log('[Scraper] Getting HTML:', url);
+      const html = await scrapeHTML(url, options);
+      return { success: true, html, length: html.length };
+    } catch (error) {
+      console.error('[Scraper] Failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('scraper:get-text', async (event, url, options = {}) => {
+    try {
+      console.log('[Scraper] Getting text:', url);
+      const text = await scrapeText(url, options);
+      return { success: true, text, length: text.length };
+    } catch (error) {
+      console.error('[Scraper] Failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('scraper:get-links', async (event, url, options = {}) => {
+    try {
+      console.log('[Scraper] Getting links:', url);
+      const links = await scrapeLinks(url, options);
+      return { success: true, links, count: links.length };
+    } catch (error) {
+      console.error('[Scraper] Failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('scraper:get-images', async (event, url, options = {}) => {
+    try {
+      console.log('[Scraper] Getting images:', url);
+      const images = await scrapeImages(url, options);
+      return { success: true, images, count: images.length };
+    } catch (error) {
+      console.error('[Scraper] Failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('scraper:extract', async (event, url, selectors, options = {}) => {
+    try {
+      console.log('[Scraper] Extracting:', url, selectors);
+      const data = await extractData(url, selectors, options);
+      return { success: true, data };
+    } catch (error) {
+      console.error('[Scraper] Failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('scraper:get-structured-data', async (event, url, options = {}) => {
+    try {
+      console.log('[Scraper] Getting structured data:', url);
+      const scraper = getWebScraper();
+      await scraper.init();
+      const data = await scraper.getStructuredData(url, options);
+      return { success: true, data };
+    } catch (error) {
+      console.error('[Scraper] Failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('scraper:evaluate', async (event, url, script, options = {}) => {
+    try {
+      console.log('[Scraper] Evaluating script:', url);
+      const scraper = getWebScraper();
+      await scraper.init();
+      const result = await scraper.evaluate(url, script, options);
+      return { success: true, result };
+    } catch (error) {
+      console.error('[Scraper] Failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+
+  // ============================================
+  // Image Downloader IPC Handlers
+  // ============================================
+  
+  const { downloadImages, getImageDownloader } = require('./image-downloader');
+  
+  ipcMain.handle('images:download-from-page', async (event, url, spaceDir, options = {}) => {
+    try {
+      // Create temp directory in the space folder
+      const tempDir = path.join(spaceDir, 'temp_images');
+      
+      console.log('[ImageDownloader] Downloading images from:', url);
+      console.log('[ImageDownloader] Saving to:', tempDir);
+      
+      const result = await downloadImages(url, tempDir, options);
+      
+      return {
+        success: true,
+        ...result
+      };
+    } catch (error) {
+      console.error('[ImageDownloader] Failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('images:download-single', async (event, imageUrl, outputPath) => {
+    try {
+      const downloader = getImageDownloader();
+      await downloader.init();
+      const result = await downloader.downloadImage(imageUrl, outputPath);
+      return { success: true, ...result };
+    } catch (error) {
+      console.error('[ImageDownloader] Failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+
+  // ============================================
+  // CSS Extractor IPC Handlers
+  // ============================================
+  
+  const { extractCSS, extractCSSVariables, extractColors, extractFonts, getCSSExtractor } = require('./css-extractor');
+  
+  ipcMain.handle('css:extract-all', async (event, url, options = {}) => {
+    try {
+      console.log('[CSSExtractor] Extracting all CSS:', url);
+      const result = await extractCSS(url, options);
+      return { success: true, ...result };
+    } catch (error) {
+      console.error('[CSSExtractor] Failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('css:extract-variables', async (event, url, options = {}) => {
+    try {
+      console.log('[CSSExtractor] Extracting CSS variables:', url);
+      const result = await extractCSSVariables(url, options);
+      return { success: true, ...result };
+    } catch (error) {
+      console.error('[CSSExtractor] Failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('css:extract-colors', async (event, url, options = {}) => {
+    try {
+      console.log('[CSSExtractor] Extracting colors:', url);
+      const result = await extractColors(url, options);
+      return { success: true, ...result };
+    } catch (error) {
+      console.error('[CSSExtractor] Failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('css:extract-fonts', async (event, url, options = {}) => {
+    try {
+      console.log('[CSSExtractor] Extracting fonts:', url);
+      const result = await extractFonts(url, options);
+      return { success: true, ...result };
+    } catch (error) {
+      console.error('[CSSExtractor] Failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('css:extract-computed', async (event, url, selectors, options = {}) => {
+    try {
+      console.log('[CSSExtractor] Extracting computed styles:', url);
+      const extractor = getCSSExtractor();
+      await extractor.init();
+      const result = await extractor.extractComputedStyles(url, selectors, options);
+      return { success: true, styles: result };
+    } catch (error) {
+      console.error('[CSSExtractor] Failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+
+  // ============================================
+  // Style Guide Extractor IPC Handlers
+  // ============================================
+  
+  const { extractStyleGuide, getStyleGuideExtractor } = require('./style-guide-extractor');
+  
+  ipcMain.handle('styleguide:extract', async (event, url, options = {}) => {
+    try {
+      console.log('[StyleGuide] Extracting from:', url);
+      const styleGuide = await extractStyleGuide(url, options);
+      return { success: true, styleGuide };
+    } catch (error) {
+      console.error('[StyleGuide] Failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('styleguide:extract-with-report', async (event, url, options = {}) => {
+    try {
+      console.log('[StyleGuide] Extracting with report:', url);
+      const extractor = getStyleGuideExtractor();
+      await extractor.init();
+      const styleGuide = await extractor.extract(url, options);
+      const report = extractor.generateReport(styleGuide);
+      const cssVariables = extractor.generateCSSVariables(styleGuide);
+      return { success: true, styleGuide, report, cssVariables };
+    } catch (error) {
+      console.error('[StyleGuide] Failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+
+  // ============================================
+  // Copy Style Extractor IPC Handlers
+  // ============================================
+  
+  const { extractCopyStyle, getCopyStyleExtractor } = require('./copy-style-extractor');
+  
+  ipcMain.handle('copystyle:extract', async (event, url, options = {}) => {
+    try {
+      console.log('[CopyStyle] Extracting from:', url);
+      const copyGuide = await extractCopyStyle(url, options);
+      return { success: true, copyGuide };
+    } catch (error) {
+      console.error('[CopyStyle] Failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('copystyle:extract-with-report', async (event, url, options = {}) => {
+    try {
+      console.log('[CopyStyle] Extracting with report:', url);
+      const extractor = getCopyStyleExtractor();
+      await extractor.init();
+      const copyGuide = await extractor.extract(url, options);
+      const report = extractor.generateReport(copyGuide);
+      const voiceSummary = extractor.generateVoiceSummary(copyGuide);
+      return { success: true, copyGuide, report, voiceSummary };
+    } catch (error) {
+      console.error('[CopyStyle] Failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+
+  // ============================================
+  // Style Prompt Generator IPC Handlers
+  // ============================================
+  
+  const { getStylePromptGenerator } = require('./style-prompt-generator');
+  
+  ipcMain.handle('prompt:generate-design', async (event, styleGuide, options = {}) => {
+    try {
+      const generator = getStylePromptGenerator();
+      const prompt = generator.generateDesignPrompt(styleGuide, options);
+      return { success: true, prompt };
+    } catch (error) {
+      console.error('[PromptGenerator] Failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('prompt:generate-copy', async (event, copyGuide, options = {}) => {
+    try {
+      const generator = getStylePromptGenerator();
+      const prompt = generator.generateCopyPrompt(copyGuide, options);
+      return { success: true, prompt };
+    } catch (error) {
+      console.error('[PromptGenerator] Failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('prompt:generate-full', async (event, styleGuide, copyGuide, options = {}) => {
+    try {
+      const generator = getStylePromptGenerator();
+      const prompt = generator.generateFullPrompt(styleGuide, copyGuide, options);
+      return { success: true, prompt };
+    } catch (error) {
+      console.error('[PromptGenerator] Failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('prompt:generate-landing-page', async (event, styleGuide, copyGuide, options = {}) => {
+    try {
+      const generator = getStylePromptGenerator();
+      const prompt = generator.generateLandingPagePrompt(styleGuide, copyGuide, options);
+      return { success: true, prompt };
+    } catch (error) {
+      console.error('[PromptGenerator] Failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('prompt:generate-email', async (event, styleGuide, copyGuide, options = {}) => {
+    try {
+      const generator = getStylePromptGenerator();
+      const prompt = generator.generateEmailPrompt(styleGuide, copyGuide, options);
+      return { success: true, prompt };
+    } catch (error) {
+      console.error('[PromptGenerator] Failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('prompt:generate-social', async (event, copyGuide, options = {}) => {
+    try {
+      const generator = getStylePromptGenerator();
+      const prompt = generator.generateSocialPostPrompt(copyGuide, options);
+      return { success: true, prompt };
+    } catch (error) {
+      console.error('[PromptGenerator] Failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('prompt:generate-headlines', async (event, copyGuide, options = {}) => {
+    try {
+      const generator = getStylePromptGenerator();
+      const prompt = generator.generateHeadlinePrompt(copyGuide, options);
+      return { success: true, prompt };
+    } catch (error) {
+      console.error('[PromptGenerator] Failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('prompt:generate-cta', async (event, copyGuide, options = {}) => {
+    try {
+      const generator = getStylePromptGenerator();
+      const prompt = generator.generateCTAPrompt(copyGuide, options);
+      return { success: true, prompt };
+    } catch (error) {
+      console.error('[PromptGenerator] Failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+
+  // Multimodal prompt with images
+  ipcMain.handle('prompt:generate-multimodal', async (event, options = {}) => {
+    try {
+      const generator = getStylePromptGenerator();
+      const result = generator.generateMultimodalPrompt(options);
+      return { success: true, ...result };
+    } catch (error) {
+      console.error('[PromptGenerator] Multimodal failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('prompt:generate-design-with-images', async (event, styleGuide, images, options = {}) => {
+    try {
+      const generator = getStylePromptGenerator();
+      const result = generator.generateDesignPromptWithImages(styleGuide, images, options);
+      return { success: true, ...result };
+    } catch (error) {
+      console.error('[PromptGenerator] Design with images failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+
+  // Image Generation Prompts (DALL-E, Imagen, etc.)
+  ipcMain.handle('prompt:generate-dalle', async (event, styleGuide, options = {}) => {
+    try {
+      const generator = getStylePromptGenerator();
+      const result = generator.generateDALLEPrompt(styleGuide, options);
+      return { success: true, ...result };
+    } catch (error) {
+      console.error('[PromptGenerator] DALL-E failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('prompt:generate-imagen', async (event, styleGuide, options = {}) => {
+    try {
+      const generator = getStylePromptGenerator();
+      const result = generator.generateImagenPrompt(styleGuide, options);
+      return { success: true, ...result };
+    } catch (error) {
+      console.error('[PromptGenerator] Imagen failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('prompt:generate-image-all', async (event, styleGuide, copyGuide, options = {}) => {
+    try {
+      const generator = getStylePromptGenerator();
+      const result = generator.generateImageGenPrompts(styleGuide, copyGuide, options);
+      return { success: true, ...result };
+    } catch (error) {
+      console.error('[PromptGenerator] Image gen failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+
+  // Get available image generation services based on user's API config
+  ipcMain.handle('prompt:get-available-image-services', async (event) => {
+    try {
+      const { getSettingsManager } = require('./settings-manager');
+      const settings = getSettingsManager();
+      const apiConfig = {
+        provider: settings.getLLMProvider(),
+        apiKey: settings.getLLMApiKey()
+      };
+      
+      const generator = getStylePromptGenerator();
+      const result = generator.getAvailableImageServices(apiConfig);
+      return { success: true, ...result };
+    } catch (error) {
+      console.error('[PromptGenerator] Get services failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Generate image prompt using the best available service
+  ipcMain.handle('prompt:generate-image-auto', async (event, styleGuide, copyGuide, options = {}) => {
+    try {
+      const { getSettingsManager } = require('./settings-manager');
+      const settings = getSettingsManager();
+      const apiConfig = {
+        provider: settings.getLLMProvider(),
+        apiKey: settings.getLLMApiKey()
+      };
+      
+      const generator = getStylePromptGenerator();
+      const result = generator.generateImagePromptForAvailableService(styleGuide, copyGuide, apiConfig, options);
+      return { success: true, ...result };
+    } catch (error) {
+      console.error('[PromptGenerator] Auto image gen failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+
+  // Read file content for preview
+  ipcMain.handle('aider:read-file', async (event, filePath) => {
+    try {
+      const fs = require('fs');
+      if (fs.existsSync(filePath)) {
+        return fs.readFileSync(filePath, 'utf8');
+      }
+      return null;
+    } catch (error) {
+      console.error('[Aider] Error reading file:', error);
+      return null;
+    }
+  });
+  
+  // File watcher for live preview
+  const fileWatchers = new Map();
+  
+  ipcMain.handle('aider:watch-file', async (event, filePath) => {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      
+      // Stop existing watcher for this file
+      if (fileWatchers.has(filePath)) {
+        fileWatchers.get(filePath).close();
+        fileWatchers.delete(filePath);
+      }
+      
+      if (!fs.existsSync(filePath)) {
+        return { success: false, error: 'File not found' };
+      }
+      
+      // Create watcher
+      const watcher = fs.watch(filePath, { persistent: false }, (eventType) => {
+        if (eventType === 'change') {
+          // Notify renderer that file changed
+          event.sender.send('aider:file-changed', filePath);
+        }
+      });
+      
+      fileWatchers.set(filePath, watcher);
+      console.log('[Aider] Watching file:', filePath);
+      return { success: true };
+    } catch (error) {
+      console.error('[Aider] Error watching file:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('aider:unwatch-file', async (event, filePath) => {
+    if (fileWatchers.has(filePath)) {
+      fileWatchers.get(filePath).close();
+      fileWatchers.delete(filePath);
+      console.log('[Aider] Stopped watching file:', filePath);
+    }
+    return { success: true };
+  });
+
+  // Open file in default application
+  ipcMain.handle('aider:open-file', async (event, filePath) => {
+    try {
+      const { shell } = require('electron');
+      await shell.openPath(filePath);
+      return { success: true };
+    } catch (error) {
+      console.error('[Aider] Error opening file:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Capture screenshot of HTML content using Puppeteer
+  ipcMain.handle('aider:capture-preview-screenshot', async (event, htmlContent, options = {}) => {
+    console.log('[Screenshot] >>> capture-preview-screenshot called');
+    console.log('[Screenshot]     HTML length:', htmlContent ? htmlContent.length : 0);
+    console.log('[Screenshot]     Options:', JSON.stringify(options));
+    
+    try {
+      console.log('[Screenshot]     Launching Puppeteer...');
+      const puppeteer = require('puppeteer');
+      const browser = await puppeteer.launch({ 
+        headless: 'new',
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+      });
+      console.log('[Screenshot]     Browser launched');
+      const page = await browser.newPage();
+      
+      // Set viewport
+      const width = options.width || 1200;
+      const height = options.height || 800;
+      await page.setViewport({ width, height });
+      
+      // Set the HTML content
+      await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
+      
+      // Wait a bit for any animations/rendering
+      await new Promise(r => setTimeout(r, 500));
+      
+      // Capture screenshot as base64
+      const screenshot = await page.screenshot({ 
+        encoding: 'base64',
+        type: 'png',
+        fullPage: options.fullPage || false
+      });
+      
+      await browser.close();
+      
+      console.log('[Screenshot] <<< Success! Screenshot size:', screenshot.length, 'chars');
+      return { 
+        success: true, 
+        screenshot: screenshot,
+        mimeType: 'image/png',
+        width,
+        height
+      };
+    } catch (error) {
+      console.error('[Screenshot] !!! Error capturing screenshot:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Transaction Database IPC Handlers
+  ipcMain.handle('txdb:record', async (event, data) => {
+    try {
+      const { getTransactionDB } = require('./transaction-db');
+      const db = getTransactionDB(app.getPath('userData'));
+      return db.recordTransaction(data);
+    } catch (error) {
+      console.error('[TxDB] Record error:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('txdb:get-transactions', async (event, options) => {
+    try {
+      const { getTransactionDB } = require('./transaction-db');
+      const db = getTransactionDB(app.getPath('userData'));
+      return { success: true, transactions: db.getTransactions(options) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('txdb:get-summary', async (event, spaceId, days) => {
+    try {
+      const { getTransactionDB } = require('./transaction-db');
+      const db = getTransactionDB(app.getPath('userData'));
+      return { success: true, summary: db.getSummary(spaceId, days) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('txdb:log-event', async (event, level, category, message, data, spaceId) => {
+    try {
+      const { getTransactionDB } = require('./transaction-db');
+      const db = getTransactionDB(app.getPath('userData'));
+      db.logEvent(level, category, message, data, spaceId);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('txdb:get-event-logs', async (event, options) => {
+    try {
+      const { getTransactionDB } = require('./transaction-db');
+      const db = getTransactionDB(app.getPath('userData'));
+      return { success: true, logs: db.getEventLogs(options) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('txdb:get-info', async (event) => {
+    try {
+      const { getTransactionDB } = require('./transaction-db');
+      const db = getTransactionDB(app.getPath('userData'));
+      return { success: true, info: db.getInfo() };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('txdb:export', async (event) => {
+    try {
+      const { getTransactionDB } = require('./transaction-db');
+      const db = getTransactionDB(app.getPath('userData'));
+      return { success: true, data: db.exportToJson() };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Cost Tracking IPC Handlers
+  ipcMain.handle('cost:record', async (event, spaceFolder, callData) => {
+    try {
+      const { getCostTracker } = require('./cost-tracker');
+      const tracker = getCostTracker(spaceFolder);
+      const record = tracker.recordCall(callData);
+      
+      // Log transaction to event logger
+      const logger = getLogger();
+      logger.log('api-transaction', {
+        type: 'API_COST',
+        model: callData.model,
+        inputTokens: callData.inputTokens,
+        outputTokens: callData.outputTokens,
+        cost: record.totalCost,
+        costFormatted: '$' + record.totalCost.toFixed(6),
+        callType: callData.type || 'prompt',
+        spaceFolder: spaceFolder,
+        timestamp: new Date().toISOString()
+      });
+      
+      console.log('[Cost] Transaction logged:', callData.model, 'Input:', callData.inputTokens, 'Output:', callData.outputTokens, 'Cost: $' + record.totalCost.toFixed(6));
+      
+      return { success: true, record };
+    } catch (error) {
+      console.error('[Cost] Error recording:', error);
+      // Log error too
+      try {
+        const logger = getLogger();
+        logger.log('api-transaction-error', {
+          type: 'API_COST_ERROR',
+          error: error.message,
+          callData: callData,
+          timestamp: new Date().toISOString()
+        });
+      } catch (e) {}
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('cost:get-summary', async (event, spaceFolder) => {
+    try {
+      const { getCostTracker } = require('./cost-tracker');
+      const tracker = getCostTracker(spaceFolder);
+      return { success: true, summary: tracker.getSummary() };
+    } catch (error) {
+      console.error('[Cost] Error getting summary:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('cost:get-by-date-range', async (event, spaceFolder, startDate, endDate) => {
+    try {
+      const { getCostTracker } = require('./cost-tracker');
+      const tracker = getCostTracker(spaceFolder);
+      return { success: true, data: tracker.getCostByDateRange(startDate, endDate) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('cost:reset', async (event, spaceFolder) => {
+    try {
+      const { getCostTracker } = require('./cost-tracker');
+      const tracker = getCostTracker(spaceFolder);
+      const backup = tracker.resetCosts();
+      return { success: true, previousTotal: backup.totalCost };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('cost:parse-aider-message', async (event, message) => {
+    try {
+      const { CostTracker } = require('./cost-tracker');
+      const tracker = new CostTracker('/tmp'); // Just for parsing
+      const parsed = tracker.parseAiderCostMessage(message);
+      return { success: true, parsed };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Version Management IPC Handlers
+  ipcMain.handle('aider:get-file-versions', async (event, spaceFolder, filePath) => {
+    try {
+      const { getVersionManager } = require('./version-manager');
+      const versionManager = getVersionManager(spaceFolder);
+      return { success: true, versions: versionManager.getFileVersions(filePath) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('aider:get-version-content', async (event, spaceFolder, filePath, versionId) => {
+    try {
+      const { getVersionManager } = require('./version-manager');
+      const versionManager = getVersionManager(spaceFolder);
+      const content = versionManager.getVersionContent(filePath, versionId);
+      if (content === null) {
+        return { success: false, error: 'Version not found' };
+      }
+      return { success: true, content };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('aider:rollback-file', async (event, spaceFolder, filePath, versionId) => {
+    try {
+      const { getVersionManager } = require('./version-manager');
+      const versionManager = getVersionManager(spaceFolder);
+      const success = versionManager.rollbackFile(filePath, versionId);
+      return { success };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('aider:rollback-session', async (event, spaceFolder, sessionId) => {
+    try {
+      const { getVersionManager } = require('./version-manager');
+      const versionManager = getVersionManager(spaceFolder);
+      return versionManager.rollbackSession(sessionId);
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('aider:get-recent-sessions', async (event, spaceFolder, limit = 20) => {
+    try {
+      const { getVersionManager } = require('./version-manager');
+      const versionManager = getVersionManager(spaceFolder);
+      return { success: true, sessions: versionManager.getRecentSessions(limit) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('aider:compare-versions', async (event, spaceFolder, filePath, versionId1, versionId2) => {
+    try {
+      const { getVersionManager } = require('./version-manager');
+      const versionManager = getVersionManager(spaceFolder);
+      return { success: true, comparison: versionManager.compareVersions(filePath, versionId1, versionId2) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Analyze screenshot with vision model (Claude or GPT-4V)
+  ipcMain.handle('aider:analyze-screenshot', async (event, screenshotBase64, prompt) => {
+    console.log('[Vision] >>> analyze-screenshot called');
+    console.log('[Vision]     Screenshot size:', screenshotBase64 ? screenshotBase64.length : 0, 'chars');
+    console.log('[Vision]     Prompt length:', prompt ? prompt.length : 0, 'chars');
+    
+    try {
+      const { getSettingsManager } = require('./settings-manager');
+      const settings = getSettingsManager();
+      const apiKey = settings.getLLMApiKey();
+      const provider = settings.getLLMProvider();
+      
+      console.log('[Vision]     API Provider:', provider);
+      console.log('[Vision]     API Key present:', !!apiKey);
+      console.log('[Vision]     API Key length:', apiKey ? apiKey.length : 0);
+      
+      if (!apiKey) {
+        console.log('[Vision] !!! No API key configured');
+        return { success: false, error: 'No API key configured. Please add an API key in Settings.' };
+      }
+      
+      let analysis = '';
+      let inputTokens = 0;
+      let outputTokens = 0;
+      
+      if (provider === 'anthropic') {
+        console.log('[Vision]     Using Claude API with vision...');
+        // Use Claude API with vision
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01'
+          },
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-20250514',
+            max_tokens: 4096,
+            messages: [{
+              role: 'user',
+              content: [
+                {
+                  type: 'image',
+                  source: {
+                    type: 'base64',
+                    media_type: 'image/png',
+                    data: screenshotBase64
+                  }
+                },
+                {
+                  type: 'text',
+                  text: prompt
+                }
+              ]
+            }]
+          })
+        });
+        
+        const data = await response.json();
+        console.log('[Vision]     Claude response received');
+        if (data.error) {
+          throw new Error(data.error.message || 'Claude API error');
+        }
+        analysis = data.content[0].text;
+        
+        // Extract token usage from Claude response
+        if (data.usage) {
+          console.log('[Vision]     Claude usage:', data.usage);
+          inputTokens = data.usage.input_tokens || 0;
+          outputTokens = data.usage.output_tokens || 0;
+        }
+        
+      } else if (provider === 'openai') {
+        // Use GPT-4V API
+        console.log('[Vision]     Using OpenAI GPT-4V API...');
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + apiKey
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o',
+            max_tokens: 4096,
+            messages: [{
+              role: 'user',
+              content: [
+                {
+                  type: 'image_url',
+                  image_url: {
+                    url: 'data:image/png;base64,' + screenshotBase64
+                  }
+                },
+                {
+                  type: 'text',
+                  text: prompt
+                }
+              ]
+            }]
+          })
+        });
+        
+        const data = await response.json();
+        console.log('[Vision]     OpenAI response received');
+        if (data.error) {
+          throw new Error(data.error.message || 'OpenAI API error');
+        }
+        analysis = data.choices[0].message.content;
+        
+        // Extract token usage from OpenAI response
+        if (data.usage) {
+          console.log('[Vision]     OpenAI usage:', data.usage);
+          inputTokens = data.usage.prompt_tokens || 0;
+          outputTokens = data.usage.completion_tokens || 0;
+        }
+        
+      } else {
+        return { success: false, error: 'Vision analysis requires Claude or OpenAI API key' };
+      }
+      
+      console.log('[Vision]     Final tokens - input:', inputTokens, 'output:', outputTokens);
+      return { success: true, analysis, inputTokens, outputTokens, provider };
+      
+    } catch (error) {
+      console.error('[Aider] Error analyzing screenshot:', error);
+      return { success: false, error: error.message };
+    }
+  });
+

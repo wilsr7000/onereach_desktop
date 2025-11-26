@@ -142,8 +142,21 @@ class AiderBridgeClient extends events_1.EventEmitter {
         for (const line of lines) {
             if (!line.trim())
                 continue;
+            
+            // Only try to parse lines that look like JSON (start with { or [)
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+                // Non-JSON output from Aider - log it but don't try to parse
+                if (trimmed.length > 0 && !trimmed.startsWith('Tokens:') && !trimmed.includes('│') && !trimmed.includes('█')) {
+                    console.log('[Aider Output]', trimmed.substring(0, 100));
+                }
+                continue;
+            }
+            
             try {
                 const message = JSON.parse(line);
+                console.log('[AiderBridge] Received JSON-RPC message, id:', message.id);
+                
                 // Handle notification
                 if ('method' in message && !('id' in message)) {
                     this.emit('notification', message);
@@ -160,18 +173,20 @@ class AiderBridgeClient extends events_1.EventEmitter {
                     else {
                         pending.resolve(response.result);
                     }
+                } else {
+                    console.warn('[AiderBridge] Received response for unknown request id:', response.id);
                 }
             }
             catch (error) {
-                console.error('[Aider Bridge] Failed to parse message:', line, error);
+                // Only log if it looked like JSON but failed to parse
+                console.error('[AiderBridge] JSON parse error:', error.message);
+                console.error('[AiderBridge]     Line preview:', line.substring(0, 80));
             }
         }
     }
-    /**
-     * Send a JSON-RPC request to Python process
-     */
     async sendRequest(method, params) {
         if (!this.process || !this.process.stdin) {
+            console.error('[AiderBridge] ERROR: Process not started or stdin unavailable');
             throw new Error('Aider Bridge not started');
         }
         const id = ++this.requestId;
@@ -181,22 +196,66 @@ class AiderBridgeClient extends events_1.EventEmitter {
             params,
             id
         };
+        
+        const startTime = Date.now();
+        console.log(`[AiderBridge] >>> Request #${id}: ${method}`);
+        if (params) {
+            const paramPreview = JSON.stringify(params).substring(0, 200);
+            console.log(`[AiderBridge]     Params: ${paramPreview}${paramPreview.length >= 200 ? '...' : ''}`);
+        }
+        
         return new Promise((resolve, reject) => {
-            this.pendingRequests.set(id, { resolve, reject });
+            this.pendingRequests.set(id, { 
+                resolve: (result) => {
+                    const elapsed = Date.now() - startTime;
+                    console.log(`[AiderBridge] <<< Response #${id}: ${method} (${elapsed}ms)`);
+                    if (result && result.success !== undefined) {
+                        console.log(`[AiderBridge]     Success: ${result.success}`);
+                    }
+                    if (result && result.error) {
+                        console.log(`[AiderBridge]     Error: ${result.error}`);
+                    }
+                    if (result && result.modified_files) {
+                        console.log(`[AiderBridge]     Modified files: ${result.modified_files.length}`);
+                    }
+                    if (result && result.file_details) {
+                        console.log(`[AiderBridge]     File details: ${JSON.stringify(result.file_details)}`);
+                    }
+                    resolve(result);
+                }, 
+                reject: (error) => {
+                    const elapsed = Date.now() - startTime;
+                    console.error(`[AiderBridge] !!! Error #${id}: ${method} (${elapsed}ms) - ${error.message}`);
+                    reject(error);
+                }
+            });
+            
             // Send request
-            this.process.stdin.write(JSON.stringify(request) + '\n');
-            // Timeout after 60 seconds
+            const requestStr = JSON.stringify(request) + '\n';
+            console.log(`[AiderBridge]     Sending ${requestStr.length} bytes to stdin`);
+            try {
+                this.process.stdin.write(requestStr);
+                console.log(`[AiderBridge]     Request sent, waiting for response...`);
+            } catch (writeError) {
+                console.error(`[AiderBridge]     WRITE ERROR: ${writeError.message}`);
+                this.pendingRequests.delete(id);
+                reject(writeError);
+                return;
+            }
+            
+            // Timeout after 120 seconds (increased from 60)
             setTimeout(() => {
                 if (this.pendingRequests.has(id)) {
+                    const elapsed = Date.now() - startTime;
+                    console.error(`[AiderBridge] !!! TIMEOUT #${id}: ${method} after ${elapsed}ms`);
+                    console.error(`[AiderBridge]     Process alive: ${this.process && !this.process.killed}`);
+                    console.error(`[AiderBridge]     Pending requests: ${this.pendingRequests.size}`);
                     this.pendingRequests.delete(id);
-                    reject(new Error(`Request timeout: ${method}`));
+                    reject(new Error(`Request timeout: ${method} (after ${elapsed}ms)`));
                 }
-            }, 60000);
+            }, 300000); // 5 minute timeout
         });
     }
-    /**
-     * Initialize Aider with a repository
-     */
     async initialize(repoPath, modelName = 'gpt-4') {
         return this.sendRequest('initialize', { repo_path: repoPath, model_name: modelName });
     }
@@ -206,6 +265,39 @@ class AiderBridgeClient extends events_1.EventEmitter {
     async runPrompt(message) {
         return this.sendRequest('run_prompt', { message });
     }
+    /**
+     * Run a prompt with streaming output
+     * @param {string} message - The prompt to send
+     * @param {function} onToken - Callback for each token received
+     * @returns {Promise} Final result
+     */
+    async runPromptStreaming(message, onToken) {
+        // Set up stream listener before sending request
+        const streamHandler = (notification) => {
+            if (notification.method === 'stream' && notification.params) {
+                const { type, content } = notification.params;
+                if (type === 'token' && content && onToken) {
+                    onToken(content);
+                } else if (type === 'start') {
+                    console.log('[AiderBridge] Stream started');
+                } else if (type === 'complete') {
+                    console.log('[AiderBridge] Stream completed');
+                } else if (type === 'error') {
+                    console.error('[AiderBridge] Stream error:', content);
+                }
+            }
+        };
+        
+        this.on('notification', streamHandler);
+        
+        try {
+            const result = await this.sendRequest('run_prompt_streaming', { message });
+            return result;
+        } finally {
+            this.removeListener('notification', streamHandler);
+        }
+    }
+    
     /**
      * Add files to Aider's context
      */

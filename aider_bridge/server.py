@@ -84,12 +84,19 @@ class AiderBridge:
                         fnames=[],  # Start with no files
                         auto_commits=True,
                         dirty_commits=True,
+                        auto_lint=False,
+                        edit_format="diff",  # Use diff-based editing for targeted changes
+                        suggest_shell_commands=False,
+                        show_diffs=True,  # Show what changed
                     )
                 except TypeError as e:
+                    print(f"[GSX Create] Fallback to simpler Coder.create: {e}", file=sys.stderr)
                     # Fallback for older/newer API versions
                     self.coder = Coder.create(
                         main_model=self.model,
                         io=self.io,
+                        auto_lint=False,
+                        edit_format="diff",
                     )
             finally:
                 os.chdir(original_cwd)
@@ -118,35 +125,99 @@ class AiderBridge:
         Returns:
             Response text and any file changes made
         """
+        import time
+        start_time = time.time()
+        print(f"[GSX-Python] >>> run_prompt called", file=sys.stderr, flush=True)
+        print(f"[GSX-Python]     Message length: {len(message)} chars", file=sys.stderr, flush=True)
+        print(f"[GSX-Python]     Message preview: {message[:100]}...", file=sys.stderr, flush=True)
+        
         if not self.coder:
+            print(f"[GSX-Python] !!! ERROR: Not initialized", file=sys.stderr, flush=True)
             return {
                 "success": False,
                 "error": "Not initialized. Call initialize() first."
             }
         
         try:
-            # Run the prompt through Aider
-            response = self.coder.run(message)
+            import os
+            from pathlib import Path
             
-            # Get files that were modified
+            print(f"[GSX-Python]     Scanning files before prompt...", file=sys.stderr, flush=True)
+            # Track files before running prompt
+            files_before = set()
+            if self.repo_path and self.repo_path.exists():
+                for f in self.repo_path.rglob('*'):
+                    if f.is_file() and not any(p in str(f) for p in ['.git', '__pycache__', 'node_modules', '.aider']):
+                        files_before.add(str(f))
+            print(f"[GSX-Python]     Files before: {len(files_before)}", file=sys.stderr, flush=True)
+            
+            # Run the prompt through Aider
+            print(f"[GSX-Python]     Calling coder.run()...", file=sys.stderr, flush=True)
+            coder_start = time.time()
+            response = self.coder.run(message)
+            coder_elapsed = time.time() - coder_start
+            print(f"[GSX-Python]     coder.run() completed in {coder_elapsed:.2f}s", file=sys.stderr, flush=True)
+            print(f"[GSX-Python]     Response length: {len(response) if response else 0} chars", file=sys.stderr, flush=True)
+            
+            print(f"[GSX-Python]     Scanning files after prompt...", file=sys.stderr, flush=True)
+            # Track files after running prompt
+            files_after = set()
+            if self.repo_path and self.repo_path.exists():
+                for f in self.repo_path.rglob('*'):
+                    if f.is_file() and not any(p in str(f) for p in ['.git', '__pycache__', 'node_modules', '.aider']):
+                        files_after.add(str(f))
+            print(f"[GSX-Python]     Files after: {len(files_after)}", file=sys.stderr, flush=True)
+            
+            # Determine new and modified files
+            new_files = files_after - files_before
+            print(f"[GSX-Python]     New files: {len(new_files)}", file=sys.stderr, flush=True)
+            for f in new_files:
+                print(f"[GSX-Python]       + {f}", file=sys.stderr, flush=True)
+            
+            # Get files in context that may have been modified
             modified_files = []
             if hasattr(self.coder, 'abs_fnames'):
                 modified_files = [str(f) for f in self.coder.abs_fnames]
+            print(f"[GSX-Python]     Modified files in context: {len(modified_files)}", file=sys.stderr, flush=True)
+            
+            # Build file_details with action info
+            file_details = []
+            for f in new_files:
+                file_details.append({
+                    "name": Path(f).name,
+                    "path": f,
+                    "action": "created"
+                })
+            for f in modified_files:
+                if f not in new_files:
+                    file_details.append({
+                        "name": Path(f).name,
+                        "path": f,
+                        "action": "modified"
+                    })
+            
+            elapsed = time.time() - start_time
+            print(f"[GSX-Python] <<< run_prompt completed in {elapsed:.2f}s", file=sys.stderr, flush=True)
+            print(f"[GSX-Python]     Success: True, file_details: {len(file_details)}", file=sys.stderr, flush=True)
             
             return {
                 "success": True,
                 "response": response or "",
                 "modified_files": modified_files,
+                "new_files": list(new_files),
+                "file_details": file_details,
                 "files_in_context": self.get_context_files()
             }
             
         except Exception as e:
+            elapsed = time.time() - start_time
+            print(f"[GSX-Python] !!! run_prompt EXCEPTION after {elapsed:.2f}s: {str(e)}", file=sys.stderr, flush=True)
+            print(f"[GSX-Python]     Traceback: {traceback.format_exc()}", file=sys.stderr, flush=True)
             return {
                 "success": False,
                 "error": str(e),
                 "traceback": traceback.format_exc()
             }
-    
     def add_files(self, file_paths: List[str]) -> Dict[str, Any]:
         """
         Add files to Aider's context
@@ -260,7 +331,202 @@ class AiderBridge:
                 "error": str(e),
                 "traceback": traceback.format_exc()
             }
+
+    def search_code(self, pattern: str, file_glob: str = None) -> Dict[str, Any]:
+        """
+        Search for a pattern in the codebase using grep-like functionality
+        
+        Args:
+            pattern: Regex pattern to search for
+            file_glob: Optional file pattern to limit search (e.g., "*.py", "*.js")
+            
+        Returns:
+            List of matches with file, line number, and content
+        """
+        import subprocess
+        import re
+        
+        if not self.repo_path:
+            return {
+                "success": False,
+                "error": "Not initialized. Call initialize() first."
+            }
+        
+        try:
+            # Build grep command
+            cmd = ['grep', '-rn', '--include=' + (file_glob or '*'), pattern, str(self.repo_path)]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            
+            matches = []
+            for line in result.stdout.strip().split('\n'):
+                if line and ':' in line:
+                    parts = line.split(':', 2)
+                    if len(parts) >= 3:
+                        matches.append({
+                            "file": parts[0].replace(str(self.repo_path) + '/', ''),
+                            "line": int(parts[1]) if parts[1].isdigit() else 0,
+                            "content": parts[2].strip()
+                        })
+            
+            return {
+                "success": True,
+                "pattern": pattern,
+                "matches": matches[:50],  # Limit to 50 matches
+                "total_matches": len(matches)
+            }
+            
+        except subprocess.TimeoutExpired:
+            return {
+                "success": False,
+                "error": "Search timed out"
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
     
+    def find_definition(self, symbol: str) -> Dict[str, Any]:
+        """
+        Find where a function, class, or variable is defined
+        
+        Args:
+            symbol: The name of the symbol to find
+            
+        Returns:
+            List of definition locations
+        """
+        import subprocess
+        
+        if not self.repo_path:
+            return {
+                "success": False,
+                "error": "Not initialized. Call initialize() first."
+            }
+        
+        try:
+            # Search for common definition patterns
+            patterns = [
+                f"def {symbol}",           # Python function
+                f"class {symbol}",         # Python/JS class
+                f"function {symbol}",      # JS function
+                f"const {symbol}",         # JS const
+                f"let {symbol}",           # JS let
+                f"var {symbol}",           # JS var
+                f"{symbol}\s*=\s*function",  # JS function expression
+                f"{symbol}\s*:\s*function",  # JS object method
+                f"async\s+{symbol}",      # Async function
+            ]
+            
+            all_matches = []
+            for pattern in patterns:
+                cmd = ['grep', '-rn', '-E', pattern, str(self.repo_path)]
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+                
+                for line in result.stdout.strip().split('\n'):
+                    if line and ':' in line:
+                        parts = line.split(':', 2)
+                        if len(parts) >= 3:
+                            all_matches.append({
+                                "file": parts[0].replace(str(self.repo_path) + '/', ''),
+                                "line": int(parts[1]) if parts[1].isdigit() else 0,
+                                "content": parts[2].strip(),
+                                "pattern": pattern
+                            })
+            
+            # Remove duplicates
+            seen = set()
+            unique_matches = []
+            for m in all_matches:
+                key = (m["file"], m["line"])
+                if key not in seen:
+                    seen.add(key)
+                    unique_matches.append(m)
+            
+            return {
+                "success": True,
+                "symbol": symbol,
+                "definitions": unique_matches[:20]
+            }
+            
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    def find_usages(self, symbol: str) -> Dict[str, Any]:
+        """
+        Find all usages of a symbol in the codebase
+        
+        Args:
+            symbol: The name to search for
+            
+        Returns:
+            List of usage locations
+        """
+        # Use search_code with word boundaries
+        return self.search_code(f"\\b{symbol}\\b")
+    
+    def read_file_section(self, file_path: str, start_line: int, end_line: int) -> Dict[str, Any]:
+        """
+        Read a specific section of a file
+        
+        Args:
+            file_path: Path to the file (relative to repo)
+            start_line: Starting line number (1-indexed)
+            end_line: Ending line number (1-indexed)
+            
+        Returns:
+            The content of the specified lines
+        """
+        import os
+        
+        if not self.repo_path:
+            return {
+                "success": False,
+                "error": "Not initialized. Call initialize() first."
+            }
+        
+        try:
+            full_path = os.path.join(str(self.repo_path), file_path)
+            
+            if not os.path.exists(full_path):
+                return {
+                    "success": False,
+                    "error": f"File not found: {file_path}"
+                }
+            
+            with open(full_path, 'r') as f:
+                lines = f.readlines()
+            
+            # Adjust for 1-indexed line numbers
+            start_idx = max(0, start_line - 1)
+            end_idx = min(len(lines), end_line)
+            
+            selected_lines = []
+            for i in range(start_idx, end_idx):
+                selected_lines.append({
+                    "line": i + 1,
+                    "content": lines[i].rstrip()
+                })
+            
+            return {
+                "success": True,
+                "file": file_path,
+                "start_line": start_line,
+                "end_line": end_line,
+                "lines": selected_lines
+            }
+            
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+
     def set_test_cmd(self, command: str) -> Dict[str, Any]:
         """
         Configure auto-test command
@@ -441,6 +707,34 @@ class AiderBridge:
                 "success": False,
                 "error": "Aider is not installed. Run: pip install aider-chat"
             }
+        
+        # Add action-oriented prefix to make Aider more reliable at editing
+        action_prefix = """You are an expert code editor. Follow these coding standards:
+
+## EDITING APPROACH:
+1. Make TARGETED edits - only change the specific lines that need modification
+2. Use SEARCH/REPLACE blocks to show exactly what you're changing
+3. Never rewrite entire files - focus on the relevant sections
+4. If you see linter markers or error output, IGNORE them and proceed
+
+## CODE QUALITY:
+1. Add clear, descriptive comments explaining complex logic
+2. Use JSDoc/docstrings for functions: describe purpose, params, return values
+3. Keep variable and function names descriptive and consistent
+4. Follow the existing code style and conventions in the file
+
+## BEFORE EDITING:
+1. Search to find where the code is defined
+2. Check how it's used elsewhere
+3. Understand the context before making changes
+
+## AFTER EDITING:
+1. Briefly explain what you changed and why
+2. List any files that were modified
+
+Now make these changes:
+"""
+        enhanced_message = action_prefix + message
         
         try:
             # Send start notification

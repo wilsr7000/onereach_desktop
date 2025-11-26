@@ -3,19 +3,31 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Pair Programming - Aider</title>
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval'">
+    <title>GSX Create</title>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; img-src 'self' data: blob: file: https:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        :root {
+            --bg-primary: #0d0d1a;
+            --bg-secondary: #1a1a2e;
+            --bg-tertiary: #16213e;
+            --accent: #4f8cff;
+            --accent-hover: #6ba3ff;
+            --success: #4cd964;
+            --warning: #ffcc00;
+            --danger: #ff3b30;
+            --text-primary: #e8e8e8;
+            --text-secondary: #a0a0a0;
+            --text-muted: #666;
+            --border: rgba(255,255,255,0.08);
+            --border-light: rgba(255,255,255,0.15);
         }
         
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: #e0e0e0;
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            background: var(--bg-primary);
+            color: var(--text-primary);
             height: 100vh;
             display: flex;
             flex-direction: column;
@@ -24,617 +36,1183 @@
         
         /* Header */
         .header {
-            background: rgba(0, 0, 0, 0.3);
-            backdrop-filter: blur(10px);
-            padding: 20px 30px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            background: var(--bg-secondary);
+            padding: 12px 20px;
+            border-bottom: 1px solid var(--border);
             display: flex;
             justify-content: space-between;
             align-items: center;
+            flex-shrink: 0;
         }
         
         .header h1 {
-            font-size: 24px;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 12px;
+            font-size: 16px;
+            font-weight: 500;
+            color: var(--text-primary);
+            letter-spacing: 0.5px;
         }
         
-        .header h1::before {
-            content: '🤖';
-            font-size: 28px;
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
         }
+        
+        .cost-display {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .cost-display:hover { background: rgba(79,140,255,0.2); }
+        .cost-display.visible { display: flex; }
+        
+        .cost-badge {
+            background: var(--success);
+            color: #000;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+            font-size: 11px;
+        }
+        .cost-badge.warning { background: var(--warning); }
+        .cost-badge.danger { background: var(--danger); color: #fff; }
         
         .status {
             display: flex;
             align-items: center;
-            gap: 8px;
-            padding: 8px 16px;
-            background: rgba(0, 0, 0, 0.3);
-            border-radius: 20px;
-            font-size: 13px;
+            gap: 6px;
+            font-size: 12px;
+            color: var(--text-secondary);
         }
         
         .status-dot {
-            width: 10px;
-            height: 10px;
+            width: 8px;
+            height: 8px;
             border-radius: 50%;
-            background: #ff3b30;
-            animation: pulse 2s infinite;
+            background: var(--danger);
         }
+        .status-dot.active { background: var(--success); }
         
-        .status-dot.active {
-            background: #4cd964;
-        }
-        
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-        
-        /* Main Content */
-        .container {
+        /* Main Layout */
+        .main-container {
             flex: 1;
             display: flex;
-            gap: 20px;
-            padding: 20px;
             overflow: hidden;
         }
         
         /* Sidebar */
-        .sidebar {
-            width: 300px;
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-            border-radius: 12px;
-            padding: 20px;
-            overflow-y: auto;
+        .sidebar-container {
+            display: flex;
+            flex-shrink: 0;
+            transition: width 0.3s ease;
         }
         
-        .sidebar h3 {
-            font-size: 14px;
+        .sidebar {
+            width: 280px;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            transition: width 0.3s ease, opacity 0.3s ease;
+        }
+        
+        .sidebar.collapsed {
+            width: 0;
+            opacity: 0;
+            overflow: hidden;
+        }
+        
+        .sidebar-toggle {
+            width: 24px;
+            background: var(--bg-tertiary);
+            border: none;
+            border-right: 1px solid var(--border);
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            transition: background 0.2s;
+        }
+        .sidebar-toggle:hover { background: var(--accent); color: #fff; }
+        
+        .sidebar-section {
+            padding: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .sidebar-section h3 {
+            font-size: 11px;
             font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-secondary);
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .badge {
+            background: var(--accent);
+            color: #fff;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 10px;
+        }
+        
+        /* Space Selector */
+        .space-selector {
+            width: 100%;
+            padding: 8px 10px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .space-selector:focus { outline: none; border-color: var(--accent); }
+        
+        /* File List */
+        .file-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px 0;
+        }
+        
+        .file-item {
+            padding: 6px 12px;
+            font-size: 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: background 0.15s;
+            color: var(--text-secondary);
+        }
+        .file-item:hover { background: rgba(255,255,255,0.05); }
+        .file-item.in-context { 
+            background: rgba(79,140,255,0.15); 
+            color: var(--accent);
+        }
+        .file-item .icon { opacity: 0.6; }
+        
+        /* Center Area */
+        .center-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+        
+        /* Setup Panel */
+        .setup-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+            text-align: center;
+        }
+        
+        .setup-panel.hidden { display: none; }
+        
+        .setup-hero {
+            max-width: 500px;
+        }
+        
+        .setup-hero img {
+            width: 100%;
+            max-width: 400px;
+            margin-bottom: 24px;
+            border-radius: 12px;
+            opacity: 0.9;
+        }
+        
+        .setup-hero h2 {
+            font-size: 24px;
+            font-weight: 500;
             margin-bottom: 12px;
-            opacity: 0.7;
+            color: var(--text-primary);
+        }
+        
+        .setup-hero p {
+            color: var(--text-secondary);
+            font-size: 14px;
+            margin-bottom: 24px;
+            line-height: 1.6;
+        }
+        
+        .setup-form {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            width: 100%;
+            max-width: 400px;
+        }
+        
+        .form-group {
+            text-align: left;
+        }
+        
+        .form-group label {
+            display: block;
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
         
-        .file-list {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-        
-        .file-item {
-            background: rgba(0, 0, 0, 0.2);
-            padding: 10px;
-            border-radius: 6px;
-            font-size: 13px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            transition: background 0.2s;
-        }
-        
-        .file-item:hover {
-            background: rgba(0, 0, 0, 0.3);
-        }
-        
-        .file-remove {
-            background: transparent;
-            border: none;
-            color: #ff3b30;
-            cursor: pointer;
-            font-size: 16px;
-            opacity: 0.7;
-            transition: opacity 0.2s;
-        }
-        
-        .file-remove:hover {
-            opacity: 1;
-        }
-        
-        .add-file-btn {
+        .form-select, .form-input {
             width: 100%;
-            padding: 10px;
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px dashed rgba(255, 255, 255, 0.3);
+            padding: 10px 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
             border-radius: 6px;
-            color: #fff;
-            cursor: pointer;
+            color: var(--text-primary);
             font-size: 13px;
-            transition: all 0.2s;
-            margin-top: 12px;
+        }
+        .form-select:focus, .form-input:focus { 
+            outline: none; 
+            border-color: var(--accent); 
         }
         
-        .add-file-btn:hover {
-            background: rgba(255, 255, 255, 0.15);
-            border-color: rgba(255, 255, 255, 0.5);
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .btn-primary {
+            background: var(--accent);
+            color: #fff;
+        }
+        .btn-primary:hover { background: var(--accent-hover); }
+        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+        
+        .btn-secondary {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+        }
+        .btn-secondary:hover { background: rgba(255,255,255,0.1); }
+        
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 11px;
         }
         
         /* Chat Area */
         .chat-area {
             flex: 1;
-            display: flex;
+            display: none;
             flex-direction: column;
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-            border-radius: 12px;
             overflow: hidden;
         }
+        .chat-area.active { display: flex; }
         
+        /* Feed-style messages */
         .messages {
             flex: 1;
-            padding: 20px;
             overflow-y: auto;
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
+            padding: 16px;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 12px;
+            line-height: 1.6;
+            background: var(--bg-primary);
         }
         
         .message {
-            max-width: 80%;
-            padding: 12px 16px;
-            border-radius: 12px;
-            font-size: 14px;
-            line-height: 1.5;
-            animation: slideIn 0.3s ease;
-        }
-        
-        @keyframes slideIn {
-            from {
-                opacity: 0;
-                transform: translateY(10px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-        
-        .message.user {
-            align-self: flex-end;
-            background: rgba(0, 153, 255, 0.3);
-            border: 1px solid rgba(0, 153, 255, 0.5);
-        }
-        
-        .message.assistant {
-            align-self: flex-start;
-            background: rgba(0, 0, 0, 0.3);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-        
-        .message.system {
-            align-self: center;
-            background: rgba(76, 217, 100, 0.2);
-            border: 1px solid rgba(76, 217, 100, 0.3);
-            font-size: 12px;
-            max-width: 60%;
-        }
-        
-        .message.error {
-            align-self: center;
-            background: rgba(255, 59, 48, 0.2);
-            border: 1px solid rgba(255, 59, 48, 0.3);
-            font-size: 12px;
-            max-width: 80%;
-        }
-        
-        .modified-files {
-            margin-top: 8px;
-            padding: 8px;
-            background: rgba(0, 0, 0, 0.2);
-            border-radius: 6px;
-            font-size: 12px;
-        }
-        
-        .modified-files-title {
-            font-weight: 600;
-            margin-bottom: 4px;
-            opacity: 0.8;
-        }
-        
-        .modified-file {
-            padding: 4px 8px;
-            background: rgba(76, 217, 100, 0.2);
-            border-radius: 4px;
-            margin-top: 4px;
-            font-family: 'SF Mono', 'Monaco', 'Courier New', monospace;
-        }
-        
-        /* Input Area */
-        .input-area {
-            padding: 20px;
-            background: rgba(0, 0, 0, 0.3);
-            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 8px 0;
+            border-bottom: 1px solid var(--border);
             display: flex;
             gap: 12px;
         }
         
+        .message-time {
+            color: var(--text-muted);
+            font-size: 10px;
+            min-width: 60px;
+            flex-shrink: 0;
+        }
+        
+        .message-type {
+            min-width: 40px;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+        .message-type.user { color: var(--accent); }
+        .message-type.ai { color: var(--success); }
+        .message-type.system { color: var(--warning); }
+        .message-type.error { color: var(--danger); }
+        
+        .message-content {
+            flex: 1;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        
+        .message-files {
+            margin-top: 8px;
+            padding: 8px;
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+            font-size: 11px;
+        }
+        
+        .file-change {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 0;
+        }
+        .file-change.created { color: var(--success); }
+        .file-change.modified { color: var(--warning); }
+        
+        /* Input Area */
+        .input-area {
+            padding: 12px 16px;
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--border);
+            display: flex;
+            gap: 12px;
+            align-items: flex-end;
+        }
+        
         .input-wrapper {
             flex: 1;
-            position: relative;
+            display: flex;
+            align-items: center;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 0 12px;
         }
         
-        #promptInput {
-            width: 100%;
-            padding: 14px 16px;
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 8px;
-            color: #fff;
-            font-size: 14px;
-            font-family: inherit;
-            resize: none;
-            min-height: 50px;
-            max-height: 150px;
-        }
-        
-        #promptInput:focus {
-            outline: none;
-            border-color: rgba(255, 255, 255, 0.4);
-            background: rgba(255, 255, 255, 0.15);
-        }
-        
-        #promptInput::placeholder {
-            color: rgba(255, 255, 255, 0.5);
-        }
-        
-        .send-btn {
-            padding: 14px 24px;
-            background: linear-gradient(135deg, #0099ff 0%, #0077cc 100%);
-            border: none;
-            border-radius: 8px;
-            color: #fff;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s;
-            align-self: flex-end;
-        }
-        
-        .send-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0, 153, 255, 0.4);
-        }
-        
-        .send-btn:active {
-            transform: translateY(0);
-        }
-        
-        .send-btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none;
-        }
-        
-        /* Loading Spinner */
-        .spinner {
-            border: 2px solid rgba(255, 255, 255, 0.1);
-            border-top: 2px solid #fff;
-            border-radius: 50%;
-            width: 16px;
-            height: 16px;
-            animation: spin 1s linear infinite;
-            display: inline-block;
+        .input-prefix {
+            color: var(--accent);
+            font-weight: bold;
             margin-right: 8px;
         }
         
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        
-        /* Setup Panel */
-        .setup-panel {
-            padding: 40px;
-            text-align: center;
-            margin: auto;
-        }
-        
-        .setup-panel h2 {
-            font-size: 28px;
-            margin-bottom: 16px;
-        }
-        
-        .setup-panel p {
-            font-size: 16px;
-            opacity: 0.8;
-            margin-bottom: 32px;
-        }
-        
-        .model-selector {
-            margin: 24px 0;
-        }
-        
-        .model-selector label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 500;
-        }
-        
-        .model-selector select {
-            padding: 12px 16px;
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 8px;
-            color: #fff;
-            font-size: 14px;
-            cursor: pointer;
-            min-width: 250px;
-        }
-        
-        .model-selector select:focus {
-            outline: none;
-            border-color: rgba(255, 255, 255, 0.4);
-        }
-        
-        .start-btn {
-            padding: 16px 32px;
-            background: linear-gradient(135deg, #4cd964 0%, #3dae50 100%);
+        .input-wrapper textarea {
+            flex: 1;
+            background: transparent;
             border: none;
-            border-radius: 8px;
-            color: #fff;
-            font-size: 16px;
-            font-weight: 600;
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 13px;
+            padding: 10px 0;
+            resize: none;
+            min-height: 40px;
+            max-height: 150px;
+        }
+        .input-wrapper textarea:focus { outline: none; }
+        .input-wrapper textarea::placeholder { color: var(--text-muted); }
+        
+        /* Preview Panel */
+        .preview-panel {
+            width: 400px;
+            background: var(--bg-secondary);
+            border-left: 1px solid var(--border);
+            display: none;
+            flex-direction: column;
+            flex-shrink: 0;
+            transition: width 0.3s ease;
+        }
+        .preview-panel.active { display: flex; }
+        .preview-panel.collapsed { width: 0; overflow: hidden; }
+        
+        .preview-header {
+            padding: 10px 12px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        
+        .preview-tabs {
+            display: flex;
+            gap: 4px;
+        }
+        
+        .preview-tab {
+            padding: 4px 10px;
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 11px;
             cursor: pointer;
-            transition: all 0.2s;
-        }
-        
-        .start-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 16px rgba(76, 217, 100, 0.4);
-        }
-        
-        .repo-info {
-            margin-top: 16px;
-            padding: 12px;
-            background: rgba(0, 0, 0, 0.2);
-            border-radius: 6px;
-            font-size: 12px;
-            font-family: 'SF Mono', 'Monaco', 'Courier New', monospace;
-        }
-        
-        /* Scrollbar */
-        ::-webkit-scrollbar {
-            width: 8px;
-        }
-        
-        ::-webkit-scrollbar-track {
-            background: rgba(0, 0, 0, 0.1);
-        }
-        
-        ::-webkit-scrollbar-thumb {
-            background: rgba(255, 255, 255, 0.2);
             border-radius: 4px;
         }
-        
-        ::-webkit-scrollbar-thumb:hover {
-            background: rgba(255, 255, 255, 0.3);
+        .preview-tab.active {
+            background: var(--accent);
+            color: #fff;
         }
+        
+        .preview-actions {
+            display: flex;
+            gap: 4px;
+        }
+        
+        .preview-actions button {
+            padding: 4px 8px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            font-size: 10px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .preview-actions button:hover { 
+            background: var(--accent); 
+            color: #fff; 
+            border-color: var(--accent);
+        }
+        
+        .preview-content {
+            flex: 1;
+            overflow: hidden;
+            background: #fff;
+        }
+        
+        .preview-content iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+        
+        .preview-empty {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            font-size: 12px;
+        }
+        
+        /* Config Panel (collapsible) */
+        .config-panel {
+            padding: 12px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border);
+            display: none;
+        }
+        .config-panel.active { display: block; }
+        
+        .config-row {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 10px;
+        }
+        
+        .config-row:last-child { margin-bottom: 0; }
+        
+        .config-group {
+            flex: 1;
+        }
+        
+        .config-group label {
+            display: block;
+            font-size: 10px;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+            text-transform: uppercase;
+        }
+        
+        .config-group select,
+        .config-group input {
+            width: 100%;
+            padding: 6px 8px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-primary);
+            font-size: 11px;
+        }
+        
+        /* Global Instructions */
+        .global-instructions {
+            padding: 12px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border);
+            display: none;
+        }
+        .global-instructions.active { display: block; }
+        
+        .global-instructions textarea {
+            width: 100%;
+            height: 80px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-primary);
+            font-size: 11px;
+            padding: 8px;
+            resize: vertical;
+            font-family: inherit;
+        }
+        
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.8);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal.active { display: flex; }
+        
+        .modal-content {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            width: 90%;
+            max-width: 800px;
+            max-height: 80vh;
+            display: flex;
+            flex-direction: column;
+            border: 1px solid var(--border);
+        }
+        
+        .modal-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .modal-header h3 { font-size: 14px; font-weight: 500; }
+        
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 20px;
+            cursor: pointer;
+        }
+        
+        .modal-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px 20px;
+        }
+        
+        /* Log Table */
+        .log-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+        }
+        
+        .log-table th, .log-table td {
+            padding: 8px 10px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .log-table th {
+            background: var(--bg-tertiary);
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+        }
+        
+        .log-table tr:hover { background: rgba(255,255,255,0.03); }
+        
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: var(--bg-primary); }
+        ::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+        
+        /* No API Key Warning */
+        .no-api-warning {
+            background: rgba(255,59,48,0.1);
+            border: 1px solid var(--danger);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .no-api-warning h3 { color: var(--danger); margin-bottom: 8px; }
+        .no-api-warning p { color: var(--text-secondary); font-size: 13px; }
     </style>
 </head>
 <body>
+    <!-- Header -->
     <div class="header">
-        <h1>AI Pair Programming</h1>
-        <div class="status">
-            <span class="status-dot" id="statusDot"></span>
-            <span id="statusText">Not Connected</span>
-        </div>
-    </div>
-    
-    <div class="container">
-        <!-- Setup Panel (shown initially) -->
-        <div class="setup-panel" id="setupPanel">
-            <h2>Start AI Pair Programming</h2>
-            <p>Aider will help you write and modify code using AI</p>
-            
-            <button class="folder-btn" onclick="Aider.selectFolder()" style="
-                padding: 12px 24px;
-                background: rgba(255, 255, 255, 0.1);
-                border: 2px dashed rgba(255, 255, 255, 0.3);
-                border-radius: 8px;
-                color: #fff;
-                font-size: 14px;
-                cursor: pointer;
-                margin-bottom: 20px;
-                transition: all 0.2s;
-            ">
-                📁 Select Project Folder
-            </button>
-            
-            <div class="repo-info" id="repoInfo" style="display: none; margin-bottom: 20px;"></div>
-            
-            <div class="model-selector">
-                <label for="modelSelect">Select AI Model:</label>
-                <select id="modelSelect">
-                    <option value="gpt-4">GPT-4 (OpenAI)</option>
-                    <option value="gpt-4-turbo">GPT-4 Turbo (OpenAI)</option>
-                    <option value="claude-3-opus-20240229">Claude 3 Opus (Anthropic)</option>
-                    <option value="claude-3-sonnet-20240229">Claude 3 Sonnet (Anthropic)</option>
-                    <option value="gpt-3.5-turbo">GPT-3.5 Turbo (Faster, Cheaper)</option>
-                </select>
+        <h1>GSX Create</h1>
+        <div class="header-right">
+            <div class="cost-display" id="costDisplay" onclick="GSXCreate.showTransactionLogs()">
+                <span>Cost:</span>
+                <span class="cost-badge" id="costBadge">$0.00</span>
             </div>
-            
-            <button class="start-btn" onclick="Aider.initialize()">
-                Select Folder & Start
-            </button>
-            
-            <p style="margin-top: 20px; font-size: 12px; opacity: 0.7;">
-                ⚠️ Requires OPENAI_API_KEY or ANTHROPIC_API_KEY environment variable
-            </p>
-        </div>
-        
-        <!-- Main Chat Interface (hidden initially) -->
-        <div class="sidebar" id="sidebar" style="display: none;">
-            <h3>Files in Context</h3>
-            <div class="file-list" id="fileList">
-                <div style="opacity: 0.6; font-size: 12px;">No files added yet</div>
-            </div>
-            <button class="add-file-btn" onclick="Aider.addFilesDialog()">
-                ➕ Add Files
-            </button>
-        </div>
-        
-        <div class="chat-area" id="chatArea" style="display: none;">
-            <div class="messages" id="messages">
-                <div class="message system">
-                    Aider is ready! Add files and start coding with AI assistance.
-                </div>
-            </div>
-            
-            <div class="input-area">
-                <div class="input-wrapper">
-                    <textarea 
-                        id="promptInput" 
-                        placeholder="Describe what you want to build or modify..."
-                        rows="1"
-                    ></textarea>
-                </div>
-                <button class="send-btn" onclick="Aider.sendPrompt()" id="sendBtn">
-                    Send
-                </button>
+            <div class="status">
+                <span class="status-dot" id="statusDot"></span>
+                <span id="statusText">Not Connected</span>
             </div>
         </div>
     </div>
     
+    <!-- Main Container -->
+    <div class="main-container">
+        <!-- Sidebar -->
+        <div class="sidebar-container">
+            <div class="sidebar" id="sidebar">
+                <!-- Space Selection -->
+                <div class="sidebar-section">
+                    <h3>Space</h3>
+                    <select class="space-selector" id="spaceSelect" onchange="GSXCreate.selectSpace(this.value)">
+                        <option value="">Select a space...</option>
+                    </select>
+                </div>
+                
+                <!-- Config Options (shown after space selected) -->
+                <div class="sidebar-section" id="configSection" style="display: none;">
+                    <h3>Configuration</h3>
+                    <div class="form-group" style="margin-bottom: 8px;">
+                        <label>Model</label>
+                        <select class="form-select" id="modelSelect" style="padding: 6px 8px; font-size: 11px;">
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 8px;">
+                        <label>Style Guide</label>
+                        <select class="form-select" id="styleGuideSelect" style="padding: 6px 8px; font-size: 11px;">
+                            <option value="">None</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 8px;">
+                        <label>Journey Map</label>
+                        <select class="form-select" id="journeyMapSelect" style="padding: 6px 8px; font-size: 11px;">
+                            <option value="">None</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-primary btn-sm" style="width: 100%; margin-top: 8px;" onclick="GSXCreate.startSession()" id="startBtn">
+                        Start Session
+                    </button>
+                </div>
+                
+                <!-- Project Files -->
+                <div class="sidebar-section" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+                    <h3>
+                        Files
+                        <span class="badge" id="fileCount">0</span>
+                    </h3>
+                    <div class="file-list" id="fileList">
+                        <div style="color: var(--text-muted); font-size: 11px; padding: 8px;">
+                            Select a space to see files
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Context Files -->
+                <div class="sidebar-section">
+                    <h3>
+                        In Context
+                        <span class="badge" id="contextCount">0</span>
+                    </h3>
+                    <div id="contextList" style="max-height: 120px; overflow-y: auto;">
+                        <div style="color: var(--text-muted); font-size: 11px;">
+                            Click files to add to context
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <button class="sidebar-toggle" onclick="GSXCreate.toggleSidebar()">
+                <span id="sidebarToggleIcon">◀</span>
+            </button>
+        </div>
+        
+        <!-- Center Area -->
+        <div class="center-area">
+            <!-- Setup Panel (shown initially) -->
+            <div class="setup-panel" id="setupPanel">
+                <div class="setup-hero">
+                    <img src="assets/banner.png" alt="GSX Create" onerror="this.style.display='none'">
+                    <h2>GSX Create</h2>
+                    <p>AI-powered code generation integrated with your Spaces. Select a space from the sidebar to begin.</p>
+                    
+                    <div id="noApiWarning" class="no-api-warning" style="display: none;">
+                        <h3>API Key Required</h3>
+                        <p>Please add an OpenAI or Anthropic API key in Settings to use GSX Create.</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Chat Area (shown after session starts) -->
+            <div class="chat-area" id="chatArea">
+                <!-- Global Instructions Toggle -->
+                <div style="padding: 8px 16px; background: var(--bg-secondary); border-bottom: 1px solid var(--border); display: flex; gap: 8px;">
+                    <button class="btn btn-secondary btn-sm" onclick="GSXCreate.toggleGlobalInstructions()">
+                        Global Instructions
+                    </button>
+                    <button class="btn btn-secondary btn-sm" onclick="GSXCreate.toggleConfig()">
+                        Config
+                    </button>
+                    <div style="flex: 1;"></div>
+                    <button class="btn btn-secondary btn-sm" onclick="GSXCreate.takeSnapshot()">
+                        Snapshot
+                    </button>
+                    <button class="btn btn-secondary btn-sm" onclick="GSXCreate.showVersionHistory()">
+                        History
+                    </button>
+                </div>
+                
+                <!-- Global Instructions Panel -->
+                <div class="global-instructions" id="globalInstructionsPanel">
+                    <label style="font-size: 10px; color: var(--text-secondary); display: block; margin-bottom: 6px;">
+                        GLOBAL INSTRUCTIONS (included with every prompt)
+                    </label>
+                    <textarea id="globalInstructions" placeholder="Enter instructions that should be included with every prompt..."></textarea>
+                    <div style="margin-top: 8px; display: flex; gap: 8px;">
+                        <button class="btn btn-sm btn-secondary" onclick="GSXCreate.saveGlobalInstructions()">Save</button>
+                        <button class="btn btn-sm btn-secondary" onclick="GSXCreate.applyTemplate('typescript')">TypeScript</button>
+                        <button class="btn btn-sm btn-secondary" onclick="GSXCreate.applyTemplate('react')">React</button>
+                        <button class="btn btn-sm btn-secondary" onclick="GSXCreate.applyTemplate('python')">Python</button>
+                    </div>
+                </div>
+                
+                <!-- Config Panel -->
+                <div class="config-panel" id="configPanel">
+                    <div class="config-row">
+                        <div class="config-group">
+                            <label>Lint Command</label>
+                            <input type="text" id="lintCmd" placeholder="e.g., npm run lint">
+                        </div>
+                        <div class="config-group">
+                            <label>Test Command</label>
+                            <input type="text" id="testCmd" placeholder="e.g., npm test">
+                        </div>
+                        <button class="btn btn-sm btn-secondary" onclick="GSXCreate.detectTools()" style="align-self: flex-end;">
+                            Auto-Detect
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Messages -->
+                <div class="messages" id="messages">
+                    <div class="message">
+                        <span class="message-time">--:--</span>
+                        <span class="message-type system">SYS</span>
+                        <span class="message-content">Session started. Describe what you want to build or modify.</span>
+                    </div>
+                </div>
+                
+                <!-- Input Area -->
+                <div class="input-area">
+                    <div class="input-wrapper">
+                        <span class="input-prefix">&gt;</span>
+                        <textarea id="promptInput" placeholder="Describe what you want to build..." rows="1"></textarea>
+                    </div>
+                    <button class="btn btn-primary" onclick="GSXCreate.sendPrompt()" id="sendBtn">Send</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Preview Panel -->
+        <div class="preview-panel" id="previewPanel">
+            <div class="preview-header">
+                <div class="preview-tabs">
+                    <button class="preview-tab active" onclick="GSXCreate.setPreviewMode('preview')">Preview</button>
+                    <button class="preview-tab" onclick="GSXCreate.setPreviewMode('code')">Code</button>
+                </div>
+                <div class="preview-actions">
+                    <button onclick="GSXCreate.refreshPreview()">Refresh</button>
+                    <button onclick="GSXCreate.openInBrowser()">Open</button>
+                    <button onclick="GSXCreate.togglePreview()">Close</button>
+                </div>
+            </div>
+            <div class="preview-content" id="previewContent">
+                <div class="preview-empty">Select a file to preview</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Transaction Log Modal -->
+    <div class="modal" id="logModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>API Transaction Logs</h3>
+                <button class="modal-close" onclick="GSXCreate.closeModal('logModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <table class="log-table">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Type</th>
+                            <th>Model</th>
+                            <th>Tokens</th>
+                            <th>Cost</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logTableBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Version History Modal -->
+    <div class="modal" id="historyModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Version History</h3>
+                <button class="modal-close" onclick="GSXCreate.closeModal('historyModal')">&times;</button>
+            </div>
+            <div class="modal-body" id="historyModalBody">
+            </div>
+        </div>
+    </div>
+
     <script>
-        const Aider = {
-            files: [],
+        const GSXCreate = {
+            // State
+            currentSpace: null,
+            currentSpaceId: null,
+            currentSpaceName: null,
             repoPath: null,
+            files: [],
+            projectFiles: [],
+            contextFiles: [],
+            apiConfig: null,
+            costSummary: { totalCost: 0, totalCalls: 0 },
+            currentPreviewFile: null,
+            globalInstructionsText: '',
+            styleGuides: [],
+            journeyMaps: [],
+            spaceItems: [],
+            fileWatcher: null,
             
-            async selectFolder() {
-                try {
-                    const folder = await window.aider.selectFolder();
-                    if (folder) {
-                        this.repoPath = folder;
-                        document.getElementById('repoInfo').textContent = `Project: ${folder}`;
-                        document.getElementById('repoInfo').style.display = 'block';
-                        document.querySelector('.start-btn').textContent = 'Start Aider';
-                    }
-                } catch (error) {
-                    this.addMessage('error', `Failed to select folder: ${error.message}`);
-                }
+            // Initialize
+            async init() {
+                console.log('[GSX Create] Initializing...');
+                await this.checkApiConfig();
+                await this.loadSpaces();
+                this.setupEventListeners();
+                this.restoreSidebarState();
             },
             
-            async initialize() {
-                const modelName = document.getElementById('modelSelect').value;
-                const repoInfo = document.getElementById('repoInfo');
-                const startBtn = document.querySelector('.start-btn');
-                
-                // If no folder selected, prompt to select one
-                if (!this.repoPath) {
-                    await this.selectFolder();
-                    if (!this.repoPath) {
-                        this.addMessage('error', 'Please select a project folder first');
+            // Check API Configuration
+            async checkApiConfig() {
+                try {
+                    this.apiConfig = await window.aider.getApiConfig();
+                    console.log('[GSX Create] API Config:', this.apiConfig);
+                    
+                    const modelSelect = document.getElementById('modelSelect');
+                    const noApiWarning = document.getElementById('noApiWarning');
+                    
+                    if (!this.apiConfig.hasApiKey) {
+                        noApiWarning.style.display = 'block';
                         return;
                     }
-                }
-                
-                startBtn.disabled = true;
-                startBtn.textContent = 'Starting...';
-                
-                try {
-                    // Start Aider Python sidecar
-                    this.updateStatus('Starting Python...', false);
-                    const startResult = await window.aider.start();
                     
-                    if (!startResult.success) {
-                        throw new Error(startResult.error || 'Failed to start Aider');
-                    }
+                    noApiWarning.style.display = 'none';
                     
-                    this.updateStatus('Initializing...', false);
-                    
-                    // Initialize with selected project
-                    const result = await window.aider.initialize(this.repoPath, modelName);
-                    
-                    if (result.success) {
-                        this.updateStatus('Connected', true);
-                        repoInfo.textContent = `Repository: ${result.repo_path || this.repoPath}`;
-                        repoInfo.style.display = 'block';
-                        
-                        // Show chat interface
-                        setTimeout(() => {
-                            document.getElementById('setupPanel').style.display = 'none';
-                            document.getElementById('sidebar').style.display = 'block';
-                            document.getElementById('chatArea').style.display = 'flex';
-                        }, 500);
+                    // Populate models based on provider
+                    if (this.apiConfig.provider === 'anthropic' || this.apiConfig.provider === 'claude') {
+                        modelSelect.innerHTML = `
+                            <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
+                            <option value="claude-opus-4-20250514">Claude Opus 4</option>
+                        `;
                     } else {
-                        throw new Error(result.error || 'Failed to initialize');
+                        modelSelect.innerHTML = `
+                            <option value="gpt-4o">GPT-4o</option>
+                            <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                        `;
                     }
                 } catch (error) {
-                    this.updateStatus('Error', false);
-                    this.addMessage('error', `Failed to start: ${error.message}`);
-                    startBtn.disabled = false;
-                    startBtn.textContent = 'Start Aider';
+                    console.error('[GSX Create] API config error:', error);
                 }
             },
             
-            updateStatus(text, active) {
-                document.getElementById('statusText').textContent = text;
-                document.getElementById('statusDot').classList.toggle('active', active);
-            },
-            
-            async addFilesDialog() {
-                // For now, use prompt - in real impl, use file dialog
-                const files = prompt('Enter file paths (comma-separated):');
-                if (!files) return;
-                
-                const filePaths = files.split(',').map(f => f.trim());
-                await this.addFiles(filePaths);
-            },
-            
-            async addFiles(filePaths) {
+            // Load Spaces
+            async loadSpaces() {
                 try {
-                    const result = await window.aider.addFiles(filePaths);
+                    const spaces = await window.aider.getSpaces();
+                    console.log('[GSX Create] Loaded spaces:', spaces);
                     
-                    if (result.success) {
-                        this.files = result.files_in_context || [];
-                        this.renderFileList();
-                        this.addMessage('system', `Added ${result.files_added.length} file(s) to context`);
-                    } else {
-                        this.addMessage('error', `Failed to add files: ${result.error}`);
+                    const select = document.getElementById('spaceSelect');
+                    select.innerHTML = '<option value="">Select a space...</option>';
+                    
+                    if (spaces && spaces.length > 0) {
+                        spaces.forEach(space => {
+                            if (space.path) {
+                                const option = document.createElement('option');
+                                option.value = space.id;
+                                option.textContent = `${space.name} (${space.itemCount || 0} items)`;
+                                option.dataset.path = space.path;
+                                option.dataset.name = space.name;
+                                select.appendChild(option);
+                            }
+                        });
                     }
                 } catch (error) {
-                    this.addMessage('error', `Error: ${error.message}`);
+                    console.error('[GSX Create] Load spaces error:', error);
                 }
             },
             
-            async removeFile(filePath) {
-                try {
-                    const result = await window.aider.removeFiles([filePath]);
-                    
-                    if (result.success) {
-                        this.files = result.files_in_context || [];
-                        this.renderFileList();
-                        this.addMessage('system', `Removed file from context`);
-                    }
-                } catch (error) {
-                    this.addMessage('error', `Error: ${error.message}`);
-                }
-            },
-            
-            renderFileList() {
-                const fileList = document.getElementById('fileList');
-                
-                if (this.files.length === 0) {
-                    fileList.innerHTML = '<div style="opacity: 0.6; font-size: 12px;">No files added yet</div>';
+            // Select Space
+            async selectSpace(spaceId) {
+                if (!spaceId) {
+                    this.currentSpace = null;
+                    this.currentSpaceId = null;
+                    document.getElementById('configSection').style.display = 'none';
                     return;
                 }
                 
-                fileList.innerHTML = this.files.map(file => {
-                    const fileName = file.split('/').pop();
+                const select = document.getElementById('spaceSelect');
+                const option = select.options[select.selectedIndex];
+                
+                this.currentSpaceId = spaceId;
+                this.currentSpaceName = option.dataset.name;
+                this.repoPath = option.dataset.path;
+                this.currentSpace = {
+                    id: spaceId,
+                    name: option.dataset.name,
+                    path: option.dataset.path
+                };
+                
+                console.log('[GSX Create] Selected space:', this.currentSpace);
+                
+                // Show config section
+                document.getElementById('configSection').style.display = 'block';
+                
+                // Load space data
+                await Promise.all([
+                    this.loadProjectFiles(),
+                    this.loadSpaceItems(),
+                    this.loadStyleGuides(),
+                    this.loadJourneyMaps(),
+                    this.loadCostSummary(),
+                    this.loadGlobalInstructions()
+                ]);
+            },
+            
+            // Load Project Files
+            async loadProjectFiles() {
+                if (!this.repoPath) return;
+                
+                try {
+                    const result = await window.aider.listProjectFiles(this.repoPath);
+                    console.log('[GSX Create] Project files:', result);
+                    
+                    if (result.success) {
+                        this.projectFiles = result.files || [];
+                        this.renderProjectFiles();
+                    }
+                } catch (error) {
+                    console.error('[GSX Create] Load files error:', error);
+                }
+            },
+            
+            // Render Project Files
+            renderProjectFiles() {
+                const fileList = document.getElementById('fileList');
+                const fileCount = document.getElementById('fileCount');
+                
+                const files = this.projectFiles.filter(f => !f.isDirectory);
+                fileCount.textContent = files.length;
+                
+                if (files.length === 0) {
+                    fileList.innerHTML = '<div style="color: var(--text-muted); font-size: 11px; padding: 8px;">No files yet</div>';
+                    return;
+                }
+                
+                fileList.innerHTML = files.map(file => {
+                    const inContext = this.contextFiles.includes(file.path);
+                    const icon = this.getFileIcon(file.name);
                     return `
-                        <div class="file-item">
-                            <span title="${file}">${fileName}</span>
-                            <button class="file-remove" onclick="Aider.removeFile('${file}')">×</button>
+                        <div class="file-item ${inContext ? 'in-context' : ''}" 
+                             onclick="GSXCreate.toggleFileContext('${file.path}')"
+                             ondblclick="GSXCreate.previewFile('${file.path}')">
+                            <span class="icon">${icon}</span>
+                            <span>${file.name}</span>
                         </div>
                     `;
                 }).join('');
             },
             
+            // Load Space Items
+            async loadSpaceItems() {
+                if (!this.currentSpaceId) return;
+                
+                try {
+                    const result = await window.aider.getSpaceItems(this.currentSpaceId);
+                    if (result.success) {
+                        this.spaceItems = result.items || [];
+                        console.log('[GSX Create] Space items:', this.spaceItems);
+                    }
+                } catch (error) {
+                    console.error('[GSX Create] Load space items error:', error);
+                }
+            },
+            
+            // Load Style Guides
+            async loadStyleGuides() {
+                if (!this.currentSpaceId) return;
+                
+                try {
+                    const result = await window.aider.getStyleGuides(this.currentSpaceId);
+                    if (result.success) {
+                        this.styleGuides = result.styleGuides || [];
+                        this.renderStyleGuideSelect();
+                    }
+                } catch (error) {
+                    console.error('[GSX Create] Load style guides error:', error);
+                }
+            },
+            
+            renderStyleGuideSelect() {
+                const select = document.getElementById('styleGuideSelect');
+                select.innerHTML = '<option value="">None</option>';
+                
+                this.styleGuides.forEach(sg => {
+                    const option = document.createElement('option');
+                    option.value = sg.id;
+                    option.textContent = sg.name;
+                    select.appendChild(option);
+                });
+            },
+            
+            // Load Journey Maps
+            async loadJourneyMaps() {
+                if (!this.currentSpaceId) return;
+                
+                try {
+                    const result = await window.aider.getJourneyMaps(this.currentSpaceId);
+                    if (result.success) {
+                        this.journeyMaps = result.journeyMaps || [];
+                        this.renderJourneyMapSelect();
+                    }
+                } catch (error) {
+                    console.error('[GSX Create] Load journey maps error:', error);
+                }
+            },
+            
+            renderJourneyMapSelect() {
+                const select = document.getElementById('journeyMapSelect');
+                select.innerHTML = '<option value="">None</option>';
+                
+                this.journeyMaps.forEach(jm => {
+                    const option = document.createElement('option');
+                    option.value = jm.id;
+                    option.textContent = jm.name;
+                    select.appendChild(option);
+                });
+            },
+            
+            // Toggle File Context
+            async toggleFileContext(filePath) {
+                const index = this.contextFiles.indexOf(filePath);
+                
+                if (index > -1) {
+                    this.contextFiles.splice(index, 1);
+                    await window.aider.removeFiles([filePath]);
+                } else {
+                    this.contextFiles.push(filePath);
+                    await window.aider.addFiles([filePath]);
+                }
+                
+                this.renderProjectFiles();
+                this.renderContextFiles();
+            },
+            
+            renderContextFiles() {
+                const contextList = document.getElementById('contextList');
+                const contextCount = document.getElementById('contextCount');
+                
+                contextCount.textContent = this.contextFiles.length;
+                
+                if (this.contextFiles.length === 0) {
+                    contextList.innerHTML = '<div style="color: var(--text-muted); font-size: 11px;">Click files to add</div>';
+                    return;
+                }
+                
+                contextList.innerHTML = this.contextFiles.map(path => {
+                    const name = path.split('/').pop();
+                    return `
+                        <div class="file-item in-context" onclick="GSXCreate.toggleFileContext('${path}')">
+                            <span>${name}</span>
+                            <span style="margin-left: auto; opacity: 0.5;">×</span>
+                        </div>
+                    `;
+                }).join('');
+            },
+            
+            // Start Session
+            async startSession() {
+                const startBtn = document.getElementById('startBtn');
+                const modelName = document.getElementById('modelSelect').value;
+                
+                startBtn.disabled = true;
+                startBtn.textContent = 'Starting...';
+                
+                try {
+                    this.updateStatus('Starting...', false);
+                    
+                    const startResult = await window.aider.start();
+                    if (!startResult.success) {
+                        throw new Error(startResult.error || 'Failed to start');
+                    }
+                    
+                    this.updateStatus('Initializing...', false);
+                    
+                    const result = await window.aider.initialize(this.repoPath, modelName);
+                    
+                    if (result.success) {
+                        this.updateStatus('Connected', true);
+                        
+                        // Add all files to context automatically
+                        const filePaths = this.projectFiles.filter(f => !f.isDirectory).map(f => f.path);
+                        if (filePaths.length > 0) {
+                            await window.aider.addFiles(filePaths);
+                            this.contextFiles = filePaths;
+                            this.renderContextFiles();
+                        }
+                        
+                        // Show chat area, hide setup
+                        document.getElementById('setupPanel').classList.add('hidden');
+                        document.getElementById('chatArea').classList.add('active');
+                        document.getElementById('previewPanel').classList.add('active');
+                        document.getElementById('costDisplay').classList.add('visible');
+                        
+                        this.addMessage('system', `Connected to ${this.currentSpaceName}. ${filePaths.length} files in context.`);
+                    } else {
+                        throw new Error(result.error || 'Initialization failed');
+                    }
+                } catch (error) {
+                    console.error('[GSX Create] Start error:', error);
+                    this.addMessage('error', error.message);
+                    this.updateStatus('Error', false);
+                } finally {
+                    startBtn.disabled = false;
+                    startBtn.textContent = 'Start Session';
+                }
+            },
+            
+            // Send Prompt
             async sendPrompt() {
                 const input = document.getElementById('promptInput');
                 const sendBtn = document.getElementById('sendBtn');
@@ -642,78 +1220,446 @@
                 
                 if (!message) return;
                 
-                // Add user message
                 this.addMessage('user', message);
                 input.value = '';
                 
-                // Disable input
                 sendBtn.disabled = true;
-                sendBtn.innerHTML = '<span class="spinner"></span>Thinking...';
+                sendBtn.textContent = 'Thinking...';
                 
                 try {
-                    const result = await window.aider.runPrompt(message);
+                    // Build full message with context
+                    let fullMessage = '';
+                    
+                    // Add global instructions
+                    if (this.globalInstructionsText) {
+                        fullMessage += `[Global Instructions]\n${this.globalInstructionsText}\n\n`;
+                    }
+                    
+                    // Add style guide if selected
+                    const styleGuideId = document.getElementById('styleGuideSelect').value;
+                    if (styleGuideId) {
+                        const sg = this.styleGuides.find(s => s.id === styleGuideId);
+                        if (sg && sg.content) {
+                            fullMessage += `[Style Guide: ${sg.name}]\n${sg.content}\n\n`;
+                        }
+                    }
+                    
+                    // Add journey map if selected
+                    const journeyMapId = document.getElementById('journeyMapSelect').value;
+                    if (journeyMapId) {
+                        const jm = this.journeyMaps.find(j => j.id === journeyMapId);
+                        if (jm && jm.content) {
+                            fullMessage += `[Journey Map: ${jm.name}]\n${jm.content}\n\n`;
+                        }
+                    }
+                    
+                    fullMessage += message;
+                    
+                    const result = await window.aider.runPrompt(fullMessage);
                     
                     if (result.success) {
-                        this.addMessage('assistant', result.response, result.modified_files);
+                        const fileDetails = result.file_details || [];
+                        this.addMessage('ai', result.response, fileDetails);
                         
-                        // Update file list if files were modified
-                        if (result.files_in_context) {
-                            this.files = result.files_in_context;
-                            this.renderFileList();
+                        // Record cost
+                        const model = document.getElementById('modelSelect').value;
+                        const inputTokens = result.input_tokens || 0;
+                        const outputTokens = result.output_tokens || 0;
+                        await this.recordApiCost(model, inputTokens, outputTokens, 'prompt', message);
+                        
+                        // Register created/modified files
+                        for (const file of fileDetails) {
+                            try {
+                                if (file.action === 'created') {
+                                    await window.aider.registerCreatedFile({
+                                        spaceId: this.currentSpaceId,
+                                        filePath: file.path,
+                                        description: file.description || result.summary,
+                                        aiModel: model
+                                    });
+                                } else if (file.action === 'modified') {
+                                    await window.aider.updateFileMetadata({
+                                        spaceId: this.currentSpaceId,
+                                        filePath: file.path,
+                                        description: file.description || result.summary
+                                    });
+                                }
+                            } catch (e) {
+                                console.error('[GSX Create] File registration error:', e);
+                            }
+                        }
+                        
+                        // Refresh files and preview
+                        await this.loadProjectFiles();
+                        
+                        // Auto-preview first HTML file
+                        const htmlFile = fileDetails.find(f => f.name.endsWith('.html'));
+                        if (htmlFile) {
+                            setTimeout(() => this.previewFile(htmlFile.path), 500);
                         }
                     } else {
-                        this.addMessage('error', `Error: ${result.error}`);
+                        this.addMessage('error', result.error);
                     }
                 } catch (error) {
-                    this.addMessage('error', `Error: ${error.message}`);
+                    console.error('[GSX Create] Prompt error:', error);
+                    this.addMessage('error', error.message);
                 } finally {
                     sendBtn.disabled = false;
                     sendBtn.textContent = 'Send';
                 }
             },
             
-            addMessage(type, text, modifiedFiles = null) {
+            // Add Message
+            addMessage(type, text, fileDetails = null) {
                 const messages = document.getElementById('messages');
-                const messageDiv = document.createElement('div');
-                messageDiv.className = `message ${type}`;
-                messageDiv.textContent = text;
+                const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
                 
-                // Add modified files if present
-                if (modifiedFiles && modifiedFiles.length > 0) {
-                    const filesDiv = document.createElement('div');
-                    filesDiv.className = 'modified-files';
-                    filesDiv.innerHTML = `
-                        <div class="modified-files-title">📝 Modified Files:</div>
-                        ${modifiedFiles.map(f => `<div class="modified-file">${f}</div>`).join('')}
-                    `;
-                    messageDiv.appendChild(filesDiv);
+                const typeLabels = {
+                    user: 'YOU',
+                    ai: 'AI',
+                    system: 'SYS',
+                    error: 'ERR'
+                };
+                
+                let html = `
+                    <div class="message">
+                        <span class="message-time">${time}</span>
+                        <span class="message-type ${type}">${typeLabels[type] || type.toUpperCase()}</span>
+                        <span class="message-content">${this.escapeHtml(text)}`;
+                
+                if (fileDetails && fileDetails.length > 0) {
+                    html += '<div class="message-files">';
+                    fileDetails.forEach(f => {
+                        html += `<div class="file-change ${f.action}">${f.action === 'created' ? '+' : '~'} ${f.name}</div>`;
+                    });
+                    html += '</div>';
                 }
                 
-                messages.appendChild(messageDiv);
+                html += '</span></div>';
+                
+                messages.insertAdjacentHTML('beforeend', html);
                 messages.scrollTop = messages.scrollHeight;
-            }
-        };
-        
-        // Handle Enter key in textarea
-        document.addEventListener('DOMContentLoaded', () => {
-            const promptInput = document.getElementById('promptInput');
+            },
             
-            if (promptInput) {
-                promptInput.addEventListener('keydown', (e) => {
+            // Preview File
+            async previewFile(filePath) {
+                if (!filePath) return;
+                
+                try {
+                    const content = await window.aider.readFile(filePath);
+                    this.currentPreviewFile = filePath;
+                    
+                    const previewContent = document.getElementById('previewContent');
+                    const ext = filePath.split('.').pop().toLowerCase();
+                    
+                    if (ext === 'html') {
+                        previewContent.innerHTML = `<iframe srcdoc="${this.escapeHtml(content)}"></iframe>`;
+                    } else {
+                        previewContent.innerHTML = `<pre style="padding: 16px; margin: 0; font-size: 12px; background: #1e1e1e; color: #d4d4d4; height: 100%; overflow: auto;">${this.escapeHtml(content)}</pre>`;
+                    }
+                    
+                    // Start file watcher
+                    this.startFileWatcher(filePath);
+                } catch (error) {
+                    console.error('[GSX Create] Preview error:', error);
+                }
+            },
+            
+            // File Watcher
+            async startFileWatcher(filePath) {
+                if (this.fileWatcher) {
+                    await window.aider.unwatchFile(this.fileWatcher);
+                }
+                this.fileWatcher = filePath;
+                await window.aider.watchFile(filePath);
+            },
+            
+            refreshPreview() {
+                if (this.currentPreviewFile) {
+                    this.previewFile(this.currentPreviewFile);
+                }
+            },
+            
+            togglePreview() {
+                document.getElementById('previewPanel').classList.toggle('active');
+            },
+            
+            setPreviewMode(mode) {
+                document.querySelectorAll('.preview-tab').forEach(t => t.classList.remove('active'));
+                event.target.classList.add('active');
+            },
+            
+            async openInBrowser() {
+                if (this.currentPreviewFile) {
+                    await window.aider.openFile(this.currentPreviewFile);
+                }
+            },
+            
+            // Cost Tracking
+            async loadCostSummary() {
+                try {
+                    const result = await window.aider.txdbGetSummary(this.currentSpaceId, 30);
+                    if (result.success) {
+                        this.costSummary = result.summary;
+                        this.updateCostDisplay();
+                    }
+                } catch (error) {
+                    console.error('[GSX Create] Cost load error:', error);
+                }
+            },
+            
+            updateCostDisplay() {
+                const badge = document.getElementById('costBadge');
+                const total = this.costSummary.totalCost || 0;
+                
+                badge.textContent = '$' + total.toFixed(4);
+                badge.classList.remove('warning', 'danger');
+                
+                if (total > 1) badge.classList.add('danger');
+                else if (total > 0.5) badge.classList.add('warning');
+            },
+            
+            async recordApiCost(model, inputTokens, outputTokens, type, promptPreview) {
+                const costs = {
+                    'claude-opus-4-20250514': { input: 15/1000000, output: 75/1000000 },
+                    'claude-sonnet-4-20250514': { input: 3/1000000, output: 15/1000000 },
+                    'gpt-4o': { input: 5/1000000, output: 15/1000000 },
+                    'gpt-4-turbo': { input: 10/1000000, output: 30/1000000 }
+                };
+                
+                const modelCosts = costs[model] || { input: 3/1000000, output: 15/1000000 };
+                const cost = (inputTokens * modelCosts.input) + (outputTokens * modelCosts.output);
+                
+                try {
+                    await window.aider.txdbRecord({
+                        spaceId: this.currentSpaceId,
+                        spaceName: this.currentSpaceName,
+                        type, model, inputTokens, outputTokens, cost,
+                        status: 'success',
+                        promptPreview: promptPreview.substring(0, 200)
+                    });
+                    
+                    this.costSummary.totalCost = (this.costSummary.totalCost || 0) + cost;
+                    this.costSummary.totalCalls = (this.costSummary.totalCalls || 0) + 1;
+                    this.updateCostDisplay();
+                } catch (error) {
+                    console.error('[GSX Create] Cost record error:', error);
+                }
+            },
+            
+            async showTransactionLogs() {
+                const modal = document.getElementById('logModal');
+                const tbody = document.getElementById('logTableBody');
+                
+                modal.classList.add('active');
+                tbody.innerHTML = '<tr><td colspan="6">Loading...</td></tr>';
+                
+                try {
+                    const result = await window.aider.txdbGetTransactions({ spaceId: this.currentSpaceId, limit: 100 });
+                    
+                    if (result.success && result.transactions.length > 0) {
+                        tbody.innerHTML = result.transactions.map(tx => `
+                            <tr>
+                                <td>${new Date(tx.timestamp).toLocaleString()}</td>
+                                <td>${tx.type}</td>
+                                <td>${tx.model || '-'}</td>
+                                <td>${tx.input_tokens || 0}/${tx.output_tokens || 0}</td>
+                                <td>$${(tx.cost || 0).toFixed(6)}</td>
+                                <td style="color: ${tx.status === 'success' ? 'var(--success)' : 'var(--danger)'}">${tx.status}</td>
+                            </tr>
+                        `).join('');
+                    } else {
+                        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center;">No transactions yet</td></tr>';
+                    }
+                } catch (error) {
+                    tbody.innerHTML = `<tr><td colspan="6" style="color: var(--danger);">Error: ${error.message}</td></tr>`;
+                }
+            },
+            
+            // Global Instructions
+            async loadGlobalInstructions() {
+                const key = `gsx-global-instructions-${this.currentSpaceId}`;
+                this.globalInstructionsText = localStorage.getItem(key) || '';
+                document.getElementById('globalInstructions').value = this.globalInstructionsText;
+            },
+            
+            saveGlobalInstructions() {
+                const text = document.getElementById('globalInstructions').value;
+                this.globalInstructionsText = text;
+                const key = `gsx-global-instructions-${this.currentSpaceId}`;
+                localStorage.setItem(key, text);
+                this.addMessage('system', 'Global instructions saved');
+            },
+            
+            toggleGlobalInstructions() {
+                document.getElementById('globalInstructionsPanel').classList.toggle('active');
+            },
+            
+            toggleConfig() {
+                document.getElementById('configPanel').classList.toggle('active');
+            },
+            
+            applyTemplate(type) {
+                const templates = {
+                    typescript: 'Use TypeScript with strict types. Prefer interfaces over types. Use async/await. Add JSDoc comments.',
+                    react: 'Use functional components with hooks. Use TypeScript. Follow React best practices. Use CSS modules or styled-components.',
+                    python: 'Use Python 3.10+. Add type hints. Follow PEP 8. Use docstrings. Handle exceptions properly.'
+                };
+                document.getElementById('globalInstructions').value = templates[type] || '';
+            },
+            
+            // Snapshot
+            async takeSnapshot() {
+                if (!this.currentPreviewFile) {
+                    this.addMessage('system', 'No file being previewed');
+                    return;
+                }
+                
+                try {
+                    const content = await window.aider.readFile(this.currentPreviewFile);
+                    this.addMessage('system', `Snapshot taken: ${this.currentPreviewFile.split('/').pop()}`);
+                    
+                    // Store snapshot for context
+                    if (!this.snapshots) this.snapshots = [];
+                    this.snapshots.push({
+                        file: this.currentPreviewFile,
+                        content: content,
+                        time: new Date().toISOString()
+                    });
+                } catch (error) {
+                    this.addMessage('error', 'Failed to take snapshot: ' + error.message);
+                }
+            },
+            
+            // Version History
+            async showVersionHistory() {
+                if (!this.currentPreviewFile) {
+                    this.addMessage('system', 'No file selected');
+                    return;
+                }
+                
+                const modal = document.getElementById('historyModal');
+                const body = document.getElementById('historyModalBody');
+                
+                modal.classList.add('active');
+                body.innerHTML = '<p>Loading...</p>';
+                
+                try {
+                    const result = await window.aider.getFileVersions(this.repoPath, this.currentPreviewFile);
+                    
+                    if (result.success && result.versions.length > 0) {
+                        body.innerHTML = result.versions.map(v => `
+                            <div style="padding: 10px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
+                                <div>
+                                    <div style="font-size: 12px;">${new Date(v.timestamp).toLocaleString()}</div>
+                                    <div style="font-size: 11px; color: var(--text-secondary);">${v.description || 'No description'}</div>
+                                </div>
+                                <button class="btn btn-sm btn-secondary" onclick="GSXCreate.rollbackToVersion('${v.id}')">Restore</button>
+                            </div>
+                        `).join('');
+                    } else {
+                        body.innerHTML = '<p style="text-align: center; color: var(--text-muted);">No version history available</p>';
+                    }
+                } catch (error) {
+                    body.innerHTML = `<p style="color: var(--danger);">Error: ${error.message}</p>`;
+                }
+            },
+            
+            async rollbackToVersion(versionId) {
+                try {
+                    await window.aider.rollbackFile(this.repoPath, this.currentPreviewFile, versionId);
+                    this.addMessage('system', 'File restored to previous version');
+                    this.refreshPreview();
+                    this.closeModal('historyModal');
+                } catch (error) {
+                    this.addMessage('error', 'Rollback failed: ' + error.message);
+                }
+            },
+            
+            // Tools Detection
+            async detectTools() {
+                try {
+                    const result = await window.aider.detectProjectTools(this.repoPath);
+                    if (result.success) {
+                        if (result.lintCmd) document.getElementById('lintCmd').value = result.lintCmd;
+                        if (result.testCmd) document.getElementById('testCmd').value = result.testCmd;
+                        this.addMessage('system', 'Detected tools: ' + (result.lintCmd || 'none') + ', ' + (result.testCmd || 'none'));
+                    }
+                } catch (error) {
+                    console.error('[GSX Create] Detect tools error:', error);
+                }
+            },
+            
+            // UI Helpers
+            updateStatus(text, connected) {
+                document.getElementById('statusText').textContent = text;
+                document.getElementById('statusDot').classList.toggle('active', connected);
+            },
+            
+            toggleSidebar() {
+                const sidebar = document.getElementById('sidebar');
+                const icon = document.getElementById('sidebarToggleIcon');
+                
+                sidebar.classList.toggle('collapsed');
+                icon.textContent = sidebar.classList.contains('collapsed') ? '▶' : '◀';
+                
+                localStorage.setItem('gsx-sidebar-collapsed', sidebar.classList.contains('collapsed'));
+            },
+            
+            restoreSidebarState() {
+                const collapsed = localStorage.getItem('gsx-sidebar-collapsed') === 'true';
+                if (collapsed) {
+                    document.getElementById('sidebar').classList.add('collapsed');
+                    document.getElementById('sidebarToggleIcon').textContent = '▶';
+                }
+            },
+            
+            closeModal(id) {
+                document.getElementById(id).classList.remove('active');
+            },
+            
+            getFileIcon(filename) {
+                const ext = filename.split('.').pop().toLowerCase();
+                const icons = { html: '🌐', css: '🎨', js: '📜', ts: '📘', py: '🐍', json: '📋', md: '📝' };
+                return icons[ext] || '📄';
+            },
+            
+            escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            },
+            
+            setupEventListeners() {
+                const input = document.getElementById('promptInput');
+                
+                input.addEventListener('keydown', (e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
-                        Aider.sendPrompt();
+                        this.sendPrompt();
                     }
                 });
                 
-                // Auto-resize textarea
-                promptInput.addEventListener('input', function() {
+                input.addEventListener('input', function() {
                     this.style.height = 'auto';
                     this.style.height = Math.min(this.scrollHeight, 150) + 'px';
                 });
+                
+                // File change listener
+                if (window.aider.onFileChange) {
+                    window.aider.onFileChange((filePath) => {
+                        if (filePath === this.currentPreviewFile) {
+                            this.refreshPreview();
+                        }
+                    });
+                }
             }
+        };
+        
+        // Initialize on load
+        document.addEventListener('DOMContentLoaded', () => {
+            GSXCreate.init();
         });
     </script>
 </body>
 </html>
-
