@@ -954,7 +954,9 @@
                     console.log('[GSX Create] Loaded spaces:', spaces);
                     
                     const select = document.getElementById('spaceSelect');
+                    const mainSelect = document.getElementById('mainSpaceSelect');
                     select.innerHTML = '<option value="">Select a space...</option>';
+                    if (mainSelect) mainSelect.innerHTML = '<option value="">Choose a space...</option>';
                     
                     if (spaces && spaces.length > 0) {
                         spaces.forEach(space => {
@@ -965,6 +967,15 @@
                                 option.dataset.path = space.path;
                                 option.dataset.name = space.name;
                                 select.appendChild(option);
+                                // Also add to main select
+                                if (mainSelect) {
+                                    const opt2 = document.createElement('option');
+                                    opt2.value = space.id;
+                                    opt2.textContent = `${space.name} (${space.itemCount || 0} items)`;
+                                    opt2.dataset.path = space.path;
+                                    opt2.dataset.name = space.name;
+                                    mainSelect.appendChild(opt2);
+                                }
                             }
                         });
                     }
@@ -973,6 +984,92 @@
                 }
             },
             
+            
+            // Select Space from Main Setup (primary action)
+            async selectSpaceFromMain(spaceId) {
+                if (!spaceId) {
+                    document.getElementById('spaceSelectedConfig').style.display = 'none';
+                    return;
+                }
+                
+                const select = document.getElementById('mainSpaceSelect');
+                const option = select.options[select.selectedIndex];
+                
+                this.currentSpaceId = spaceId;
+                this.currentSpaceName = option.dataset.name;
+                this.repoPath = option.dataset.path;
+                this.currentSpace = {
+                    id: spaceId,
+                    name: option.dataset.name,
+                    path: option.dataset.path
+                };
+                
+                console.log('[GSX Create] Selected space from main:', this.currentSpace);
+                
+                // Show config options
+                document.getElementById('spaceSelectedConfig').style.display = 'block';
+                
+                // Sync sidebar select
+                const sidebarSelect = document.getElementById('spaceSelect');
+                if (sidebarSelect) sidebarSelect.value = spaceId;
+                
+                // Load space data
+                await Promise.all([
+                    this.loadProjectFiles(),
+                    this.loadSpaceItems(),
+                    this.loadStyleGuidesForMain(),
+                    this.loadJourneyMapsForMain(),
+                    this.loadCostSummary(),
+                    this.loadGlobalInstructions()
+                ]);
+                
+                // Show sidebar config section too
+                const configSection = document.getElementById('configSection');
+                if (configSection) configSection.style.display = 'block';
+            },
+            
+            async loadStyleGuidesForMain() {
+                if (!this.currentSpaceId) return;
+                try {
+                    const result = await window.aider.getStyleGuides(this.currentSpaceId);
+                    if (result.success) {
+                        this.styleGuides = result.styleGuides || [];
+                        const mainSelect = document.getElementById('mainStyleGuideSelect');
+                        if (mainSelect) {
+                            mainSelect.innerHTML = '<option value="">None</option>';
+                            this.styleGuides.forEach(sg => {
+                                const opt = document.createElement('option');
+                                opt.value = sg.id;
+                                opt.textContent = sg.name;
+                                mainSelect.appendChild(opt);
+                            });
+                        }
+                        this.renderStyleGuideSelect();
+                    }
+                } catch (e) { console.error('[GSX Create] Style guides error:', e); }
+            },
+            
+            async loadJourneyMapsForMain() {
+                if (!this.currentSpaceId) return;
+                try {
+                    const result = await window.aider.getJourneyMaps(this.currentSpaceId);
+                    if (result.success) {
+                        this.journeyMaps = result.journeyMaps || [];
+                        const mainSelect = document.getElementById('mainJourneyMapSelect');
+                        if (mainSelect) {
+                            mainSelect.innerHTML = '<option value="">None</option>';
+                            this.journeyMaps.forEach(jm => {
+                                const opt = document.createElement('option');
+                                opt.value = jm.id;
+                                opt.textContent = jm.name;
+                                mainSelect.appendChild(opt);
+                            });
+                        }
+                        this.renderJourneyMapSelect();
+                    }
+                } catch (e) { console.error('[GSX Create] Journey maps error:', e); }
+            },
+
             // Select Space
             async selectSpace(spaceId) {
                 if (!spaceId) {
@@ -983,6 +1080,7 @@
                 }
                 
                 const select = document.getElementById('spaceSelect');
+                    const mainSelect = document.getElementById('mainSpaceSelect');
                 const option = select.options[select.selectedIndex];
                 
                 this.currentSpaceId = spaceId;
@@ -1093,6 +1191,15 @@
                     option.value = sg.id;
                     option.textContent = sg.name;
                     select.appendChild(option);
+                                // Also add to main select
+                                if (mainSelect) {
+                                    const opt2 = document.createElement('option');
+                                    opt2.value = space.id;
+                                    opt2.textContent = `${space.name} (${space.itemCount || 0} items)`;
+                                    opt2.dataset.path = space.path;
+                                    opt2.dataset.name = space.name;
+                                    mainSelect.appendChild(opt2);
+                                }
                 });
             },
             
@@ -1120,6 +1227,15 @@
                     option.value = jm.id;
                     option.textContent = jm.name;
                     select.appendChild(option);
+                                // Also add to main select
+                                if (mainSelect) {
+                                    const opt2 = document.createElement('option');
+                                    opt2.value = space.id;
+                                    opt2.textContent = `${space.name} (${space.itemCount || 0} items)`;
+                                    opt2.dataset.path = space.path;
+                                    opt2.dataset.name = space.name;
+                                    mainSelect.appendChild(opt2);
+                                }
                 });
             },
             
