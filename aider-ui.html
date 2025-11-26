@@ -989,6 +989,35 @@
                     console.error('[GSX Create] Load spaces error:', error);
                 }
             },
+            // Create New Space
+            async createNewSpace() {
+                const name = prompt('Enter a name for your new space:');
+                if (!name || !name.trim()) return;
+                
+                try {
+                    const result = await window.aider.createSpace(name.trim());
+                    
+                    if (result && result.success) {
+                        this.addMessage('system', 'Created new space: ' + name);
+                        await this.loadSpaces();
+                        
+                        const mainSelect = document.getElementById('mainSpaceSelect');
+                        for (let i = 0; i < mainSelect.options.length; i++) {
+                            if (mainSelect.options[i].text.startsWith(name)) {
+                                mainSelect.selectedIndex = i;
+                                await this.selectSpaceFromMain(mainSelect.value);
+                                break;
+                            }
+                        }
+                    } else {
+                        alert('Failed to create space: ' + (result?.error || 'Unknown error'));
+                    }
+                } catch (error) {
+                    console.error('[GSX Create] Create space error:', error);
+                    alert('Failed to create space: ' + error.message);
+                }
+            },
+            
             
             
             // Select Space from Main Setup (primary action)

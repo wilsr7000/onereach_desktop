@@ -1553,6 +1553,40 @@ function setupAiderIPC() {
     }
   });
 
+
+  // Create a new space for GSX Create
+  ipcMain.handle('aider:create-space', async (event, name) => {
+    try {
+      const ClipboardStorage = require('./clipboard-storage-v2');
+      const storage = new ClipboardStorage();
+      
+      const id = 'space-' + Date.now();
+      
+      const newSpace = {
+        id: id,
+        name: name,
+        icon: '📁',
+        color: '#4f8cff',
+        createdAt: new Date().toISOString()
+      };
+      
+      storage.index.spaces = storage.index.spaces || [];
+      storage.index.spaces.push(newSpace);
+      storage.saveIndex();
+      
+      const spacePath = path.join(storage.spacesDir, id);
+      if (!fs.existsSync(spacePath)) {
+        fs.mkdirSync(spacePath, { recursive: true });
+      }
+      
+      console.log('[GSX Create] Created new space:', name, 'at', spacePath);
+      
+      return { success: true, space: { ...newSpace, path: spacePath } };
+    } catch (error) {
+      console.error('[GSX Create] Failed to create space:', error);
+      return { success: false, error: error.message };
+    }
+  });
   // List files in a directory for GSX Create
   ipcMain.handle('aider:list-files', async (event, dirPath) => {
     try {
