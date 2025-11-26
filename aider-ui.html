@@ -770,8 +770,14 @@
                         Config
                     </button>
                     <div style="flex: 1;"></div>
-                    <button class="btn btn-secondary btn-sm" onclick="GSXCreate.takeSnapshot()">
+                    <button class="btn btn-secondary btn-sm" onclick="GSXCreate.takeSnapshot()" title="Capture HTML snapshot">
                         Snapshot
+                    </button>
+                    <button class="btn btn-secondary btn-sm" onclick="GSXCreate.runCodeTest()" title="AI analyzes HTML code">
+                        Code Test
+                    </button>
+                    <button class="btn btn-secondary btn-sm" onclick="GSXCreate.runVisionTest()" title="AI analyzes visual screenshot" style="background: var(--accent); color: white;">
+                        Visual Test
                     </button>
                     <button class="btn btn-secondary btn-sm" onclick="GSXCreate.showVersionHistory()">
                         History
@@ -1624,6 +1630,109 @@
                 document.getElementById('globalInstructions').value = templates[type] || '';
             },
             
+
+            // Code Test - AI analyzes HTML code
+            async runCodeTest() {
+                if (!this.currentPreviewFile) {
+                    this.addMessage('system', 'No file being previewed. Select a file first.');
+                    return;
+                }
+                
+                try {
+                    this.addMessage('system', 'Running code analysis...');
+                    
+                    const content = await window.aider.readFile(this.currentPreviewFile);
+                    const fileName = this.currentPreviewFile.split('/').pop();
+                    
+                    const prompt = `Please analyze this ${fileName} file for issues:
+
+\`\`\`html
+${content.substring(0, 10000)}
+\`\`\`
+
+Check for:
+1. HTML validity and structure issues
+2. Accessibility problems (missing alt tags, ARIA labels)
+3. Responsive design issues
+4. JavaScript errors or anti-patterns
+5. CSS issues or missing styles
+6. Security concerns
+7. Performance issues
+8. Best practices violations
+
+Provide a concise report with specific line references where possible.`;
+
+                    const result = await window.aider.runPrompt(prompt);
+                    
+                    if (result.success) {
+                        this.addMessage('ai', result.response);
+                        
+                        // Record cost
+                        const model = document.getElementById('modelSelect')?.value || 'claude-sonnet-4-20250514';
+                        await this.recordApiCost(model, result.input_tokens || 0, result.output_tokens || 0, 'code_test', 'Code analysis');
+                    } else {
+                        this.addMessage('error', 'Code test failed: ' + result.error);
+                    }
+                } catch (error) {
+                    this.addMessage('error', 'Code test error: ' + error.message);
+                }
+            },
+            
+            // Visual Test - AI analyzes screenshot with vision model
+            async runVisionTest() {
+                if (!this.currentPreviewFile) {
+                    this.addMessage('system', 'No file being previewed. Select a file first.');
+                    return;
+                }
+                
+                try {
+                    this.addMessage('system', 'Capturing screenshot and running visual analysis...');
+                    
+                    // Get HTML content
+                    const htmlContent = await window.aider.readFile(this.currentPreviewFile);
+                    
+                    // Capture screenshot
+                    const screenshotResult = await window.aider.capturePreviewScreenshot(htmlContent, { fullPage: true });
+                    
+                    if (!screenshotResult.success) {
+                        this.addMessage('error', 'Failed to capture screenshot: ' + screenshotResult.error);
+                        return;
+                    }
+                    
+                    this.addMessage('system', 'Screenshot captured. Sending to vision AI...');
+                    
+                    // Send to vision model for analysis
+                    const visionPrompt = `Analyze this screenshot of a web page UI and provide feedback on:
+
+1. **Visual Design**: Layout, spacing, alignment, color usage, typography
+2. **UI/UX Issues**: Confusing elements, poor contrast, unclear hierarchy
+3. **Responsiveness**: How it might look on different screen sizes
+4. **Accessibility**: Visual accessibility issues (contrast, text size)
+5. **Professional Quality**: Does it look polished and production-ready?
+6. **Suggestions**: Specific improvements to make it better
+
+Be specific and actionable in your feedback.`;
+
+                    const visionResult = await window.aider.analyzeScreenshot(screenshotResult.screenshot, visionPrompt);
+                    
+                    if (visionResult.success) {
+                        this.addMessage('ai', '📸 Visual Analysis:\n\n' + visionResult.analysis);
+                        
+                        // Record cost
+                        await this.recordApiCost(
+                            visionResult.model || 'gpt-4o',
+                            visionResult.inputTokens || 1000,
+                            visionResult.outputTokens || 500,
+                            'vision_test',
+                            'Visual screenshot analysis'
+                        );
+                    } else {
+                        this.addMessage('error', 'Vision analysis failed: ' + visionResult.error);
+                    }
+                } catch (error) {
+                    this.addMessage('error', 'Vision test error: ' + error.message);
+                }
+            },
             // Snapshot
             async takeSnapshot() {
                 if (!this.currentPreviewFile) {
