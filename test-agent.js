@@ -27,12 +27,27 @@ class TestAgent {
             lastAnalysis: null
         };
         this.traceEnabled = false;
+        console.log('[TestAgent] Initialized');
+    }
+
+    /**
+     * Log helper with timestamp
+     */
+    log(level, message, data = null) {
+        const timestamp = new Date().toISOString();
+        const prefix = `[TestAgent ${timestamp}]`;
+        if (data) {
+            console[level](`${prefix} ${message}`, data);
+        } else {
+            console[level](`${prefix} ${message}`);
+        }
     }
 
     /**
      * Get browser launcher based on type
      */
     getBrowserType(type = 'chromium') {
+        this.log('log', `Getting browser type: ${type}`);
         switch (type) {
             case 'firefox': return firefox;
             case 'webkit': return webkit;
@@ -44,7 +59,10 @@ class TestAgent {
      * Initialize the browser
      */
     async init(browserType = 'chromium') {
+        this.log('log', `Initializing browser: ${browserType}`);
+        
         if (this.browser && this.currentBrowserType === browserType) {
+            this.log('log', 'Browser already initialized, reusing');
             return true;
         }
 
@@ -56,14 +74,17 @@ class TestAgent {
         this.currentBrowserType = browserType;
         const launcher = this.getBrowserType(browserType);
         
+        this.log('log', 'Launching browser...');
         this.browser = await launcher.launch({
             headless: true
         });
+        this.log('log', 'Browser launched successfully');
         
         this.context = await this.browser.newContext({
             viewport: { width: 1280, height: 800 },
             deviceScaleFactor: 1
         });
+        this.log('log', 'Browser context created');
 
         return true;
     }
@@ -72,6 +93,7 @@ class TestAgent {
      * Close the browser
      */
     async close() {
+        this.log('log', 'Closing browser...');
         if (this.context) {
             await this.context.close();
             this.context = null;
@@ -81,6 +103,7 @@ class TestAgent {
             this.browser = null;
         }
         this.page = null;
+        this.log('log', 'Browser closed');
     }
 
     /**
@@ -97,10 +120,16 @@ class TestAgent {
      * Generate a test plan based on the HTML file
      */
     async generateTestPlan(htmlFilePath, aiAnalyzer) {
+        this.log('log', `=== GENERATE TEST PLAN ===`);
+        this.log('log', `File: ${htmlFilePath}`);
+        this.log('log', `AI Analyzer: ${aiAnalyzer ? 'provided' : 'not provided'}`);
+        
         const htmlContent = fs.readFileSync(htmlFilePath, 'utf-8');
+        this.log('log', `HTML content length: ${htmlContent.length} chars`);
         
         // Extract testable elements
         const testableElements = this.extractTestableElements(htmlContent);
+        this.log('log', `Found ${testableElements.length} testable elements`);
         
         // If we have an AI analyzer, use it to generate smarter tests
         if (aiAnalyzer) {
@@ -260,7 +289,12 @@ ${JSON.stringify(testableElements, null, 2)}`;
      * Run all tests in the test plan
      */
     async runTests(htmlFilePath, options = {}) {
+        this.log('log', `=== RUN TESTS ===`);
+        this.log('log', `File: ${htmlFilePath}`);
+        this.log('log', `Options:`, options);
+        
         if (this.isRunning) {
+            this.log('warn', 'Tests already running, aborting');
             return { success: false, error: 'Tests already running' };
         }
 
@@ -268,28 +302,39 @@ ${JSON.stringify(testableElements, null, 2)}`;
         this.testResults = [];
 
         try {
+            this.log('log', `Initializing browser: ${options.browser || 'chromium'}`);
             await this.init(options.browser || 'chromium');
             
             // Create a new page
+            this.log('log', 'Creating new page...');
             this.page = await this.context.newPage();
             
             // Start tracing if enabled
             if (this.traceEnabled) {
+                this.log('log', 'Starting trace...');
                 await this.context.tracing.start({ screenshots: true, snapshots: true });
             }
 
             // Load the HTML file
             const fileUrl = `file://${htmlFilePath}`;
+            this.log('log', `Navigating to: ${fileUrl}`);
             await this.page.goto(fileUrl, { waitUntil: 'networkidle' });
+            this.log('log', 'Page loaded successfully');
 
             // Generate test plan if not exists
             if (!this.testPlan) {
+                this.log('log', 'No test plan exists, generating...');
                 await this.generateTestPlan(htmlFilePath);
             }
 
+            this.log('log', `Running ${this.testPlan.tests?.length || 0} tests...`);
+            
             // Run each test
-            for (const test of this.testPlan.tests) {
+            for (let i = 0; i < this.testPlan.tests.length; i++) {
+                const test = this.testPlan.tests[i];
+                this.log('log', `Test ${i + 1}/${this.testPlan.tests.length}: ${test.name}`);
                 const result = await this.runSingleTest(test);
+                this.log('log', `  Result: ${result.status} ${result.error ? '- ' + result.error : ''}`);
                 this.testResults.push(result);
                 
                 // Emit progress if callback provided
@@ -603,9 +648,15 @@ ${JSON.stringify(testableElements, null, 2)}`;
      * Interactive test - let AI analyze and suggest fixes
      */
     async interactiveTest(htmlFilePath, aiAnalyzer, options = {}) {
+        this.log('log', `=== INTERACTIVE TEST ===`);
+        this.log('log', `File: ${htmlFilePath}`);
+        this.log('log', `AI Analyzer: ${aiAnalyzer ? 'provided' : 'not provided'}`);
+        
         try {
+            this.log('log', 'Initializing browser...');
             await this.init(options.browser || 'chromium');
             this.page = await this.context.newPage();
+            this.log('log', 'Page created');
             
             // Collect console messages
             const consoleMessages = [];
@@ -622,26 +673,36 @@ ${JSON.stringify(testableElements, null, 2)}`;
                 pageErrors.push(error.message);
             });
 
+            this.log('log', `Navigating to file://${htmlFilePath}`);
             await this.page.goto(`file://${htmlFilePath}`, { waitUntil: 'networkidle' });
+            this.log('log', 'Page loaded');
 
             // Get page content and screenshot
+            this.log('log', 'Capturing full-page screenshot...');
             const screenshot = await this.page.screenshot({ type: 'png', fullPage: true });
+            this.log('log', `Screenshot captured: ${screenshot.length} bytes`);
+            
             const html = await this.page.content();
+            this.log('log', `HTML content: ${html.length} chars`);
             
             // Get console errors
             const consoleErrors = consoleMessages.filter(m => m.type === 'error').map(m => m.text);
+            this.log('log', `Console messages: ${consoleMessages.length} total, ${consoleErrors.length} errors`);
+            this.log('log', `Page errors: ${pageErrors.length}`);
 
             await this.page.close();
             this.page = null;
 
             // Ask AI to analyze
             if (aiAnalyzer) {
+                this.log('log', 'Sending to AI analyzer...');
                 const analysis = await aiAnalyzer({
                     screenshot: screenshot.toString('base64'),
                     html: html.substring(0, 10000),
                     consoleErrors,
                     pageErrors
                 });
+                this.log('log', `AI analysis received: ${analysis ? analysis.length : 0} chars`);
                 
                 return {
                     success: true,
@@ -653,6 +714,7 @@ ${JSON.stringify(testableElements, null, 2)}`;
                 };
             }
 
+            this.log('log', 'No AI analyzer, returning raw data');
             return {
                 success: true,
                 screenshot: screenshot.toString('base64'),
@@ -662,6 +724,7 @@ ${JSON.stringify(testableElements, null, 2)}`;
             };
 
         } catch (error) {
+            this.log('error', `Interactive test failed: ${error.message}`);
             return {
                 success: false,
                 error: error.message
@@ -673,10 +736,14 @@ ${JSON.stringify(testableElements, null, 2)}`;
      * Accessibility test using Playwright
      */
     async runAccessibilityTest(htmlFilePath, options = {}) {
+        this.log('log', `=== ACCESSIBILITY TEST ===`);
+        this.log('log', `File: ${htmlFilePath}`);
+        
         try {
             await this.init(options.browser || 'chromium');
             this.page = await this.context.newPage();
             
+            this.log('log', 'Loading page...');
             await this.page.goto(`file://${htmlFilePath}`, { waitUntil: 'networkidle' });
 
             // Run accessibility checks
@@ -842,21 +909,27 @@ ${JSON.stringify(testableElements, null, 2)}`;
      * Performance test using Playwright
      */
     async runPerformanceTest(htmlFilePath, options = {}) {
+        this.log('log', `=== PERFORMANCE TEST ===`);
+        this.log('log', `File: ${htmlFilePath}`);
+        
         try {
             await this.init(options.browser || 'chromium');
             this.page = await this.context.newPage();
 
             // Clear cache
+            this.log('log', 'Clearing cookies/cache...');
             await this.context.clearCookies();
             
             const startTime = Date.now();
             
             // Navigate and measure
+            this.log('log', 'Loading page and measuring performance...');
             const response = await this.page.goto(`file://${htmlFilePath}`, { 
                 waitUntil: 'networkidle' 
             });
             
             const loadTime = Date.now() - startTime;
+            this.log('log', `Page load time: ${loadTime}ms`);
 
             // Get performance timing
             const performanceTiming = await this.page.evaluate(() => {
