@@ -1493,8 +1493,9 @@ function setupAiderIPC() {
   // Transaction database handlers for cost tracking
   ipcMain.handle('txdb:get-summary', async (event, spaceId) => {
     try {
-      const txDb = require('./transaction-db');
-      const summary = await txDb.getSummary(spaceId);
+      const { getTransactionDB } = require('./transaction-db');
+      const txDb = getTransactionDB(app.getPath('userData'));
+      const summary = txDb.getSummary(spaceId);
       return { success: true, summary };
     } catch (error) {
       console.error('[TXDB] Failed to get summary:', error);
@@ -1504,8 +1505,9 @@ function setupAiderIPC() {
   
   ipcMain.handle('txdb:record-transaction', async (event, data) => {
     try {
-      const txDb = require('./transaction-db');
-      await txDb.recordTransaction(data);
+      const { getTransactionDB } = require('./transaction-db');
+      const txDb = getTransactionDB(app.getPath('userData'));
+      txDb.recordTransaction(data);
       return { success: true };
     } catch (error) {
       console.error('[TXDB] Failed to record transaction:', error);
@@ -1515,8 +1517,9 @@ function setupAiderIPC() {
   
   ipcMain.handle('txdb:get-transactions', async (event, spaceId, limit = 50) => {
     try {
-      const txDb = require('./transaction-db');
-      const transactions = await txDb.getTransactions(spaceId, limit);
+      const { getTransactionDB } = require('./transaction-db');
+      const txDb = getTransactionDB(app.getPath('userData'));
+      const transactions = txDb.getTransactions(spaceId, limit);
       return { success: true, transactions };
     } catch (error) {
       console.error('[TXDB] Failed to get transactions:', error);
@@ -2008,41 +2011,7 @@ function setupIPC() {
   // GSX CREATE - Cost Tracking Handlers
   // ============================================
   
-  // Note: aider:read-file and aider:open-file are registered earlier in setupAiderIPC
-  
-  // Transaction database handlers for cost tracking
-  ipcMain.handle('txdb:get-summary', async (event, spaceId) => {
-    try {
-      const txDb = require('./transaction-db');
-      const summary = await txDb.getSummary(spaceId);
-      return { success: true, summary };
-    } catch (error) {
-      console.error('[TXDB] Failed to get summary:', error);
-      return { success: false, error: error.message, summary: { totalCost: 0, totalCalls: 0 } };
-    }
-  });
-  
-  ipcMain.handle('txdb:record-transaction', async (event, data) => {
-    try {
-      const txDb = require('./transaction-db');
-      await txDb.recordTransaction(data);
-      return { success: true };
-    } catch (error) {
-      console.error('[TXDB] Failed to record transaction:', error);
-      return { success: false, error: error.message };
-    }
-  });
-  
-  ipcMain.handle('txdb:get-transactions', async (event, spaceId, limit = 50) => {
-    try {
-      const txDb = require('./transaction-db');
-      const transactions = await txDb.getTransactions(spaceId, limit);
-      return { success: true, transactions };
-    } catch (error) {
-      console.error('[TXDB] Failed to get transactions:', error);
-      return { success: false, error: error.message, transactions: [] };
-    }
-  });
+  // Note: aider:read-file, aider:open-file, and txdb handlers are registered earlier in setupAiderIPC
   
   // Style Guides handlers
   const styleGuides = new Map();
