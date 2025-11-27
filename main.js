@@ -6530,8 +6530,10 @@ ipcMain.handle('test-agent:visual', async (event, htmlFilePath, baseline = null)
 ipcMain.handle('test-agent:interactive', async (event, htmlFilePath) => {
   console.log('[TestAgent] Running interactive test for:', htmlFilePath);
   try {
-    const apiKey = settings.getLLMApiKey();
-    const provider = settings.getLLMProvider();
+    const { getSettingsManager } = require('./settings-manager');
+    const settingsManager = getSettingsManager();
+    const apiKey = settingsManager.get('llmApiKey');
+    const provider = settingsManager.get('llmProvider') || 'anthropic';
     
     let aiAnalyzer = null;
     if (apiKey && provider === 'anthropic') {
