@@ -1556,6 +1556,84 @@ function setupAiderIPC() {
     }
   });
   
+  // Migrate all spaces to unified metadata
+  ipcMain.handle('aider:migrate-spaces', async () => {
+    try {
+      const ClipboardStorage = require('./clipboard-storage-v2');
+      const storage = new ClipboardStorage();
+      const migrated = storage.migrateAllSpaces();
+      return { success: true, migrated };
+    } catch (error) {
+      console.error('[GSX Create] Failed to migrate spaces:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Search across all spaces (uses DuckDB)
+  ipcMain.handle('aider:search-all-spaces', async (event, searchTerm) => {
+    try {
+      const ClipboardStorage = require('./clipboard-storage-v2');
+      const storage = new ClipboardStorage();
+      const results = await storage.searchAllSpaces(searchTerm);
+      return { success: true, results };
+    } catch (error) {
+      console.error('[GSX Create] Failed to search spaces:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Query spaces with custom conditions (uses DuckDB)
+  ipcMain.handle('aider:query-spaces', async (event, whereClause) => {
+    try {
+      const ClipboardStorage = require('./clipboard-storage-v2');
+      const storage = new ClipboardStorage();
+      const results = await storage.querySpaces(whereClause);
+      return { success: true, results };
+    } catch (error) {
+      console.error('[GSX Create] Failed to query spaces:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Get all spaces with metadata
+  ipcMain.handle('aider:get-all-spaces-with-metadata', async () => {
+    try {
+      const ClipboardStorage = require('./clipboard-storage-v2');
+      const storage = new ClipboardStorage();
+      const spaces = storage.getAllSpacesWithMetadata();
+      return { success: true, spaces };
+    } catch (error) {
+      console.error('[GSX Create] Failed to get spaces with metadata:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Get space files from metadata
+  ipcMain.handle('aider:get-space-files', async (event, spaceId) => {
+    try {
+      const ClipboardStorage = require('./clipboard-storage-v2');
+      const storage = new ClipboardStorage();
+      const files = storage.getSpaceFiles(spaceId);
+      return { success: true, files };
+    } catch (error) {
+      console.error('[GSX Create] Failed to get space files:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Get space directory path
+  ipcMain.handle('aider:get-space-path', async (event, spaceId) => {
+    try {
+      const ClipboardStorage = require('./clipboard-storage-v2');
+      const storage = new ClipboardStorage();
+      const spacePath = storage.getSpacePath(spaceId);
+      return { success: true, path: spacePath };
+    } catch (error) {
+      console.error('[GSX Create] Failed to get space path:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
   // List files in a project directory (for GSX Create)
   ipcMain.handle('aider:list-project-files', async (event, dirPath) => {
     try {

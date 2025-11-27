@@ -15,6 +15,20 @@ try {
   nativeImage = null;
 }
 
+// DuckDB for cross-space queries
+let eventDB = null;
+function getEventDB() {
+  if (!eventDB) {
+    try {
+      const { getEventDB: getDB } = require('./event-db');
+      eventDB = getDB();
+    } catch (e) {
+      console.warn('[Storage] EventDB not available:', e.message);
+    }
+  }
+  return eventDB;
+}
+
 class ClipboardStorageV2 {
   constructor() {
     // Use Documents folder for storage
@@ -35,6 +49,9 @@ class ClipboardStorageV2 {
     // Load or create index
     this.index = this.loadIndex();
     
+    // Ensure all spaces have metadata files (including unclassified)
+    this.ensureAllSpacesHaveMetadata();
+    
     // In-memory cache for performance
     this.cache = new Map();
     this.cacheSize = 100; // Keep last 100 items in cache
@@ -44,6 +61,35 @@ class ClipboardStorageV2 {
     fs.mkdirSync(this.storageRoot, { recursive: true });
     fs.mkdirSync(this.itemsDir, { recursive: true });
     fs.mkdirSync(this.spacesDir, { recursive: true });
+    
+    // Ensure "unclassified" space has a directory and metadata file
+    this.ensureSpaceMetadata('unclassified', {
+      name: 'Unclassified',
+      icon: '◯',
+      color: '#64c8ff'
+    });
+  }
+  
+  // Ensure a space has a directory and metadata file
+  ensureSpaceMetadata(spaceId, spaceInfo) {
+    const spaceDir = path.join(this.spacesDir, spaceId);
+    fs.mkdirSync(spaceDir, { recursive: true });
+    
+    const metadataPath = path.join(spaceDir, 'space-metadata.json');
+    if (!fs.existsSync(metadataPath)) {
+      this.initSpaceMetadata(spaceId, spaceInfo);
+      console.log('[Storage] Created space-metadata.json for space:', spaceId);
+    }
+  }
+  
+  // Ensure all spaces in index have metadata files
+  ensureAllSpacesHaveMetadata() {
+    if (!this.index || !this.index.spaces) return;
+    
+    for (const space of this.index.spaces) {
+      this.ensureSpaceMetadata(space.id, space);
+    }
+    console.log('[Storage] Verified metadata files for all', this.index.spaces.length, 'spaces');
   }
   
   loadIndex() {
@@ -391,6 +437,9 @@ class ClipboardStorageV2 {
     const spaceDir = path.join(this.spacesDir, spaceId);
     fs.mkdirSync(spaceDir, { recursive: true });
     
+    // Create unified space-metadata.json
+    this.initSpaceMetadata(spaceId, newSpace);
+    
     // Create README.ipynb if notebook data provided
     if (space.notebook) {
       this.createSpaceNotebook(spaceId, space);
@@ -399,6 +448,202 @@ class ClipboardStorageV2 {
     this.saveIndex();
     
     return newSpace;
+  }
+  
+  // Initialize space metadata file
+  initSpaceMetadata(spaceId, space) {
+    const metadataPath = path.join(this.spacesDir, spaceId, 'space-metadata.json');
+    
+    const metadata = {
+      version: '1.0',
+      spaceId: spaceId,
+      name: space.name,
+      icon: space.icon || '◯',
+      color: space.color || '#64c8ff',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      author: require('os').userInfo().username || 'Unknown',
+      
+      // Project config (for GSX Create)
+      projectConfig: {
+        setupComplete: false,
+        currentVersion: 0,
+        mainFile: null,
+        description: null,
+        targetUsers: null,
+        stylePreference: null
+      },
+      
+      // All file metadata in one place
+      files: {},
+      
+      // Asset metadata (journey map, style guide, etc.)
+      assets: {},
+      
+      // Approval tracking
+      approvals: {},
+      
+      // Version history
+      versions: []
+    };
+    
+    fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+    return metadata;
+  }
+  
+  // Get space metadata
+  getSpaceMetadata(spaceId) {
+    const metadataPath = path.join(this.spacesDir, spaceId, 'space-metadata.json');
+    
+    if (fs.existsSync(metadataPath)) {
+      try {
+        return JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+      } catch (e) {
+        console.error('[Storage] Error reading space metadata:', e);
+      }
+    }
+    
+    // Create if doesn't exist
+    const space = this.index.spaces.find(s => s.id === spaceId);
+    if (space) {
+      return this.initSpaceMetadata(spaceId, space);
+    }
+    
+    return null;
+  }
+  
+  // Update space metadata
+  updateSpaceMetadata(spaceId, updates) {
+    const metadataPath = path.join(this.spacesDir, spaceId, 'space-metadata.json');
+    let metadata = this.getSpaceMetadata(spaceId);
+    
+    if (!metadata) {
+      console.error('[Storage] Space not found:', spaceId);
+      return null;
+    }
+    
+    // Deep merge updates
+    metadata = this.deepMerge(metadata, updates);
+    metadata.updatedAt = new Date().toISOString();
+    
+    fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+    return metadata;
+  }
+  
+  // Add or update file metadata
+  setFileMetadata(spaceId, filePath, fileMetadata) {
+    const metadata = this.getSpaceMetadata(spaceId);
+    if (!metadata) return null;
+    
+    const fileName = path.basename(filePath);
+    const fileKey = this.normalizeFilePath(filePath);
+    
+    metadata.files[fileKey] = {
+      fileName: fileName,
+      filePath: filePath,
+      ...fileMetadata,
+      updatedAt: new Date().toISOString()
+    };
+    
+    if (!metadata.files[fileKey].createdAt) {
+      metadata.files[fileKey].createdAt = new Date().toISOString();
+    }
+    
+    return this.updateSpaceMetadata(spaceId, { files: metadata.files });
+  }
+  
+  // Get file metadata
+  getFileMetadata(spaceId, filePath) {
+    const metadata = this.getSpaceMetadata(spaceId);
+    if (!metadata) return null;
+    
+    const fileKey = this.normalizeFilePath(filePath);
+    return metadata.files[fileKey] || null;
+  }
+  
+  // Set asset metadata (journey map, style guide, etc.)
+  setAssetMetadata(spaceId, assetType, assetMetadata) {
+    const metadata = this.getSpaceMetadata(spaceId);
+    if (!metadata) return null;
+    
+    metadata.assets[assetType] = {
+      ...assetMetadata,
+      updatedAt: new Date().toISOString()
+    };
+    
+    if (!metadata.assets[assetType].createdAt) {
+      metadata.assets[assetType].createdAt = new Date().toISOString();
+    }
+    
+    return this.updateSpaceMetadata(spaceId, { assets: metadata.assets });
+  }
+  
+  // Set approval status
+  setApproval(spaceId, itemType, itemId, approved, approvedBy = null) {
+    const metadata = this.getSpaceMetadata(spaceId);
+    if (!metadata) return null;
+    
+    const approvalKey = `${itemType}:${itemId}`;
+    metadata.approvals[approvalKey] = {
+      approved: approved,
+      approvedAt: approved ? new Date().toISOString() : null,
+      approvedBy: approvedBy
+    };
+    
+    return this.updateSpaceMetadata(spaceId, { approvals: metadata.approvals });
+  }
+  
+  // Add version to history
+  addVersion(spaceId, versionData) {
+    const metadata = this.getSpaceMetadata(spaceId);
+    if (!metadata) return null;
+    
+    const version = {
+      version: (metadata.versions.length || 0) + 1,
+      ...versionData,
+      createdAt: new Date().toISOString()
+    };
+    
+    metadata.versions.push(version);
+    metadata.projectConfig.currentVersion = version.version;
+    
+    return this.updateSpaceMetadata(spaceId, { 
+      versions: metadata.versions,
+      projectConfig: metadata.projectConfig
+    });
+  }
+  
+  // Update project config
+  updateProjectConfig(spaceId, configUpdates) {
+    const metadata = this.getSpaceMetadata(spaceId);
+    if (!metadata) return null;
+    
+    metadata.projectConfig = {
+      ...metadata.projectConfig,
+      ...configUpdates
+    };
+    
+    return this.updateSpaceMetadata(spaceId, { projectConfig: metadata.projectConfig });
+  }
+  
+  // Helper: normalize file path to use as key
+  normalizeFilePath(filePath) {
+    return filePath.replace(/\\/g, '/').split('/').pop();
+  }
+  
+  // Helper: deep merge objects
+  deepMerge(target, source) {
+    const result = { ...target };
+    
+    for (const key in source) {
+      if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
+        result[key] = this.deepMerge(result[key] || {}, source[key]);
+      } else {
+        result[key] = source[key];
+      }
+    }
+    
+    return result;
   }
   
   updateSpace(spaceId, updates) {
@@ -611,6 +856,201 @@ class ClipboardStorageV2 {
       
       return false;
     });
+  }
+  
+  // ========== MIGRATION ==========
+  
+  // Migrate existing spaces to use unified metadata
+  migrateAllSpaces() {
+    console.log('[Storage] Starting migration to unified metadata...');
+    let migrated = 0;
+    
+    for (const space of this.index.spaces) {
+      if (space.id === 'unclassified') continue;
+      
+      const metadataPath = path.join(this.spacesDir, space.id, 'space-metadata.json');
+      if (!fs.existsSync(metadataPath)) {
+        this.migrateSpace(space.id);
+        migrated++;
+      }
+    }
+    
+    console.log(`[Storage] Migration complete. Migrated ${migrated} spaces.`);
+    return migrated;
+  }
+  
+  // Migrate a single space
+  migrateSpace(spaceId) {
+    const spaceDir = path.join(this.spacesDir, spaceId);
+    if (!fs.existsSync(spaceDir)) {
+      console.log(`[Storage] Space directory not found: ${spaceId}`);
+      return false;
+    }
+    
+    const space = this.index.spaces.find(s => s.id === spaceId);
+    if (!space) {
+      console.log(`[Storage] Space not found in index: ${spaceId}`);
+      return false;
+    }
+    
+    console.log(`[Storage] Migrating space: ${space.name} (${spaceId})`);
+    
+    // Create unified metadata
+    const metadata = this.initSpaceMetadata(spaceId, space);
+    
+    // Scan for existing files and add them to metadata
+    const files = fs.readdirSync(spaceDir);
+    for (const file of files) {
+      if (file === 'space-metadata.json' || file.startsWith('.')) continue;
+      
+      const filePath = path.join(spaceDir, file);
+      const stats = fs.statSync(filePath);
+      
+      if (stats.isFile()) {
+        const ext = path.extname(file).toLowerCase();
+        const fileType = this.getFileType(ext);
+        
+        metadata.files[file] = {
+          fileName: file,
+          filePath: file,
+          type: fileType,
+          size: stats.size,
+          createdAt: stats.birthtime.toISOString(),
+          updatedAt: stats.mtime.toISOString(),
+          status: 'existing'
+        };
+      }
+    }
+    
+    // Check for old metadata files and merge
+    const oldMetaFiles = [
+      '.asset-metadata.json',
+      'project-config.json',
+      '.gsx-costs.json'
+    ];
+    
+    for (const oldFile of oldMetaFiles) {
+      const oldPath = path.join(spaceDir, oldFile);
+      if (fs.existsSync(oldPath)) {
+        try {
+          const oldData = JSON.parse(fs.readFileSync(oldPath, 'utf8'));
+          
+          if (oldFile === 'project-config.json') {
+            metadata.projectConfig = { ...metadata.projectConfig, ...oldData };
+          } else if (oldFile === '.asset-metadata.json') {
+            metadata.assets = { ...metadata.assets, ...oldData };
+          } else if (oldFile === '.gsx-costs.json') {
+            metadata.costHistory = oldData;
+          }
+          
+          console.log(`[Storage] Merged old metadata: ${oldFile}`);
+        } catch (e) {
+          console.error(`[Storage] Error reading old metadata ${oldFile}:`, e.message);
+        }
+      }
+    }
+    
+    // Save unified metadata
+    const metadataPath = path.join(spaceDir, 'space-metadata.json');
+    fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+    
+    console.log(`[Storage] Migrated space: ${space.name}`);
+    return true;
+  }
+  
+  // Get file type from extension
+  getFileType(ext) {
+    const types = {
+      '.html': 'html',
+      '.htm': 'html',
+      '.css': 'css',
+      '.js': 'javascript',
+      '.ts': 'typescript',
+      '.json': 'json',
+      '.md': 'markdown',
+      '.txt': 'text',
+      '.csv': 'csv',
+      '.png': 'image',
+      '.jpg': 'image',
+      '.jpeg': 'image',
+      '.gif': 'image',
+      '.svg': 'image',
+      '.pdf': 'pdf',
+      '.ipynb': 'notebook'
+    };
+    return types[ext] || 'unknown';
+  }
+  
+  // ========== CROSS-SPACE QUERIES (DuckDB) ==========
+  
+  // Search across all spaces using DuckDB
+  async searchAllSpaces(searchTerm) {
+    const db = getEventDB();
+    if (db) {
+      await db.init();
+      return await db.searchAcrossSpaces(searchTerm);
+    }
+    
+    // Fallback: manual search
+    const results = [];
+    for (const space of this.index.spaces) {
+      if (space.id === 'unclassified') continue;
+      
+      const metadata = this.getSpaceMetadata(space.id);
+      if (metadata) {
+        const searchLower = searchTerm.toLowerCase();
+        if (metadata.name?.toLowerCase().includes(searchLower) ||
+            metadata.projectConfig?.description?.toLowerCase().includes(searchLower)) {
+          results.push({
+            spaceId: space.id,
+            name: metadata.name,
+            projectConfig: metadata.projectConfig
+          });
+        }
+      }
+    }
+    return results;
+  }
+  
+  // Query space metadata with custom conditions
+  async querySpaces(whereClause) {
+    const db = getEventDB();
+    if (db) {
+      await db.init();
+      return await db.querySpaceMetadata(whereClause);
+    }
+    return [];
+  }
+  
+  // Get all spaces with their metadata
+  getAllSpacesWithMetadata() {
+    const spacesWithMeta = [];
+    
+    for (const space of this.index.spaces) {
+      const metadata = this.getSpaceMetadata(space.id);
+      spacesWithMeta.push({
+        ...space,
+        metadata: metadata
+      });
+    }
+    
+    return spacesWithMeta;
+  }
+  
+  // Get space files from metadata
+  getSpaceFiles(spaceId) {
+    const metadata = this.getSpaceMetadata(spaceId);
+    if (!metadata) return [];
+    
+    return Object.entries(metadata.files || {}).map(([key, file]) => ({
+      key,
+      ...file
+    }));
+  }
+  
+  // Get space directory path
+  getSpacePath(spaceId) {
+    return path.join(this.spacesDir, spaceId);
   }
   
   // Get preferences

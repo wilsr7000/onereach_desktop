@@ -15,16 +15,30 @@ class GSXFileSync {
     this.maxHistorySize = 100;
     this.alertShowing = false; // Track if error alert is already showing
     
-    // Default sync paths - includes everything needed for full restore
-    this.defaultSyncPaths = [
-      { local: path.join(app.getPath('documents'), 'OR-Spaces'), remote: 'OR-Spaces', description: 'Clipboard Spaces data' },
-      { local: app.getPath('userData'), remote: 'App-Config', description: 'App configuration and settings' }
-    ];
-    
-    // Optional: Desktop sync (user can enable)
-    this.optionalSyncPaths = [
-      { local: path.join(app.getPath('desktop')), remote: 'Desktop', description: 'Desktop files' }
-    ];
+    // Lazy initialize paths - will be set on first access
+    this._defaultSyncPaths = null;
+    this._optionalSyncPaths = null;
+  }
+  
+  // Lazy getter for default sync paths
+  get defaultSyncPaths() {
+    if (!this._defaultSyncPaths) {
+      this._defaultSyncPaths = [
+        { local: path.join(app.getPath('documents'), 'OR-Spaces'), remote: 'OR-Spaces', description: 'Clipboard Spaces data' },
+        { local: app.getPath('userData'), remote: 'App-Config', description: 'App configuration and settings' }
+      ];
+    }
+    return this._defaultSyncPaths;
+  }
+  
+  // Lazy getter for optional sync paths
+  get optionalSyncPaths() {
+    if (!this._optionalSyncPaths) {
+      this._optionalSyncPaths = [
+        { local: path.join(app.getPath('desktop')), remote: 'Desktop', description: 'Desktop files' }
+      ];
+    }
+    return this._optionalSyncPaths;
   }
   
   /**

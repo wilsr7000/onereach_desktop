@@ -192,6 +192,32 @@ class ClipboardManagerV2 {
     // Update space counts
     this.updateSpaceCounts();
     
+    // Sync to unified space-metadata.json if item belongs to a space
+    const targetSpaceId = indexEntry.spaceId;
+    if (targetSpaceId) {
+      try {
+        const spaceMeta = this.storage.getSpaceMetadata(targetSpaceId);
+        if (spaceMeta) {
+          const fileKey = item.fileName || `item-${indexEntry.id}`;
+          spaceMeta.files[fileKey] = {
+            itemId: indexEntry.id,
+            fileName: item.fileName,
+            type: item.type,
+            fileType: item.fileType,
+            fileCategory: item.fileCategory,
+            preview: item.preview,
+            source: item.source,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          };
+          this.storage.updateSpaceMetadata(targetSpaceId, { files: spaceMeta.files });
+          console.log('[Clipboard] Synced new item to space-metadata.json:', fileKey);
+        }
+      } catch (syncError) {
+        console.error('[Clipboard] Error syncing new item to space metadata:', syncError);
+      }
+    }
+    
     // Notify renderer
     this.notifyHistoryUpdate();
     
@@ -248,8 +274,30 @@ class ClipboardManagerV2 {
       }
     }
     
+    // Get item info before deletion for space metadata cleanup
+    const item = this.history.find(h => h.id === id);
+    const spaceId = item ? item.spaceId : null;
+    const fileName = item ? item.fileName : null;
+    
     const success = this.storage.deleteItem(id);
     if (success) {
+      // Remove from unified space-metadata.json
+      if (spaceId) {
+        try {
+          const spaceMeta = this.storage.getSpaceMetadata(spaceId);
+          if (spaceMeta) {
+            const fileKey = fileName || `item-${id}`;
+            if (spaceMeta.files[fileKey]) {
+              delete spaceMeta.files[fileKey];
+              this.storage.updateSpaceMetadata(spaceId, { files: spaceMeta.files });
+              console.log('[Clipboard] Removed from space-metadata.json:', fileKey);
+            }
+          }
+        } catch (syncError) {
+          console.error('[Clipboard] Error removing from space metadata:', syncError);
+        }
+      }
+      
       this.history = this.history.filter(h => h.id !== id);
       this.pinnedItems.delete(id);
       if (this.manager && this.manager.pendingOperations) {
@@ -325,13 +373,51 @@ class ClipboardManagerV2 {
   }
   
   moveItemToSpace(itemId, spaceId) {
+    // Get item before moving to know old space
+    const item = this.history.find(h => h.id === itemId);
+    const oldSpaceId = item ? item.spaceId : null;
+    
     const success = this.storage.moveItem(itemId, spaceId);
     
     if (success) {
       // Update in-memory history
-      const item = this.history.find(h => h.id === itemId);
       if (item) {
         item.spaceId = spaceId;
+      }
+      
+      // Sync with unified space-metadata.json
+      try {
+        const fullItem = this.storage.loadItem(itemId);
+        const fileKey = fullItem.fileName || `item-${itemId}`;
+        
+        // Remove from old space's metadata
+        if (oldSpaceId) {
+          const oldMeta = this.storage.getSpaceMetadata(oldSpaceId);
+          if (oldMeta && oldMeta.files[fileKey]) {
+            delete oldMeta.files[fileKey];
+            this.storage.updateSpaceMetadata(oldSpaceId, { files: oldMeta.files });
+          }
+        }
+        
+        // Add to new space's metadata
+        if (spaceId) {
+          const newMeta = this.storage.getSpaceMetadata(spaceId);
+          if (newMeta) {
+            newMeta.files[fileKey] = {
+              itemId: itemId,
+              fileName: fullItem.fileName,
+              type: fullItem.type,
+              fileType: fullItem.fileType,
+              preview: fullItem.preview,
+              movedAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            };
+            this.storage.updateSpaceMetadata(spaceId, { files: newMeta.files });
+            console.log('[Clipboard] Synced move to space-metadata.json:', fileKey, '->', spaceId);
+          }
+        }
+      } catch (syncError) {
+        console.error('[Clipboard] Error syncing move to space metadata:', syncError);
       }
       
       this.updateSpaceCounts();
@@ -1194,11 +1280,44 @@ class ClipboardManagerV2 {
         const item = this.storage.loadItem(itemId);
         if (!item) return { success: false };
         
+        // Update item's individual metadata file
         const metadataPath = path.join(this.storage.storageRoot, item.metadataPath);
         const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
         
         Object.assign(metadata, updates);
         fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+        
+        // Also sync to unified space-metadata.json if item belongs to a space
+        if (item.spaceId) {
+          try {
+            const spaceMetadata = this.storage.getSpaceMetadata(item.spaceId);
+            if (spaceMetadata) {
+              // Create a file key based on item ID or filename
+              const fileKey = item.fileName || `item-${itemId}`;
+              spaceMetadata.files[fileKey] = {
+                ...spaceMetadata.files[fileKey],
+                itemId: itemId,
+                type: item.type,
+                fileType: item.fileType,
+                description: updates.description || metadata.description,
+                tags: updates.tags || metadata.tags,
+                notes: updates.notes || metadata.notes,
+                instructions: updates.instructions || metadata.instructions,
+                source: updates.source || metadata.source,
+                ai_generated: updates.ai_generated || metadata.ai_generated,
+                ai_assisted: updates.ai_assisted || metadata.ai_assisted,
+                ai_model: updates.ai_model || metadata.ai_model,
+                ai_provider: updates.ai_provider || metadata.ai_provider,
+                updatedAt: new Date().toISOString()
+              };
+              this.storage.updateSpaceMetadata(item.spaceId, { files: spaceMetadata.files });
+              console.log('[Clipboard] Synced metadata to space-metadata.json for:', fileKey);
+            }
+          } catch (syncError) {
+            console.error('[Clipboard] Error syncing to space metadata:', syncError);
+            // Don't fail the operation if sync fails
+          }
+        }
         
         return { success: true };
       } catch (error) {

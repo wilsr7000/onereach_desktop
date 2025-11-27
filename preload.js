@@ -504,6 +504,16 @@ contextBridge.exposeInMainWorld('aider', {
   getSpaces: () => ipcRenderer.invoke('aider:get-spaces'),
   createSpace: (name) => ipcRenderer.invoke('aider:create-space', name),
   listProjectFiles: (dirPath) => ipcRenderer.invoke('aider:list-project-files', dirPath),
+  
+  // Unified space metadata
+  getSpaceMetadata: (spaceId) => ipcRenderer.invoke('aider:get-space-metadata', spaceId),
+  updateSpaceMetadata: (spaceId, updates) => ipcRenderer.invoke('aider:update-space-metadata', spaceId, updates),
+  setFileMetadata: (spaceId, filePath, metadata) => ipcRenderer.invoke('aider:set-file-metadata', spaceId, filePath, metadata),
+  getFileMetadata: (spaceId, filePath) => ipcRenderer.invoke('aider:get-file-metadata', spaceId, filePath),
+  setAssetMetadata: (spaceId, assetType, metadata) => ipcRenderer.invoke('aider:set-asset-metadata', spaceId, assetType, metadata),
+  setApproval: (spaceId, itemType, itemId, approved) => ipcRenderer.invoke('aider:set-approval', spaceId, itemType, itemId, approved),
+  addVersion: (spaceId, versionData) => ipcRenderer.invoke('aider:add-version', spaceId, versionData),
+  updateProjectConfig: (spaceId, configUpdates) => ipcRenderer.invoke('aider:update-project-config', spaceId, configUpdates),
   // Playwright API testing
   runPlaywrightTests: (options) => ipcRenderer.invoke('aider:run-playwright-tests', options),
   // File operations
@@ -534,7 +544,32 @@ contextBridge.exposeInMainWorld('aider', {
   txdbGetTransactions: (spaceId, limit) => ipcRenderer.invoke('txdb:get-transactions', spaceId, limit),
   // Event logging
   txdbLogEvent: (data) => ipcRenderer.invoke('txdb:log-event', data),
-  txdbGetEventLogs: (options) => ipcRenderer.invoke('txdb:get-event-logs', options)
+  txdbGetEventLogs: (options) => ipcRenderer.invoke('txdb:get-event-logs', options),
+  
+  // DuckDB Analytics
+  eventdbCostByModel: (spaceId) => ipcRenderer.invoke('eventdb:cost-by-model', spaceId),
+  eventdbDailyCosts: (spaceId, days) => ipcRenderer.invoke('eventdb:daily-costs', spaceId, days),
+  eventdbQuerySpaces: (whereClause) => ipcRenderer.invoke('eventdb:query-spaces', whereClause),
+  eventdbSearchSpaces: (searchTerm) => ipcRenderer.invoke('eventdb:search-spaces', searchTerm),
+  eventdbQuery: (sql) => ipcRenderer.invoke('eventdb:query', sql),
+  
+  // Unified Space Metadata System
+  getSpaceMetadata: (spaceId) => ipcRenderer.invoke('aider:get-space-metadata', spaceId),
+  updateSpaceMetadata: (spaceId, updates) => ipcRenderer.invoke('aider:update-space-metadata', spaceId, updates),
+  setFileMetadata: (spaceId, filePath, metadata) => ipcRenderer.invoke('aider:set-file-metadata', spaceId, filePath, metadata),
+  getFileMetadata: (spaceId, filePath) => ipcRenderer.invoke('aider:get-file-metadata', spaceId, filePath),
+  setAssetMetadata: (spaceId, assetType, metadata) => ipcRenderer.invoke('aider:set-asset-metadata', spaceId, assetType, metadata),
+  setApproval: (spaceId, itemType, itemId, approved) => ipcRenderer.invoke('aider:set-approval', spaceId, itemType, itemId, approved),
+  addVersion: (spaceId, versionData) => ipcRenderer.invoke('aider:add-version', spaceId, versionData),
+  updateProjectConfig: (spaceId, configUpdates) => ipcRenderer.invoke('aider:update-project-config', spaceId, configUpdates),
+  
+  // Space Migration & Cross-Space Queries
+  migrateSpaces: () => ipcRenderer.invoke('aider:migrate-spaces'),
+  searchAllSpaces: (searchTerm) => ipcRenderer.invoke('aider:search-all-spaces', searchTerm),
+  querySpaces: (whereClause) => ipcRenderer.invoke('aider:query-spaces', whereClause),
+  getAllSpacesWithMetadata: () => ipcRenderer.invoke('aider:get-all-spaces-with-metadata'),
+  getSpaceFiles: (spaceId) => ipcRenderer.invoke('aider:get-space-files', spaceId),
+  getSpacePath: (spaceId) => ipcRenderer.invoke('aider:get-space-path', spaceId)
 });
 
 // Expose auth API
@@ -682,8 +717,16 @@ contextBridge.exposeInMainWorld('clipboard', {
   addHtml: (data) => ipcRenderer.invoke('black-hole:add-html', data),
   addImage: (data) => ipcRenderer.invoke('black-hole:add-image', data),
   addFile: (data) => ipcRenderer.invoke('black-hole:add-file', data),
-  
 
+  // Unified space metadata methods
+  getSpaceMetadata: (spaceId) => ipcRenderer.invoke('aider:get-space-metadata', spaceId),
+  updateSpaceMetadata: (spaceId, updates) => ipcRenderer.invoke('aider:update-space-metadata', spaceId, updates),
+  setFileMetadata: (spaceId, filePath, metadata) => ipcRenderer.invoke('aider:set-file-metadata', spaceId, filePath, metadata),
+  getFileMetadata: (spaceId, filePath) => ipcRenderer.invoke('aider:get-file-metadata', spaceId, filePath),
+  setAssetMetadata: (spaceId, assetName, metadata) => ipcRenderer.invoke('aider:set-asset-metadata', spaceId, assetName, metadata),
+  setApproval: (spaceId, assetName, approved) => ipcRenderer.invoke('aider:set-approval', spaceId, assetName, approved),
+  addVersion: (spaceId, version) => ipcRenderer.invoke('aider:add-version', spaceId, version),
+  updateProjectConfig: (spaceId, config) => ipcRenderer.invoke('aider:update-project-config', spaceId, config),
   
   // Event listeners
   onHistoryUpdate: (callback) => {
