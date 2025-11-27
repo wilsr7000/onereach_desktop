@@ -1284,6 +1284,27 @@ function setupAiderIPC() {
     }
   });
   
+  // Run prompt with streaming
+  ipcMain.handle('aider:run-prompt-streaming', async (event, message, channel) => {
+    try {
+      if (!aiderBridge) {
+        throw new Error('Aider not started');
+      }
+      console.log('[Aider] Running streaming prompt:', message.substring(0, 100) + '...');
+      
+      const result = await aiderBridge.runPromptStreaming(message, (token) => {
+        event.sender.send(channel, { type: 'token', token });
+      });
+      
+      event.sender.send(channel, { type: 'done', result });
+      return result;
+    } catch (error) {
+      console.error('[Aider] Streaming prompt failed:', error);
+      event.sender.send(channel, { type: 'error', error: error.message });
+      return { success: false, error: error.message };
+    }
+  });
+  
   // Add files
   ipcMain.handle('aider:add-files', async (event, filePaths) => {
     try {

@@ -487,6 +487,11 @@ contextBridge.exposeInMainWorld('aider', {
   start: () => ipcRenderer.invoke('aider:start'),
   initialize: (repoPath, modelName) => ipcRenderer.invoke('aider:initialize', repoPath, modelName),
   runPrompt: (message) => ipcRenderer.invoke('aider:run-prompt', message),
+  runPromptStreaming: (message, callback) => {
+    const channel = 'aider:prompt-stream-' + Date.now();
+    ipcRenderer.on(channel, (event, data) => callback(data));
+    return ipcRenderer.invoke('aider:run-prompt-streaming', message, channel);
+  },
   addFiles: (filePaths) => ipcRenderer.invoke('aider:add-files', filePaths),
   removeFiles: (filePaths) => ipcRenderer.invoke('aider:remove-files', filePaths),
   getRepoMap: () => ipcRenderer.invoke('aider:get-repo-map'),
