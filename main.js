@@ -1757,6 +1757,53 @@ function setupAiderIPC() {
     }
   });
   
+  // Get space items
+  ipcMain.handle('aider:get-space-items', async (event, spaceId) => {
+    try {
+      const ClipboardStorage = require('./clipboard-storage-v2');
+      const storage = new ClipboardStorage();
+      const items = storage.getItemsBySpace(spaceId);
+      return { success: true, items };
+    } catch (error) {
+      console.error('[GSX Create] Failed to get space items:', error);
+      return { success: false, error: error.message, items: [] };
+    }
+  });
+
+  // Watch file for changes
+  const fileWatchers = new Map();
+  ipcMain.handle('aider:watch-file', async (event, filePath) => {
+    try {
+      if (fileWatchers.has(filePath)) {
+        return { success: true, message: 'Already watching' };
+      }
+      const watcher = fs.watch(filePath, (eventType) => {
+        if (eventType === 'change') {
+          event.sender.send('aider:file-changed', filePath);
+        }
+      });
+      fileWatchers.set(filePath, watcher);
+      console.log('[Aider] Watching file:', filePath);
+      return { success: true };
+    } catch (error) {
+      console.error('[Aider] Watch file error:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('aider:unwatch-file', async (event, filePath) => {
+    try {
+      const watcher = fileWatchers.get(filePath);
+      if (watcher) {
+        watcher.close();
+        fileWatchers.delete(filePath);
+      }
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
   console.log('[setupAiderIPC] Aider Bridge IPC handlers registered');
 }
 
@@ -1958,30 +2005,10 @@ function setupIPC() {
   }
   
   // ============================================
-  // GSX CREATE - File and Cost Tracking Handlers
+  // GSX CREATE - Cost Tracking Handlers
   // ============================================
   
-  // Read a file
-  ipcMain.handle('aider:read-file', async (event, filePath) => {
-    try {
-      const content = fs.readFileSync(filePath, 'utf-8');
-      return content;
-    } catch (error) {
-      console.error('[GSX Create] Failed to read file:', error);
-      return null;
-    }
-  });
-  
-  // Open a file in default application
-  ipcMain.handle('aider:open-file', async (event, filePath) => {
-    try {
-      await shell.openPath(filePath);
-      return { success: true };
-    } catch (error) {
-      console.error('[GSX Create] Failed to open file:', error);
-      return { success: false, error: error.message };
-    }
-  });
+  // Note: aider:read-file and aider:open-file are registered earlier in setupAiderIPC
   
   // Transaction database handlers for cost tracking
   ipcMain.handle('txdb:get-summary', async (event, spaceId) => {

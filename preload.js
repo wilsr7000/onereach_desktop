@@ -482,36 +482,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   triggerMissionControl: () => ipcRenderer.send('trigger-mission-control')
 });
 
-// Expose Aider API for AI pair programming
+// Expose Aider API for GSX Create
 contextBridge.exposeInMainWorld('aider', {
   start: () => ipcRenderer.invoke('aider:start'),
   initialize: (repoPath, modelName) => ipcRenderer.invoke('aider:initialize', repoPath, modelName),
   runPrompt: (message) => ipcRenderer.invoke('aider:run-prompt', message),
-  runPromptStreaming: (message, onToken, options = {}) => {
-    // Set up listener for stream events
-    const handler = (event, data) => {
-      if (data.type === 'token' && onToken) {
-        onToken(data.content);
-      }
-    };
-    ipcRenderer.on('aider:stream', handler);
-    return ipcRenderer.invoke('aider:run-prompt-streaming', message, options).finally(() => {
-      ipcRenderer.removeListener('aider:stream', handler);
-    });
-  },
-  onStream: (callback) => ipcRenderer.on('aider:stream', (event, data) => callback(data)),
-  removeStreamListener: () => ipcRenderer.removeAllListeners('aider:stream'),
-  _runPrompt: (message) => ipcRenderer.invoke('aider:run-prompt', message),
   addFiles: (filePaths) => ipcRenderer.invoke('aider:add-files', filePaths),
   removeFiles: (filePaths) => ipcRenderer.invoke('aider:remove-files', filePaths),
   getRepoMap: () => ipcRenderer.invoke('aider:get-repo-map'),
-  
-  // Code search tools
-  searchCode: (pattern, fileGlob) => ipcRenderer.invoke('aider:search-code', pattern, fileGlob),
-  findDefinition: (symbol) => ipcRenderer.invoke('aider:find-definition', symbol),
-  findUsages: (symbol) => ipcRenderer.invoke('aider:find-usages', symbol),
-  readFileSection: (filePath, startLine, endLine) => ipcRenderer.invoke('aider:read-file-section', filePath, startLine, endLine),
-  
   setTestCmd: (command) => ipcRenderer.invoke('aider:set-test-cmd', command),
   setLintCmd: (command) => ipcRenderer.invoke('aider:set-lint-cmd', command),
   shutdown: () => ipcRenderer.invoke('aider:shutdown'),
@@ -519,48 +497,33 @@ contextBridge.exposeInMainWorld('aider', {
   selectFolder: () => ipcRenderer.invoke('aider:select-folder'),
   getApiConfig: () => ipcRenderer.invoke('aider:get-api-config'),
   getSpaces: () => ipcRenderer.invoke('aider:get-spaces'),
-  listFiles: (dirPath) => ipcRenderer.invoke('aider:list-files', dirPath),
-  getSpaceItems: (spaceId) => ipcRenderer.invoke('aider:get-space-items', spaceId),
+  createSpace: (name) => ipcRenderer.invoke('aider:create-space', name),
   listProjectFiles: (dirPath) => ipcRenderer.invoke('aider:list-project-files', dirPath),
-  detectProjectTools: (dirPath) => ipcRenderer.invoke('aider:detect-project-tools', dirPath),
+  // File operations
+  readFile: (filePath) => ipcRenderer.invoke('aider:read-file', filePath),
+  openFile: (filePath) => ipcRenderer.invoke('aider:open-file', filePath),
+  watchFile: (filePath) => ipcRenderer.invoke('aider:watch-file', filePath),
+  unwatchFile: (filePath) => ipcRenderer.invoke('aider:unwatch-file', filePath),
+  // Screenshot capture
+  capturePreviewScreenshot: (htmlContent, options) => ipcRenderer.invoke('aider:capture-preview-screenshot', htmlContent, options),
+  analyzeScreenshot: (screenshotBase64, prompt) => ipcRenderer.invoke('aider:analyze-screenshot', screenshotBase64, prompt),
+  // File registration with Space Manager
   registerCreatedFile: (data) => ipcRenderer.invoke('aider:register-created-file', data),
   updateFileMetadata: (data) => ipcRenderer.invoke('aider:update-file-metadata', data),
+  // Space items
+  getSpaceItems: (spaceId) => ipcRenderer.invoke('clipboard:get-space-items', spaceId),
+  // Style Guide management
   getStyleGuides: (spaceId) => ipcRenderer.invoke('aider:get-style-guides', spaceId),
   saveStyleGuide: (data) => ipcRenderer.invoke('aider:save-style-guide', data),
   deleteStyleGuide: (id) => ipcRenderer.invoke('aider:delete-style-guide', id),
-  readFile: (filePath) => ipcRenderer.invoke('aider:read-file', filePath),
-  openFile: (filePath) => ipcRenderer.invoke('aider:open-file', filePath),
-  capturePreviewScreenshot: (htmlContent, options) => ipcRenderer.invoke('aider:capture-preview-screenshot', htmlContent, options),
-  analyzeScreenshot: (screenshotBase64, prompt) => ipcRenderer.invoke('aider:analyze-screenshot', screenshotBase64, prompt),
-  
-  // Version Management
-  getFileVersions: (spaceFolder, filePath) => ipcRenderer.invoke('aider:get-file-versions', spaceFolder, filePath),
-  getVersionContent: (spaceFolder, filePath, versionId) => ipcRenderer.invoke('aider:get-version-content', spaceFolder, filePath, versionId),
-  rollbackFile: (spaceFolder, filePath, versionId) => ipcRenderer.invoke('aider:rollback-file', spaceFolder, filePath, versionId),
-  rollbackSession: (spaceFolder, sessionId) => ipcRenderer.invoke('aider:rollback-session', spaceFolder, sessionId),
-  getRecentSessions: (spaceFolder, limit) => ipcRenderer.invoke('aider:get-recent-sessions', spaceFolder, limit),
-  compareVersions: (spaceFolder, filePath, versionId1, versionId2) => ipcRenderer.invoke('aider:compare-versions', spaceFolder, filePath, versionId1, versionId2),
-  
-  // Cost Tracking
-  recordCost: (spaceFolder, callData) => ipcRenderer.invoke('cost:record', spaceFolder, callData),
-  getCostSummary: (spaceFolder) => ipcRenderer.invoke('cost:get-summary', spaceFolder),
-  getCostByDateRange: (spaceFolder, startDate, endDate) => ipcRenderer.invoke('cost:get-by-date-range', spaceFolder, startDate, endDate),
-  resetCosts: (spaceFolder) => ipcRenderer.invoke('cost:reset', spaceFolder),
-  parseAiderCostMessage: (message) => ipcRenderer.invoke('cost:parse-aider-message', message),
-  
-  // Transaction Database
-  txdbRecord: (data) => ipcRenderer.invoke('txdb:record', data),
-  txdbGetTransactions: (options) => ipcRenderer.invoke('txdb:get-transactions', options),
-  txdbGetSummary: (spaceId, days) => ipcRenderer.invoke('txdb:get-summary', spaceId, days),
-  txdbLogEvent: (level, category, message, data, spaceId) => ipcRenderer.invoke('txdb:log-event', level, category, message, data, spaceId),
-  txdbGetEventLogs: (options) => ipcRenderer.invoke('txdb:get-event-logs', options),
-  txdbGetInfo: () => ipcRenderer.invoke('txdb:get-info'),
-  txdbExport: () => ipcRenderer.invoke('txdb:export'),
-  watchFile: (filePath) => ipcRenderer.invoke('aider:watch-file', filePath),
-  unwatchFile: (filePath) => ipcRenderer.invoke('aider:unwatch-file', filePath),
-  onFileChanged: (callback) => {
-    ipcRenderer.on('aider:file-changed', (event, filePath) => callback(filePath));
-  }
+  // Journey Maps
+  getJourneyMaps: (spaceId) => ipcRenderer.invoke('aider:get-journey-maps', spaceId),
+  saveJourneyMap: (data) => ipcRenderer.invoke('aider:save-journey-map', data),
+  deleteJourneyMap: (id) => ipcRenderer.invoke('aider:delete-journey-map', id),
+  // Transaction database for cost tracking
+  txdbGetSummary: (spaceId) => ipcRenderer.invoke('txdb:get-summary', spaceId),
+  txdbRecordTransaction: (data) => ipcRenderer.invoke('txdb:record-transaction', data),
+  txdbGetTransactions: (spaceId, limit) => ipcRenderer.invoke('txdb:get-transactions', spaceId, limit)
 });
 
 // Expose auth API
@@ -733,336 +696,55 @@ contextBridge.exposeInMainWorld('clipboard', {
     });
   }
 });
-// Screenshot Capture API
-contextBridge.exposeInMainWorld('screenshot', {
-  /**
-   * Capture a screenshot from a URL
-   * @param {string} url - The URL to capture
-   * @param {Object} options - Options: width, height, fullPage, format, quality, timeout, delay, selector
-   * @returns {Promise<{success: boolean, data?: string, error?: string}>}
-   */
-  capture: (url, options = {}) => ipcRenderer.invoke('screenshot:capture', url, options),
-  
-  /**
-   * Capture a screenshot and save to file
-   * @param {string} url - The URL to capture
-   * @param {string} outputPath - Path to save the screenshot
-   * @param {Object} options - Capture options
-   * @returns {Promise<{success: boolean, path?: string, error?: string}>}
-   */
-  captureToFile: (url, outputPath, options = {}) => ipcRenderer.invoke('screenshot:capture-to-file', url, outputPath, options),
-  
-  /**
-   * Capture responsive screenshots at multiple viewport sizes
-   * @param {string} url - The URL to capture
-   * @param {Array} viewports - Array of {name, width, height} or null for defaults
-   * @param {Object} options - Additional capture options
-   * @returns {Promise<{success: boolean, results?: Array, error?: string}>}
-   */
-  captureResponsive: (url, viewports = null, options = {}) => ipcRenderer.invoke('screenshot:capture-responsive', url, viewports, options),
-  
-  /**
-   * Capture a thumbnail (smaller, optimized image)
-   * @param {string} url - The URL to capture
-   * @param {Object} options - Options: width (default 320), height (default 240), quality
-   * @returns {Promise<{success: boolean, data?: string, error?: string}>}
-   */
-  captureThumbnail: (url, options = {}) => ipcRenderer.invoke('screenshot:capture-thumbnail', url, options)
-});
-
-
-// Web Scraper API
-contextBridge.exposeInMainWorld('scraper', {
-  /**
-   * Get full HTML content of a page
-   * @param {string} url - URL to scrape
-   * @param {Object} options - Options: timeout, waitUntil, delay, waitForSelector, waitForIdle
-   * @returns {Promise<{success: boolean, html?: string, error?: string}>}
-   */
-  getHTML: (url, options = {}) => ipcRenderer.invoke('scraper:get-html', url, options),
-  
-  /**
-   * Get text content of a page (no HTML tags)
-   * @param {string} url - URL to scrape
-   * @param {Object} options - Scrape options
-   * @returns {Promise<{success: boolean, text?: string, error?: string}>}
-   */
-  getText: (url, options = {}) => ipcRenderer.invoke('scraper:get-text', url, options),
-  
-  /**
-   * Get all links from a page
-   * @param {string} url - URL to scrape
-   * @param {Object} options - Scrape options
-   * @returns {Promise<{success: boolean, links?: Array, error?: string}>}
-   */
-  getLinks: (url, options = {}) => ipcRenderer.invoke('scraper:get-links', url, options),
-  
-  /**
-   * Get all images from a page
-   * @param {string} url - URL to scrape
-   * @param {Object} options - Options include loadLazyImages: true
-   * @returns {Promise<{success: boolean, images?: Array, error?: string}>}
-   */
-  getImages: (url, options = {}) => ipcRenderer.invoke('scraper:get-images', url, options),
-  
-  /**
-   * Extract specific elements using CSS selectors
-   * @param {string} url - URL to scrape
-   * @param {string|Array} selectors - CSS selector(s) to extract
-   * @param {Object} options - Scrape options
-   * @returns {Promise<{success: boolean, data?: Object, error?: string}>}
-   */
-  extract: (url, selectors, options = {}) => ipcRenderer.invoke('scraper:extract', url, selectors, options),
-  
-  /**
-   * Get structured data (JSON-LD, Open Graph, Twitter Cards, meta tags)
-   * @param {string} url - URL to scrape
-   * @param {Object} options - Scrape options
-   * @returns {Promise<{success: boolean, data?: Object, error?: string}>}
-   */
-  getStructuredData: (url, options = {}) => ipcRenderer.invoke('scraper:get-structured-data', url, options),
-  
-  /**
-   * Execute custom JavaScript on a page
-   * @param {string} url - URL to scrape
-   * @param {string} script - JavaScript code to execute
-   * @param {Object} options - Scrape options
-   * @returns {Promise<{success: boolean, result?: any, error?: string}>}
-   */
-  evaluate: (url, script, options = {}) => ipcRenderer.invoke('scraper:evaluate', url, script, options)
-});
-
-
-// Image Downloader API
-contextBridge.exposeInMainWorld('imageDownloader', {
-  /**
-   * Download main images from a web page to a space directory
-   * @param {string} url - Web page URL to scrape images from
-   * @param {string} spaceDir - Space directory path (images saved to spaceDir/temp_images/)
-   * @param {Object} options - Options: minWidth, minHeight, maxImages, loadLazyImages
-   * @returns {Promise<{success: boolean, downloaded?: Array, failed?: Array, error?: string}>}
-   */
-  downloadFromPage: (url, spaceDir, options = {}) => 
-    ipcRenderer.invoke('images:download-from-page', url, spaceDir, options),
-  
-  /**
-   * Download a single image
-   * @param {string} imageUrl - Direct URL to the image
-   * @param {string} outputPath - Full path to save the image
-   * @returns {Promise<{success: boolean, path?: string, size?: number, error?: string}>}
-   */
-  downloadSingle: (imageUrl, outputPath) => 
-    ipcRenderer.invoke('images:download-single', imageUrl, outputPath)
-});
-
-
-// CSS Extractor API
-contextBridge.exposeInMainWorld('cssExtractor', {
-  /**
-   * Extract all CSS from a page (stylesheets, style tags, inline styles)
-   * @param {string} url - URL to extract CSS from
-   * @param {Object} options - Options: timeout, waitUntil
-   * @returns {Promise<{success: boolean, combined?: string, styleTags?: Array, linkedStylesheets?: Array, stats?: Object}>}
-   */
-  extractAll: (url, options = {}) => ipcRenderer.invoke('css:extract-all', url, options),
-  
-  /**
-   * Extract CSS variables (custom properties)
-   * @param {string} url - URL to extract from
-   * @param {Object} options - Options
-   * @returns {Promise<{success: boolean, root?: Object, all?: Array}>}
-   */
-  extractVariables: (url, options = {}) => ipcRenderer.invoke('css:extract-variables', url, options),
-  
-  /**
-   * Extract color palette from CSS
-   * @param {string} url - URL to extract from
-   * @param {Object} options - Options
-   * @returns {Promise<{success: boolean, colors?: Array, total?: number}>}
-   */
-  extractColors: (url, options = {}) => ipcRenderer.invoke('css:extract-colors', url, options),
-  
-  /**
-   * Extract font information
-   * @param {string} url - URL to extract from
-   * @param {Object} options - Options
-   * @returns {Promise<{success: boolean, families?: Array, fontFaces?: Array}>}
-   */
-  extractFonts: (url, options = {}) => ipcRenderer.invoke('css:extract-fonts', url, options),
-  
-  /**
-   * Extract computed styles for specific elements
-   * @param {string} url - URL to extract from
-   * @param {string|Array} selectors - CSS selector(s)
-   * @param {Object} options - Options
-   * @returns {Promise<{success: boolean, styles?: Object}>}
-   */
-  extractComputed: (url, selectors, options = {}) => ipcRenderer.invoke('css:extract-computed', url, selectors, options)
-});
-
-
-// Style Guide Extractor API
-contextBridge.exposeInMainWorld('styleGuideExtractor', {
-  /**
-   * Extract complete style guide from a URL
-   * @param {string} url - URL to analyze
-   * @param {Object} options - Options
-   * @returns {Promise<{success: boolean, styleGuide?: Object}>}
-   */
-  extract: (url, options = {}) => ipcRenderer.invoke('styleguide:extract', url, options),
-  
-  /**
-   * Extract style guide with markdown report and CSS variables
-   * @param {string} url - URL to analyze
-   * @param {Object} options - Options
-   * @returns {Promise<{success: boolean, styleGuide?: Object, report?: string, cssVariables?: string}>}
-   */
-  extractWithReport: (url, options = {}) => ipcRenderer.invoke('styleguide:extract-with-report', url, options)
-});
-
-
-// Copy Style Extractor API
-contextBridge.exposeInMainWorld('copyStyleExtractor', {
-  /**
-   * Extract copywriting style guide from a URL
-   * @param {string} url - URL to analyze
-   * @param {Object} options - Options
-   * @returns {Promise<{success: boolean, copyGuide?: Object}>}
-   */
-  extract: (url, options = {}) => ipcRenderer.invoke('copystyle:extract', url, options),
-  
-  /**
-   * Extract copy style with markdown report and voice summary
-   * @param {string} url - URL to analyze
-   * @param {Object} options - Options
-   * @returns {Promise<{success: boolean, copyGuide?: Object, report?: string, voiceSummary?: string}>}
-   */
-  extractWithReport: (url, options = {}) => ipcRenderer.invoke('copystyle:extract-with-report', url, options)
-});
-
-
-// Style Prompt Generator API
-contextBridge.exposeInMainWorld('promptGenerator', {
-  /**
-   * Generate a design prompt from visual style guide
-   * @param {Object} styleGuide - Visual style guide from styleGuideExtractor
-   * @param {Object} options - {type, purpose, additionalContext, includeColors, includeTypography, includeButtons}
-   */
-  generateDesign: (styleGuide, options = {}) => ipcRenderer.invoke('prompt:generate-design', styleGuide, options),
-  
-  /**
-   * Generate a copy/content prompt from copy style guide
-   * @param {Object} copyGuide - Copy guide from copyStyleExtractor
-   * @param {Object} options - {type, topic, targetAudience, additionalContext, length}
-   */
-  generateCopy: (copyGuide, options = {}) => ipcRenderer.invoke('prompt:generate-copy', copyGuide, options),
-  
-  /**
-   * Generate a combined design + copy prompt
-   * @param {Object} styleGuide - Visual style guide
-   * @param {Object} copyGuide - Copy style guide
-   * @param {Object} options - {type, purpose, topic, targetAudience, additionalContext}
-   */
-  generateFull: (styleGuide, copyGuide, options = {}) => ipcRenderer.invoke('prompt:generate-full', styleGuide, copyGuide, options),
-  
-  /**
-   * Generate a landing page prompt
-   */
-  generateLandingPage: (styleGuide, copyGuide, options = {}) => ipcRenderer.invoke('prompt:generate-landing-page', styleGuide, copyGuide, options),
-  
-  /**
-   * Generate an email prompt
-   */
-  generateEmail: (styleGuide, copyGuide, options = {}) => ipcRenderer.invoke('prompt:generate-email', styleGuide, copyGuide, options),
-  
-  /**
-   * Generate a social media post prompt
-   * @param {Object} copyGuide - Copy style guide
-   * @param {Object} options - {platform: 'twitter'|'linkedin'|'instagram'|'facebook', topic}
-   */
-  generateSocial: (copyGuide, options = {}) => ipcRenderer.invoke('prompt:generate-social', copyGuide, options),
-  
-  /**
-   * Generate headline variations prompt
-   * @param {Object} copyGuide - Copy style guide
-   * @param {Object} options - {topic, count}
-   */
-  generateHeadlines: (copyGuide, options = {}) => ipcRenderer.invoke('prompt:generate-headlines', copyGuide, options),
-  
-  /**
-   * Generate CTA variations prompt
-   * @param {Object} copyGuide - Copy style guide
-   * @param {Object} options - {action, count}
-   */
-  generateCTA: (copyGuide, options = {}) => ipcRenderer.invoke('prompt:generate-cta', copyGuide, options)
-});
-
-
-  // Add multimodal methods to promptGenerator
-  // Note: These should be added to the existing promptGenerator object
-  // Adding them as separate exposure for now
-
-contextBridge.exposeInMainWorld('promptGeneratorMultimodal', {
-  /**
-   * Generate a multimodal prompt with images for AI vision models
-   * @param {Object} options - {styleGuide, copyGuide, images, type, purpose, targetAudience, additionalContext}
-   * @param {Array} options.images - Array of {base64, path, description, type} objects
-   * @returns {Object} {text, images, messages: {claude, openai, generic}}
-   */
-  generateMultimodal: (options = {}) => ipcRenderer.invoke('prompt:generate-multimodal', options),
-  
-  /**
-   * Generate a design prompt with categorized images
-   * @param {Object} styleGuide - Visual style guide
-   * @param {Array} images - Array of {base64, type: 'full-page'|'hero'|'component'|'responsive', description}
-   * @param {Object} options - {type, purpose, additionalContext}
-   */
-  generateDesignWithImages: (styleGuide, images, options = {}) => 
-    ipcRenderer.invoke('prompt:generate-design-with-images', styleGuide, images, options)
-});
-
-
-// Image Generation Prompt APIs
-contextBridge.exposeInMainWorld('imageGenPrompts', {
-  /**
-   * Generate DALL-E 3 optimized prompt
-   * @param {Object} styleGuide - Visual style guide
-   * @param {Object} options - {subject, style, mood, additionalDetails, size, quality}
-   * @returns {Object} {prompt, apiParams, variations}
-   */
-  generateDALLE: (styleGuide, options = {}) => ipcRenderer.invoke('prompt:generate-dalle', styleGuide, options),
-  
-  /**
-   * Generate Google Imagen optimized prompt
-   * @param {Object} styleGuide - Visual style guide
-   * @param {Object} options - {subject, imageType, aspectRatio, mood, additionalDetails}
-   * @returns {Object} {prompt, apiParams, vertexAI}
-   */
-  generateImagen: (styleGuide, options = {}) => ipcRenderer.invoke('prompt:generate-imagen', styleGuide, options),
-  
-  /**
-   * Generate prompts for ALL image generation services
-   * @param {Object} styleGuide - Visual style guide
-   * @param {Object} copyGuide - Copy style guide
-   * @param {Object} options - {subject, purpose, targetAudience}
-   * @returns {Object} {dalle, imagen, midjourney, stableDiffusion, summary}
-   */
-  generateAll: (styleGuide, copyGuide, options = {}) => 
-    ipcRenderer.invoke('prompt:generate-image-all', styleGuide, copyGuide, options)
-});
-
 
 // ============================================
 // TEST AGENT API
 // ============================================
 contextBridge.exposeInMainWorld('testAgent', {
-  generatePlan: (htmlFilePath, useAI) => ipcRenderer.invoke('test-agent:generate-plan', htmlFilePath, useAI),
-  runTests: (htmlFilePath, options) => ipcRenderer.invoke('test-agent:run-tests', htmlFilePath, options),
-  runAccessibilityTest: (htmlFilePath) => ipcRenderer.invoke('test-agent:accessibility', htmlFilePath),
-  runPerformanceTest: (htmlFilePath) => ipcRenderer.invoke('test-agent:performance', htmlFilePath),
-  runVisualTest: (htmlFilePath, baseline) => ipcRenderer.invoke('test-agent:visual', htmlFilePath, baseline),
-  runCrossBrowserTest: (htmlFilePath) => ipcRenderer.invoke('test-agent:cross-browser', htmlFilePath),
-  runInteractiveTest: (htmlFilePath) => ipcRenderer.invoke('test-agent:interactive', htmlFilePath),
-  close: () => ipcRenderer.invoke('test-agent:close'),
-  onProgress: (callback) => ipcRenderer.on('test-agent:progress', (event, result) => callback(result))
+  // Generate a test plan for an HTML file
+  generatePlan: (htmlFilePath, useAI = false) => 
+    ipcRenderer.invoke('test-agent:generate-plan', htmlFilePath, useAI),
+  
+  // Run all tests in the test plan
+  runTests: (htmlFilePath, options = {}) => 
+    ipcRenderer.invoke('test-agent:run-tests', htmlFilePath, options),
+  
+  // Run accessibility test
+  runAccessibilityTest: (htmlFilePath) => 
+    ipcRenderer.invoke('test-agent:accessibility', htmlFilePath),
+  
+  // Run performance test
+  runPerformanceTest: (htmlFilePath) => 
+    ipcRenderer.invoke('test-agent:performance', htmlFilePath),
+  
+  // Run visual regression test
+  runVisualTest: (htmlFilePath, baseline = null) => 
+    ipcRenderer.invoke('test-agent:visual', htmlFilePath, baseline),
+  
+  // Run interactive AI-powered test
+  runInteractiveTest: (htmlFilePath) => 
+    ipcRenderer.invoke('test-agent:interactive', htmlFilePath),
+  
+  // Update test agent context
+  updateContext: (context) => 
+    ipcRenderer.invoke('test-agent:update-context', context),
+  
+  // Close test agent
+  close: () => 
+    ipcRenderer.invoke('test-agent:close'),
+  
+  // Listen for test progress updates
+  onProgress: (callback) => {
+    ipcRenderer.on('test-agent:progress', (event, result) => {
+      callback(result);
+    });
+  },
+  
+  // Run cross-browser test (Chrome, Firefox, Safari)
+  runCrossBrowserTest: (htmlFilePath) => 
+    ipcRenderer.invoke('test-agent:cross-browser', htmlFilePath),
+  
+  // Enable/disable tracing for debugging
+  setTracing: (enabled) => 
+    ipcRenderer.invoke('test-agent:set-tracing', enabled)
 });
