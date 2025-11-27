@@ -2,11 +2,47 @@ const { app, safeStorage } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
+// Skip Keychain encryption in dev mode to avoid password prompts
+// Use function to defer check until app is ready
+function isDev() {
+  try {
+    return !app.isPackaged;
+  } catch (e) {
+    return true; // Assume dev mode if can't determine
+  }
+}
+
 class SettingsManager {
   constructor() {
-    this.settingsPath = path.join(app.getPath('userData'), 'app-settings.json');
-    this.encryptedSettingsPath = path.join(app.getPath('userData'), 'app-settings-encrypted.json');
-    this.settings = this.loadSettings();
+    // Lazy initialize paths - will be set on first access
+    this._settingsPath = null;
+    this._encryptedSettingsPath = null;
+    this._settings = null;
+  }
+
+  get settingsPath() {
+    if (!this._settingsPath) {
+      this._settingsPath = path.join(app.getPath('userData'), 'app-settings.json');
+    }
+    return this._settingsPath;
+  }
+
+  get encryptedSettingsPath() {
+    if (!this._encryptedSettingsPath) {
+      this._encryptedSettingsPath = path.join(app.getPath('userData'), 'app-settings-encrypted.json');
+    }
+    return this._encryptedSettingsPath;
+  }
+
+  get settings() {
+    if (!this._settings) {
+      this._settings = this.loadSettings();
+    }
+    return this._settings;
+  }
+
+  set settings(value) {
+    this._settings = value;
   }
 
   loadSettings() {
@@ -20,7 +56,8 @@ class SettingsManager {
         for (const [key, value] of Object.entries(encryptedData)) {
           if (key.includes('apiKey') || key.includes('secret') || key.includes('Token')) {
             // Decrypt sensitive data
-            if (safeStorage.isEncryptionAvailable() && value.encrypted) {
+            // Skip Keychain decryption in dev mode to avoid password prompts
+            if (!isDev() && safeStorage.isEncryptionAvailable() && value.encrypted) {
               try {
                 const decrypted = safeStorage.decryptString(Buffer.from(value.data, 'base64'));
                 settings[key] = decrypted;
@@ -28,6 +65,9 @@ class SettingsManager {
                 console.error(`Error decrypting ${key}:`, error);
                 settings[key] = '';
               }
+            } else if (value.encrypted) {
+              // In dev mode, just use empty string for encrypted values
+              settings[key] = '';
             } else {
               settings[key] = value;
             }
@@ -67,19 +107,23 @@ class SettingsManager {
     try {
       const dataToSave = {};
       
-      // Encrypt sensitive fields
+      // Encrypt sensitive fields (skip in dev mode to avoid Keychain prompts)
       for (const [key, value] of Object.entries(this.settings)) {
         if ((key.includes('apiKey') || key.includes('secret') || key.includes('Token')) && value && typeof value === 'string') {
-          // Encrypt sensitive data
-          if (safeStorage.isEncryptionAvailable()) {
+          // Encrypt sensitive data (only in production)
+          if (!isDev() && safeStorage.isEncryptionAvailable()) {
             const encrypted = safeStorage.encryptString(value);
             dataToSave[key] = {
               encrypted: true,
               data: encrypted.toString('base64')
             };
           } else {
-            // If encryption not available, store as plain text (not recommended)
-            console.warn('Encryption not available, storing API key in plain text');
+            // In dev mode or if encryption not available, store as plain text
+            if (isDev()) {
+              console.log('[Settings] Dev mode: storing API key without encryption');
+            } else {
+              console.warn('Encryption not available, storing API key in plain text');
+            }
             dataToSave[key] = value;
           }
         } else {

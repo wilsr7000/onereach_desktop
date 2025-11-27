@@ -4,7 +4,6 @@ const fs = require('fs');
 const { setApplicationMenu, registerTestMenuShortcut, refreshGSXLinks } = require('./menu');
 const { shell } = require('electron');
 const browserWindow = require('./browserWindow');
-const { autoUpdater } = require('electron-updater');
 const log = require('electron-log');
 const ClipboardManager = require('./clipboard-manager-v2-adapter');
 const rollbackManager = require('./rollback-manager');
@@ -18,12 +17,20 @@ const { AiderBridgeClient } = require('./aider-bridge-client');
 // Global Aider Bridge instance
 let aiderBridge = null;
 
+// autoUpdater - loaded lazily after app is ready
+let autoUpdater = null;
+
 // Configure logging for updates
 log.transports.file.level = 'info';
-// Note: autoUpdater config moved to app.whenReady() to avoid null errors
 
-// Path to IDW entries configuration file
-const idwConfigPath = path.join(app.getPath('userData'), 'idw-entries.json');
+// Path to IDW entries configuration file - initialized lazily
+let idwConfigPath = null;
+function getIdwConfigPath() {
+  if (!idwConfigPath) {
+    idwConfigPath = path.join(app.getPath('userData'), 'idw-entries.json');
+  }
+  return idwConfigPath;
+}
 
 // Keep global references to prevent garbage collection
 let tray;
@@ -34,38 +41,40 @@ let registeredShortcuts = []; // Track our registered shortcuts
 
 // Initialize clipboard manager - moved to app.whenReady()
 
-// Override shell.openExternal to handle GSX URLs specifically
-const originalOpenExternal = shell.openExternal;
-shell.openExternal = (url, options) => {
-  console.log('shell.openExternal intercepted URL:', url);
-  
-  // Check if it's a GSX URL that should be handled in an Electron window
-  if (url.includes('.onereach.ai/') &&
-      (url.includes('actiondesk.') || 
-       url.includes('studio.') || 
-       url.includes('hitl.') || 
-       url.includes('tickets.') || 
-       url.includes('calendar.') || 
-       url.includes('docs.'))) {
-    console.log('Intercepted GSX URL in shell.openExternal, opening in Electron window:', url);
+// Override shell.openExternal to handle GSX URLs - wrapped in function to call after app ready
+function setupShellOverride() {
+  const originalOpenExternal = shell.openExternal;
+  shell.openExternal = (url, options) => {
+    console.log('shell.openExternal intercepted URL:', url);
     
-    // Extract the GSX app name from the URL
-    let label = 'GSX';
-    if (url.includes('actiondesk.')) label = 'Action Desk';
-    else if (url.includes('studio.')) label = 'Designer';
-    else if (url.includes('hitl.')) label = 'HITL';
-    else if (url.includes('tickets.')) label = 'Tickets';
-    else if (url.includes('calendar.')) label = 'Calendar';
-    else if (url.includes('docs.')) label = 'Developer';
+    // Check if it's a GSX URL that should be handled in an Electron window
+    if (url.includes('.onereach.ai/') &&
+        (url.includes('actiondesk.') || 
+         url.includes('studio.') || 
+         url.includes('hitl.') || 
+         url.includes('tickets.') || 
+         url.includes('calendar.') || 
+         url.includes('docs.'))) {
+      console.log('Intercepted GSX URL in shell.openExternal, opening in Electron window:', url);
+      
+      // Extract the GSX app name from the URL
+      let label = 'GSX';
+      if (url.includes('actiondesk.')) label = 'Action Desk';
+      else if (url.includes('studio.')) label = 'Designer';
+      else if (url.includes('hitl.')) label = 'HITL';
+      else if (url.includes('tickets.')) label = 'Tickets';
+      else if (url.includes('calendar.')) label = 'Calendar';
+      else if (url.includes('docs.')) label = 'Developer';
+      
+      // Open the GSX URL in an Electron window
+      browserWindow.openGSXWindow(url, label);
+      return Promise.resolve();
+    }
     
-    // Open the GSX URL in an Electron window
-    browserWindow.openGSXWindow(url, label);
-    return Promise.resolve();
-  }
-  
-  // For all other URLs, use the original implementation
-  return originalOpenExternal(url, options);
-};
+    // For all other URLs, use the original implementation
+    return originalOpenExternal(url, options);
+  };
+}
 
 // Create a global reference to the setup wizard function for direct access
 global.openSetupWizardGlobal = () => {
@@ -73,22 +82,15 @@ global.openSetupWizardGlobal = () => {
   openSetupWizard();
 };
 
-// ---- Browser command-line tweaks (must be before app ready) ----
-// Allow third-party cookies and relax SameSite restrictions so Google OAuth works inside the app
-app.commandLine.appendSwitch('disable-features', [
-  'SameSiteByDefaultCookies',
-  'CookiesWithoutSameSiteMustBeSecure',
-  'ThirdPartyStoragePartitioning',
-  'BlockThirdPartyCookies'
-].join(','));
-
-// Add additional switches for better OAuth support
-app.commandLine.appendSwitch('enable-features', 'NetworkServiceInProcess');
-app.commandLine.appendSwitch('disable-site-isolation-trials');
-app.commandLine.appendSwitch('disable-web-security');
+// ---- Browser command-line tweaks ----
+// NOTE: These are now set inside app.whenReady() to avoid "app undefined" errors
+// The switches still work when set early in the ready handler
 
 // Configure default session for better OAuth support
 app.whenReady().then(() => {
+  // Set up shell.openExternal override
+  setupShellOverride();
+  
   // Load and configure autoUpdater (must be done after app is ready)
   try {
     autoUpdater = require('electron-updater').autoUpdater;
@@ -1450,6 +1452,110 @@ function setupAiderIPC() {
     }
   });
   
+  // Get space metadata (unified metadata file)
+  ipcMain.handle('aider:get-space-metadata', async (event, spaceId) => {
+    try {
+      const ClipboardStorage = require('./clipboard-storage-v2');
+      const storage = new ClipboardStorage();
+      const metadata = storage.getSpaceMetadata(spaceId);
+      return { success: true, metadata };
+    } catch (error) {
+      console.error('[GSX Create] Failed to get space metadata:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Update space metadata
+  ipcMain.handle('aider:update-space-metadata', async (event, spaceId, updates) => {
+    try {
+      const ClipboardStorage = require('./clipboard-storage-v2');
+      const storage = new ClipboardStorage();
+      const metadata = storage.updateSpaceMetadata(spaceId, updates);
+      return { success: true, metadata };
+    } catch (error) {
+      console.error('[GSX Create] Failed to update space metadata:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Set file metadata
+  ipcMain.handle('aider:set-file-metadata', async (event, spaceId, filePath, fileMetadata) => {
+    try {
+      const ClipboardStorage = require('./clipboard-storage-v2');
+      const storage = new ClipboardStorage();
+      const metadata = storage.setFileMetadata(spaceId, filePath, fileMetadata);
+      return { success: true, metadata };
+    } catch (error) {
+      console.error('[GSX Create] Failed to set file metadata:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Get file metadata
+  ipcMain.handle('aider:get-file-metadata', async (event, spaceId, filePath) => {
+    try {
+      const ClipboardStorage = require('./clipboard-storage-v2');
+      const storage = new ClipboardStorage();
+      const fileMetadata = storage.getFileMetadata(spaceId, filePath);
+      return { success: true, metadata: fileMetadata };
+    } catch (error) {
+      console.error('[GSX Create] Failed to get file metadata:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Set asset metadata (journey map, style guide, etc.)
+  ipcMain.handle('aider:set-asset-metadata', async (event, spaceId, assetType, assetMetadata) => {
+    try {
+      const ClipboardStorage = require('./clipboard-storage-v2');
+      const storage = new ClipboardStorage();
+      const metadata = storage.setAssetMetadata(spaceId, assetType, assetMetadata);
+      return { success: true, metadata };
+    } catch (error) {
+      console.error('[GSX Create] Failed to set asset metadata:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Set approval status
+  ipcMain.handle('aider:set-approval', async (event, spaceId, itemType, itemId, approved) => {
+    try {
+      const ClipboardStorage = require('./clipboard-storage-v2');
+      const storage = new ClipboardStorage();
+      const metadata = storage.setApproval(spaceId, itemType, itemId, approved);
+      return { success: true, metadata };
+    } catch (error) {
+      console.error('[GSX Create] Failed to set approval:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Add version to history
+  ipcMain.handle('aider:add-version', async (event, spaceId, versionData) => {
+    try {
+      const ClipboardStorage = require('./clipboard-storage-v2');
+      const storage = new ClipboardStorage();
+      const metadata = storage.addVersion(spaceId, versionData);
+      return { success: true, metadata };
+    } catch (error) {
+      console.error('[GSX Create] Failed to add version:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Update project config
+  ipcMain.handle('aider:update-project-config', async (event, spaceId, configUpdates) => {
+    try {
+      const ClipboardStorage = require('./clipboard-storage-v2');
+      const storage = new ClipboardStorage();
+      const metadata = storage.updateProjectConfig(spaceId, configUpdates);
+      return { success: true, metadata };
+    } catch (error) {
+      console.error('[GSX Create] Failed to update project config:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
   // List files in a project directory (for GSX Create)
   ipcMain.handle('aider:list-project-files', async (event, dirPath) => {
     try {
@@ -1499,6 +1605,25 @@ function setupAiderIPC() {
     }
   });
   
+  // Write a file
+  ipcMain.handle('aider:write-file', async (event, filePath, content) => {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      // Ensure directory exists
+      const dir = path.dirname(filePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(filePath, content, 'utf-8');
+      console.log('[GSX Create] File written:', filePath);
+      return { success: true };
+    } catch (error) {
+      console.error('[GSX Create] Failed to write file:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
   // Open a file in default application
   ipcMain.handle('aider:open-file', async (event, filePath) => {
     try {
@@ -1511,40 +1636,185 @@ function setupAiderIPC() {
     }
   });
   
-  // Transaction database handlers for cost tracking
+  // ========== DuckDB Event/Transaction Handlers ==========
+  
   ipcMain.handle('txdb:get-summary', async (event, spaceId) => {
     try {
-      const { getTransactionDB } = require('./transaction-db');
-      const txDb = getTransactionDB(app.getPath('userData'));
-      const summary = txDb.getSummary(spaceId);
-      return { success: true, summary };
+      const { getEventDB } = require('./event-db');
+      const eventDb = getEventDB(app.getPath('userData'));
+      const summary = await eventDb.getCostSummary(spaceId);
+      return { 
+        success: true, 
+        summary: summary || { totalCost: 0, totalCalls: 0, total_input_tokens: 0, total_output_tokens: 0 } 
+      };
     } catch (error) {
-      console.error('[TXDB] Failed to get summary:', error);
+      console.error('[EventDB] Failed to get summary:', error);
       return { success: false, error: error.message, summary: { totalCost: 0, totalCalls: 0 } };
     }
   });
   
   ipcMain.handle('txdb:record-transaction', async (event, data) => {
     try {
-      const { getTransactionDB } = require('./transaction-db');
-      const txDb = getTransactionDB(app.getPath('userData'));
-      txDb.recordTransaction(data);
+      const { getEventDB } = require('./event-db');
+      const eventDb = getEventDB(app.getPath('userData'));
+      await eventDb.logTransaction({
+        spaceId: data.spaceId,
+        spaceName: data.spaceName,
+        type: data.type || 'api_call',
+        model: data.model,
+        inputTokens: data.inputTokens || data.input_tokens,
+        outputTokens: data.outputTokens || data.output_tokens,
+        cost: data.cost,
+        status: data.status || 'success',
+        promptPreview: data.promptPreview,
+        responsePreview: data.responsePreview,
+        errorMessage: data.errorMessage,
+        durationMs: data.durationMs,
+        metadata: data.metadata
+      });
       return { success: true };
     } catch (error) {
-      console.error('[TXDB] Failed to record transaction:', error);
+      console.error('[EventDB] Failed to record transaction:', error);
       return { success: false, error: error.message };
     }
   });
   
   ipcMain.handle('txdb:get-transactions', async (event, spaceId, limit = 50) => {
     try {
-      const { getTransactionDB } = require('./transaction-db');
-      const txDb = getTransactionDB(app.getPath('userData'));
-      const transactions = txDb.getTransactions(spaceId, limit);
+      const { getEventDB } = require('./event-db');
+      const eventDb = getEventDB(app.getPath('userData'));
+      const transactions = await eventDb.getTransactions({ spaceId, limit });
       return { success: true, transactions };
     } catch (error) {
-      console.error('[TXDB] Failed to get transactions:', error);
+      console.error('[EventDB] Failed to get transactions:', error);
       return { success: false, error: error.message, transactions: [] };
+    }
+  });
+  
+  // Event logging
+  ipcMain.handle('txdb:log-event', async (event, data) => {
+    try {
+      // Use new DuckDB-based EventDB
+      const { getEventDB } = require('./event-db');
+      const eventDb = getEventDB(app.getPath('userData'));
+      
+      await eventDb.logEvent({
+        level: data.type || 'info',
+        category: data.category || 'user-log',
+        spaceId: data.spaceId || null,
+        message: data.summary || data.message || 'No message',
+        details: {
+          aiSummary: data.aiSummary,
+          userNotes: data.userNotes,
+          context: data.context
+        },
+        source: data.source || 'app',
+        userAction: data.userAction || null,
+        filePath: data.filePath || null,
+        errorStack: data.stack || null
+      });
+      
+      console.log('[EventDB] Event logged:', data.type, (data.message || '').substring(0, 50));
+      return { success: true };
+    } catch (error) {
+      console.error('[EventDB] Failed to log event:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('txdb:get-event-logs', async (event, options = {}) => {
+    try {
+      const { getEventDB } = require('./event-db');
+      const eventDb = getEventDB(app.getPath('userData'));
+      const rawLogs = await eventDb.getEventLogs(options);
+      
+      // Transform logs to match UI expectations
+      const logs = rawLogs.map(log => ({
+        id: log.id,
+        type: log.level,
+        summary: log.message,
+        message: log.message,
+        aiSummary: log.details?.aiSummary,
+        userNotes: log.details?.userNotes,
+        context: log.details?.context,
+        stack: log.error_stack,
+        timestamp: log.timestamp,
+        category: log.category
+      }));
+      
+      return { success: true, logs };
+    } catch (error) {
+      console.error('[EventDB] Failed to get event logs:', error);
+      return { success: false, error: error.message, logs: [] };
+    }
+  });
+  
+  // DuckDB Analytics - Cost by model
+  ipcMain.handle('eventdb:cost-by-model', async (event, spaceId) => {
+    try {
+      const { getEventDB } = require('./event-db');
+      const spacesPath = path.join(require('os').homedir(), 'Documents', 'OR-Spaces', 'spaces');
+      const eventDb = getEventDB(app.getPath('userData'), spacesPath);
+      const data = await eventDb.getCostByModel(spaceId);
+      return { success: true, data };
+    } catch (error) {
+      console.error('[EventDB] Failed to get cost by model:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // DuckDB Analytics - Daily costs
+  ipcMain.handle('eventdb:daily-costs', async (event, spaceId, days = 30) => {
+    try {
+      const { getEventDB } = require('./event-db');
+      const spacesPath = path.join(require('os').homedir(), 'Documents', 'OR-Spaces', 'spaces');
+      const eventDb = getEventDB(app.getPath('userData'), spacesPath);
+      const data = await eventDb.getDailyCosts(spaceId, days);
+      return { success: true, data };
+    } catch (error) {
+      console.error('[EventDB] Failed to get daily costs:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // DuckDB - Query space metadata across all spaces
+  ipcMain.handle('eventdb:query-spaces', async (event, whereClause) => {
+    try {
+      const { getEventDB } = require('./event-db');
+      const spacesPath = path.join(require('os').homedir(), 'Documents', 'OR-Spaces', 'spaces');
+      const eventDb = getEventDB(app.getPath('userData'), spacesPath);
+      const data = await eventDb.querySpaceMetadata(whereClause);
+      return { success: true, data };
+    } catch (error) {
+      console.error('[EventDB] Failed to query spaces:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // DuckDB - Search across spaces
+  ipcMain.handle('eventdb:search-spaces', async (event, searchTerm) => {
+    try {
+      const { getEventDB } = require('./event-db');
+      const spacesPath = path.join(require('os').homedir(), 'Documents', 'OR-Spaces', 'spaces');
+      const eventDb = getEventDB(app.getPath('userData'), spacesPath);
+      const data = await eventDb.searchAcrossSpaces(searchTerm);
+      return { success: true, data };
+    } catch (error) {
+      console.error('[EventDB] Failed to search spaces:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // DuckDB - Raw query (for advanced use)
+  ipcMain.handle('eventdb:query', async (event, sql) => {
+    try {
+      const { getEventDB } = require('./event-db');
+      const eventDb = getEventDB(app.getPath('userData'));
+      const data = await eventDb.query(sql);
+      return { success: true, data };
+    } catch (error) {
+      console.error('[EventDB] Query failed:', error);
+      return { success: false, error: error.message };
     }
   });
   
@@ -1803,7 +2073,15 @@ function setupAiderIPC() {
       }
       const watcher = fs.watch(filePath, (eventType) => {
         if (eventType === 'change') {
-          event.sender.send('aider:file-changed', filePath);
+          try {
+            if (event.sender && !event.sender.isDestroyed()) {
+              event.sender.send('aider:file-changed', filePath);
+            }
+          } catch (e) {
+            // Window closed, stop watching
+            watcher.close();
+            fileWatchers.delete(filePath);
+          }
         }
       });
       fileWatchers.set(filePath, watcher);
@@ -1824,6 +2102,40 @@ function setupAiderIPC() {
       }
       return { success: true };
     } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Capture preview screenshot using Playwright
+  ipcMain.handle('aider:capture-preview-screenshot', async (event, filePath) => {
+    try {
+      console.log('[Screenshot] Capturing screenshot for:', filePath);
+      const { chromium } = require('playwright');
+      
+      const browser = await chromium.launch({ headless: true });
+      const context = await browser.newContext({
+        viewport: { width: 1280, height: 800 }
+      });
+      const page = await context.newPage();
+      
+      // Navigate to the file
+      const fileUrl = filePath.startsWith('file://') ? filePath : `file://${filePath}`;
+      console.log('[Screenshot] Navigating to:', fileUrl);
+      await page.goto(fileUrl, { waitUntil: 'networkidle', timeout: 30000 });
+      
+      // Capture full page screenshot
+      const buffer = await page.screenshot({ fullPage: true });
+      
+      await browser.close();
+      
+      console.log('[Screenshot] Capture successful, size:', buffer.length);
+      return { 
+        success: true, 
+        screenshot: buffer.toString('base64'),
+        size: buffer.length
+      };
+    } catch (error) {
+      console.error('[Screenshot] Capture error:', error);
       return { success: false, error: error.message };
     }
   });
@@ -3106,10 +3418,16 @@ function setupIPC() {
     try {
       const { clipboard } = require('electron');
       const text = clipboard.readText();
-      event.sender.send('clipboard-text-result', text);
+      if (event.sender && !event.sender.isDestroyed()) {
+        event.sender.send('clipboard-text-result', text);
+      }
     } catch (error) {
       console.error('Error reading clipboard:', error);
-      event.sender.send('clipboard-text-result', '');
+      try {
+        if (event.sender && !event.sender.isDestroyed()) {
+          event.sender.send('clipboard-text-result', '');
+        }
+      } catch (e) { /* ignore */ }
     }
   });
 
@@ -5485,7 +5803,8 @@ function setupIPC() {
       }
       
       // In production, this would check for actual updates
-      const { autoUpdater } = require('electron-updater');
+      // autoUpdater loaded lazily in app.whenReady()
+let autoUpdater = null;
       const result = await autoUpdater.checkForUpdates();
       return { 
         message: result.updateInfo ? `Update available: ${result.updateInfo.version}` : 'Up to date',
@@ -6404,13 +6723,102 @@ ipcMain.handle('test-agent:run-tests', async (event, htmlFilePath, options = {})
     const results = await testAgent.runTests(htmlFilePath, {
       ...options,
       onProgress: (result) => {
-        // Send progress updates to renderer
-        event.sender.send('test-agent:progress', result);
+        // Send progress updates to renderer (check if sender still exists)
+        try {
+          if (event.sender && !event.sender.isDestroyed()) {
+            event.sender.send('test-agent:progress', result);
+          }
+        } catch (e) {
+          console.log('[TestAgent] Could not send progress - window may be closed');
+        }
       }
     });
     return results;
   } catch (error) {
     console.error('[TestAgent] Run tests error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Run Playwright API tests
+ipcMain.handle('aider:run-playwright-tests', async (event, options = {}) => {
+  console.log('[Playwright] Running API tests:', options);
+  try {
+    const { spawn } = require('child_process');
+    const path = require('path');
+    
+    const testDir = options.testDir || process.cwd();
+    const configPath = options.configPath || path.join(testDir, 'playwright.config.js');
+    const project = options.project || 'api';
+    
+    return new Promise((resolve) => {
+      const args = ['playwright', 'test', '--project=' + project, '--reporter=json'];
+      
+      if (options.configPath) {
+        args.push('--config=' + configPath);
+      }
+      
+      const proc = spawn('npx', args, {
+        cwd: testDir,
+        env: { ...process.env, API_BASE_URL: options.baseUrl || 'http://localhost:3000' }
+      });
+      
+      let stdout = '';
+      let stderr = '';
+      
+      proc.stdout.on('data', (data) => {
+        stdout += data.toString();
+      });
+      
+      proc.stderr.on('data', (data) => {
+        stderr += data.toString();
+      });
+      
+      proc.on('close', (code) => {
+        try {
+          // Parse JSON output
+          const jsonMatch = stdout.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const result = JSON.parse(jsonMatch[0]);
+            const passed = result.stats?.expected || 0;
+            const failed = (result.stats?.unexpected || 0) + (result.stats?.flaky || 0);
+            
+            resolve({
+              success: failed === 0,
+              passed,
+              failed,
+              total: passed + failed,
+              suites: result.suites || [],
+              raw: result
+            });
+          } else {
+            resolve({
+              success: code === 0,
+              passed: code === 0 ? 1 : 0,
+              failed: code === 0 ? 0 : 1,
+              output: stdout,
+              error: stderr
+            });
+          }
+        } catch (e) {
+          resolve({
+            success: false,
+            error: e.message,
+            output: stdout,
+            stderr: stderr
+          });
+        }
+      });
+      
+      proc.on('error', (err) => {
+        resolve({
+          success: false,
+          error: 'Playwright not installed: ' + err.message
+        });
+      });
+    });
+  } catch (error) {
+    console.error('[Playwright] Test error:', error);
     return { success: false, error: error.message };
   }
 });

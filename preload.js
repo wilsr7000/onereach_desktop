@@ -504,13 +504,16 @@ contextBridge.exposeInMainWorld('aider', {
   getSpaces: () => ipcRenderer.invoke('aider:get-spaces'),
   createSpace: (name) => ipcRenderer.invoke('aider:create-space', name),
   listProjectFiles: (dirPath) => ipcRenderer.invoke('aider:list-project-files', dirPath),
+  // Playwright API testing
+  runPlaywrightTests: (options) => ipcRenderer.invoke('aider:run-playwright-tests', options),
   // File operations
   readFile: (filePath) => ipcRenderer.invoke('aider:read-file', filePath),
+  writeFile: (filePath, content) => ipcRenderer.invoke('aider:write-file', filePath, content),
   openFile: (filePath) => ipcRenderer.invoke('aider:open-file', filePath),
   watchFile: (filePath) => ipcRenderer.invoke('aider:watch-file', filePath),
   unwatchFile: (filePath) => ipcRenderer.invoke('aider:unwatch-file', filePath),
-  // Screenshot capture
-  capturePreviewScreenshot: (htmlContent, options) => ipcRenderer.invoke('aider:capture-preview-screenshot', htmlContent, options),
+  // Screenshot capture (takes file path, not HTML content)
+  capturePreviewScreenshot: (filePath) => ipcRenderer.invoke('aider:capture-preview-screenshot', filePath),
   analyzeScreenshot: (screenshotBase64, prompt) => ipcRenderer.invoke('aider:analyze-screenshot', screenshotBase64, prompt),
   // File registration with Space Manager
   registerCreatedFile: (data) => ipcRenderer.invoke('aider:register-created-file', data),
@@ -528,7 +531,10 @@ contextBridge.exposeInMainWorld('aider', {
   // Transaction database for cost tracking
   txdbGetSummary: (spaceId) => ipcRenderer.invoke('txdb:get-summary', spaceId),
   txdbRecordTransaction: (data) => ipcRenderer.invoke('txdb:record-transaction', data),
-  txdbGetTransactions: (spaceId, limit) => ipcRenderer.invoke('txdb:get-transactions', spaceId, limit)
+  txdbGetTransactions: (spaceId, limit) => ipcRenderer.invoke('txdb:get-transactions', spaceId, limit),
+  // Event logging
+  txdbLogEvent: (data) => ipcRenderer.invoke('txdb:log-event', data),
+  txdbGetEventLogs: (options) => ipcRenderer.invoke('txdb:get-event-logs', options)
 });
 
 // Expose auth API
