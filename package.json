@@ -120,6 +120,7 @@
     "electron-builder": "^24.9.1"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.0",
     "@or-sdk/files-sync-node": "^0.0.4",
     "archiver": "^7.0.1",
     "better-sqlite3": "^12.4.6",

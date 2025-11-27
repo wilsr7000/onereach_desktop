@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GSX Create</title>
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; img-src 'self' data: blob: file: https:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: file:; object-src 'self' file:; frame-src 'self' file:; img-src 'self' data: blob: file: https:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         
@@ -110,39 +110,47 @@
         .sidebar-container {
             display: flex;
             flex-shrink: 0;
-            transition: width 0.3s ease;
         }
         
         .sidebar {
-            width: 280px;
+            width: 260px;
             background: var(--bg-secondary);
             border-right: 1px solid var(--border);
             display: flex;
             flex-direction: column;
             overflow: hidden;
-            transition: width 0.3s ease, opacity 0.3s ease;
+            transition: width 0.2s ease;
+            position: relative;
         }
         
         .sidebar.collapsed {
             width: 0;
-            opacity: 0;
-            overflow: hidden;
+            border-right: none;
         }
         
         .sidebar-toggle {
+            position: absolute;
+            right: -24px;
+            top: 50%;
+            transform: translateY(-50%);
             width: 24px;
+            height: 60px;
             background: var(--bg-tertiary);
-            border: none;
-            border-right: 1px solid var(--border);
+            border: 1px solid var(--border);
+            border-left: none;
+            border-radius: 0 8px 8px 0;
             color: var(--text-secondary);
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
             font-size: 12px;
-            transition: background 0.2s;
+            z-index: 100;
         }
-        .sidebar-toggle:hover { background: var(--accent); color: #fff; }
+        .sidebar-toggle:hover { 
+            background: var(--accent); 
+            color: #fff; 
+        }
         
         .sidebar-section {
             padding: 12px;
@@ -205,6 +213,12 @@
             color: var(--accent);
         }
         .file-item .icon { opacity: 0.6; }
+        .file-item .preview-icon { 
+            margin-left: auto; 
+            opacity: 0.4; 
+            font-size: 10px;
+        }
+        .file-item:hover .preview-icon { opacity: 0.8; }
         
         /* Center Area */
         .center-area {
@@ -305,6 +319,27 @@
         .btn-primary:hover { background: var(--accent-hover); }
         .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
         
+        .btn-test {
+            background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
+            color: #fff;
+            font-size: 16px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+        .btn-test:hover { 
+            background: linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%);
+            transform: scale(1.05);
+        }
+        .btn-test:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-test.running {
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+        
         .btn-secondary {
             background: var(--bg-tertiary);
             color: var(--text-primary);
@@ -325,6 +360,19 @@
             overflow: hidden;
         }
         .chat-area.active { display: flex; }
+        
+        /* Chat Toolbar */
+        .chat-toolbar {
+            display: flex;
+            gap: 8px;
+            padding: 8px 12px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            flex-wrap: wrap;
+        }
+        .chat-toolbar .spacer {
+            flex: 1;
+        }
         
         /* Feed-style messages */
         .messages {
@@ -373,6 +421,210 @@
             background: var(--bg-tertiary);
             border-radius: 4px;
             font-size: 11px;
+        }
+        
+        /* Streaming message styles */
+        .message-content.streaming {
+            background: var(--bg-tertiary);
+            padding: 12px;
+            border-radius: 6px;
+            border-left: 3px solid var(--accent);
+        }
+        .streaming-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: var(--bg-primary);
+            border-radius: 6px;
+            margin-bottom: 12px;
+            font-size: 13px;
+        }
+        .streaming-status .status-icon {
+            font-size: 16px;
+        }
+        .streaming-status .status-text {
+            color: var(--accent);
+            font-weight: 500;
+            flex: 1;
+        }
+        .streaming-status .status-timer {
+            color: var(--text-muted);
+            font-size: 11px;
+            font-family: monospace;
+        }
+        .thinking-indicator {
+            color: var(--accent);
+            font-style: italic;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .stream-output {
+            margin: 0;
+            padding: 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-family: inherit;
+            font-size: inherit;
+            background: transparent;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        /* Collapsible code blocks */
+        .code-collapse {
+            margin: 8px 0;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--bg-primary);
+            overflow: hidden;
+        }
+        .code-collapse summary {
+            padding: 8px 12px;
+            cursor: pointer;
+            font-size: 12px;
+            color: var(--text-muted);
+            background: var(--bg-secondary);
+            user-select: none;
+        }
+        .code-collapse summary:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+        .code-collapse[open] summary {
+            border-bottom: 1px solid var(--border);
+        }
+        .collapsed-code {
+            margin: 0;
+            padding: 12px;
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+            font-size: 11px;
+            line-height: 1.5;
+            max-height: 300px;
+            overflow-y: auto;
+            background: #1a1a1a;
+            color: #d4d4d4;
+        }
+        
+        /* Test Agent Styles */
+        .test-tab {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+        .test-tab.active {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }
+        .test-panel {
+            display: none;
+        }
+        .test-panel.active {
+            display: block;
+        }
+        .test-result-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 12px;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+            margin-bottom: 8px;
+        }
+        .test-result-item.passed {
+            border-left: 3px solid var(--success);
+        }
+        .test-result-item.failed {
+            border-left: 3px solid var(--error);
+        }
+        .test-status-icon {
+            font-size: 16px;
+        }
+        .test-name {
+            flex: 1;
+            font-size: 12px;
+            color: var(--text-primary);
+        }
+        .test-duration {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+        .accessibility-issue {
+            padding: 10px 12px;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+            margin-bottom: 8px;
+            font-size: 12px;
+        }
+        .accessibility-issue.error {
+            border-left: 3px solid var(--error);
+        }
+        .accessibility-issue.warning {
+            border-left: 3px solid #f59e0b;
+        }
+        .performance-metric {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 12px;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+            margin-bottom: 6px;
+        }
+        .performance-score {
+            font-size: 48px;
+            font-weight: 700;
+            text-align: center;
+            padding: 20px;
+        }
+        .performance-score.good { color: var(--success); }
+        .performance-score.ok { color: #f59e0b; }
+        .performance-score.bad { color: var(--error); }
+        
+        /* Code Tools */
+        .code-tool-tab {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+        }
+        .code-tool-tab.active {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #fff;
+        }
+        .code-tool-panel {
+            display: none;
+        }
+        .code-tool-panel.active {
+            display: block;
+        }
+        .code-result-item {
+            padding: 10px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .code-result-item:hover {
+            background: var(--bg-tertiary);
+        }
+        .code-result-file {
+            color: var(--accent);
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        .code-result-line {
+            color: var(--text-muted);
+            font-size: 10px;
+        }
+        .code-result-content {
+            color: var(--text-primary);
+            background: var(--bg-primary);
+            padding: 6px 8px;
+            border-radius: 4px;
+            margin-top: 6px;
+            overflow-x: auto;
         }
         
         .file-change {
@@ -428,15 +680,76 @@
         /* Preview Panel */
         .preview-panel {
             width: 400px;
+            min-width: 200px;
+            max-width: 70%;
             background: var(--bg-secondary);
             border-left: 1px solid var(--border);
             display: none;
             flex-direction: column;
             flex-shrink: 0;
-            transition: width 0.3s ease;
+            position: relative;
         }
         .preview-panel.active { display: flex; }
-        .preview-panel.collapsed { width: 0; overflow: hidden; }
+        .preview-panel.collapsed { 
+            width: 40px !important; 
+            min-width: 40px !important; 
+        }
+        .preview-panel.collapsed .preview-content,
+        .preview-panel.collapsed .preview-header > *:not(.preview-toggle) {
+            display: none;
+        }
+        
+        /* Resize handle for preview panel - left edge */
+        .preview-resize-handle {
+            position: absolute;
+            left: -3px;
+            top: 0;
+            bottom: 0;
+            width: 8px;
+            cursor: ew-resize;
+            background: transparent;
+            z-index: 20;
+        }
+        .preview-resize-handle::after {
+            content: '';
+            position: absolute;
+            left: 3px;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: transparent;
+            transition: background 0.2s;
+        }
+        .preview-resize-handle:hover::after,
+        .preview-resize-handle.dragging::after {
+            background: var(--accent);
+        }
+        
+        /* Preview toggle button */
+        .preview-toggle {
+            position: absolute;
+            left: -20px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 20px;
+            height: 48px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-right: none;
+            border-radius: 6px 0 0 6px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            transition: background 0.2s;
+            z-index: 15;
+        }
+        .preview-toggle:hover { 
+            background: var(--accent); 
+            color: #fff; 
+        }
         
         .preview-header {
             padding: 10px 12px;
@@ -490,7 +803,8 @@
         .preview-content {
             flex: 1;
             overflow: hidden;
-            background: #fff;
+            background: var(--bg-primary);
+            position: relative;
         }
         
         .preview-content iframe {
@@ -676,9 +990,13 @@
     
     <!-- Main Container -->
     <div class="main-container">
-        <!-- Sidebar -->
-        <div class="sidebar-container">
+        <!-- Sidebar (hidden until session starts) -->
+        <div class="sidebar-container" id="sidebarContainer" style="display: none;">
             <div class="sidebar" id="sidebar">
+                <!-- Toggle button - positioned on right edge -->
+                <button class="sidebar-toggle" id="sidebarToggle" onclick="GSXCreate.toggleSidebar()" title="Toggle sidebar">
+                    <span id="sidebarToggleIcon">◀</span>
+                </button>
                 <!-- Space Selection -->
                 <div class="sidebar-section">
                     <h3>Space</h3>
@@ -738,9 +1056,6 @@
                     </div>
                 </div>
             </div>
-            <button class="sidebar-toggle" onclick="GSXCreate.toggleSidebar()">
-                <span id="sidebarToggleIcon">◀</span>
-            </button>
         </div>
         
         <!-- Center Area -->
@@ -750,37 +1065,90 @@
                 <div class="setup-hero">
                     <img src="assets/banner.png" alt="GSX Create" onerror="this.style.display='none'">
                     <h2>GSX Create</h2>
-                    <p>AI-powered code generation integrated with your Spaces. Select a space from the sidebar to begin.</p>
+                    <p>AI-powered code generation integrated with your Spaces</p>
                     
                     <div id="noApiWarning" class="no-api-warning" style="display: none;">
                         <h3>API Key Required</h3>
                         <p>Please add an OpenAI or Anthropic API key in Settings to use GSX Create.</p>
+                    </div>
+                    
+                    <!-- Space Selection - Primary Action -->
+                    <div class="setup-form" id="mainSetupForm" style="margin-top: 32px;">
+                        <div class="form-group">
+                            <label style="font-size: 14px; font-weight: 500; margin-bottom: 12px; display: block; color: var(--text-primary);">
+                                Select a Space
+                            </label>
+                            <select class="form-select" id="mainSpaceSelect" onchange="GSXCreate.selectSpaceFromMain(this.value)" 
+                                    style="font-size: 15px; padding: 14px 16px; background: var(--bg-tertiary); border: 2px solid var(--border-light); border-radius: 8px;">
+                                <option value="">Choose a space...</option>
+                            </select>
+                            <div style="text-align: center; margin: 16px 0; color: var(--text-muted); font-size: 12px;">— or —</div>
+                            <button class="btn btn-secondary" onclick="GSXCreate.createNewSpace()" 
+                                    style="width: 100%; padding: 14px; border: 2px dashed var(--border-light); background: transparent;">
+                                + Create New Space
+                            </button>
+                        </div>
+                        
+                        <!-- Start Button - always visible, disabled until space selected -->
+                        <button class="btn btn-primary" disabled style="width: 100%; margin-top: 24px; padding: 14px; opacity: 0.5; cursor: not-allowed;" onclick="GSXCreate.startSession()" id="mainStartBtn">
+                            Start Session
+                        </button>
+                        
+                        <!-- Optional config - shown after space selected -->
+                        <div id="spaceSelectedConfig" style="display: none; margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--border);">
+                            <label style="font-size: 12px; font-weight: 500; margin-bottom: 12px; display: block; color: var(--text-secondary);">
+                                Optional Configuration
+                            </label>
+                            <div class="form-group" style="margin-bottom: 12px;">
+                                <label style="font-size: 11px;">AI Model</label>
+                                <select class="form-select" id="mainModelSelect" style="padding: 10px;">
+                                </select>
+                            </div>
+                            
+                            <div style="display: flex; gap: 12px;">
+                                <div class="form-group" style="flex: 1;">
+                                    <label style="font-size: 11px;">Style Guide</label>
+                                    <select class="form-select" id="mainStyleGuideSelect">
+                                        <option value="">None</option>
+                                    </select>
+                                </div>
+                                <div class="form-group" style="flex: 1;">
+                                    <label style="font-size: 11px;">Journey Map</label>
+                                    <select class="form-select" id="mainJourneyMapSelect">
+                                        <option value="">None</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
             
             <!-- Chat Area (shown after session starts) -->
             <div class="chat-area" id="chatArea">
-                <!-- Global Instructions Toggle -->
-                <div style="padding: 8px 16px; background: var(--bg-secondary); border-bottom: 1px solid var(--border); display: flex; gap: 8px;">
-                    <button class="btn btn-secondary btn-sm" onclick="GSXCreate.toggleGlobalInstructions()">
-                        Global Instructions
+                <!-- Chat Toolbar -->
+                <div class="chat-toolbar">
+                    <button class="btn btn-secondary btn-sm" onclick="GSXCreate.toggleGlobalInstructions()" title="Global instructions">
+                        Instructions
                     </button>
-                    <button class="btn btn-secondary btn-sm" onclick="GSXCreate.toggleConfig()">
+                    <button class="btn btn-secondary btn-sm" onclick="GSXCreate.toggleConfig()" title="Lint & test config">
                         Config
                     </button>
-                    <div style="flex: 1;"></div>
-                    <button class="btn btn-secondary btn-sm" onclick="GSXCreate.takeSnapshot()" title="Capture HTML snapshot">
-                        Snapshot
+                    <button class="btn btn-secondary btn-sm" onclick="GSXCreate.showCodeTools()" title="Code intelligence tools">
+                        🔍 Code
                     </button>
-                    <button class="btn btn-secondary btn-sm" onclick="GSXCreate.runCodeTest()" title="AI analyzes HTML code">
-                        Code Test
+                    <button class="btn btn-secondary btn-sm" onclick="GSXCreate.showTestAgent()" title="Automated testing with Puppeteer" style="background: var(--success);">
+                        🧪 Test Agent
                     </button>
-                    <button class="btn btn-secondary btn-sm" onclick="GSXCreate.runVisionTest()" title="AI analyzes visual screenshot" style="background: var(--accent); color: white;">
-                        Visual Test
+                    <div class="spacer"></div>
+                    <button class="btn btn-secondary btn-sm" onclick="GSXCreate.runCodeTest()" title="Analyze code">
+                        Test
                     </button>
-                    <button class="btn btn-secondary btn-sm" onclick="GSXCreate.showVersionHistory()">
+                    <button class="btn btn-secondary btn-sm" onclick="GSXCreate.showVersionHistory()" title="Version history">
                         History
+                    </button>
+                    <button class="btn btn-secondary btn-sm" onclick="GSXCreate.showLogs()" title="View logs">
+                        Logs
                     </button>
                 </div>
                 
@@ -830,6 +1198,7 @@
                         <span class="input-prefix">&gt;</span>
                         <textarea id="promptInput" placeholder="Describe what you want to build..." rows="1"></textarea>
                     </div>
+                    <button class="btn btn-test" onclick="GSXCreate.runQuickTest()" id="testBtn" title="Run AI Test & Fix">🧪</button>
                     <button class="btn btn-primary" onclick="GSXCreate.sendPrompt()" id="sendBtn">Send</button>
                 </div>
             </div>
@@ -837,19 +1206,21 @@
         
         <!-- Preview Panel -->
         <div class="preview-panel" id="previewPanel">
+            <div class="preview-resize-handle" id="previewResizeHandle"></div>
+            <button class="preview-toggle" id="previewToggle" onclick="GSXCreate.collapsePreview()" title="Collapse/Expand">
+                <span id="previewToggleIcon">▶</span>
+            </button>
             <div class="preview-header">
-                <div class="preview-tabs">
-                    <button class="preview-tab active" onclick="GSXCreate.setPreviewMode('preview')">Preview</button>
-                    <button class="preview-tab" onclick="GSXCreate.setPreviewMode('code')">Code</button>
-                </div>
+                <span class="preview-title" id="previewTitle">Preview</span>
                 <div class="preview-actions">
-                    <button onclick="GSXCreate.refreshPreview()">Refresh</button>
-                    <button onclick="GSXCreate.openInBrowser()">Open</button>
-                    <button onclick="GSXCreate.togglePreview()">Close</button>
+                    <button onclick="GSXCreate.captureAndAnalyze()" title="Capture screenshot and send to AI for review" style="background: var(--accent);">📸 AI Review</button>
+                    <button onclick="GSXCreate.refreshPreview()" title="Refresh">↻</button>
+                    <button onclick="GSXCreate.openInBrowser()" title="Open in browser">↗</button>
+                    <button onclick="GSXCreate.togglePreview()" title="Hide preview">×</button>
                 </div>
             </div>
             <div class="preview-content" id="previewContent">
-                <div class="preview-empty">Select a file to preview</div>
+                <div class="preview-empty">Click a file to preview</div>
             </div>
         </div>
     </div>
@@ -891,6 +1262,175 @@
             </div>
         </div>
     </div>
+    
+    <!-- Code Tools Modal -->
+    <div class="modal" id="codeToolsModal">
+        <div class="modal-content" style="max-width: 800px;">
+            <div class="modal-header">
+                <h3>🔍 Code Intelligence</h3>
+                <button class="modal-close" onclick="GSXCreate.closeModal('codeToolsModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- Tool Tabs -->
+                <div style="display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 1px solid var(--border); padding-bottom: 12px;">
+                    <button class="btn btn-sm code-tool-tab active" data-tool="search" onclick="GSXCreate.selectCodeTool('search')">Search Code</button>
+                    <button class="btn btn-sm code-tool-tab" data-tool="definition" onclick="GSXCreate.selectCodeTool('definition')">Find Definition</button>
+                    <button class="btn btn-sm code-tool-tab" data-tool="usages" onclick="GSXCreate.selectCodeTool('usages')">Find Usages</button>
+                    <button class="btn btn-sm code-tool-tab" data-tool="repomap" onclick="GSXCreate.selectCodeTool('repomap')">Repo Map</button>
+                </div>
+                
+                <!-- Search Code Panel -->
+                <div id="codeToolSearch" class="code-tool-panel active">
+                    <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">
+                        Search for patterns in your codebase using regex
+                    </p>
+                    <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                        <input type="text" id="searchPattern" placeholder="Search pattern (regex)" style="flex: 2; padding: 10px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);">
+                        <input type="text" id="searchGlob" placeholder="File glob (e.g., *.js)" style="flex: 1; padding: 10px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);">
+                        <button class="btn btn-primary" onclick="GSXCreate.searchCode()">Search</button>
+                    </div>
+                    <div id="searchResults" style="max-height: 400px; overflow-y: auto; font-family: monospace; font-size: 12px;"></div>
+                </div>
+                
+                <!-- Find Definition Panel -->
+                <div id="codeToolDefinition" class="code-tool-panel">
+                    <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">
+                        Find where a function, class, or variable is defined
+                    </p>
+                    <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                        <input type="text" id="definitionSymbol" placeholder="Symbol name (e.g., handleSubmit, UserClass)" style="flex: 1; padding: 10px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);">
+                        <button class="btn btn-primary" onclick="GSXCreate.findDefinition()">Find</button>
+                    </div>
+                    <div id="definitionResults" style="max-height: 400px; overflow-y: auto; font-family: monospace; font-size: 12px;"></div>
+                </div>
+                
+                <!-- Find Usages Panel -->
+                <div id="codeToolUsages" class="code-tool-panel">
+                    <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">
+                        Find all places where a symbol is used
+                    </p>
+                    <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                        <input type="text" id="usagesSymbol" placeholder="Symbol name" style="flex: 1; padding: 10px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);">
+                        <button class="btn btn-primary" onclick="GSXCreate.findUsages()">Find Usages</button>
+                    </div>
+                    <div id="usagesResults" style="max-height: 400px; overflow-y: auto; font-family: monospace; font-size: 12px;"></div>
+                </div>
+                
+                <!-- Repo Map Panel -->
+                <div id="codeToolRepomap" class="code-tool-panel">
+                    <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">
+                        View the structure of your codebase - files, classes, and functions
+                    </p>
+                    <button class="btn btn-primary" onclick="GSXCreate.getRepoMap()" style="margin-bottom: 12px;">Generate Repo Map</button>
+                    <div id="repomapResults" style="max-height: 400px; overflow-y: auto; font-family: monospace; font-size: 12px; white-space: pre-wrap;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Test Agent Modal -->
+    <div class="modal" id="testAgentModal">
+        <div class="modal-content" style="max-width: 900px; max-height: 85vh;">
+            <div class="modal-header">
+                <h3>🧪 Test Agent</h3>
+                <button class="modal-close" onclick="GSXCreate.closeModal('testAgentModal')">&times;</button>
+            </div>
+            <div class="modal-body" style="overflow-y: auto;">
+                <!-- Test Type Tabs -->
+                <div style="display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 1px solid var(--border); padding-bottom: 12px; flex-wrap: wrap;">
+                    <button class="btn btn-sm test-tab active" data-test="functional" onclick="GSXCreate.selectTestTab('functional')">🎯 Functional</button>
+                    <button class="btn btn-sm test-tab" data-test="visual" onclick="GSXCreate.selectTestTab('visual')">👁️ Visual</button>
+                    <button class="btn btn-sm test-tab" data-test="accessibility" onclick="GSXCreate.selectTestTab('accessibility')">♿ Accessibility</button>
+                    <button class="btn btn-sm test-tab" data-test="performance" onclick="GSXCreate.selectTestTab('performance')">⚡ Performance</button>
+                    <button class="btn btn-sm test-tab" data-test="interactive" onclick="GSXCreate.selectTestTab('interactive')">🤖 AI Interactive</button>
+                </div>
+                
+                <!-- Functional Tests Panel -->
+                <div id="testPanelFunctional" class="test-panel active">
+                    <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">
+                        Automatically test buttons, forms, links, and interactions using Playwright
+                    </p>
+                    <div style="display: flex; gap: 8px; margin-bottom: 16px; align-items: center; flex-wrap: wrap;">
+                        <select id="browserSelect" style="padding: 8px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);">
+                            <option value="chromium">🌐 Chrome</option>
+                            <option value="firefox">🦊 Firefox</option>
+                            <option value="webkit">🧭 Safari</option>
+                        </select>
+                        <button class="btn btn-primary" onclick="GSXCreate.generateTestPlan()">📋 Generate Test Plan</button>
+                        <button class="btn btn-success" onclick="GSXCreate.runFunctionalTests()" id="runTestsBtn" disabled>▶️ Run Tests</button>
+                        <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary);">
+                            <input type="checkbox" id="useAIForTests" checked> Use AI
+                        </label>
+                    </div>
+                    
+                    <!-- Test Plan Display -->
+                    <div id="testPlanDisplay" style="margin-bottom: 16px; display: none;">
+                        <h4 style="font-size: 13px; margin-bottom: 8px; color: var(--text-primary);">📋 Test Plan</h4>
+                        <div id="testPlanList" style="background: var(--bg-tertiary); border-radius: 6px; padding: 12px; max-height: 200px; overflow-y: auto;"></div>
+                    </div>
+                    
+                    <!-- Test Results -->
+                    <div id="testResultsDisplay" style="display: none;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <h4 style="font-size: 13px; color: var(--text-primary);">📊 Results</h4>
+                            <button class="btn btn-success btn-sm" onclick="GSXCreate.fixFailedTests()" id="fixFailedTestsBtn" disabled>🔧 Fix Failed Tests</button>
+                        </div>
+                        <div id="testSummary" style="display: flex; gap: 16px; margin-bottom: 12px; padding: 12px; background: var(--bg-tertiary); border-radius: 6px;"></div>
+                        <div id="testResultsList" style="max-height: 300px; overflow-y: auto;"></div>
+                    </div>
+                </div>
+                
+                <!-- Visual Tests Panel -->
+                <div id="testPanelVisual" class="test-panel">
+                    <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">
+                        Capture screenshots and compare visual changes over time. Test across multiple browsers.
+                    </p>
+                    <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
+                        <button class="btn btn-primary" onclick="GSXCreate.captureBaseline()">📸 Capture Baseline</button>
+                        <button class="btn btn-secondary" onclick="GSXCreate.compareVisual()">🔍 Compare to Baseline</button>
+                        <button class="btn btn-secondary" onclick="GSXCreate.runCrossBrowserTest()" style="background: linear-gradient(135deg, #4285f4, #ea4335, #fbbc05);">🌐 Cross-Browser Test</button>
+                    </div>
+                    <div id="visualTestResults" style="display: flex; gap: 16px; flex-wrap: wrap;"></div>
+                </div>
+                
+                <!-- Accessibility Tests Panel -->
+                <div id="testPanelAccessibility" class="test-panel">
+                    <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">
+                        Check for accessibility issues: missing alt text, labels, keyboard navigation, etc.
+                    </p>
+                    <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+                        <button class="btn btn-primary" onclick="GSXCreate.runAccessibilityTest()">♿ Run Accessibility Audit</button>
+                        <button class="btn btn-success" onclick="GSXCreate.fixAccessibilityIssues()" id="fixAccessibilityBtn" disabled>🔧 Fix Issues</button>
+                    </div>
+                    <div id="accessibilityResults"></div>
+                </div>
+                
+                <!-- Performance Tests Panel -->
+                <div id="testPanelPerformance" class="test-panel">
+                    <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">
+                        Measure load time, DOM size, and resource usage
+                    </p>
+                    <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+                        <button class="btn btn-primary" onclick="GSXCreate.runPerformanceTest()">⚡ Run Performance Test</button>
+                        <button class="btn btn-success" onclick="GSXCreate.fixPerformanceIssues()" id="fixPerformanceBtn" disabled>🔧 Optimize</button>
+                    </div>
+                    <div id="performanceResults"></div>
+                </div>
+                
+                <!-- AI Interactive Tests Panel -->
+                <div id="testPanelInteractive" class="test-panel">
+                    <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">
+                        Let AI analyze your UI, find bugs, and suggest fixes - then implement them automatically
+                    </p>
+                    <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+                        <button class="btn btn-primary" onclick="GSXCreate.runInteractiveTest()">🤖 AI Analyze & Test</button>
+                        <button class="btn btn-success" onclick="GSXCreate.implementTestFixes()" id="implementFixesBtn" disabled>🔧 Implement Fixes</button>
+                    </div>
+                    <div id="interactiveResults"></div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <script>
         const GSXCreate = {
@@ -927,27 +1467,39 @@
                     console.log('[GSX Create] API Config:', this.apiConfig);
                     
                     const modelSelect = document.getElementById('modelSelect');
+                    const mainModelSelect = document.getElementById('mainModelSelect');
                     const noApiWarning = document.getElementById('noApiWarning');
+                    const mainSetupForm = document.getElementById('mainSetupForm');
                     
                     if (!this.apiConfig.hasApiKey) {
                         noApiWarning.style.display = 'block';
+                        if (mainSetupForm) mainSetupForm.style.display = 'none';
                         return;
                     }
                     
                     noApiWarning.style.display = 'none';
+                    if (mainSetupForm) mainSetupForm.style.display = 'block';
                     
-                    // Populate models based on provider
+                    // Model options HTML
+                    let modelOptionsHtml = '';
                     if (this.apiConfig.provider === 'anthropic' || this.apiConfig.provider === 'claude') {
-                        modelSelect.innerHTML = `
-                            <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
-                            <option value="claude-opus-4-20250514">Claude Opus 4</option>
+                        modelOptionsHtml = `
+                            <option value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5 (Recommended)</option>
+                            <option value="claude-haiku-4-5-20250929">Claude Haiku 4.5 (Fastest)</option>
+                            <option value="claude-opus-4-5-20250929">Claude Opus 4.5 (Premium)</option>
+                            <option value="claude-opus-4-1-20250929">Claude Opus 4.1</option>
+                            <option value="claude-sonnet-4-20250514">Claude Sonnet 4 (Legacy)</option>
                         `;
                     } else {
-                        modelSelect.innerHTML = `
+                        modelOptionsHtml = `
                             <option value="gpt-4o">GPT-4o</option>
                             <option value="gpt-4-turbo">GPT-4 Turbo</option>
                         `;
                     }
+                    
+                    // Populate both model selects
+                    if (modelSelect) modelSelect.innerHTML = modelOptionsHtml;
+                    if (mainModelSelect) mainModelSelect.innerHTML = modelOptionsHtml;
                 } catch (error) {
                     console.error('[GSX Create] API config error:', error);
                 }
@@ -959,28 +1511,39 @@
                     const spaces = await window.aider.getSpaces();
                     console.log('[GSX Create] Loaded spaces:', spaces);
                     
+                    // Populate sidebar select
                     const select = document.getElementById('spaceSelect');
+                    if (select) {
+                        select.innerHTML = '<option value="">Select a space...</option>';
+                    }
+                    
+                    // Populate main setup select
                     const mainSelect = document.getElementById('mainSpaceSelect');
-                    select.innerHTML = '<option value="">Select a space...</option>';
-                    if (mainSelect) mainSelect.innerHTML = '<option value="">Choose a space...</option>';
+                    if (mainSelect) {
+                        mainSelect.innerHTML = '<option value="">Choose a space...</option>';
+                    }
                     
                     if (spaces && spaces.length > 0) {
                         spaces.forEach(space => {
                             if (space.path) {
-                                const option = document.createElement('option');
-                                option.value = space.id;
-                                option.textContent = `${space.name} (${space.itemCount || 0} items)`;
-                                option.dataset.path = space.path;
-                                option.dataset.name = space.name;
-                                select.appendChild(option);
-                                // Also add to main select
+                                // Sidebar select
+                                if (select) {
+                                    const option = document.createElement('option');
+                                    option.value = space.id;
+                                    option.textContent = `${space.name} (${space.itemCount || 0} items)`;
+                                    option.dataset.path = space.path;
+                                    option.dataset.name = space.name;
+                                    select.appendChild(option);
+                                }
+                                
+                                // Main setup select
                                 if (mainSelect) {
-                                    const opt2 = document.createElement('option');
-                                    opt2.value = space.id;
-                                    opt2.textContent = `${space.name} (${space.itemCount || 0} items)`;
-                                    opt2.dataset.path = space.path;
-                                    opt2.dataset.name = space.name;
-                                    mainSelect.appendChild(opt2);
+                                    const option2 = document.createElement('option');
+                                    option2.value = space.id;
+                                    option2.textContent = `${space.name} (${space.itemCount || 0} items)`;
+                                    option2.dataset.path = space.path;
+                                    option2.dataset.name = space.name;
+                                    mainSelect.appendChild(option2);
                                 }
                             }
                         });
@@ -989,41 +1552,17 @@
                     console.error('[GSX Create] Load spaces error:', error);
                 }
             },
-            // Create New Space
-            async createNewSpace() {
-                const name = prompt('Enter a name for your new space:');
-                if (!name || !name.trim()) return;
-                
-                try {
-                    const result = await window.aider.createSpace(name.trim());
-                    
-                    if (result && result.success) {
-                        this.addMessage('system', 'Created new space: ' + name);
-                        await this.loadSpaces();
-                        
-                        const mainSelect = document.getElementById('mainSpaceSelect');
-                        for (let i = 0; i < mainSelect.options.length; i++) {
-                            if (mainSelect.options[i].text.startsWith(name)) {
-                                mainSelect.selectedIndex = i;
-                                await this.selectSpaceFromMain(mainSelect.value);
-                                break;
-                            }
-                        }
-                    } else {
-                        alert('Failed to create space: ' + (result?.error || 'Unknown error'));
-                    }
-                } catch (error) {
-                    console.error('[GSX Create] Create space error:', error);
-                    alert('Failed to create space: ' + error.message);
-                }
-            },
             
-            
-            
-            // Select Space from Main Setup (primary action)
+            // Select Space from Main Setup
             async selectSpaceFromMain(spaceId) {
+                const startBtn = document.getElementById('mainStartBtn');
+                
                 if (!spaceId) {
                     document.getElementById('spaceSelectedConfig').style.display = 'none';
+                    // Disable start button
+                    startBtn.disabled = true;
+                    startBtn.style.opacity = '0.5';
+                    startBtn.style.cursor = 'not-allowed';
                     return;
                 }
                 
@@ -1040,6 +1579,11 @@
                 };
                 
                 console.log('[GSX Create] Selected space from main:', this.currentSpace);
+                
+                // Enable start button
+                startBtn.disabled = false;
+                startBtn.style.opacity = '1';
+                startBtn.style.cursor = 'pointer';
                 
                 // Show config options
                 document.getElementById('spaceSelectedConfig').style.display = 'block';
@@ -1065,57 +1609,73 @@
             
             async loadStyleGuidesForMain() {
                 if (!this.currentSpaceId) return;
+                
                 try {
                     const result = await window.aider.getStyleGuides(this.currentSpaceId);
                     if (result.success) {
                         this.styleGuides = result.styleGuides || [];
+                        
+                        // Populate main select
                         const mainSelect = document.getElementById('mainStyleGuideSelect');
                         if (mainSelect) {
                             mainSelect.innerHTML = '<option value="">None</option>';
                             this.styleGuides.forEach(sg => {
-                                const opt = document.createElement('option');
-                                opt.value = sg.id;
-                                opt.textContent = sg.name;
-                                mainSelect.appendChild(opt);
+                                const option = document.createElement('option');
+                                option.value = sg.id;
+                                option.textContent = sg.name;
+                                mainSelect.appendChild(option);
                             });
                         }
+                        
+                        // Also populate sidebar select
                         this.renderStyleGuideSelect();
                     }
-                } catch (e) { console.error('[GSX Create] Style guides error:', e); }
+                } catch (error) {
+                    console.error('[GSX Create] Load style guides error:', error);
+                }
             },
             
             async loadJourneyMapsForMain() {
                 if (!this.currentSpaceId) return;
+                
                 try {
                     const result = await window.aider.getJourneyMaps(this.currentSpaceId);
                     if (result.success) {
                         this.journeyMaps = result.journeyMaps || [];
+                        
+                        // Populate main select
                         const mainSelect = document.getElementById('mainJourneyMapSelect');
                         if (mainSelect) {
                             mainSelect.innerHTML = '<option value="">None</option>';
                             this.journeyMaps.forEach(jm => {
-                                const opt = document.createElement('option');
-                                opt.value = jm.id;
-                                opt.textContent = jm.name;
-                                mainSelect.appendChild(opt);
+                                const option = document.createElement('option');
+                                option.value = jm.id;
+                                option.textContent = jm.name;
+                                mainSelect.appendChild(option);
                             });
                         }
+                        
+                        // Also populate sidebar select
                         this.renderJourneyMapSelect();
                     }
-                } catch (e) { console.error('[GSX Create] Journey maps error:', e); }
+                } catch (error) {
+                    console.error('[GSX Create] Load journey maps error:', error);
+                }
             },
-
+            
             // Select Space
             async selectSpace(spaceId) {
+                const sidebarContainer = document.getElementById('sidebarContainer');
+                
                 if (!spaceId) {
                     this.currentSpace = null;
                     this.currentSpaceId = null;
                     document.getElementById('configSection').style.display = 'none';
+                    sidebarContainer.style.display = 'none';
                     return;
                 }
                 
                 const select = document.getElementById('spaceSelect');
-                    const mainSelect = document.getElementById('mainSpaceSelect');
                 const option = select.options[select.selectedIndex];
                 
                 this.currentSpaceId = spaceId;
@@ -1129,7 +1689,8 @@
                 
                 console.log('[GSX Create] Selected space:', this.currentSpace);
                 
-                // Show config section
+                // Show sidebar container and config section
+                sidebarContainer.style.display = 'flex';
                 document.getElementById('configSection').style.display = 'block';
                 
                 // Load space data
@@ -1176,12 +1737,14 @@
                 fileList.innerHTML = files.map(file => {
                     const inContext = this.contextFiles.includes(file.path);
                     const icon = this.getFileIcon(file.name);
+                    const ext = file.name.split('.').pop().toLowerCase();
+                    const isPreviewable = ['html', 'htm', 'css', 'js', 'json', 'ts', 'txt', 'md'].includes(ext);
                     return `
                         <div class="file-item ${inContext ? 'in-context' : ''}" 
-                             onclick="GSXCreate.toggleFileContext('${file.path}')"
-                             ondblclick="GSXCreate.previewFile('${file.path}')">
+                             onclick="GSXCreate.selectFile('${file.path}')">
                             <span class="icon">${icon}</span>
                             <span>${file.name}</span>
+                            ${isPreviewable ? '<span class="preview-icon" title="Click to preview">&#128065;</span>' : ''}
                         </div>
                     `;
                 }).join('');
@@ -1226,15 +1789,6 @@
                     option.value = sg.id;
                     option.textContent = sg.name;
                     select.appendChild(option);
-                                // Also add to main select
-                                if (mainSelect) {
-                                    const opt2 = document.createElement('option');
-                                    opt2.value = space.id;
-                                    opt2.textContent = `${space.name} (${space.itemCount || 0} items)`;
-                                    opt2.dataset.path = space.path;
-                                    opt2.dataset.name = space.name;
-                                    mainSelect.appendChild(opt2);
-                                }
                 });
             },
             
@@ -1262,19 +1816,24 @@
                     option.value = jm.id;
                     option.textContent = jm.name;
                     select.appendChild(option);
-                                // Also add to main select
-                                if (mainSelect) {
-                                    const opt2 = document.createElement('option');
-                                    opt2.value = space.id;
-                                    opt2.textContent = `${space.name} (${space.itemCount || 0} items)`;
-                                    opt2.dataset.path = space.path;
-                                    opt2.dataset.name = space.name;
-                                    mainSelect.appendChild(opt2);
-                                }
                 });
             },
             
             // Toggle File Context
+            // Select file - adds to context AND previews
+            async selectFile(filePath) {
+                // Add to context if not already there
+                if (!this.contextFiles.includes(filePath)) {
+                    this.contextFiles.push(filePath);
+                    await window.aider.addFiles([filePath]);
+                    this.renderProjectFiles();
+                    this.renderContextFiles();
+                }
+                
+                // Preview the file
+                this.previewFile(filePath);
+            },
+            
             async toggleFileContext(filePath) {
                 const index = this.contextFiles.indexOf(filePath);
                 
@@ -1314,8 +1873,23 @@
             
             // Start Session
             async startSession() {
-                const startBtn = document.getElementById('startBtn');
-                const modelName = document.getElementById('modelSelect').value;
+                // Get buttons (main or sidebar)
+                const startBtn = document.getElementById('mainStartBtn') || document.getElementById('startBtn');
+                const modelName = (document.getElementById('mainModelSelect') || document.getElementById('modelSelect')).value;
+                
+                // Get style guide and journey map from main selects if available
+                const styleGuideSelect = document.getElementById('mainStyleGuideSelect') || document.getElementById('styleGuideSelect');
+                const journeyMapSelect = document.getElementById('mainJourneyMapSelect') || document.getElementById('journeyMapSelect');
+                
+                if (styleGuideSelect && styleGuideSelect.value) {
+                    // Sync to sidebar
+                    const sidebarSG = document.getElementById('styleGuideSelect');
+                    if (sidebarSG) sidebarSG.value = styleGuideSelect.value;
+                }
+                if (journeyMapSelect && journeyMapSelect.value) {
+                    const sidebarJM = document.getElementById('journeyMapSelect');
+                    if (sidebarJM) sidebarJM.value = journeyMapSelect.value;
+                }
                 
                 startBtn.disabled = true;
                 startBtn.textContent = 'Starting...';
@@ -1343,10 +1917,10 @@
                             this.renderContextFiles();
                         }
                         
-                        // Show chat area, hide setup
+                        // Show chat area and sidebar, hide setup
                         document.getElementById('setupPanel').classList.add('hidden');
                         document.getElementById('chatArea').classList.add('active');
-                        document.getElementById('previewPanel').classList.add('active');
+                        document.getElementById('sidebarContainer').style.display = 'flex';
                         document.getElementById('costDisplay').classList.add('visible');
                         
                         this.addMessage('system', `Connected to ${this.currentSpaceName}. ${filePaths.length} files in context.`);
@@ -1363,7 +1937,11 @@
                 }
             },
             
-            // Send Prompt
+            // Store last visual analysis for context
+            lastVisualAnalysis: null,
+            lastVisualAnalysisTime: null,
+            
+            // Send Prompt with Streaming
             async sendPrompt() {
                 const input = document.getElementById('promptInput');
                 const sendBtn = document.getElementById('sendBtn');
@@ -1377,13 +1955,34 @@
                 sendBtn.disabled = true;
                 sendBtn.textContent = 'Thinking...';
                 
+                // Create a streaming message element
+                const streamingMsgId = 'streaming-' + Date.now();
+                this.addStreamingMessage(streamingMsgId);
+                
                 try {
                     // Build full message with context
                     let fullMessage = '';
                     
+                    // Check if user is asking to implement something and we have recent visual analysis
+                    const implementKeywords = ['implement', 'impliment', 'apply', 'make these changes', 'fix these', 'do these', 'add these', 'update based on'];
+                    const isImplementRequest = implementKeywords.some(kw => message.toLowerCase().includes(kw));
+                    
+                    // Include visual analysis if recent (within 5 minutes) and user is asking to implement
+                    if (this.lastVisualAnalysis && isImplementRequest) {
+                        const analysisAge = Date.now() - this.lastVisualAnalysisTime;
+                        if (analysisAge < 5 * 60 * 1000) { // 5 minutes
+                            fullMessage += `[Visual Analysis of Current UI - Please implement these improvements]\n${this.lastVisualAnalysis}\n\n`;
+                            fullMessage += `[User Request]\n${message}\n\nPlease implement the improvements from the visual analysis above. Focus on the high priority items first.\n\n`;
+                        } else {
+                            fullMessage += message;
+                        }
+                    } else {
+                        fullMessage += message;
+                    }
+                    
                     // Add global instructions
                     if (this.globalInstructionsText) {
-                        fullMessage += `[Global Instructions]\n${this.globalInstructionsText}\n\n`;
+                        fullMessage = `[Global Instructions]\n${this.globalInstructionsText}\n\n` + fullMessage;
                     }
                     
                     // Add style guide if selected
@@ -1406,17 +2005,70 @@
                     
                     fullMessage += message;
                     
-                    const result = await window.aider.runPrompt(fullMessage);
+                    // Use streaming to show thinking process
+                    let lastRefresh = Date.now();
+                    let streamedContent = ''; // Accumulate streamed content for token counting
+                    
+                    const result = await window.aider.runPromptStreaming(
+                        fullMessage,
+                        (token) => {
+                            streamedContent += token; // Accumulate for cost calculation
+                            this.appendToStreamingMessage(streamingMsgId, token);
+                            
+                            // Check for file modification indicators and refresh preview
+                            // Refresh every 2 seconds if we're in the middle of edits
+                            const now = Date.now();
+                            if (now - lastRefresh > 2000) {
+                                lastRefresh = now;
+                                if (this.currentPreviewFile) {
+                                    this.refreshPreview();
+                                }
+                            }
+                        },
+                        { include_thinking: true }
+                    );
+                    
+                    // Final refresh after completion
+                    if (this.currentPreviewFile) {
+                        this.refreshPreview();
+                    }
+                    
+                    // Finalize the streaming message
+                    this.finalizeStreamingMessage(streamingMsgId, result);
                     
                     if (result.success) {
                         const fileDetails = result.file_details || [];
-                        this.addMessage('ai', result.response, fileDetails);
                         
-                        // Record cost
+                        // Parse actual token counts and cost from Aider's output
                         const model = document.getElementById('modelSelect').value;
-                        const inputTokens = result.input_tokens || 0;
-                        const outputTokens = result.output_tokens || 0;
-                        await this.recordApiCost(model, inputTokens, outputTokens, 'prompt', message);
+                        let inputTokens = 0;
+                        let outputTokens = 0;
+                        let actualCost = 0;
+                        
+                        // Try to parse "Tokens: 15k sent, 2.1k received. Cost: $0.08 message"
+                        const tokenMatch = streamedContent.match(/Tokens:\s*([\d.]+)k?\s*sent,\s*([\d.]+)k?\s*received/i);
+                        const costMatch = streamedContent.match(/Cost:\s*\$([\d.]+)\s*message/i);
+                        
+                        if (tokenMatch) {
+                            inputTokens = parseFloat(tokenMatch[1]) * (tokenMatch[1].includes('k') || streamedContent.includes('k sent') ? 1000 : 1);
+                            outputTokens = parseFloat(tokenMatch[2]) * (tokenMatch[2].includes('k') || streamedContent.includes('k received') ? 1000 : 1);
+                            // Handle "15k" format
+                            if (streamedContent.match(/[\d.]+k\s*sent/i)) inputTokens = parseFloat(tokenMatch[1]) * 1000;
+                            if (streamedContent.match(/[\d.]+k\s*received/i)) outputTokens = parseFloat(tokenMatch[2]) * 1000;
+                        }
+                        
+                        if (costMatch) {
+                            actualCost = parseFloat(costMatch[1]);
+                        }
+                        
+                        // Fallback to estimates if parsing failed
+                        if (inputTokens === 0) inputTokens = Math.ceil(fullMessage.length / 4);
+                        if (outputTokens === 0) outputTokens = Math.ceil(streamedContent.length / 4);
+                        
+                        console.log('[GSX Create] Parsed tokens - input:', inputTokens, 'output:', outputTokens, 'actual cost:', actualCost);
+                        
+                        // Use actual cost if available, otherwise calculate
+                        await this.recordApiCost(model, inputTokens, outputTokens, 'prompt', message, actualCost);
                         
                         // Register created/modified files
                         for (const file of fileDetails) {
@@ -1444,15 +2096,14 @@
                         await this.loadProjectFiles();
                         
                         // Auto-preview first HTML file
-                        const htmlFile = fileDetails.find(f => f.name.endsWith('.html'));
+                        const htmlFile = fileDetails.find(f => f.path && f.path.endsWith('.html'));
                         if (htmlFile) {
                             setTimeout(() => this.previewFile(htmlFile.path), 500);
                         }
-                    } else {
-                        this.addMessage('error', result.error);
                     }
                 } catch (error) {
                     console.error('[GSX Create] Prompt error:', error);
+                    this.removeStreamingMessage(streamingMsgId);
                     this.addMessage('error', error.message);
                 } finally {
                     sendBtn.disabled = false;
@@ -1460,8 +2111,171 @@
                 }
             },
             
+            // Streaming message helpers
+            streamingPhase: '',
+            streamingStartTime: null,
+            
+            addStreamingMessage(id) {
+                const messages = document.getElementById('messages');
+                const now = new Date();
+                const time = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+                
+                this.streamingStartTime = Date.now();
+                this.streamingPhase = 'thinking';
+                
+                const msgDiv = document.createElement('div');
+                msgDiv.className = 'message';
+                msgDiv.id = id;
+                msgDiv.innerHTML = `
+                    <span class="message-time">${time}</span>
+                    <span class="message-type ai">AI</span>
+                    <div class="message-content streaming">
+                        <div class="streaming-status" id="${id}-status">
+                            <span class="status-icon">🤔</span>
+                            <span class="status-text">Thinking...</span>
+                            <span class="status-timer">0s</span>
+                        </div>
+                        <pre class="stream-output"></pre>
+                    </div>
+                `;
+                messages.appendChild(msgDiv);
+                messages.scrollTop = messages.scrollHeight;
+                
+                // Start timer update
+                this.updateStreamingTimer(id);
+            },
+            
+            updateStreamingTimer(id) {
+                const timerEl = document.querySelector(`#${id}-status .status-timer`);
+                if (!timerEl || !this.streamingStartTime) return;
+                
+                const elapsed = Math.floor((Date.now() - this.streamingStartTime) / 1000);
+                timerEl.textContent = elapsed + 's';
+                
+                if (document.getElementById(id)) {
+                    setTimeout(() => this.updateStreamingTimer(id), 1000);
+                }
+            },
+            
+            updateStreamingStatus(id, phase, icon) {
+                const statusEl = document.getElementById(`${id}-status`);
+                if (!statusEl) return;
+                
+                this.streamingPhase = phase;
+                statusEl.querySelector('.status-icon').textContent = icon;
+                statusEl.querySelector('.status-text').textContent = phase;
+            },
+            
+            // Track if we're inside a code block
+            inCodeBlock: false,
+            codeBlockContent: '',
+            codeBlockCount: 0,
+            
+            appendToStreamingMessage(id, token) {
+                const msgDiv = document.getElementById(id);
+                if (!msgDiv) return;
+                
+                const output = msgDiv.querySelector('.stream-output');
+                
+                // Detect phase changes from the output
+                if (token.includes('SEARCH/REPLACE') || token.includes('<<<<<<')) {
+                    this.updateStreamingStatus(id, 'Editing files...', '✏️');
+                    this.inCodeBlock = true;
+                    this.codeBlockCount++;
+                } else if (token.includes('Applied edit') || token.includes('Wrote')) {
+                    this.updateStreamingStatus(id, 'Files updated!', '✅');
+                    this.inCodeBlock = false;
+                } else if (token.includes('>>>>>>> REPLACE')) {
+                    this.inCodeBlock = false;
+                } else if (token.includes('Tokens:') && token.includes('Cost:')) {
+                    this.updateStreamingStatus(id, 'Complete!', '✅');
+                } else if (this.streamingPhase === 'thinking' && output && output.textContent.length > 50) {
+                    this.updateStreamingStatus(id, 'Analyzing...', '🔍');
+                }
+                
+                if (output) {
+                    // If we're in a code block, add to collapsed section
+                    if (this.inCodeBlock || token.includes('<<<<<<') || token.includes('>>>>>>>')) {
+                        // Check if we need to create a new collapsible
+                        let codeSection = output.querySelector('.code-section-' + this.codeBlockCount);
+                        if (!codeSection) {
+                            const details = document.createElement('details');
+                            details.className = 'code-collapse code-section-' + this.codeBlockCount;
+                            details.innerHTML = `<summary>📝 Code change #${this.codeBlockCount} (click to expand)</summary><pre class="collapsed-code"></pre>`;
+                            output.appendChild(details);
+                            codeSection = details;
+                        }
+                        const codeContent = codeSection.querySelector('.collapsed-code');
+                        if (codeContent) {
+                            codeContent.textContent += token;
+                        }
+                    } else {
+                        // Regular text - append directly
+                        output.appendChild(document.createTextNode(token));
+                    }
+                    
+                    const messages = document.getElementById('messages');
+                    messages.scrollTop = messages.scrollHeight;
+                }
+            },
+            
+            finalizeStreamingMessage(id, result) {
+                const msgDiv = document.getElementById(id);
+                if (!msgDiv) return;
+                
+                const content = msgDiv.querySelector('.message-content');
+                const statusEl = document.getElementById(`${id}-status`);
+                
+                // Calculate elapsed time
+                const elapsed = this.streamingStartTime ? Math.floor((Date.now() - this.streamingStartTime) / 1000) : 0;
+                
+                // Update final status
+                if (statusEl) {
+                    const modifiedCount = result.modified_files ? result.modified_files.length : 0;
+                    const fileDetails = result.file_details || [];
+                    
+                    let summaryText = '✅ Complete';
+                    if (modifiedCount > 0 || fileDetails.length > 0) {
+                        const count = modifiedCount || fileDetails.length;
+                        summaryText = `✅ Done! ${count} file(s) modified`;
+                    }
+                    summaryText += ` (${elapsed}s)`;
+                    
+                    statusEl.innerHTML = `<span style="color: var(--success); font-weight: 600;">${summaryText}</span>`;
+                }
+                
+                // Add file details if any
+                const files = result.modified_files || result.file_details || [];
+                if (files.length > 0) {
+                    const filesDiv = document.createElement('div');
+                    filesDiv.className = 'message-files';
+                    filesDiv.style.marginTop = '12px';
+                    filesDiv.innerHTML = `
+                        <div style="color: var(--success); font-weight: 600; margin-bottom: 8px;">📁 Modified Files:</div>
+                        ${files.map(f => {
+                            const path = typeof f === 'string' ? f : (f.path || f.name);
+                            const name = path.split('/').pop();
+                            const action = f.action || 'modified';
+                            return `<div style="padding: 4px 8px; background: var(--bg-primary); border-radius: 4px; margin: 4px 0; display: flex; justify-content: space-between;">
+                                <span>${name}</span>
+                                <span style="color: var(--text-muted); font-size: 10px;">${action}</span>
+                            </div>`;
+                        }).join('')}
+                    `;
+                    content.appendChild(filesDiv);
+                }
+                
+                this.streamingStartTime = null;
+            },
+            
+            removeStreamingMessage(id) {
+                const msgDiv = document.getElementById(id);
+                if (msgDiv) msgDiv.remove();
+                this.streamingStartTime = null;
+            },
+            
             // Add Message
-            addMessage(type, text, fileDetails = null) {
+            addMessage(type, text, fileDetails = null, allowHtml = false) {
                 const messages = document.getElementById('messages');
                 const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
                 
@@ -1472,11 +2286,17 @@
                     error: 'ERR'
                 };
                 
+                // Format text - convert markdown-like formatting
+                let formattedText = allowHtml ? text : this.escapeHtml(text);
+                formattedText = formattedText
+                    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                    .replace(/\n/g, '<br>');
+                
                 let html = `
                     <div class="message">
                         <span class="message-time">${time}</span>
                         <span class="message-type ${type}">${typeLabels[type] || type.toUpperCase()}</span>
-                        <span class="message-content">${this.escapeHtml(text)}`;
+                        <span class="message-content">${formattedText}`;
                 
                 if (fileDetails && fileDetails.length > 0) {
                     html += '<div class="message-files">';
@@ -1496,23 +2316,53 @@
             async previewFile(filePath) {
                 if (!filePath) return;
                 
+                console.log('[GSX Create] Preview file:', filePath);
+                const previewContent = document.getElementById('previewContent');
+                const previewTitle = document.getElementById('previewTitle');
+                const previewPanel = document.getElementById('previewPanel');
+                
                 try {
                     const content = await window.aider.readFile(filePath);
+                    console.log('[GSX Create] File content length:', content ? content.length : 0);
+                    
                     this.currentPreviewFile = filePath;
-                    
-                    const previewContent = document.getElementById('previewContent');
                     const ext = filePath.split('.').pop().toLowerCase();
+                    const fileName = filePath.split('/').pop();
                     
-                    if (ext === 'html') {
-                        previewContent.innerHTML = `<iframe srcdoc="${this.escapeHtml(content)}"></iframe>`;
+                    // Update title
+                    if (previewTitle) previewTitle.textContent = fileName;
+                    
+                    // Show preview panel
+                    if (previewPanel) previewPanel.classList.add('active');
+                    
+                    if (!content) {
+                        previewContent.innerHTML = '<div class="preview-empty">File is empty or could not be read</div>';
+                        return;
+                    }
+                    
+                    if (ext === 'html' || ext === 'htm') {
+                        // Create iframe and write content directly
+                        const iframe = document.createElement('iframe');
+                        iframe.style.cssText = 'width: 100%; height: 100%; border: none; background: white;';
+                        previewContent.innerHTML = '';
+                        previewContent.appendChild(iframe);
+                        
+                        // Write content to iframe
+                        const doc = iframe.contentDocument || iframe.contentWindow.document;
+                        doc.open();
+                        doc.write(content);
+                        doc.close();
+                        console.log('[GSX Create] HTML preview rendered in iframe');
                     } else {
-                        previewContent.innerHTML = `<pre style="padding: 16px; margin: 0; font-size: 12px; background: #1e1e1e; color: #d4d4d4; height: 100%; overflow: auto;">${this.escapeHtml(content)}</pre>`;
+                        // Code preview
+                        previewContent.innerHTML = '<pre style="padding: 16px; margin: 0; font-size: 12px; background: #1e1e1e; color: #d4d4d4; height: 100%; overflow: auto; white-space: pre-wrap; word-wrap: break-word;">' + this.escapeHtml(content) + '</pre>';
                     }
                     
                     // Start file watcher
                     this.startFileWatcher(filePath);
                 } catch (error) {
                     console.error('[GSX Create] Preview error:', error);
+                    previewContent.innerHTML = '<div class="preview-empty">Error loading file: ' + error.message + '</div>';
                 }
             },
             
@@ -1532,7 +2382,14 @@
             },
             
             togglePreview() {
-                document.getElementById('previewPanel').classList.toggle('active');
+                document.getElementById('previewPanel').classList.remove('active');
+            },
+            
+            collapsePreview() {
+                const panel = document.getElementById('previewPanel');
+                const icon = document.getElementById('previewToggleIcon');
+                panel.classList.toggle('collapsed');
+                icon.textContent = panel.classList.contains('collapsed') ? '◀' : '▶';
             },
             
             setPreviewMode(mode) {
@@ -1546,13 +2403,854 @@
                 }
             },
             
+            // Screenshot and AI Review
+            async captureAndAnalyze() {
+                if (!this.currentPreviewFile) {
+                    this.addMessage('error', 'No file is being previewed. Select a file first.');
+                    return;
+                }
+                
+                const ext = this.currentPreviewFile.split('.').pop().toLowerCase();
+                if (ext !== 'html' && ext !== 'htm') {
+                    this.addMessage('error', 'Screenshot capture only works with HTML files.');
+                    return;
+                }
+                
+                this.addMessage('system', '📸 Capturing screenshot for AI review...');
+                
+                try {
+                    // Read the HTML content
+                    const htmlContent = await window.aider.readFile(this.currentPreviewFile);
+                    
+                    if (!htmlContent) {
+                        this.addMessage('error', 'Could not read file content.');
+                        return;
+                    }
+                    
+                    // Capture screenshot
+                    const screenshotResult = await window.aider.capturePreviewScreenshot(htmlContent, {
+                        fullPage: true,
+                        width: 1280,
+                        height: 800
+                    });
+                    
+                    if (!screenshotResult.success) {
+                        this.addMessage('error', 'Screenshot capture failed: ' + (screenshotResult.error || 'Unknown error'));
+                        return;
+                    }
+                    
+                    this.addMessage('system', '🔍 Sending screenshot to AI for visual analysis...');
+                    
+                    // Send to AI for analysis
+                    const analysisPrompt = `Please analyze this screenshot of the UI and provide feedback on:
+1. Visual design and aesthetics
+2. Layout and spacing
+3. Usability and UX issues
+4. Any bugs or rendering problems you can see
+5. Suggestions for improvement
+
+Be specific about what you see in the image.`;
+                    
+                    const analysisResult = await window.aider.analyzeScreenshot(
+                        screenshotResult.screenshot,
+                        analysisPrompt
+                    );
+                    
+                    if (analysisResult.success) {
+                        // Store the analysis for later use with implement requests
+                        this.lastVisualAnalysis = analysisResult.analysis;
+                        this.lastVisualAnalysisTime = Date.now();
+                        
+                        // Create message with implement button
+                        const analysisHtml = `📸 **Visual Analysis:**\n\n${analysisResult.analysis}\n\n<button class="btn btn-primary btn-sm" onclick="GSXCreate.implementVisualFixes()" style="margin-top: 12px;">🔧 Implement These Changes</button>`;
+                        this.addMessage('ai', analysisHtml, null, true);
+                        
+                        // Record cost if tokens provided
+                        if (analysisResult.usage) {
+                            const model = 'claude-sonnet-4-5-20250929'; // Vision model
+                            await this.recordApiCost(
+                                model,
+                                analysisResult.usage.input_tokens || 0,
+                                analysisResult.usage.output_tokens || 0,
+                                'vision',
+                                'Screenshot analysis'
+                            );
+                        }
+                    } else {
+                        this.addMessage('error', 'AI analysis failed: ' + (analysisResult.error || 'Unknown error'));
+                    }
+                } catch (error) {
+                    console.error('[GSX Create] Screenshot analysis error:', error);
+                    this.addMessage('error', 'Screenshot analysis failed: ' + error.message);
+                }
+            },
+            
+            // Implement Visual Fixes
+            async implementVisualFixes() {
+                if (!this.lastVisualAnalysis) {
+                    this.addMessage('error', 'No visual analysis available. Run "📸 AI Review" first.');
+                    return;
+                }
+                
+                // Set the prompt and trigger send
+                const input = document.getElementById('promptInput');
+                input.value = 'Please implement ALL the improvements from the visual analysis. Start with the High Priority items, then Medium Priority. Make all necessary code changes to the HTML/CSS/JS.';
+                this.sendPrompt();
+            },
+            
+            // Code Intelligence Tools
+            showCodeTools() {
+                document.getElementById('codeToolsModal').classList.add('active');
+            },
+            
+            selectCodeTool(tool) {
+                // Update tabs
+                document.querySelectorAll('.code-tool-tab').forEach(t => {
+                    t.classList.toggle('active', t.dataset.tool === tool);
+                });
+                // Update panels
+                document.querySelectorAll('.code-tool-panel').forEach(p => {
+                    p.classList.toggle('active', p.id === 'codeTool' + tool.charAt(0).toUpperCase() + tool.slice(1));
+                });
+            },
+            
+            // ============================================
+            // TEST AGENT
+            // ============================================
+            testPlan: null,
+            testResults: null,
+            visualBaseline: null,
+            lastInteractiveAnalysis: null,
+            
+            showTestAgent() {
+                if (!this.currentPreviewFile) {
+                    this.addMessage('error', 'Please preview an HTML file first to run tests on it.');
+                    return;
+                }
+                document.getElementById('testAgentModal').classList.add('active');
+            },
+            
+            selectTestTab(tab) {
+                document.querySelectorAll('.test-tab').forEach(t => {
+                    t.classList.toggle('active', t.dataset.test === tab);
+                });
+                document.querySelectorAll('.test-panel').forEach(p => {
+                    p.classList.toggle('active', p.id === 'testPanel' + tab.charAt(0).toUpperCase() + tab.slice(1));
+                });
+            },
+            
+            async generateTestPlan() {
+                if (!this.currentPreviewFile) {
+                    this.addMessage('error', 'No file to test. Preview an HTML file first.');
+                    return;
+                }
+                
+                const useAI = document.getElementById('useAIForTests').checked;
+                const planList = document.getElementById('testPlanList');
+                const planDisplay = document.getElementById('testPlanDisplay');
+                
+                planList.innerHTML = '<p style="color: var(--text-muted);">Generating test plan...</p>';
+                planDisplay.style.display = 'block';
+                
+                try {
+                    const result = await window.testAgent.generatePlan(this.currentPreviewFile, useAI);
+                    
+                    if (result.success && result.testPlan) {
+                        this.testPlan = result.testPlan;
+                        document.getElementById('runTestsBtn').disabled = false;
+                        
+                        planList.innerHTML = `
+                            <div style="margin-bottom: 8px; color: var(--text-primary); font-weight: 600;">${result.testPlan.name}</div>
+                            ${result.testPlan.tests.map((t, i) => `
+                                <div style="padding: 6px 8px; background: var(--bg-secondary); border-radius: 4px; margin-bottom: 4px; font-size: 11px;">
+                                    <span style="color: var(--text-muted);">#${i + 1}</span>
+                                    <span style="margin-left: 8px;">${t.name}</span>
+                                    <span style="float: right; color: var(--accent);">${t.action}</span>
+                                </div>
+                            `).join('')}
+                        `;
+                    } else {
+                        planList.innerHTML = `<p style="color: var(--error);">Failed: ${result.error || 'Unknown error'}</p>`;
+                    }
+                } catch (error) {
+                    planList.innerHTML = `<p style="color: var(--error);">Error: ${error.message}</p>`;
+                }
+            },
+            
+            async runFunctionalTests() {
+                if (!this.currentPreviewFile || !this.testPlan) {
+                    return;
+                }
+                
+                const browser = document.getElementById('browserSelect').value;
+                const resultsDisplay = document.getElementById('testResultsDisplay');
+                const summaryDiv = document.getElementById('testSummary');
+                const resultsList = document.getElementById('testResultsList');
+                
+                resultsDisplay.style.display = 'block';
+                summaryDiv.innerHTML = `<p style="color: var(--text-muted);">Running tests in ${browser}...</p>`;
+                resultsList.innerHTML = '';
+                
+                // Listen for progress updates
+                window.testAgent.onProgress((result) => {
+                    const statusIcon = result.status === 'passed' ? '✅' : '❌';
+                    resultsList.innerHTML += `
+                        <div class="test-result-item ${result.status}">
+                            <span class="test-status-icon">${statusIcon}</span>
+                            <span class="test-name">${result.name}</span>
+                            <span class="test-duration">${result.duration}ms</span>
+                        </div>
+                    `;
+                });
+                
+                try {
+                    const result = await window.testAgent.runTests(this.currentPreviewFile, { browser });
+                    
+                    if (result.success) {
+                        this.testResults = result.results || [];
+                        const summary = result.summary;
+                        
+                        // Enable fix button if there are failures
+                        const fixBtn = document.getElementById('fixFailedTestsBtn');
+                        if (fixBtn) fixBtn.disabled = summary.failed === 0;
+                        
+                        summaryDiv.innerHTML = `
+                            <div style="text-align: center;">
+                                <div style="font-size: 24px; font-weight: 700; color: ${summary.passRate >= 80 ? 'var(--success)' : summary.passRate >= 50 ? '#f59e0b' : 'var(--error)'};">
+                                    ${summary.passRate}%
+                                </div>
+                                <div style="font-size: 11px; color: var(--text-muted);">Pass Rate</div>
+                            </div>
+                            <div style="text-align: center;">
+                                <div style="font-size: 24px; font-weight: 700; color: var(--success);">${summary.passed}</div>
+                                <div style="font-size: 11px; color: var(--text-muted);">Passed</div>
+                            </div>
+                            <div style="text-align: center;">
+                                <div style="font-size: 24px; font-weight: 700; color: var(--error);">${summary.failed}</div>
+                                <div style="font-size: 11px; color: var(--text-muted);">Failed</div>
+                            </div>
+                            <div style="text-align: center;">
+                                <div style="font-size: 24px; font-weight: 700; color: var(--text-primary);">${summary.duration}ms</div>
+                                <div style="font-size: 11px; color: var(--text-muted);">Duration</div>
+                            </div>
+                        `;
+                        
+                        // Add to chat
+                        this.addMessage('system', `🧪 Test Results: ${summary.passed}/${summary.total} passed (${summary.passRate}%) in ${summary.duration}ms`);
+                    } else {
+                        summaryDiv.innerHTML = `<p style="color: var(--error);">Tests failed: ${result.error}</p>`;
+                    }
+                } catch (error) {
+                    summaryDiv.innerHTML = `<p style="color: var(--error);">Error: ${error.message}</p>`;
+                }
+            },
+            
+            async captureBaseline() {
+                if (!this.currentPreviewFile) return;
+                
+                const resultsDiv = document.getElementById('visualTestResults');
+                resultsDiv.innerHTML = '<p style="color: var(--text-muted);">Capturing baseline...</p>';
+                
+                try {
+                    const result = await window.testAgent.runVisualTest(this.currentPreviewFile);
+                    
+                    if (result.success) {
+                        this.visualBaseline = result.currentScreenshot;
+                        resultsDiv.innerHTML = `
+                            <div style="text-align: center;">
+                                <p style="color: var(--success); margin-bottom: 12px;">✅ Baseline captured!</p>
+                                <img src="data:image/png;base64,${result.currentScreenshot}" 
+                                     style="max-width: 100%; border-radius: 6px; border: 1px solid var(--border);">
+                            </div>
+                        `;
+                    } else {
+                        resultsDiv.innerHTML = `<p style="color: var(--error);">Failed: ${result.error}</p>`;
+                    }
+                } catch (error) {
+                    resultsDiv.innerHTML = `<p style="color: var(--error);">Error: ${error.message}</p>`;
+                }
+            },
+            
+            async compareVisual() {
+                if (!this.currentPreviewFile || !this.visualBaseline) {
+                    document.getElementById('visualTestResults').innerHTML = 
+                        '<p style="color: var(--text-muted);">Capture a baseline first</p>';
+                    return;
+                }
+                
+                const resultsDiv = document.getElementById('visualTestResults');
+                resultsDiv.innerHTML = '<p style="color: var(--text-muted);">Comparing...</p>';
+                
+                try {
+                    const result = await window.testAgent.runVisualTest(this.currentPreviewFile, this.visualBaseline);
+                    
+                    if (result.success) {
+                        resultsDiv.innerHTML = `
+                            <div style="display: flex; gap: 16px; flex-wrap: wrap;">
+                                <div style="flex: 1; min-width: 300px;">
+                                    <h4 style="font-size: 12px; margin-bottom: 8px;">Baseline</h4>
+                                    <img src="data:image/png;base64,${this.visualBaseline}" 
+                                         style="max-width: 100%; border-radius: 6px; border: 1px solid var(--border);">
+                                </div>
+                                <div style="flex: 1; min-width: 300px;">
+                                    <h4 style="font-size: 12px; margin-bottom: 8px;">Current</h4>
+                                    <img src="data:image/png;base64,${result.currentScreenshot}" 
+                                         style="max-width: 100%; border-radius: 6px; border: 1px solid var(--border);">
+                                </div>
+                            </div>
+                            <p style="margin-top: 12px; text-align: center; color: ${result.hasDifferences ? 'var(--error)' : 'var(--success)'};">
+                                ${result.hasDifferences ? '⚠️ Visual differences detected!' : '✅ No visual changes'}
+                            </p>
+                        `;
+                    } else {
+                        resultsDiv.innerHTML = `<p style="color: var(--error);">Failed: ${result.error}</p>`;
+                    }
+                } catch (error) {
+                    resultsDiv.innerHTML = `<p style="color: var(--error);">Error: ${error.message}</p>`;
+                }
+            },
+            
+            async runCrossBrowserTest() {
+                if (!this.currentPreviewFile) return;
+                
+                const resultsDiv = document.getElementById('visualTestResults');
+                resultsDiv.innerHTML = '<p style="color: var(--text-muted);">🌐 Testing across Chrome, Firefox, and Safari...</p>';
+                
+                try {
+                    const result = await window.testAgent.runCrossBrowserTest(this.currentPreviewFile);
+                    
+                    if (result.success) {
+                        const browsers = result.browsers;
+                        resultsDiv.innerHTML = `
+                            <div style="display: flex; gap: 16px; flex-wrap: wrap; width: 100%;">
+                                ${Object.entries(browsers).map(([browser, data]) => `
+                                    <div style="flex: 1; min-width: 250px;">
+                                        <h4 style="font-size: 12px; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+                                            ${browser === 'chromium' ? '🌐' : browser === 'firefox' ? '🦊' : '🧭'}
+                                            ${browser.charAt(0).toUpperCase() + browser.slice(1)}
+                                            ${data.success ? '<span style="color: var(--success);">✓</span>' : '<span style="color: var(--error);">✗</span>'}
+                                        </h4>
+                                        ${data.success 
+                                            ? `<img src="data:image/png;base64,${data.screenshot}" style="max-width: 100%; border-radius: 6px; border: 1px solid var(--border);">` 
+                                            : `<p style="color: var(--error); font-size: 11px;">${data.error}</p>`
+                                        }
+                                    </div>
+                                `).join('')}
+                            </div>
+                        `;
+                        
+                        this.addMessage('system', '🌐 Cross-browser test complete: Chrome, Firefox, Safari');
+                    } else {
+                        resultsDiv.innerHTML = `<p style="color: var(--error);">Failed: ${result.error}</p>`;
+                    }
+                } catch (error) {
+                    resultsDiv.innerHTML = `<p style="color: var(--error);">Error: ${error.message}</p>`;
+                }
+            },
+            
+            async runAccessibilityTest() {
+                if (!this.currentPreviewFile) return;
+                
+                const resultsDiv = document.getElementById('accessibilityResults');
+                resultsDiv.innerHTML = '<p style="color: var(--text-muted);">Running accessibility audit...</p>';
+                
+                try {
+                    const result = await window.testAgent.runAccessibilityTest(this.currentPreviewFile);
+                    
+                    if (result.success) {
+                        // Store results for fixing
+                        this.lastAccessibilityResults = result;
+                        
+                        // Enable fix button if there are issues
+                        const fixBtn = document.getElementById('fixAccessibilityBtn');
+                        if (fixBtn) fixBtn.disabled = result.issues.length === 0;
+                        
+                        if (result.issues.length === 0) {
+                            resultsDiv.innerHTML = '<p style="color: var(--success);">✅ No accessibility issues found!</p>';
+                        } else {
+                            resultsDiv.innerHTML = `
+                                <div style="margin-bottom: 12px; padding: 12px; background: var(--bg-tertiary); border-radius: 6px;">
+                                    <span style="color: var(--error); font-weight: 600;">${result.summary.errors} errors</span>
+                                    <span style="margin-left: 12px; color: #f59e0b; font-weight: 600;">${result.summary.warnings} warnings</span>
+                                </div>
+                                ${result.issues.map(issue => `
+                                    <div class="accessibility-issue ${issue.severity}">
+                                        <div style="font-weight: 600; margin-bottom: 4px;">${issue.type}</div>
+                                        <div style="color: var(--text-secondary);">${issue.message}</div>
+                                        <code style="font-size: 10px; color: var(--text-muted); display: block; margin-top: 4px; word-break: break-all;">
+                                            ${this.escapeHtml(issue.element || '')}
+                                        </code>
+                                    </div>
+                                `).join('')}
+                            `;
+                        }
+                        
+                        this.addMessage('system', `♿ Accessibility: ${result.summary.errors} errors, ${result.summary.warnings} warnings`);
+                    } else {
+                        resultsDiv.innerHTML = `<p style="color: var(--error);">Failed: ${result.error}</p>`;
+                    }
+                } catch (error) {
+                    resultsDiv.innerHTML = `<p style="color: var(--error);">Error: ${error.message}</p>`;
+                }
+            },
+            
+            async runPerformanceTest() {
+                if (!this.currentPreviewFile) return;
+                
+                const resultsDiv = document.getElementById('performanceResults');
+                resultsDiv.innerHTML = '<p style="color: var(--text-muted);">Running performance test...</p>';
+                
+                try {
+                    const result = await window.testAgent.runPerformanceTest(this.currentPreviewFile);
+                    
+                    if (result.success) {
+                        // Store results for fixing
+                        this.lastPerformanceResults = result;
+                        
+                        // Enable optimize button if score is below threshold
+                        const fixBtn = document.getElementById('fixPerformanceBtn');
+                        if (fixBtn) fixBtn.disabled = result.score >= 80;
+                        
+                        const scoreClass = result.score >= 80 ? 'good' : result.score >= 50 ? 'ok' : 'bad';
+                        
+                        resultsDiv.innerHTML = `
+                            <div class="performance-score ${scoreClass}">${result.score}</div>
+                            <div style="text-align: center; margin-bottom: 16px; color: var(--text-muted);">Performance Score</div>
+                            
+                            <div class="performance-metric">
+                                <span>Load Time</span>
+                                <span style="font-weight: 600;">${result.loadTime}ms</span>
+                            </div>
+                            <div class="performance-metric">
+                                <span>DOM Nodes</span>
+                                <span style="font-weight: 600;">${result.domStats.nodeCount}</span>
+                            </div>
+                            <div class="performance-metric">
+                                <span>Scripts</span>
+                                <span style="font-weight: 600;">${result.domStats.scriptCount}</span>
+                            </div>
+                            <div class="performance-metric">
+                                <span>Stylesheets</span>
+                                <span style="font-weight: 600;">${result.domStats.styleCount}</span>
+                            </div>
+                            <div class="performance-metric">
+                                <span>Images</span>
+                                <span style="font-weight: 600;">${result.domStats.imageCount}</span>
+                            </div>
+                        `;
+                        
+                        this.addMessage('system', `⚡ Performance: Score ${result.score}/100, Load time ${result.loadTime}ms`);
+                    } else {
+                        resultsDiv.innerHTML = `<p style="color: var(--error);">Failed: ${result.error}</p>`;
+                    }
+                } catch (error) {
+                    resultsDiv.innerHTML = `<p style="color: var(--error);">Error: ${error.message}</p>`;
+                }
+            },
+            
+            async runInteractiveTest() {
+                if (!this.currentPreviewFile) return;
+                
+                const resultsDiv = document.getElementById('interactiveResults');
+                resultsDiv.innerHTML = '<p style="color: var(--text-muted);">🤖 AI is analyzing your UI...</p>';
+                
+                try {
+                    const result = await window.testAgent.runInteractiveTest(this.currentPreviewFile);
+                    
+                    if (result.success) {
+                        this.lastInteractiveAnalysis = result.aiAnalysis;
+                        document.getElementById('implementFixesBtn').disabled = !result.aiAnalysis;
+                        
+                        let html = '';
+                        
+                        if (result.consoleErrors && result.consoleErrors.length > 0) {
+                            html += `
+                                <div style="margin-bottom: 16px; padding: 12px; background: rgba(239, 68, 68, 0.1); border-radius: 6px; border-left: 3px solid var(--error);">
+                                    <div style="font-weight: 600; margin-bottom: 8px;">Console Errors (${result.consoleErrors.length})</div>
+                                    ${result.consoleErrors.map(e => `<div style="font-size: 11px; color: var(--error);">${this.escapeHtml(e)}</div>`).join('')}
+                                </div>
+                            `;
+                        }
+                        
+                        if (result.screenshot) {
+                            html += `
+                                <div style="margin-bottom: 16px;">
+                                    <img src="data:image/png;base64,${result.screenshot}" 
+                                         style="max-width: 100%; max-height: 200px; border-radius: 6px; border: 1px solid var(--border);">
+                                </div>
+                            `;
+                        }
+                        
+                        if (result.aiAnalysis) {
+                            html += `
+                                <div style="padding: 12px; background: var(--bg-tertiary); border-radius: 6px; white-space: pre-wrap; font-size: 12px;">
+                                    ${this.escapeHtml(result.aiAnalysis)}
+                                </div>
+                            `;
+                        } else {
+                            html += '<p style="color: var(--text-muted);">AI analysis not available (check API key)</p>';
+                        }
+                        
+                        resultsDiv.innerHTML = html;
+                    } else {
+                        resultsDiv.innerHTML = `<p style="color: var(--error);">Failed: ${result.error}</p>`;
+                    }
+                } catch (error) {
+                    resultsDiv.innerHTML = `<p style="color: var(--error);">Error: ${error.message}</p>`;
+                }
+            },
+            
+            // Store last test results for fixing
+            lastTestResults: null,
+            lastAccessibilityResults: null,
+            lastPerformanceResults: null,
+            
+            // Quick Test - single button to run AI analysis and auto-fix
+            async runQuickTest() {
+                if (!this.currentPreviewFile) {
+                    this.addMessage('error', 'Please select a file to preview first');
+                    return;
+                }
+                
+                const testBtn = document.getElementById('testBtn');
+                testBtn.classList.add('running');
+                testBtn.disabled = true;
+                
+                this.addMessage('system', '🧪 Running AI test analysis...');
+                
+                try {
+                    // Run the AI interactive test
+                    const result = await window.testAgent.runInteractiveTest(this.currentPreviewFile);
+                    
+                    if (result.success) {
+                        // Show console errors if any
+                        if (result.consoleErrors && result.consoleErrors.length > 0) {
+                            this.addMessage('error', `⚠️ Console Errors:\n${result.consoleErrors.join('\n')}`);
+                        }
+                        
+                        if (result.aiAnalysis) {
+                            // Store analysis
+                            this.lastInteractiveAnalysis = result.aiAnalysis;
+                            this.lastVisualAnalysis = result.aiAnalysis;
+                            this.lastVisualAnalysisTime = Date.now();
+                            
+                            // Show AI analysis with Fix button
+                            const msgHtml = `
+                                <div style="margin-bottom: 12px;">
+                                    <strong>🤖 AI Analysis Complete</strong>
+                                </div>
+                                <div style="white-space: pre-wrap; font-size: 12px; max-height: 300px; overflow-y: auto; padding: 12px; background: var(--bg-tertiary); border-radius: 6px; margin-bottom: 12px;">
+${this.escapeHtml(result.aiAnalysis)}
+                                </div>
+                                <button class="btn btn-success" onclick="GSXCreate.implementQuickFixes()" style="width: 100%;">
+                                    🔧 Implement These Fixes
+                                </button>
+                            `;
+                            this.addMessage('ai', msgHtml, true);
+                        } else {
+                            this.addMessage('error', 'AI analysis not available. Check your API key in Config.');
+                        }
+                    } else {
+                        this.addMessage('error', `Test failed: ${result.error}`);
+                    }
+                } catch (error) {
+                    this.addMessage('error', `Test error: ${error.message}`);
+                } finally {
+                    testBtn.classList.remove('running');
+                    testBtn.disabled = false;
+                }
+            },
+            
+            async implementQuickFixes() {
+                if (!this.lastVisualAnalysis) {
+                    this.addMessage('error', 'No analysis available. Run test first.');
+                    return;
+                }
+                
+                const input = document.getElementById('promptInput');
+                input.value = `Please implement ALL the fixes and improvements from this analysis:
+
+${this.lastVisualAnalysis}
+
+Address each issue systematically:
+1. Fix any bugs or errors first
+2. Then address UX/usability issues  
+3. Then visual/aesthetic improvements
+4. Finally accessibility concerns
+
+Make the changes directly to the file.`;
+                
+                this.sendPrompt();
+            },
+            
+            async implementTestFixes() {
+                if (!this.lastInteractiveAnalysis) {
+                    this.addMessage('error', 'No AI analysis available. Run "AI Analyze & Test" first.');
+                    return;
+                }
+                
+                // Store for sendPrompt to pick up
+                this.lastVisualAnalysis = this.lastInteractiveAnalysis;
+                this.lastVisualAnalysisTime = Date.now();
+                
+                // Close modal and trigger implementation
+                this.closeModal('testAgentModal');
+                
+                const input = document.getElementById('promptInput');
+                input.value = 'Please implement the fixes and improvements identified in the AI analysis. Address any bugs, UX issues, and suggested improvements.';
+                this.sendPrompt();
+            },
+            
+            async fixAccessibilityIssues() {
+                if (!this.lastAccessibilityResults || !this.lastAccessibilityResults.issues) {
+                    this.addMessage('error', 'No accessibility issues found. Run accessibility test first.');
+                    return;
+                }
+                
+                const issues = this.lastAccessibilityResults.issues;
+                if (issues.length === 0) {
+                    this.addMessage('system', '✅ No accessibility issues to fix!');
+                    return;
+                }
+                
+                // Format issues for AI
+                const issueList = issues.map((issue, i) => 
+                    `${i + 1}. [${issue.severity.toUpperCase()}] ${issue.type}: ${issue.message}\n   Element: ${issue.element || 'N/A'}\n   Selector: ${issue.selector || 'N/A'}`
+                ).join('\n\n');
+                
+                this.closeModal('testAgentModal');
+                
+                const prompt = `Please fix the following accessibility issues in the HTML file:
+
+${issueList}
+
+For each issue:
+1. Find the element using the selector or element snippet
+2. Apply the appropriate fix (add alt text, aria-label, tabindex, etc.)
+3. Ensure the fix follows WCAG 2.1 guidelines
+
+Focus on errors first, then warnings.`;
+                
+                const input = document.getElementById('promptInput');
+                input.value = prompt;
+                this.sendPrompt();
+            },
+            
+            async fixPerformanceIssues() {
+                if (!this.lastPerformanceResults) {
+                    this.addMessage('error', 'No performance data. Run performance test first.');
+                    return;
+                }
+                
+                const perf = this.lastPerformanceResults;
+                const issues = [];
+                
+                if (perf.loadTime > 3000) issues.push(`- Load time is ${perf.loadTime}ms (should be < 3000ms)`);
+                if (perf.domStats?.nodeCount > 1500) issues.push(`- DOM has ${perf.domStats.nodeCount} nodes (should be < 1500)`);
+                if (perf.domStats?.scriptCount > 10) issues.push(`- ${perf.domStats.scriptCount} script tags (consider bundling)`);
+                if (perf.domStats?.styleCount > 5) issues.push(`- ${perf.domStats.styleCount} stylesheets (consider combining)`);
+                
+                if (issues.length === 0) {
+                    this.addMessage('system', '✅ No major performance issues to fix!');
+                    return;
+                }
+                
+                this.closeModal('testAgentModal');
+                
+                const prompt = `Please optimize the HTML file for better performance. Issues found:
+
+${issues.join('\n')}
+
+Current metrics:
+- Load time: ${perf.loadTime}ms
+- DOM nodes: ${perf.domStats?.nodeCount || 'N/A'}
+- Scripts: ${perf.domStats?.scriptCount || 'N/A'}
+- Stylesheets: ${perf.domStats?.styleCount || 'N/A'}
+- Performance score: ${perf.score}/100
+
+Suggestions:
+1. Minimize DOM complexity where possible
+2. Combine/minify CSS and JS
+3. Defer non-critical scripts
+4. Optimize images (lazy loading, proper sizing)
+5. Remove unused CSS/JS`;
+                
+                const input = document.getElementById('promptInput');
+                input.value = prompt;
+                this.sendPrompt();
+            },
+            
+            async fixFailedTests() {
+                if (!this.testResults || this.testResults.length === 0) {
+                    this.addMessage('error', 'No test results. Run functional tests first.');
+                    return;
+                }
+                
+                const failed = this.testResults.filter(t => t.status === 'failed');
+                if (failed.length === 0) {
+                    this.addMessage('system', '✅ All tests passed! Nothing to fix.');
+                    return;
+                }
+                
+                const failedList = failed.map((t, i) => 
+                    `${i + 1}. Test: ${t.name}\n   Error: ${t.error}\n   Selector: ${t.selector || 'N/A'}`
+                ).join('\n\n');
+                
+                this.closeModal('testAgentModal');
+                
+                const prompt = `The following functional tests failed. Please fix the issues:
+
+${failedList}
+
+For each failed test:
+1. Identify why the element or interaction failed
+2. Fix the HTML/CSS/JS to make the test pass
+3. Ensure the fix doesn't break other functionality`;
+                
+                const input = document.getElementById('promptInput');
+                input.value = prompt;
+                this.sendPrompt();
+            },
+            
+            async searchCode() {
+                const pattern = document.getElementById('searchPattern').value.trim();
+                const glob = document.getElementById('searchGlob').value.trim() || null;
+                const resultsDiv = document.getElementById('searchResults');
+                
+                if (!pattern) {
+                    resultsDiv.innerHTML = '<p style="color: var(--text-muted);">Enter a search pattern</p>';
+                    return;
+                }
+                
+                resultsDiv.innerHTML = '<p>Searching...</p>';
+                
+                try {
+                    const result = await window.aider.searchCode(pattern, glob);
+                    console.log('[GSX Create] Search result:', result);
+                    
+                    if (result.success && result.matches && result.matches.length > 0) {
+                        resultsDiv.innerHTML = result.matches.map(match => `
+                            <div class="code-result-item" onclick="GSXCreate.previewFile('${match.file}')">
+                                <div class="code-result-file">${match.file}</div>
+                                <div class="code-result-line">Line ${match.line}</div>
+                                <div class="code-result-content">${this.escapeHtml(match.content)}</div>
+                            </div>
+                        `).join('');
+                    } else if (result.success) {
+                        resultsDiv.innerHTML = '<p style="color: var(--text-muted);">No matches found</p>';
+                    } else {
+                        resultsDiv.innerHTML = '<p style="color: var(--danger);">Error: ' + (result.error || 'Search failed') + '</p>';
+                    }
+                } catch (error) {
+                    console.error('[GSX Create] Search error:', error);
+                    resultsDiv.innerHTML = '<p style="color: var(--danger);">Error: ' + error.message + '</p>';
+                }
+            },
+            
+            async findDefinition() {
+                const symbol = document.getElementById('definitionSymbol').value.trim();
+                const resultsDiv = document.getElementById('definitionResults');
+                
+                if (!symbol) {
+                    resultsDiv.innerHTML = '<p style="color: var(--text-muted);">Enter a symbol name</p>';
+                    return;
+                }
+                
+                resultsDiv.innerHTML = '<p>Searching...</p>';
+                
+                try {
+                    const result = await window.aider.findDefinition(symbol);
+                    console.log('[GSX Create] Definition result:', result);
+                    
+                    if (result.success && result.definitions && result.definitions.length > 0) {
+                        resultsDiv.innerHTML = result.definitions.map(def => `
+                            <div class="code-result-item" onclick="GSXCreate.previewFile('${def.file}')">
+                                <div class="code-result-file">${def.file}</div>
+                                <div class="code-result-line">Line ${def.line}</div>
+                                <div class="code-result-content">${this.escapeHtml(def.content)}</div>
+                            </div>
+                        `).join('');
+                    } else if (result.success) {
+                        resultsDiv.innerHTML = '<p style="color: var(--text-muted);">No definition found for "' + symbol + '"</p>';
+                    } else {
+                        resultsDiv.innerHTML = '<p style="color: var(--danger);">Error: ' + (result.error || 'Search failed') + '</p>';
+                    }
+                } catch (error) {
+                    console.error('[GSX Create] Find definition error:', error);
+                    resultsDiv.innerHTML = '<p style="color: var(--danger);">Error: ' + error.message + '</p>';
+                }
+            },
+            
+            async findUsages() {
+                const symbol = document.getElementById('usagesSymbol').value.trim();
+                const resultsDiv = document.getElementById('usagesResults');
+                
+                if (!symbol) {
+                    resultsDiv.innerHTML = '<p style="color: var(--text-muted);">Enter a symbol name</p>';
+                    return;
+                }
+                
+                resultsDiv.innerHTML = '<p>Searching...</p>';
+                
+                try {
+                    const result = await window.aider.findUsages(symbol);
+                    console.log('[GSX Create] Usages result:', result);
+                    
+                    if (result.success && result.usages && result.usages.length > 0) {
+                        resultsDiv.innerHTML = `
+                            <p style="margin-bottom: 12px; color: var(--success);">Found ${result.usages.length} usage(s)</p>
+                            ${result.usages.map(usage => `
+                                <div class="code-result-item" onclick="GSXCreate.previewFile('${usage.file}')">
+                                    <div class="code-result-file">${usage.file}</div>
+                                    <div class="code-result-line">Line ${usage.line}</div>
+                                    <div class="code-result-content">${this.escapeHtml(usage.content)}</div>
+                                </div>
+                            `).join('')}
+                        `;
+                    } else if (result.success) {
+                        resultsDiv.innerHTML = '<p style="color: var(--text-muted);">No usages found for "' + symbol + '"</p>';
+                    } else {
+                        resultsDiv.innerHTML = '<p style="color: var(--danger);">Error: ' + (result.error || 'Search failed') + '</p>';
+                    }
+                } catch (error) {
+                    console.error('[GSX Create] Find usages error:', error);
+                    resultsDiv.innerHTML = '<p style="color: var(--danger);">Error: ' + error.message + '</p>';
+                }
+            },
+            
+            async getRepoMap() {
+                const resultsDiv = document.getElementById('repomapResults');
+                
+                resultsDiv.innerHTML = '<p>Generating repository map...</p>';
+                
+                try {
+                    const result = await window.aider.getRepoMap();
+                    console.log('[GSX Create] Repo map result:', result);
+                    
+                    if (result.success && result.repo_map) {
+                        resultsDiv.innerHTML = `<pre style="margin: 0; color: var(--text-primary);">${this.escapeHtml(result.repo_map)}</pre>`;
+                    } else if (result.success) {
+                        resultsDiv.innerHTML = '<p style="color: var(--text-muted);">No repository map available</p>';
+                    } else {
+                        resultsDiv.innerHTML = '<p style="color: var(--danger);">Error: ' + (result.error || 'Failed to generate map') + '</p>';
+                    }
+                } catch (error) {
+                    console.error('[GSX Create] Repo map error:', error);
+                    resultsDiv.innerHTML = '<p style="color: var(--danger);">Error: ' + error.message + '</p>';
+                }
+            },
+            
             // Cost Tracking
             async loadCostSummary() {
                 try {
+                    console.log('[GSX Create] Loading cost summary for space:', this.currentSpaceId);
                     const result = await window.aider.txdbGetSummary(this.currentSpaceId, 30);
+                    console.log('[GSX Create] Cost summary result:', result);
                     if (result.success) {
-                        this.costSummary = result.summary;
+                        this.costSummary = result.summary || { totalCost: 0, totalCalls: 0 };
                         this.updateCostDisplay();
+                    } else {
+                        console.error('[GSX Create] Cost summary failed:', result.error);
                     }
                 } catch (error) {
                     console.error('[GSX Create] Cost load error:', error);
@@ -1561,7 +3259,10 @@
             
             updateCostDisplay() {
                 const badge = document.getElementById('costBadge');
+                if (!badge) return;
+                
                 const total = this.costSummary.totalCost || 0;
+                console.log('[GSX Create] Updating cost display:', total);
                 
                 badge.textContent = '$' + total.toFixed(4);
                 badge.classList.remove('warning', 'danger');
@@ -1570,25 +3271,40 @@
                 else if (total > 0.5) badge.classList.add('warning');
             },
             
-            async recordApiCost(model, inputTokens, outputTokens, type, promptPreview) {
-                const costs = {
-                    'claude-opus-4-20250514': { input: 15/1000000, output: 75/1000000 },
-                    'claude-sonnet-4-20250514': { input: 3/1000000, output: 15/1000000 },
-                    'gpt-4o': { input: 5/1000000, output: 15/1000000 },
-                    'gpt-4-turbo': { input: 10/1000000, output: 30/1000000 }
-                };
+            async recordApiCost(model, inputTokens, outputTokens, type, promptPreview, actualCost = null) {
+                let cost = actualCost;
                 
-                const modelCosts = costs[model] || { input: 3/1000000, output: 15/1000000 };
-                const cost = (inputTokens * modelCosts.input) + (outputTokens * modelCosts.output);
+                // If no actual cost provided, calculate from tokens
+                if (!cost || cost === 0) {
+                    const costs = {
+                        // Claude 4.5 models (latest)
+                        'claude-sonnet-4-5-20250929': { input: 3/1000000, output: 15/1000000 },
+                        'claude-haiku-4-5-20250929': { input: 1/1000000, output: 5/1000000 },
+                        'claude-opus-4-5-20250929': { input: 5/1000000, output: 25/1000000 },
+                        'claude-opus-4-1-20250929': { input: 15/1000000, output: 75/1000000 },
+                        // Legacy Claude 4 models
+                        'claude-opus-4-20250514': { input: 15/1000000, output: 75/1000000 },
+                        'claude-sonnet-4-20250514': { input: 3/1000000, output: 15/1000000 },
+                        'gpt-4o': { input: 5/1000000, output: 15/1000000 },
+                        'gpt-4-turbo': { input: 10/1000000, output: 30/1000000 }
+                    };
+                    
+                    const modelCosts = costs[model] || { input: 3/1000000, output: 15/1000000 };
+                    cost = (inputTokens * modelCosts.input) + (outputTokens * modelCosts.output);
+                }
+                
+                console.log('[GSX Create] Recording cost:', { model, inputTokens, outputTokens, cost, wasActual: actualCost !== null });
                 
                 try {
-                    await window.aider.txdbRecord({
+                    const result = await window.aider.txdbRecord({
                         spaceId: this.currentSpaceId,
                         spaceName: this.currentSpaceName,
                         type, model, inputTokens, outputTokens, cost,
                         status: 'success',
-                        promptPreview: promptPreview.substring(0, 200)
+                        promptPreview: promptPreview ? promptPreview.substring(0, 200) : ''
                     });
+                    
+                    console.log('[GSX Create] Cost record result:', result);
                     
                     this.costSummary.totalCost = (this.costSummary.totalCost || 0) + cost;
                     this.costSummary.totalCalls = (this.costSummary.totalCalls || 0) + 1;
@@ -1659,109 +3375,6 @@
                 document.getElementById('globalInstructions').value = templates[type] || '';
             },
             
-
-            // Code Test - AI analyzes HTML code
-            async runCodeTest() {
-                if (!this.currentPreviewFile) {
-                    this.addMessage('system', 'No file being previewed. Select a file first.');
-                    return;
-                }
-                
-                try {
-                    this.addMessage('system', 'Running code analysis...');
-                    
-                    const content = await window.aider.readFile(this.currentPreviewFile);
-                    const fileName = this.currentPreviewFile.split('/').pop();
-                    
-                    const prompt = `Please analyze this ${fileName} file for issues:
-
-\`\`\`html
-${content.substring(0, 10000)}
-\`\`\`
-
-Check for:
-1. HTML validity and structure issues
-2. Accessibility problems (missing alt tags, ARIA labels)
-3. Responsive design issues
-4. JavaScript errors or anti-patterns
-5. CSS issues or missing styles
-6. Security concerns
-7. Performance issues
-8. Best practices violations
-
-Provide a concise report with specific line references where possible.`;
-
-                    const result = await window.aider.runPrompt(prompt);
-                    
-                    if (result.success) {
-                        this.addMessage('ai', result.response);
-                        
-                        // Record cost
-                        const model = document.getElementById('modelSelect')?.value || 'claude-sonnet-4-20250514';
-                        await this.recordApiCost(model, result.input_tokens || 0, result.output_tokens || 0, 'code_test', 'Code analysis');
-                    } else {
-                        this.addMessage('error', 'Code test failed: ' + result.error);
-                    }
-                } catch (error) {
-                    this.addMessage('error', 'Code test error: ' + error.message);
-                }
-            },
-            
-            // Visual Test - AI analyzes screenshot with vision model
-            async runVisionTest() {
-                if (!this.currentPreviewFile) {
-                    this.addMessage('system', 'No file being previewed. Select a file first.');
-                    return;
-                }
-                
-                try {
-                    this.addMessage('system', 'Capturing screenshot and running visual analysis...');
-                    
-                    // Get HTML content
-                    const htmlContent = await window.aider.readFile(this.currentPreviewFile);
-                    
-                    // Capture screenshot
-                    const screenshotResult = await window.aider.capturePreviewScreenshot(htmlContent, { fullPage: true });
-                    
-                    if (!screenshotResult.success) {
-                        this.addMessage('error', 'Failed to capture screenshot: ' + screenshotResult.error);
-                        return;
-                    }
-                    
-                    this.addMessage('system', 'Screenshot captured. Sending to vision AI...');
-                    
-                    // Send to vision model for analysis
-                    const visionPrompt = `Analyze this screenshot of a web page UI and provide feedback on:
-
-1. **Visual Design**: Layout, spacing, alignment, color usage, typography
-2. **UI/UX Issues**: Confusing elements, poor contrast, unclear hierarchy
-3. **Responsiveness**: How it might look on different screen sizes
-4. **Accessibility**: Visual accessibility issues (contrast, text size)
-5. **Professional Quality**: Does it look polished and production-ready?
-6. **Suggestions**: Specific improvements to make it better
-
-Be specific and actionable in your feedback.`;
-
-                    const visionResult = await window.aider.analyzeScreenshot(screenshotResult.screenshot, visionPrompt);
-                    
-                    if (visionResult.success) {
-                        this.addMessage('ai', '📸 Visual Analysis:\n\n' + visionResult.analysis);
-                        
-                        // Record cost
-                        await this.recordApiCost(
-                            visionResult.model || 'gpt-4o',
-                            visionResult.inputTokens || 1000,
-                            visionResult.outputTokens || 500,
-                            'vision_test',
-                            'Visual screenshot analysis'
-                        );
-                    } else {
-                        this.addMessage('error', 'Vision analysis failed: ' + visionResult.error);
-                    }
-                } catch (error) {
-                    this.addMessage('error', 'Vision test error: ' + error.message);
-                }
-            },
             // Snapshot
             async takeSnapshot() {
                 if (!this.currentPreviewFile) {
@@ -1896,17 +3509,70 @@ Be specific and actionable in your feedback.`;
                 
                 input.addEventListener('input', function() {
                     this.style.height = 'auto';
-                    this.style.height = Math.min(this.scrollHeight, 150) + 'px';
+                    this.style.height = Math.min(this.scrollHeight, 120) + 'px';
                 });
                 
-                // File change listener
-                if (window.aider.onFileChange) {
-                    window.aider.onFileChange((filePath) => {
-                        if (filePath === this.currentPreviewFile) {
+                // File change listener - refresh preview when files change
+                if (window.aider.onFileChanged) {
+                    window.aider.onFileChanged((filePath) => {
+                        console.log('[GSX Create] File changed:', filePath);
+                        // Refresh preview if it's the current file
+                        if (this.currentPreviewFile && filePath === this.currentPreviewFile) {
                             this.refreshPreview();
                         }
+                        // Also refresh file list
+                        this.loadProjectFiles();
                     });
                 }
+                
+                // Resize handle for preview panel
+                this.setupResizeHandle();
+            },
+            
+            setupResizeHandle() {
+                // Preview panel resize only
+                const previewHandle = document.getElementById('previewResizeHandle');
+                const previewPanel = document.getElementById('previewPanel');
+                
+                if (!previewHandle || !previewPanel) return;
+                
+                let isResizing = false;
+                let startX, startWidth;
+                
+                // Create overlay to prevent iframe from capturing mouse events
+                const overlay = document.createElement('div');
+                overlay.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 9999; cursor: ew-resize; display: none;';
+                document.body.appendChild(overlay);
+                
+                const stopResize = () => {
+                    if (isResizing) {
+                        isResizing = false;
+                        previewHandle.classList.remove('dragging');
+                        overlay.style.display = 'none';
+                        document.body.style.userSelect = '';
+                    }
+                };
+                
+                previewHandle.addEventListener('mousedown', (e) => {
+                    isResizing = true;
+                    startX = e.clientX;
+                    startWidth = previewPanel.offsetWidth;
+                    previewHandle.classList.add('dragging');
+                    overlay.style.display = 'block';
+                    document.body.style.userSelect = 'none';
+                    e.preventDefault();
+                });
+                
+                document.addEventListener('mousemove', (e) => {
+                    if (!isResizing) return;
+                    // Dragging left edge - moving left increases width
+                    const diff = startX - e.clientX;
+                    const newWidth = Math.max(200, Math.min(startWidth + diff, window.innerWidth * 0.7));
+                    previewPanel.style.width = newWidth + 'px';
+                });
+                
+                document.addEventListener('mouseup', stopResize);
+                overlay.addEventListener('mouseup', stopResize);
             }
         };
         

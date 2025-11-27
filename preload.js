@@ -1051,3 +1051,18 @@ contextBridge.exposeInMainWorld('imageGenPrompts', {
     ipcRenderer.invoke('prompt:generate-image-all', styleGuide, copyGuide, options)
 });
 
+
+// ============================================
+// TEST AGENT API
+// ============================================
+contextBridge.exposeInMainWorld('testAgent', {
+  generatePlan: (htmlFilePath, useAI) => ipcRenderer.invoke('test-agent:generate-plan', htmlFilePath, useAI),
+  runTests: (htmlFilePath, options) => ipcRenderer.invoke('test-agent:run-tests', htmlFilePath, options),
+  runAccessibilityTest: (htmlFilePath) => ipcRenderer.invoke('test-agent:accessibility', htmlFilePath),
+  runPerformanceTest: (htmlFilePath) => ipcRenderer.invoke('test-agent:performance', htmlFilePath),
+  runVisualTest: (htmlFilePath, baseline) => ipcRenderer.invoke('test-agent:visual', htmlFilePath, baseline),
+  runCrossBrowserTest: (htmlFilePath) => ipcRenderer.invoke('test-agent:cross-browser', htmlFilePath),
+  runInteractiveTest: (htmlFilePath) => ipcRenderer.invoke('test-agent:interactive', htmlFilePath),
+  close: () => ipcRenderer.invoke('test-agent:close'),
+  onProgress: (callback) => ipcRenderer.on('test-agent:progress', (event, result) => callback(result))
+});
