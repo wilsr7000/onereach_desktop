@@ -2111,6 +2111,55 @@
                 }
             },
             
+            // Create New Space
+            async createNewSpace() {
+                const spaceName = prompt('Enter a name for the new space:');
+                if (!spaceName || !spaceName.trim()) {
+                    return;
+                }
+                
+                try {
+                    console.log('[GSX Create] Creating new space:', spaceName);
+                    this.trackBehavior('create_space_started', { name: spaceName });
+                    
+                    // Create the space via clipboard API
+                    const result = await window.clipboard.createSpace({
+                        name: spaceName.trim(),
+                        icon: '◆',
+                        notebook: {
+                            description: `Project space for ${spaceName}`,
+                            objective: '',
+                            instructions: '',
+                            tags: ['gsx-create'],
+                            links: []
+                        }
+                    });
+                    
+                    if (result && result.success) {
+                        console.log('[GSX Create] Space created:', result.space);
+                        this.trackBehavior('create_space_success', { spaceId: result.space.id, name: spaceName });
+                        
+                        // Reload spaces to update the dropdown
+                        await this.loadSpaces();
+                        
+                        // Auto-select the new space
+                        const mainSelect = document.getElementById('mainSpaceSelect');
+                        if (mainSelect && result.space.id) {
+                            mainSelect.value = result.space.id;
+                            await this.selectSpaceFromMain(result.space.id);
+                        }
+                        
+                        this.addMessage('system', `✅ Space "${spaceName}" created successfully!`);
+                    } else {
+                        throw new Error(result?.error || 'Failed to create space');
+                    }
+                } catch (error) {
+                    console.error('[GSX Create] Create space error:', error);
+                    this.trackBehavior('create_space_error', { name: spaceName, error: error.message });
+                    alert('Failed to create space: ' + error.message);
+                }
+            },
+            
             // Select Space from Main Setup
             async selectSpaceFromMain(spaceId) {
                 const startBtn = document.getElementById('mainStartBtn');

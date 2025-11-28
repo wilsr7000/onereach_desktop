@@ -2218,6 +2218,57 @@ function setupAiderIPC() {
     }
   });
 
+  // Analyze screenshot with AI
+  ipcMain.handle('aider:analyze-screenshot', async (event, screenshotBase64, prompt) => {
+    try {
+      console.log('[Analyze] Analyzing screenshot with AI...');
+      const settingsManager = require('./settings-manager').getSettingsManager();
+      const settings = settingsManager.getSettings();
+      
+      if (!settings.llmApiKey) {
+        return { success: false, error: 'No API key configured' };
+      }
+      
+      const Anthropic = require('@anthropic-ai/sdk');
+      const client = new Anthropic({ apiKey: settings.llmApiKey });
+      
+      const response = await client.messages.create({
+        model: settings.llmModel || 'claude-sonnet-4-20250514',
+        max_tokens: 4096,
+        messages: [{
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: 'image/png',
+                data: screenshotBase64
+              }
+            },
+            {
+              type: 'text',
+              text: prompt || 'Analyze this screenshot and describe what you see. Identify any UI issues, bugs, or improvements that could be made.'
+            }
+          ]
+        }]
+      });
+      
+      const analysis = response.content[0]?.text || 'No analysis available';
+      console.log('[Analyze] Analysis complete');
+      
+      return { 
+        success: true, 
+        analysis,
+        model: settings.llmModel || 'claude-sonnet-4-20250514',
+        usage: response.usage
+      };
+    } catch (error) {
+      console.error('[Analyze] Error:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
   console.log('[setupAiderIPC] Aider Bridge IPC handlers registered');
 }
 
