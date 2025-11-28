@@ -2231,7 +2231,7 @@ function setupAiderIPC() {
     try {
       console.log('[Analyze] Analyzing screenshot with AI...');
       const settingsManager = require('./settings-manager').getSettingsManager();
-      const settings = settingsManager.getSettings();
+      const settings = settingsManager.settings;
       
       if (!settings.llmApiKey) {
         return { success: false, error: 'No API key configured' };
