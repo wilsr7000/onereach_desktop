@@ -2226,29 +2226,10 @@ function setupAiderIPC() {
     }
   });
 
-  // Analyze screenshot with AI
+  // Analyze screenshot with AI (supports both image analysis and text-only prompts)
   ipcMain.handle('aider:analyze-screenshot', async (event, screenshotBase64, prompt) => {
     try {
-      console.log('[Analyze] Analyzing screenshot with AI...');
-      
-      // Validate screenshot data
-      if (!screenshotBase64 || typeof screenshotBase64 !== 'string') {
-        console.error('[Analyze] Invalid screenshot data:', typeof screenshotBase64);
-        return { success: false, error: 'Invalid screenshot data - must be a base64 string' };
-      }
-      
-      // Remove data URL prefix if present
-      let base64Data = screenshotBase64;
-      if (base64Data.startsWith('data:')) {
-        base64Data = base64Data.split(',')[1] || base64Data;
-      }
-      
-      if (!base64Data || base64Data.length < 100) {
-        console.error('[Analyze] Screenshot data too short:', base64Data?.length);
-        return { success: false, error: 'Screenshot data is empty or too short' };
-      }
-      
-      console.log('[Analyze] Screenshot data length:', base64Data.length);
+      console.log('[Analyze] Analyzing with AI...');
       
       const settingsManager = require('./settings-manager').getSettingsManager();
       const settings = settingsManager.settings;
@@ -2260,25 +2241,55 @@ function setupAiderIPC() {
       const Anthropic = require('@anthropic-ai/sdk');
       const client = new Anthropic({ apiKey: settings.llmApiKey });
       
+      let messageContent;
+      
+      // Check if we have valid screenshot data
+      if (screenshotBase64 && typeof screenshotBase64 === 'string' && screenshotBase64.length > 100) {
+        // Remove data URL prefix if present
+        let base64Data = screenshotBase64;
+        if (base64Data.startsWith('data:')) {
+          base64Data = base64Data.split(',')[1] || base64Data;
+        }
+        
+        console.log('[Analyze] With image, data length:', base64Data.length);
+        
+        // Image + text analysis
+        messageContent = [
+          {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: 'image/png',
+              data: base64Data
+            }
+          },
+          {
+            type: 'text',
+            text: prompt || 'Analyze this screenshot and describe what you see. Identify any UI issues, bugs, or improvements that could be made.'
+          }
+        ];
+      } else {
+        // Text-only analysis (no image)
+        console.log('[Analyze] Text-only analysis (no image)');
+        
+        if (!prompt) {
+          return { success: false, error: 'No prompt provided for text-only analysis' };
+        }
+        
+        messageContent = [
+          {
+            type: 'text',
+            text: prompt
+          }
+        ];
+      }
+      
       const response = await client.messages.create({
         model: settings.llmModel || 'claude-sonnet-4-20250514',
         max_tokens: 4096,
         messages: [{
           role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: {
-                type: 'base64',
-                media_type: 'image/png',
-                data: base64Data
-              }
-            },
-            {
-              type: 'text',
-              text: prompt || 'Analyze this screenshot and describe what you see. Identify any UI issues, bugs, or improvements that could be made.'
-            }
-          ]
+          content: messageContent
         }]
       });
       
