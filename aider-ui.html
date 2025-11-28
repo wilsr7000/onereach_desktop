@@ -2111,10 +2111,71 @@
                 }
             },
             
+            // Show a custom prompt modal (since prompt() is not supported in Electron)
+            showPromptModal(title, placeholder = '') {
+                return new Promise((resolve) => {
+                    // Create modal overlay
+                    const overlay = document.createElement('div');
+                    overlay.style.cssText = `
+                        position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+                        background: rgba(0,0,0,0.7); z-index: 10000;
+                        display: flex; align-items: center; justify-content: center;
+                    `;
+                    
+                    const modal = document.createElement('div');
+                    modal.style.cssText = `
+                        background: var(--bg-secondary, #1e1e1e); border-radius: 12px;
+                        padding: 24px; min-width: 320px; max-width: 400px;
+                        box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+                        border: 1px solid var(--border-color, #333);
+                    `;
+                    
+                    modal.innerHTML = `
+                        <h3 style="margin: 0 0 16px 0; color: var(--text-primary, #fff); font-size: 16px;">${title}</h3>
+                        <input type="text" id="promptInput" placeholder="${placeholder}" style="
+                            width: 100%; padding: 10px 12px; border-radius: 6px;
+                            border: 1px solid var(--border-color, #444); background: var(--bg-primary, #121212);
+                            color: var(--text-primary, #fff); font-size: 14px; box-sizing: border-box;
+                        " autofocus>
+                        <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end;">
+                            <button id="promptCancel" style="
+                                padding: 8px 16px; border-radius: 6px; border: 1px solid var(--border-color, #444);
+                                background: transparent; color: var(--text-secondary, #888); cursor: pointer;
+                            ">Cancel</button>
+                            <button id="promptOk" style="
+                                padding: 8px 16px; border-radius: 6px; border: none;
+                                background: var(--accent-color, #0066cc); color: #fff; cursor: pointer;
+                            ">Create</button>
+                        </div>
+                    `;
+                    
+                    overlay.appendChild(modal);
+                    document.body.appendChild(overlay);
+                    
+                    const input = modal.querySelector('#promptInput');
+                    const okBtn = modal.querySelector('#promptOk');
+                    const cancelBtn = modal.querySelector('#promptCancel');
+                    
+                    const cleanup = (value) => {
+                        overlay.remove();
+                        resolve(value);
+                    };
+                    
+                    input.focus();
+                    input.addEventListener('keydown', (e) => {
+                        if (e.key === 'Enter') cleanup(input.value.trim() || null);
+                        if (e.key === 'Escape') cleanup(null);
+                    });
+                    okBtn.addEventListener('click', () => cleanup(input.value.trim() || null));
+                    cancelBtn.addEventListener('click', () => cleanup(null));
+                    overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(null); });
+                });
+            },
+            
             // Create New Space
             async createNewSpace() {
-                const spaceName = prompt('Enter a name for the new space:');
-                if (!spaceName || !spaceName.trim()) {
+                const spaceName = await this.showPromptModal('Create New Space', 'Enter space name...');
+                if (!spaceName) {
                     return;
                 }
                 
@@ -2124,7 +2185,7 @@
                     
                     // Create the space via clipboard API
                     const result = await window.clipboard.createSpace({
-                        name: spaceName.trim(),
+                        name: spaceName,
                         icon: '◆',
                         notebook: {
                             description: `Project space for ${spaceName}`,
@@ -2156,7 +2217,7 @@
                 } catch (error) {
                     console.error('[GSX Create] Create space error:', error);
                     this.trackBehavior('create_space_error', { name: spaceName, error: error.message });
-                    alert('Failed to create space: ' + error.message);
+                    this.addMessage('error', 'Failed to create space: ' + error.message);
                 }
             },
             
