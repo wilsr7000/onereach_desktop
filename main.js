@@ -1674,11 +1674,19 @@ function setupAiderIPC() {
   // Read a file
   ipcMain.handle('aider:read-file', async (event, filePath) => {
     try {
+      if (!filePath || typeof filePath !== 'string') {
+        console.error('[GSX Create] Invalid file path:', filePath);
+        return null;
+      }
       const fs = require('fs');
+      if (!fs.existsSync(filePath)) {
+        console.error('[GSX Create] File does not exist:', filePath);
+        return null;
+      }
       const content = fs.readFileSync(filePath, 'utf-8');
       return content;
     } catch (error) {
-      console.error('[GSX Create] Failed to read file:', error);
+      console.error('[GSX Create] Failed to read file:', filePath, error.message || error);
       return null;
     }
   });
@@ -2264,8 +2272,9 @@ function setupAiderIPC() {
         usage: response.usage
       };
     } catch (error) {
-      console.error('[Analyze] Error:', error);
-      return { success: false, error: error.message };
+      const errorMessage = error.message || error.toString() || 'Unknown error';
+      console.error('[Analyze] Error:', errorMessage, error.stack || '');
+      return { success: false, error: errorMessage };
     }
   });
 
