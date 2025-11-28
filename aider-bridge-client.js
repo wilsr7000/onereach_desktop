@@ -25,9 +25,15 @@ class AiderBridgeClient extends events_1.EventEmitter {
     async start() {
         return new Promise((resolve, reject) => {
             // Try multiple possible paths for the server script
+            // In packaged app, aider_bridge is unpacked to app.asar.unpacked
             const possiblePaths = [
+                // Packaged app: unpacked location (must be first for packaged builds)
+                path.join(process.resourcesPath || '', 'app.asar.unpacked', 'aider_bridge', 'server.py'),
+                // Development: same directory
                 path.join(__dirname, 'aider_bridge', 'server.py'),
+                // Development: parent directory
                 path.join(__dirname, '../aider_bridge/server.py'),
+                // Development: cwd
                 path.join(process.cwd(), 'aider_bridge', 'server.py'),
             ];
             
@@ -35,6 +41,10 @@ class AiderBridgeClient extends events_1.EventEmitter {
             const fs = require('fs');
             
             for (const p of possiblePaths) {
+                // Skip paths with empty resourcesPath in dev
+                if (p.includes('undefined') || p.startsWith('/app.asar.unpacked')) {
+                    continue;
+                }
                 console.log(`[Aider Bridge] Checking path: ${p}`);
                 if (fs.existsSync(p)) {
                     scriptPath = p;

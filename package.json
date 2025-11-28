@@ -37,6 +37,9 @@
   "build": {
     "appId": "com.onereach.app",
     "productName": "Onereach.ai",
+    "asarUnpack": [
+      "aider_bridge/**/*"
+    ],
     "files": [
       "**/*",
       "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
