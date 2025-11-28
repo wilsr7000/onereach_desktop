@@ -2230,6 +2230,26 @@ function setupAiderIPC() {
   ipcMain.handle('aider:analyze-screenshot', async (event, screenshotBase64, prompt) => {
     try {
       console.log('[Analyze] Analyzing screenshot with AI...');
+      
+      // Validate screenshot data
+      if (!screenshotBase64 || typeof screenshotBase64 !== 'string') {
+        console.error('[Analyze] Invalid screenshot data:', typeof screenshotBase64);
+        return { success: false, error: 'Invalid screenshot data - must be a base64 string' };
+      }
+      
+      // Remove data URL prefix if present
+      let base64Data = screenshotBase64;
+      if (base64Data.startsWith('data:')) {
+        base64Data = base64Data.split(',')[1] || base64Data;
+      }
+      
+      if (!base64Data || base64Data.length < 100) {
+        console.error('[Analyze] Screenshot data too short:', base64Data?.length);
+        return { success: false, error: 'Screenshot data is empty or too short' };
+      }
+      
+      console.log('[Analyze] Screenshot data length:', base64Data.length);
+      
       const settingsManager = require('./settings-manager').getSettingsManager();
       const settings = settingsManager.settings;
       
@@ -2251,7 +2271,7 @@ function setupAiderIPC() {
               source: {
                 type: 'base64',
                 media_type: 'image/png',
-                data: screenshotBase64
+                data: base64Data
               }
             },
             {
