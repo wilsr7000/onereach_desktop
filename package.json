@@ -1,7 +1,7 @@
 {
   "name": "onereach-ai",
   "productName": "Onereach.ai",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Onereach.ai Desktop Application",
   "main": "main.js",
   "icon": "assets/icon.icns",
@@ -119,7 +119,7 @@
   },
   "devDependencies": {
     "@electron/notarize": "^3.0.1",
-    "electron": "^32.3.3",
+    "electron": "^39.2.4",
     "electron-builder": "^24.9.1"
   },
   "dependencies": {
