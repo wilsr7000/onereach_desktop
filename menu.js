@@ -184,7 +184,12 @@ function openGSXLargeWindow(url, title, windowTitle, loadingMessage = 'Loading..
         });
         
         document.getElementById('gsx-refresh').addEventListener('click', () => {
-          window.location.reload();
+          // Clear cache and reload using Electron API
+          if (window.electronAPI && window.electronAPI.clearCacheAndReload) {
+            window.electronAPI.clearCacheAndReload();
+          } else {
+            window.location.reload();
+          }
         });
         
         document.getElementById('gsx-mission-control').addEventListener('click', () => {

@@ -479,7 +479,8 @@ contextBridge.exposeInMainWorld('flipboardAPI', {
 
 // Expose electronAPI for GSX toolbar functionality
 contextBridge.exposeInMainWorld('electronAPI', {
-  triggerMissionControl: () => ipcRenderer.send('trigger-mission-control')
+  triggerMissionControl: () => ipcRenderer.send('trigger-mission-control'),
+  clearCacheAndReload: () => ipcRenderer.send('clear-cache-and-reload')
 });
 
 // Expose Aider API for GSX Create

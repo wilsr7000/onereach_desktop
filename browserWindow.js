@@ -395,6 +395,14 @@ function createMainWindow(app) {
   // Add context menu handler for right-click "Paste to Black Hole"
   mainWindow.webContents.on('context-menu', (event, params) => {
     console.log('[BrowserWindow] Context menu requested at:', params.x, params.y);
+    
+    // Allow native DevTools context menu to work (only when right-clicking IN DevTools)
+    const url = mainWindow.webContents.getURL();
+    if (url.startsWith('devtools://') || url.startsWith('chrome-devtools://')) {
+      console.log('[BrowserWindow] DevTools panel detected, allowing native context menu');
+      return; // Don't prevent default, let DevTools handle it
+    }
+    
     event.preventDefault();
     
     const { Menu, MenuItem } = require('electron');

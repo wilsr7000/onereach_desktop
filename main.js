@@ -651,6 +651,14 @@ app.whenReady().then(() => {
           
           contents.on('context-menu', (event, params) => {
             console.log('[Main] Fallback context menu triggered at:', params.x, params.y);
+            
+            // Allow native DevTools context menu to work (only when right-clicking IN DevTools)
+            const url = contents.getURL();
+            if (url.startsWith('devtools://') || url.startsWith('chrome-devtools://')) {
+              console.log('[Main] DevTools panel detected, allowing native context menu');
+              return; // Don't prevent default, let DevTools handle it
+            }
+            
             event.preventDefault();
             
             // Create context menu with "Paste to Black Hole" option
@@ -2338,6 +2346,23 @@ function setupIPC() {
     console.log('[IPC] Mission Control triggered from GSX toolbar');
   });
   
+  // Clear cache and reload for GSX toolbar refresh button
+  ipcMain.on('clear-cache-and-reload', async (event) => {
+    try {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      if (win) {
+        // Clear the cache for this session
+        await win.webContents.session.clearCache();
+        console.log('[IPC] Cache cleared for window');
+        // Reload ignoring cache
+        win.webContents.reloadIgnoringCache();
+        console.log('[IPC] Page reloaded ignoring cache');
+      }
+    } catch (error) {
+      console.error('[IPC] Error clearing cache and reloading:', error);
+    }
+  });
+
   ipcMain.handle('settings:get-all', async () => {
     const settingsManager = global.settingsManager;
     if (!settingsManager) {
@@ -3647,6 +3672,14 @@ function setupIPC() {
       console.log(`[Main] Adding context menu handler for webview ${data.tabId}`);
       contents.on('context-menu', (event, params) => {
         console.log(`[Webview ${data.tabId}] Context menu requested at:`, params.x, params.y);
+        
+        // Allow native DevTools context menu to work (only when right-clicking IN DevTools)
+        const url = contents.getURL();
+        if (url.startsWith('devtools://') || url.startsWith('chrome-devtools://')) {
+          console.log(`[Webview ${data.tabId}] DevTools panel detected, allowing native context menu`);
+          return; // Don't prevent default, let DevTools handle it
+        }
+        
         event.preventDefault();
         
         // Create context menu with "Paste to Black Hole" option
