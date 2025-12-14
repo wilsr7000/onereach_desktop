@@ -55,6 +55,22 @@ class ClipboardStorageV2 {
     // In-memory cache for performance
     this.cache = new Map();
     this.cacheSize = 100; // Keep last 100 items in cache
+    
+    // PERFORMANCE: Debounce save operations
+    this._saveTimeout = null;
+    this._pendingIndex = null;
+  }
+  
+  // Flush any pending async saves (call before app quit)
+  flushPendingSaves() {
+    if (this._saveTimeout) {
+      clearTimeout(this._saveTimeout);
+      this._saveTimeout = null;
+    }
+    if (this._pendingIndex) {
+      this.saveIndexSync(this._pendingIndex);
+      this._pendingIndex = null;
+    }
   }
   
   ensureDirectories() {
@@ -134,7 +150,74 @@ class ClipboardStorageV2 {
     };
   }
   
+  // PERFORMANCE: Debounced async save to reduce I/O blocking
+  // Saves are batched and written asynchronously after a short delay
   saveIndex(index = this.index) {
+    // Update lastModified
+    index.lastModified = new Date().toISOString();
+    
+    // Schedule async save with debouncing
+    this._scheduleAsyncSave(index);
+  }
+  
+  // Internal: Schedule an async save with debouncing
+  _scheduleAsyncSave(index) {
+    // Clear any pending save
+    if (this._saveTimeout) {
+      clearTimeout(this._saveTimeout);
+    }
+    
+    // Mark that we have pending changes
+    this._pendingIndex = index;
+    
+    // Schedule save after 100ms (debounce rapid changes)
+    this._saveTimeout = setTimeout(() => {
+      this._performAsyncSave();
+    }, 100);
+  }
+  
+  // Internal: Perform the actual async save
+  async _performAsyncSave() {
+    if (!this._pendingIndex) return;
+    
+    const index = this._pendingIndex;
+    this._pendingIndex = null;
+    this._saveTimeout = null;
+    
+    const tempPath = this.indexPath + '.tmp';
+    const backupPath = this.indexPath + '.backup';
+    
+    try {
+      const fsPromises = fs.promises;
+      
+      // Write to temp file asynchronously
+      await fsPromises.writeFile(tempPath, JSON.stringify(index, null, 2));
+      
+      // Backup current if exists
+      try {
+        await fsPromises.access(this.indexPath);
+        await fsPromises.copyFile(this.indexPath, backupPath);
+      } catch (e) {
+        // File doesn't exist, no backup needed
+      }
+      
+      // Atomic rename
+      await fsPromises.rename(tempPath, this.indexPath);
+      
+      console.log('[Storage] Index saved asynchronously');
+    } catch (error) {
+      console.error('[Storage] Error saving index:', error);
+      // Clean up temp file if it exists
+      try {
+        await fs.promises.unlink(tempPath);
+      } catch (e) {
+        // Ignore cleanup errors
+      }
+    }
+  }
+  
+  // Synchronous save for critical operations (e.g., before app quit)
+  saveIndexSync(index = this.index) {
     const tempPath = this.indexPath + '.tmp';
     const backupPath = this.indexPath + '.backup';
     
@@ -153,9 +236,9 @@ class ClipboardStorageV2 {
       // Atomic rename
       fs.renameSync(tempPath, this.indexPath);
       
-      console.log('Index saved successfully');
+      console.log('[Storage] Index saved synchronously');
     } catch (error) {
-      console.error('Error saving index:', error);
+      console.error('[Storage] Error saving index:', error);
       // Clean up temp file if it exists
       if (fs.existsSync(tempPath)) {
         fs.unlinkSync(tempPath);
@@ -178,8 +261,8 @@ class ClipboardStorageV2 {
       // For files, use the actual filename
       contentPath = `items/${itemId}/${item.fileName}`;
     } else {
-      // For other types, use generic extension
-      const ext = this.getExtension(item.type);
+      // For other types, use generic extension (pass content to determine real extension)
+      const ext = this.getExtension(item.type, item.content);
       contentPath = `items/${itemId}/content.${ext}`;
     }
     
@@ -199,9 +282,11 @@ class ClipboardStorageV2 {
       id: itemId,
       type: item.type,
       dateCreated: new Date().toISOString(),
-                author: require('os').userInfo().username || 'Unknown',
+      author: require('os').userInfo().username || 'Unknown',
       source: item.source || 'clipboard',
       tags: item.tags || [],
+      // Video-specific: scene list for agentic player
+      scenes: item.scenes || [],
       ...item.metadata
     };
     
@@ -278,8 +363,35 @@ class ClipboardStorageV2 {
         const files = fs.readdirSync(itemDir).filter(f => 
           !f.endsWith('.json') && !f.endsWith('.png') && !f.endsWith('.svg') && !f.startsWith('.')
         );
+        console.log(`[Storage] Found files in ${itemId}:`, files);
+        
         if (files.length > 0) {
-          actualContentPath = path.join(itemDir, files[0]);
+          // Prefer video files over audio files
+          const videoExtensions = ['.mp4', '.webm', '.mkv', '.avi', '.mov', '.m4v'];
+          const audioExtensions = ['.mp3', '.wav', '.aac', '.m4a', '.ogg'];
+          
+          // Sort: video files first, then non-audio, then audio
+          const sortedFiles = files.sort((a, b) => {
+            const aLower = a.toLowerCase();
+            const bLower = b.toLowerCase();
+            const aIsVideo = videoExtensions.some(ext => aLower.endsWith(ext));
+            const bIsVideo = videoExtensions.some(ext => bLower.endsWith(ext));
+            const aIsAudio = audioExtensions.some(ext => aLower.endsWith(ext));
+            const bIsAudio = audioExtensions.some(ext => bLower.endsWith(ext));
+            
+            // Video first
+            if (aIsVideo && !bIsVideo) return -1;
+            if (!aIsVideo && bIsVideo) return 1;
+            // Audio last
+            if (aIsAudio && !bIsAudio) return 1;
+            if (!aIsAudio && bIsAudio) return -1;
+            return 0;
+          });
+          
+          console.log(`[Storage] Sorted files (video first):`, sortedFiles);
+          actualContentPath = path.join(itemDir, sortedFiles[0]);
+          console.log(`[Storage] Selected content path:`, actualContentPath);
+          
           // Verify the file exists and has content
           if (fs.existsSync(actualContentPath)) {
             const stats = fs.statSync(actualContentPath);
@@ -417,6 +529,21 @@ class ClipboardStorageV2 {
     this.saveIndex();
     
     return item.pinned;
+  }
+  
+  // Update item index properties
+  updateItemIndex(itemId, updates) {
+    const item = this.index.items.find(item => item.id === itemId);
+    if (!item) {
+      return false;
+    }
+    
+    // Apply updates
+    Object.assign(item, updates);
+    item.timestamp = Date.now(); // Update timestamp on edit
+    
+    this.saveIndex();
+    return true;
   }
   
   // Space management
@@ -698,21 +825,183 @@ class ClipboardStorageV2 {
     return crypto.randomBytes(16).toString('hex');
   }
   
-  getExtension(type) {
+  getExtension(type, content = null) {
+    // If we have content, detect the best extension based on the actual content
+    if (content && typeof content === 'string') {
+      const detected = this.detectContentType(content);
+      if (detected) return detected;
+    }
+    
+    // Fallback based on type
     switch (type) {
-      case 'text': return 'txt';
-      case 'html': return 'html';
+      case 'text': return 'md';
+      case 'html': return 'md';  // Default HTML type to md (detectContentType handles real HTML)
       case 'image': return 'png';
       case 'file': return 'file';
-      default: return 'dat';
+      default: return 'md';
     }
+  }
+  
+  // Detect content type and return appropriate extension
+  detectContentType(content) {
+    if (!content || typeof content !== 'string') return null;
+    
+    const trimmed = content.trim();
+    
+    // Check for JSON
+    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || 
+        (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+      try {
+        JSON.parse(trimmed);
+        return 'json';
+      } catch (e) {
+        // Not valid JSON, continue checking
+      }
+    }
+    
+    // Check for XML
+    if (trimmed.startsWith('<?xml') || 
+        (trimmed.startsWith('<') && trimmed.includes('</') && !this.isHtml(trimmed))) {
+      // Basic XML check - starts with tag and has closing tags but isn't HTML
+      const xmlPattern = /^<\?xml|^<[a-zA-Z][a-zA-Z0-9]*[^>]*>[\s\S]*<\/[a-zA-Z][a-zA-Z0-9]*>$/;
+      if (xmlPattern.test(trimmed)) {
+        return 'xml';
+      }
+    }
+    
+    // Check for YAML (starts with ---, or has key: value patterns)
+    if (trimmed.startsWith('---') || /^[a-zA-Z_][a-zA-Z0-9_]*:\s*.+/m.test(trimmed)) {
+      // More thorough YAML check
+      const lines = trimmed.split('\n');
+      let yamlScore = 0;
+      for (const line of lines.slice(0, 10)) {
+        if (/^\s*[a-zA-Z_][a-zA-Z0-9_]*:\s*.*/.test(line)) yamlScore++;
+        if (/^\s*-\s+/.test(line)) yamlScore++;
+      }
+      if (yamlScore >= 2) return 'yaml';
+    }
+    
+    // Check for CSV (multiple lines with consistent comma/tab delimiters)
+    const lines = trimmed.split('\n');
+    if (lines.length >= 2) {
+      const commaCount = (lines[0].match(/,/g) || []).length;
+      const tabCount = (lines[0].match(/\t/g) || []).length;
+      if (commaCount >= 2 || tabCount >= 2) {
+        // Check if other lines have similar structure
+        let consistent = true;
+        for (let i = 1; i < Math.min(lines.length, 5); i++) {
+          const lineCommas = (lines[i].match(/,/g) || []).length;
+          const lineTabs = (lines[i].match(/\t/g) || []).length;
+          if (commaCount >= 2 && Math.abs(lineCommas - commaCount) > 1) consistent = false;
+          if (tabCount >= 2 && Math.abs(lineTabs - tabCount) > 1) consistent = false;
+        }
+        if (consistent && (commaCount >= 2 || tabCount >= 2)) {
+          return 'csv';
+        }
+      }
+    }
+    
+    // Check for actual HTML document
+    if (this.isHtml(trimmed)) {
+      return 'html';
+    }
+    
+    // Check for code patterns
+    const codePatterns = [
+      // JavaScript/TypeScript
+      { pattern: /^(import|export|const|let|var|function|class|interface|type)\s+/m, ext: 'js' },
+      { pattern: /=>\s*{|async\s+function|await\s+/, ext: 'js' },
+      // Python
+      { pattern: /^(def|class|import|from|if __name__|print\()/m, ext: 'py' },
+      { pattern: /:\s*\n\s+(return|pass|raise|yield)/, ext: 'py' },
+      // SQL
+      { pattern: /^(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)\s+/im, ext: 'sql' },
+      // Shell/Bash
+      { pattern: /^#!\/bin\/(bash|sh|zsh)/, ext: 'sh' },
+      { pattern: /^\s*(if\s+\[|for\s+\w+\s+in|while\s+\[|echo\s+)/m, ext: 'sh' },
+      // CSS
+      { pattern: /^[.#]?[a-zA-Z][a-zA-Z0-9_-]*\s*{\s*[a-zA-Z-]+\s*:/m, ext: 'css' },
+    ];
+    
+    for (const { pattern, ext } of codePatterns) {
+      if (pattern.test(trimmed)) {
+        return ext;
+      }
+    }
+    
+    // Check for Markdown indicators - need at least 2 patterns to be confident it's markdown
+    let mdScore = 0;
+    
+    if (/^#{1,6}\s+.+/m.test(trimmed)) mdScore += 2;  // Headers (strong indicator)
+    if (/^\s*[-*+]\s+.+/m.test(trimmed)) mdScore += 1;  // Unordered lists
+    if (/^\s*\d+\.\s+.+/m.test(trimmed)) mdScore += 1;  // Ordered lists
+    if (/\[.+?\]\(.+?\)/.test(trimmed)) mdScore += 2;  // Links (strong indicator)
+    if (/!\[.*?\]\(.+?\)/.test(trimmed)) mdScore += 2;  // Images (strong indicator)
+    if (/^>\s+.+/m.test(trimmed)) mdScore += 1;  // Blockquotes
+    if (/```[\s\S]*?```/.test(trimmed)) mdScore += 2;  // Fenced code blocks (strong indicator)
+    if (/`[^`]+`/.test(trimmed)) mdScore += 1;  // Inline code
+    if (/\*\*[^*]+\*\*/.test(trimmed)) mdScore += 1;  // Bold
+    if (/__[^_]+__/.test(trimmed)) mdScore += 1;  // Bold alt
+    if (/(?<!\*)\*[^*\s][^*]*[^*\s]\*(?!\*)/.test(trimmed)) mdScore += 1;  // Italic
+    if (/(?<!_)_[^_\s][^_]*[^_\s]_(?!_)/.test(trimmed)) mdScore += 1;  // Italic alt
+    if (/^(-{3,}|\*{3,}|_{3,})$/m.test(trimmed)) mdScore += 1;  // Horizontal rules
+    if (/^\s*[-*]\s+\[[x ]\]/im.test(trimmed)) mdScore += 2;  // Task lists (strong indicator)
+    if (/\|.+\|.+\|/m.test(trimmed) && /\|[-:]+\|[-:]+\|/m.test(trimmed)) mdScore += 2;  // Tables (strong indicator)
+    
+    if (mdScore >= 2) {
+      return 'md';
+    }
+    
+    // Check for URL
+    if (/^https?:\/\/[^\s]+$/.test(trimmed)) {
+      return 'url';  // Single URL - we'll handle this specially
+    }
+    
+    // Default to markdown for general text
+    return 'md';
+  }
+  
+  // Check if content is actual HTML
+  isHtml(content) {
+    if (!content || typeof content !== 'string') return false;
+    // Must have actual HTML document structure or meaningful structural tags
+    const htmlPattern = /<\s*(html|head|body|div|table|form|article|section|header|footer|nav|main|aside|ul|ol)[^>]*>/i;
+    return htmlPattern.test(content);
   }
   
   saveContent(item, itemDir) {
     if (item.type === 'text' || item.type === 'html') {
-      const ext = this.getExtension(item.type);
-      const contentPath = path.join(itemDir, `content.${ext}`);
-      fs.writeFileSync(contentPath, item.content, 'utf8');
+      // Determine extension based on actual content
+      const ext = this.getExtension(item.type, item.content);
+      
+      // Handle URL extension specially - save as .txt with the URL
+      const finalExt = ext === 'url' ? 'txt' : ext;
+      const contentPath = path.join(itemDir, `content.${finalExt}`);
+      
+      // Determine what content to save
+      let contentToSave = item.content;
+      
+      // For 'html' type items that aren't actual HTML, save the plain text version
+      if (item.type === 'html' && !this.isHtml(item.content)) {
+        contentToSave = item.plainText || item.content;
+      }
+      
+      // Strip HTML tags for non-HTML file types
+      if (item.type === 'html' && finalExt !== 'html' && contentToSave.includes('<')) {
+        // Remove HTML tags but preserve the text
+        contentToSave = contentToSave
+          .replace(/<[^>]*>/g, '')
+          .replace(/&nbsp;/g, ' ')
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&quot;/g, '"')
+          .replace(/\s+/g, ' ')
+          .trim();
+      }
+      
+      fs.writeFileSync(contentPath, contentToSave, 'utf8');
+      console.log(`[Storage] Saved content as .${finalExt} (detected from content)`);
     } else if (item.type === 'image') {
       const contentPath = path.join(itemDir, 'content.png');
                   const base64Data = item.content.replace(/^data:image\/[^;]+;base64,/, '');

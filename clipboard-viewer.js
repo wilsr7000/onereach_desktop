@@ -71,6 +71,7 @@ async function init() {
         console.log('Loaded history items:', history.length);
         
         setupEventListeners();
+        setupPreviewEventListeners();
         
         // Set default view
         setView('list');
@@ -246,6 +247,442 @@ async function loadHistory() {
 }
 
 // Render spaces in sidebar
+// Generate smart title for clipboard items
+function generateTitleForItem(item) {
+    // Priority 1: Use existing title from metadata
+    if (item.metadata?.title) {
+        return item.metadata.title;
+    }
+    
+    // Priority 2: Use fileName for files
+    if (item.fileName && item.type === 'file') {
+        return item.fileName;
+    }
+    
+    // Priority 3: Auto-generate based on content
+    if (item.type === 'text' || item.type === 'html') {
+        const content = item.plainText || item.text || item.content || item.preview || '';
+        
+        // Check if it's a URL
+        if (content.trim().match(/^https?:\/\//)) {
+            try {
+                const url = new URL(content.trim());
+                return `Link: ${url.hostname}`;
+            } catch (e) {
+                return 'Web Link';
+            }
+        }
+        
+        // Extract first line or sentence as title
+        const firstLine = content.split('\n')[0].trim();
+        if (firstLine.length > 0 && firstLine.length <= 60) {
+            // First line is good length - use it
+            return firstLine;
+        } else if (firstLine.length > 60) {
+            // First line too long - find first sentence
+            const firstSentence = firstLine.match(/^[^.!?]+[.!?]/);
+            if (firstSentence && firstSentence[0].length <= 60) {
+                return firstSentence[0].trim();
+            }
+            // Truncate first line
+            return firstLine.substring(0, 57) + '...';
+        }
+        
+        // Extract key words if possible
+        const words = content.trim().split(/\s+/).slice(0, 6).join(' ');
+        if (words.length > 0) {
+            return words.length <= 50 ? words : words.substring(0, 47) + '...';
+        }
+    }
+    
+    // Priority 4: Use source information
+    if (item.source && item.source !== 'clipboard') {
+        return `From ${item.source}`;
+    }
+    
+    // Priority 5: Use type-based default
+    const typeNames = {
+        'text': 'Text Note',
+        'html': 'Rich Content',
+        'image': 'Image',
+        'code': 'Code Snippet',
+        'url': 'Web Link',
+        'file': 'File',
+        'pdf': 'PDF Document',
+        'video': 'Video',
+        'audio': 'Audio',
+        'screenshot': 'Screenshot'
+    };
+    
+    return typeNames[item.type] || typeNames[item.fileType] || 'Clipboard Item';
+}
+
+// Setup drag-and-drop and paste functionality for spaces
+function setupSpaceDragAndDrop() {
+    const spaceItems = document.querySelectorAll('.space-item');
+    
+    spaceItems.forEach(spaceItem => {
+        const spaceId = spaceItem.dataset.spaceId;
+        
+        // DRAG AND DROP FUNCTIONALITY
+        spaceItem.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            spaceItem.style.background = 'rgba(99, 102, 241, 0.3)';
+            spaceItem.style.borderLeft = '3px solid rgba(99, 102, 241, 1)';
+        });
+        
+        spaceItem.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            spaceItem.style.background = '';
+            spaceItem.style.borderLeft = '';
+        });
+        
+        spaceItem.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            // Reset visual state
+            spaceItem.style.background = '';
+            spaceItem.style.borderLeft = '';
+            
+            try {
+                // Get dropped item ID
+                const itemId = e.dataTransfer.getData('text/plain');
+                
+                if (!itemId) {
+                    console.log('[Drag] No item ID in drag data');
+                    return;
+                }
+                
+                console.log('[Drag] Dropping item', itemId, 'into space', spaceId);
+                
+                // Move item to this space
+                const result = await window.clipboard.moveToSpace(itemId, spaceId);
+                
+                if (result.success) {
+                    showNotification('✅ Moved to ' + (spaceItem.querySelector('.space-name')?.textContent || 'space'));
+                    await loadSpaces();
+                    await loadHistory();
+                } else {
+                    showNotification('❌ Failed to move item');
+                }
+                
+            } catch (error) {
+                console.error('[Drag] Error moving item:', error);
+                showNotification('❌ Error: ' + error.message);
+            }
+        });
+        
+        // RIGHT-CLICK PASTE FUNCTIONALITY
+        spaceItem.addEventListener('contextmenu', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            // Create custom context menu
+            const existingMenu = document.getElementById('spaceContextMenu');
+            if (existingMenu) existingMenu.remove();
+            
+            const menu = document.createElement('div');
+            menu.id = 'spaceContextMenu';
+            menu.style.cssText = `
+                position: fixed;
+                left: ${e.clientX}px;
+                top: ${e.clientY}px;
+                background: #1a1a25;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 8px;
+                padding: 4px;
+                z-index: 10000;
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+                min-width: 180px;
+            `;
+            
+            const spaceName = spaceItem.querySelector('.space-name')?.textContent || 'this space';
+            
+            menu.innerHTML = `
+                <div class="context-menu-item" data-action="paste" style="
+                    padding: 8px 12px;
+                    cursor: pointer;
+                    border-radius: 4px;
+                    font-size: 13px;
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    color: rgba(255, 255, 255, 0.9);
+                ">
+                    <span>📋</span>
+                    <span>Paste into ${spaceName}</span>
+                </div>
+                <div class="context-menu-item" data-action="paste-file" style="
+                    padding: 8px 12px;
+                    cursor: pointer;
+                    border-radius: 4px;
+                    font-size: 13px;
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    color: rgba(255, 255, 255, 0.9);
+                ">
+                    <span>📎</span>
+                    <span>Paste File into ${spaceName}</span>
+                </div>
+            `;
+            
+            document.body.appendChild(menu);
+            
+            // Add hover effects
+            menu.querySelectorAll('.context-menu-item').forEach(item => {
+                item.addEventListener('mouseenter', () => {
+                    item.style.background = 'rgba(99, 102, 241, 0.3)';
+                });
+                item.addEventListener('mouseleave', () => {
+                    item.style.background = '';
+                });
+                
+                item.addEventListener('click', async () => {
+                    const action = item.dataset.action;
+                    
+                    if (action === 'paste') {
+                        await pasteIntoSpace(spaceId);
+                    } else if (action === 'paste-file') {
+                        await pasteFileIntoSpace(spaceId);
+                    }
+                    
+                    menu.remove();
+                });
+            });
+            
+            // Close menu on click outside
+            const closeMenu = (e) => {
+                if (!menu.contains(e.target)) {
+                    menu.remove();
+                    document.removeEventListener('click', closeMenu);
+                }
+            };
+            setTimeout(() => document.addEventListener('click', closeMenu), 0);
+            
+            // Close on escape
+            const closeOnEscape = (e) => {
+                if (e.key === 'Escape') {
+                    menu.remove();
+                    document.removeEventListener('keydown', closeOnEscape);
+                }
+            };
+            document.addEventListener('keydown', closeOnEscape);
+        });
+    });
+}
+
+// Paste clipboard content into a space (HARDENED VERSION)
+async function pasteIntoSpace(spaceId) {
+    try {
+        console.log('[Paste] Pasting clipboard content into space:', spaceId);
+        
+        // Ensure clipboard API is available
+        if (!window.api || !window.api.invoke) {
+            throw new Error('Clipboard API not available. Please try again.');
+        }
+        
+        if (!window.clipboard) {
+            throw new Error('Clipboard manager not initialized. Please try again.');
+        }
+        
+        // Get comprehensive clipboard data including file paths
+        const clipboardData = await window.api.invoke('get-clipboard-data');
+        
+        console.log('[Paste] Clipboard data:', {
+            hasText: clipboardData?.hasText,
+            hasHtml: clipboardData?.hasHtml,
+            hasImage: clipboardData?.hasImage,
+            textLength: clipboardData?.text?.length || 0,
+            htmlLength: clipboardData?.html?.length || 0
+        });
+        
+        // Validation: Check if clipboard has any content
+        if (!clipboardData) {
+            showNotification('❌ Failed to read clipboard');
+            return;
+        }
+        
+        const spaceName = spaces.find(s => s.id === spaceId)?.name || 'Space';
+        let result;
+        
+        // IMPROVED Priority order: Image > Text > HTML (prefer text over HTML for simple content)
+        
+        // 1. Handle IMAGE (highest priority)
+        if (clipboardData.hasImage && clipboardData.imageDataUrl) {
+            console.log('[Paste] Detected: IMAGE');
+            
+            result = await window.clipboard.addImage({
+                dataUrl: clipboardData.imageDataUrl,
+                fileName: `Pasted Image ${new Date().toLocaleTimeString()}.png`,
+                fileSize: clipboardData.imageDataUrl.length,
+                spaceId: spaceId
+            });
+            
+            if (result?.success) {
+                showNotification(`✅ Image pasted into ${spaceName}`);
+            } else {
+                const errorMsg = result?.error || 'Failed to paste image';
+                console.error('[Paste] Image error:', errorMsg);
+                throw new Error(errorMsg);
+            }
+        }
+        // 2. Handle TEXT (prefer text over HTML to avoid false HTML detection)
+        else if (clipboardData.hasText && clipboardData.text && !clipboardData.hasHtml) {
+            const text = clipboardData.text.trim();
+            console.log('[Paste] Detected: TEXT (no HTML)', text.substring(0, 50));
+            
+            result = await window.clipboard.addText({
+                content: text,
+                spaceId: spaceId
+            });
+            
+            if (result?.success) {
+                if (result.isYouTube) {
+                    showNotification(`✅ YouTube video queued for download into ${spaceName}`);
+                } else {
+                    showNotification(`✅ Text pasted into ${spaceName}`);
+                }
+            } else {
+                const errorMsg = result?.error || 'Failed to paste text';
+                console.error('[Paste] Text error:', errorMsg);
+                throw new Error(errorMsg);
+            }
+        }
+        // 3. Handle HTML (Rich content) - only if hasHtml is true
+        else if (clipboardData.hasHtml && clipboardData.html) {
+            console.log('[Paste] Detected: HTML (rich content)', clipboardData.html.substring(0, 100));
+            
+            result = await window.clipboard.addHtml({
+                content: clipboardData.html,
+                plainText: clipboardData.text || '',
+                spaceId: spaceId
+            });
+            
+            if (result?.success) {
+                showNotification(`✅ Rich content pasted into ${spaceName}`);
+            } else {
+                const errorMsg = result?.error || 'Failed to paste HTML';
+                console.error('[Paste] HTML error:', errorMsg);
+                throw new Error(errorMsg);
+            }
+        }
+        // 4. Fallback: Has text but with HTML (treat as text)
+        else if (clipboardData.hasText && clipboardData.text) {
+            const text = clipboardData.text.trim();
+            console.log('[Paste] Detected: TEXT (ignoring basic HTML wrapper)', text.substring(0, 50));
+            
+            result = await window.clipboard.addText({
+                content: text,
+                spaceId: spaceId
+            });
+            
+            if (result?.success) {
+                showNotification(`✅ Text pasted into ${spaceName}`);
+            } else {
+                const errorMsg = result?.error || 'Failed to paste text';
+                console.error('[Paste] Text fallback error:', errorMsg);
+                throw new Error(errorMsg);
+            }
+        }
+        // 5. Nothing to paste
+        else {
+            showNotification('❌ Nothing to paste - clipboard is empty');
+            return;
+        }
+        
+        // Reload to show new item
+        console.log('[Paste] Reloading spaces and history...');
+        setTimeout(async () => {
+            await loadSpaces();
+            await loadHistory();
+        }, 800);
+        
+    } catch (error) {
+        console.error('[Paste] Error pasting into space:', error);
+        const errorMessage = error?.message || String(error) || 'Unknown error';
+        showNotification('❌ Failed to paste: ' + errorMessage);
+    }
+}
+
+// Paste FILE from clipboard into a space (HARDENED VERSION)
+async function pasteFileIntoSpace(spaceId) {
+    try {
+        console.log('[PasteFile] Pasting file from clipboard into space:', spaceId);
+        
+        // Get file paths from clipboard via backend
+        const fileData = await window.api.invoke('get-clipboard-files');
+        
+        if (!fileData || !fileData.files || fileData.files.length === 0) {
+            showNotification('❌ No files in clipboard');
+            return;
+        }
+        
+        const spaceName = spaces.find(s => s.id === spaceId)?.name || 'Space';
+        const files = fileData.files;
+        
+        console.log('[PasteFile] Found', files.length, 'file(s):', files);
+        
+        // Process each file
+        for (const filePath of files) {
+            console.log('[PasteFile] Processing file:', filePath);
+            
+            try {
+                const result = await window.clipboard.addFile({
+                    filePath: filePath,
+                    spaceId: spaceId
+                });
+                
+                if (!result?.success) {
+                    console.error('[PasteFile] Failed to add file:', filePath, result?.error);
+                }
+            } catch (fileError) {
+                console.error('[PasteFile] Error adding file:', filePath, fileError);
+            }
+        }
+        
+        showNotification(`✅ ${files.length} file(s) pasted into ${spaceName}`);
+        
+        // Reload to show new items
+        setTimeout(async () => {
+            await loadSpaces();
+            await loadHistory();
+        }, 800);
+        
+    } catch (error) {
+        console.error('[PasteFile] Error:', error);
+        showNotification('❌ Failed to paste file: ' + error.message);
+    }
+}
+
+// Show notification helper
+function showNotification(message) {
+    const toast = document.createElement('div');
+    toast.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background: #1a1a25;
+        color: white;
+        padding: 12px 20px;
+        border-radius: 8px;
+        border: 1px solid rgba(99, 102, 241, 0.5);
+        z-index: 10001;
+        font-size: 13px;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+        animation: slideIn 0.3s ease-out;
+    `;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    
+    setTimeout(() => {
+        toast.style.animation = 'slideOut 0.3s ease-out';
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
+}
+
 function renderSpaces() {
     const spacesList = document.getElementById('spacesList');
     
@@ -258,8 +695,15 @@ function renderSpaces() {
         </div>
     `;
     
-    // Add user-created spaces
-    spaces.forEach(space => {
+    // Sort spaces by lastUsed (most recent first), then by createdAt
+    const sortedSpaces = [...spaces].sort((a, b) => {
+        const aLastUsed = a.lastUsed || a.createdAt || 0;
+        const bLastUsed = b.lastUsed || b.createdAt || 0;
+        return bLastUsed - aLastUsed; // Most recent first
+    });
+    
+    // Add user-created spaces (sorted by most recently used)
+    sortedSpaces.forEach(space => {
         html += `
             <div class="space-item ${currentSpace === space.id ? 'active' : ''}" data-space-id="${space.id}">
                 <span class="space-icon">${space.icon}</span>
@@ -276,6 +720,9 @@ function renderSpaces() {
     });
     
     spacesList.innerHTML = html;
+    
+    // Add drag-and-drop and paste functionality to each space item
+    setupSpaceDragAndDrop();
 }
 
 // Render history list
@@ -307,6 +754,78 @@ function renderHistory(items = history) {
     
     try {
         historyList.innerHTML = items.map(item => {
+          try {
+            // Check if item is downloading FIRST - render special placeholder
+            const isDownloading = item.metadata?.downloadStatus === 'downloading';
+            const downloadError = item.metadata?.downloadStatus === 'error';
+            
+            if (isDownloading) {
+                const title = item.metadata?.title || 'Video';
+                const progress = item.metadata?.downloadProgress || 0;
+                const shortTitle = title.length > 40 ? title.substring(0, 40) + '...' : title;
+                const timeAgo = formatTimeAgo(item.timestamp);
+                const statusText = item.metadata?.downloadStatusText || 'Downloading';
+                
+                return `
+                    <div class="history-item downloading" data-id="${item.id}" data-download-status="downloading" draggable="true">
+                        <div class="item-header">
+                            <div class="item-type">
+                                <span class="type-icon type-video">▶</span>
+                                <span class="item-time">${timeAgo}</span>
+                            </div>
+                        </div>
+                        <div class="video-tile downloading-tile">
+                            <div class="video-tile-badge">
+                                <span class="video-badge-icon">▶</span>
+                                <span class="video-badge-text">VIDEO</span>
+                                <span class="download-status-badge">Downloading</span>
+                            </div>
+                            <div class="video-tile-content">
+                                <div class="video-tile-title">${escapeHtml(shortTitle)}</div>
+                                <div class="download-progress-bar">
+                                    <div class="download-progress-fill" style="width: ${progress}%"></div>
+                                </div>
+                                <div class="video-tile-meta">
+                                    <span class="video-meta-item">${progress > 0 ? Math.round(progress) + '%' : statusText}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            if (downloadError) {
+                const title = item.metadata?.title || 'Video';
+                const shortTitle = title.length > 40 ? title.substring(0, 40) + '...' : title;
+                const timeAgo = formatTimeAgo(item.timestamp);
+                const errorMsg = item.metadata?.downloadError || 'Download failed';
+                
+                return `
+                    <div class="history-item download-error" data-id="${item.id}" data-download-status="error" draggable="true">
+                        <div class="item-header">
+                            <div class="item-type">
+                                <span class="type-icon type-error">!</span>
+                                <span class="item-time">${timeAgo}</span>
+                            </div>
+                        </div>
+                        <div class="video-tile error-tile">
+                            <div class="video-tile-badge">
+                                <span class="video-badge-icon error">!</span>
+                                <span class="video-badge-text">VIDEO</span>
+                                <span class="error-status-badge">Failed</span>
+                            </div>
+                            <div class="video-tile-content">
+                                <div class="video-tile-title">${escapeHtml(shortTitle)}</div>
+                                <div class="video-tile-desc error-text">${escapeHtml(errorMsg.substring(0, 80))}</div>
+                            </div>
+                        </div>
+                        <div class="item-actions">
+                            <button class="action-btn" data-action="delete" title="Delete">×</button>
+                        </div>
+                    </div>
+                `;
+            }
+            
             const icon = getTypeIcon(item.type, item.source, item.fileType, item.fileCategory, item.metadata);
             const timeAgo = formatTimeAgo(item.timestamp);
             
@@ -343,42 +862,76 @@ function renderHistory(items = history) {
                 }
             } else if (item.type === 'file') {
                 // Handle file types
-                if (item.fileType === 'video') {
+                if (item.fileType === 'video' || item.fileCategory === 'video') {
+                    // Get video metadata for better display
+                    // Prefer AI-generated metadata over YouTube metadata
+                    const title = item.metadata?.title || item.fileName || 'Video';
+                    const shortDesc = item.metadata?.shortDescription || '';
+                    const uploader = item.metadata?.uploader || item.metadata?.channel || '';
+                    const duration = item.metadata?.duration || '';
+                    const isYouTube = item.metadata?.source === 'youtube' || item.metadata?.youtubeUrl;
+                    const hasAudio = !!item.metadata?.audioPath;
+                    const hasTranscript = !!item.metadata?.transcript;
+                    
+                    // Get thumbnail - prefer local extracted, fallback to YouTube thumbnail
+                    const thumbnail = item.metadata?.localThumbnail 
+                        ? `file://${item.metadata.localThumbnail}`
+                        : (item.metadata?.thumbnail || item.thumbnail || '');
+                    
+                    // Check for additional features
+                    const hasStoryBeats = !!item.metadata?.storyBeats && item.metadata.storyBeats.length > 0;
+                    const hasSpeakers = !!item.metadata?.speakers && item.metadata.speakers.length > 0;
+                    const hasTopics = !!item.metadata?.topics && item.metadata.topics.length > 0;
+                    
+                    // Build status indicators
+                    let statusIndicators = '';
+                    statusIndicators += '<span class="video-feature-badge video">Video</span>';
+                    if (hasAudio) statusIndicators += '<span class="video-feature-badge audio">Audio</span>';
+                    if (hasTranscript) statusIndicators += '<span class="video-feature-badge transcript">Transcript</span>';
+                    if (hasStoryBeats) statusIndicators += '<span class="video-feature-badge beats">Story Beats</span>';
+                    if (hasSpeakers) statusIndicators += `<span class="video-feature-badge speakers">${item.metadata.speakers.length} Speaker${item.metadata.speakers.length > 1 ? 's' : ''}</span>`;
+                    
                     contentHtml = `
-                        <div class="media-preview">
-                            <video controls preload="metadata">
-                                <source src="file://${item.filePath}">
-                            </video>
-                        </div>
-                        <div class="file-info">
-                            <div class="file-icon">▶</div>
-                            <div class="file-details">
-                                <div class="file-name">${escapeHtml(item.fileName)}</div>
-                                <div class="file-meta">
-                                    <span>${formatFileSize(item.fileSize)}</span>
-                                    <span>${item.fileExt ? item.fileExt.toUpperCase() : ''}</span>
+                        <div class="video-tile ${thumbnail ? 'has-thumbnail' : ''}">
+                            ${thumbnail ? `
+                                <div class="video-tile-thumbnail">
+                                    <img src="${thumbnail}" alt="Video thumbnail">
+                                    <div class="video-play-overlay">▶</div>
+                                    ${duration ? `<span class="video-duration-badge">${escapeHtml(duration)}</span>` : ''}
+                                </div>
+                            ` : ''}
+                            <div class="video-tile-info">
+                                <div class="video-tile-badge">
+                                    <span class="video-badge-icon">▶</span>
+                                    <span class="video-badge-text">VIDEO</span>
+                                    ${isYouTube ? '<span class="video-source-badge">YouTube</span>' : ''}
+                                </div>
+                                <div class="video-tile-content">
+                                    <div class="video-tile-title">${escapeHtml(title)}</div>
+                                    ${shortDesc ? `<div class="video-tile-desc">${escapeHtml(shortDesc)}</div>` : ''}
+                                    <div class="video-tile-meta">
+                                        ${uploader ? `<span class="video-meta-item">${escapeHtml(uploader)}</span>` : ''}
+                                        ${!thumbnail && duration ? `<span class="video-meta-item">${escapeHtml(duration)}</span>` : ''}
+                                        <span class="video-meta-item">${formatFileSize(item.fileSize)}</span>
+                                    </div>
+                                    ${statusIndicators ? `<div class="video-features">${statusIndicators}</div>` : ''}
                                 </div>
                             </div>
                         </div>
                     `;
                 } else if (item.fileType === 'audio') {
-                    // For audio files, we need to handle them differently due to Electron security
+                    // For audio files, show file info - use Preview button to play
                     contentHtml = `
-                        <div class="file-info">
-                            <div class="file-icon">♫</div>
+                        <div class="file-info" style="display: flex; align-items: center; gap: 12px;">
+                            <div class="file-icon" style="font-size: 28px;">🎵</div>
                             <div class="file-details">
                                 <div class="file-name">${escapeHtml(item.fileName)}</div>
                                 <div class="file-meta">
                                     <span>${formatFileSize(item.fileSize)}</span>
                                     <span>${item.fileExt ? item.fileExt.toUpperCase() : ''}</span>
-                                    <span class="audio-status">Click copy to clipboard to play</span>
+                                    <span style="color: rgba(100, 200, 255, 0.8);">Click ◎ Preview to play</span>
                                 </div>
                             </div>
-                        </div>
-                        <div class="media-preview" style="display: none;">
-                            <audio controls preload="metadata" id="audio-${item.id}">
-                                Your browser does not support the audio element.
-                            </audio>
                         </div>
                     `;
                 } else if (item.fileType === 'image-file' && item.thumbnail) {
@@ -503,12 +1056,24 @@ function renderHistory(items = history) {
                         <div class="item-content">${escapeHtml(item.preview || item.plainText || item.text)}</div>
                     `;
                 } else {
-                    contentHtml = `<div class="item-content">${escapeHtml(item.preview || item.plainText || item.text)}</div>`;
+                    const title = generateTitleForItem(item);
+                    contentHtml = `
+                        ${title ? `<div class="item-title">${escapeHtml(title)}</div>` : ''}
+                        <div class="item-content">${escapeHtml(item.preview || item.plainText || item.text)}</div>
+                    `;
                 }
             } else if (item.source === 'code') {
-                contentHtml = `<div class="item-content code">${escapeHtml(item.preview)}</div>`;
+                const title = generateTitleForItem(item);
+                contentHtml = `
+                    ${title ? `<div class="item-title">${escapeHtml(title)}</div>` : ''}
+                    <div class="item-content code">${escapeHtml(item.preview)}</div>
+                `;
             } else {
-                contentHtml = `<div class="item-content">${escapeHtml(item.preview)}</div>`;
+                const title = generateTitleForItem(item);
+                contentHtml = `
+                    ${title ? `<div class="item-title">${escapeHtml(title)}</div>` : ''}
+                    <div class="item-content">${escapeHtml(item.preview)}</div>
+                `;
             }
             
             // Handle text files with thumbnails
@@ -540,7 +1105,7 @@ function renderHistory(items = history) {
             const typeClass = item.type === 'file' ? `type-${item.fileCategory || 'file'}` : `type-${item.source || item.type}`;
             
             return `
-                <div class="history-item ${item.pinned ? 'pinned' : ''}" data-id="${item.id}">
+                <div class="history-item ${item.pinned ? 'pinned' : ''}" data-id="${item.id}" draggable="true">
                     <div class="item-header">
                         <div class="item-type">
                             <span class="type-icon ${typeClass}">${icon}</span>
@@ -550,6 +1115,9 @@ function renderHistory(items = history) {
                     </div>
                     ${contentHtml}
                     <div class="item-actions">
+                        <button class="action-btn" data-action="preview" title="Preview/Edit">
+                            ◎
+                        </button>
                         <button class="action-btn copy" data-action="copy" title="Copy to Clipboard">
                             ⧉
                         </button>
@@ -563,18 +1131,41 @@ function renderHistory(items = history) {
                     </div>
                 </div>
             `;
+          } catch (itemError) {
+            console.error('Error rendering item:', item.id, itemError);
+            // Return a placeholder for broken items
+            return `
+                <div class="history-item error-item" data-id="${item.id || 'unknown'}">
+                    <div class="item-header">
+                        <div class="item-type">
+                            <span class="type-icon">⚠️</span>
+                            <span class="item-time">Error</span>
+                        </div>
+                    </div>
+                    <div class="item-content" style="color: rgba(255,100,100,0.8);">
+                        Failed to render item: ${itemError.message}
+                    </div>
+                    <div class="item-actions">
+                        <button class="action-btn" data-action="delete" title="Delete">🗑️</button>
+                    </div>
+                </div>
+            `;
+          }
         }).join('');
         
         itemCount.textContent = `${items.length} item${items.length !== 1 ? 's' : ''}`;
     } catch (error) {
         console.error('Error rendering history:', error);
         console.error('Error stack:', error.stack);
+        // Try to identify which item caused the error
+        console.error('Items that may have caused error:', items.map(i => ({ id: i.id, type: i.type, metadata: i.metadata })));
         historyList.innerHTML = `
             <div class="empty-state">
                 <img src="${getAssetPath('or-logo.png')}" class="empty-logo" alt="OneReach Logo">
                 <div class="empty-icon">⚠️</div>
                 <div class="empty-text">Error rendering items</div>
                 <div class="empty-hint">${error.message}</div>
+                <button onclick="window.clipboard.clearCorruptItems && window.clipboard.clearCorruptItems()" style="margin-top: 16px; padding: 8px 16px; background: rgba(255,100,100,0.3); border: 1px solid rgba(255,100,100,0.5); border-radius: 6px; color: white; cursor: pointer;">Clear Corrupt Items</button>
             </div>
         `;
         itemCount.textContent = 'Error';
@@ -741,7 +1332,19 @@ function filterItems() {
     if (currentFilter !== 'all') {
         items = items.filter(item => {
             if (currentFilter === 'pinned') return item.pinned;
-            if (currentFilter === 'text') return item.type === 'text' && item.source !== 'code' && item.source !== 'url' && item.source !== 'data' && item.source !== 'spreadsheet';
+            if (currentFilter === 'text') {
+                // Include text type and .md files (but not html type - that has its own filter now)
+                if (item.type === 'text') return item.source !== 'code' && item.source !== 'url' && item.source !== 'data' && item.source !== 'spreadsheet';
+                if (item.type === 'file' && item.fileExt === '.md') return true;
+                return false;
+            }
+            if (currentFilter === 'html') {
+                // HTML type items and .html files
+                if (item.type === 'html') return true;
+                if (item.type === 'generated-document' || item.metadata?.type === 'generated-document') return true;
+                if (item.type === 'file' && (item.fileExt === '.html' || item.fileExt === '.htm')) return true;
+                return false;
+            }
             if (currentFilter === 'code') return item.source === 'code' || (item.type === 'file' && item.fileCategory === 'code');
             if (currentFilter === 'design') return item.type === 'file' && item.fileCategory === 'design';
             if (currentFilter === 'flow') return item.type === 'file' && (item.fileType === 'flow' || item.fileCategory === 'flow');
@@ -793,7 +1396,17 @@ async function searchItems(query) {
             if (currentFilter === 'video') return item.type === 'file' && item.fileType === 'video';
             if (currentFilter === 'audio') return item.type === 'file' && item.fileType === 'audio';
             if (currentFilter === 'file') return item.type === 'file';
-            if (currentFilter === 'text') return item.type === 'text' && item.source !== 'code' && item.source !== 'url';
+            if (currentFilter === 'text') {
+                if (item.type === 'text') return item.source !== 'code' && item.source !== 'url';
+                if (item.type === 'file' && item.fileExt === '.md') return true;
+                return false;
+            }
+            if (currentFilter === 'html') {
+                if (item.type === 'html') return true;
+                if (item.type === 'generated-document' || item.metadata?.type === 'generated-document') return true;
+                if (item.type === 'file' && (item.fileExt === '.html' || item.fileExt === '.htm')) return true;
+                return false;
+            }
             if (currentFilter === 'screenshot') return item.isScreenshot === true;
             return false;
         });
@@ -1104,11 +1717,283 @@ async function showMoveToSpaceModal(itemId) {
     });
 }
 
-// Show metadata modal
+// Show paste to space modal (for Cmd+V when no space is selected)
+async function showPasteToSpaceModal() {
+    // Create a modal for space selection
+    const modalHtml = `
+        <div class="modal-overlay" id="pasteToSpaceModal" style="display: flex;">
+            <div class="modal" style="width: 400px;">
+                <h2 class="modal-title">📋 Paste into Space</h2>
+                <p style="color: rgba(255, 255, 255, 0.6); margin-bottom: 16px; font-size: 13px;">
+                    Choose a space to paste your clipboard content into:
+                </p>
+                <div class="space-select-list" style="max-height: 300px; overflow-y: auto; margin: 20px 0;">
+                    <div class="space-select-item" data-space-id="unclassified" style="
+                        display: flex;
+                        align-items: center;
+                        padding: 12px;
+                        cursor: pointer;
+                        border-radius: 8px;
+                        margin-bottom: 8px;
+                        background: rgba(255, 255, 255, 0.05);
+                        transition: all 0.2s;
+                    ">
+                        <span class="space-icon" style="font-size: 18px; margin-right: 12px;">📥</span>
+                        <span class="space-name" style="flex: 1;">Unclassified</span>
+                    </div>
+                    ${spaces.map(space => `
+                        <div class="space-select-item" data-space-id="${space.id}" style="
+                            display: flex;
+                            align-items: center;
+                            padding: 12px;
+                            cursor: pointer;
+                            border-radius: 8px;
+                            margin-bottom: 8px;
+                            background: rgba(255, 255, 255, 0.05);
+                            transition: all 0.2s;
+                        ">
+                            <span class="space-icon" style="font-size: 18px; margin-right: 12px;">${space.icon}</span>
+                            <span class="space-name" style="flex: 1;">${space.name}</span>
+                            <span class="space-count" style="font-size: 12px; color: rgba(255, 255, 255, 0.5);">${space.itemCount || 0} items</span>
+                        </div>
+                    `).join('')}
+                </div>
+                <div class="modal-buttons">
+                    <button class="btn btn-secondary" onclick="document.getElementById('pasteToSpaceModal').remove()">Cancel</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Add the modal to the page
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    // Add hover effects and click handlers
+    const modal = document.getElementById('pasteToSpaceModal');
+    modal.querySelectorAll('.space-select-item').forEach(item => {
+        item.addEventListener('mouseenter', () => {
+            item.style.background = 'rgba(99, 102, 241, 0.3)';
+        });
+        item.addEventListener('mouseleave', () => {
+            item.style.background = 'rgba(255, 255, 255, 0.05)';
+        });
+        item.addEventListener('click', async () => {
+            const spaceId = item.dataset.spaceId;
+            modal.remove();
+            
+            try {
+                await pasteIntoSpace(spaceId);
+            } catch (error) {
+                console.error('[PasteModal] Error pasting:', error);
+                showNotification('❌ Failed to paste: ' + error.message);
+            }
+        });
+    });
+    
+    // Close on escape
+    const closeOnEscape = (e) => {
+        if (e.key === 'Escape') {
+            modal.remove();
+            document.removeEventListener('keydown', closeOnEscape);
+        }
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    
+    // Close on click outside
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            modal.remove();
+        }
+    });
+}
+
+// Build dynamic HTML for metadata fields based on schema
+function buildDynamicMetadataFields(metadata, schema) {
+    let html = '';
+    
+    const fieldRenderers = {
+        'string': (key, label, value) => `
+            <div class="form-group">
+                <label class="form-label">${label}</label>
+                <input type="text" class="form-input dynamic-field" data-field="${key}" value="${escapeHtml(value || '')}" placeholder="${label}">
+            </div>
+        `,
+        'textarea': (key, label, value) => `
+            <div class="form-group">
+                <label class="form-label">${label}</label>
+                <textarea class="form-input dynamic-field" data-field="${key}" rows="4" placeholder="${label}">${escapeHtml(value || '')}</textarea>
+            </div>
+        `,
+        'array': (key, label, value) => {
+            const displayValue = Array.isArray(value) ? value.join(', ') : value || '';
+            return `
+                <div class="form-group">
+                    <label class="form-label">${label} <span style="font-size: 11px; opacity: 0.6;">(comma-separated)</span></label>
+                    <input type="text" class="form-input dynamic-field" data-field="${key}" value="${escapeHtml(displayValue)}" placeholder="${label}">
+                </div>
+            `;
+        },
+        'list': (key, label, value) => {
+            const displayValue = Array.isArray(value) ? value.join('\n') : value || '';
+            return `
+                <div class="form-group">
+                    <label class="form-label">${label} <span style="font-size: 11px; opacity: 0.6;">(one per line)</span></label>
+                    <textarea class="form-input dynamic-field" data-field="${key}" rows="5" placeholder="${label}">${escapeHtml(displayValue)}</textarea>
+                </div>
+            `;
+        }
+    };
+    
+    // Define field types for rendering
+    const fieldTypes = {
+        'description': 'textarea',
+        'longDescription': 'textarea',
+        'shortDescription': 'string',
+        'notes': 'textarea',
+        'instructions': 'textarea',
+        'extracted_text': 'textarea',
+        'tags': 'array',
+        'topics': 'array',
+        'speakers': 'array',
+        'keyPoints': 'list',
+        'actionItems': 'list',
+        'functions': 'array',
+        'dependencies': 'array',
+        'entities': 'array',
+        'keyFields': 'array',
+        'visible_urls': 'array',
+        'storyBeats': 'list'
+    };
+    
+    // Render fields based on schema
+    schema.fields.forEach(fieldKey => {
+        const label = schema.labels[fieldKey] || fieldKey.charAt(0).toUpperCase() + fieldKey.slice(1).replace(/([A-Z])/g, ' $1');
+        const value = metadata[fieldKey];
+        const type = fieldTypes[fieldKey] || 'string';
+        const renderer = fieldRenderers[type] || fieldRenderers['string'];
+        
+        html += renderer(fieldKey, label, value);
+    });
+    
+    return html;
+}
+
+// Get metadata schema for asset type
+function getMetadataSchemaForType(item) {
+    const type = item.fileType || item.fileCategory || item.type;
+    
+    // Define schemas with type-specific fields
+    const schemas = {
+        'video': {
+            fields: ['title', 'shortDescription', 'longDescription', 'category', 'topics', 'speakers', 'keyPoints', 'targetAudience', 'tags', 'notes'],
+            labels: {
+                'shortDescription': 'Short Description',
+                'longDescription': 'Long Description', 
+                'category': 'Video Type',
+                'keyPoints': 'Key Points',
+                'targetAudience': 'Target Audience'
+            }
+        },
+        'audio': {
+            fields: ['title', 'description', 'audioType', 'topics', 'speakers', 'keyPoints', 'genre', 'tags', 'notes'],
+            labels: {
+                'audioType': 'Audio Type',
+                'genre': 'Genre'
+            }
+        },
+        'code': {
+            fields: ['title', 'description', 'language', 'purpose', 'functions', 'dependencies', 'complexity', 'tags', 'notes'],
+            labels: {
+                'language': 'Programming Language',
+                'purpose': 'Purpose',
+                'functions': 'Functions/Classes',
+                'dependencies': 'Dependencies',
+                'complexity': 'Complexity Level'
+            }
+        },
+        'pdf': {
+            fields: ['title', 'description', 'documentType', 'subject', 'category', 'purpose', 'topics', 'tags', 'notes'],
+            labels: {
+                'documentType': 'Document Type',
+                'subject': 'Subject',
+                'category': 'Category',
+                'purpose': 'Purpose'
+            }
+        },
+        'data': {
+            fields: ['title', 'description', 'dataType', 'format', 'entities', 'keyFields', 'purpose', 'tags', 'notes'],
+            labels: {
+                'dataType': 'Data Type',
+                'format': 'Format',
+                'entities': 'Entities',
+                'keyFields': 'Key Fields',
+                'purpose': 'Purpose'
+            }
+        },
+        'image': {
+            fields: ['title', 'description', 'category', 'extracted_text', 'visible_urls', 'app_detected', 'instructions', 'tags', 'notes'],
+            labels: {
+                'category': 'Image Type',
+                'extracted_text': 'Extracted Text',
+                'visible_urls': 'Visible URLs',
+                'app_detected': 'App/Source',
+                'instructions': 'Usage Instructions'
+            }
+        },
+        'html': {
+            fields: ['title', 'description', 'documentType', 'topics', 'keyPoints', 'author', 'source', 'tags', 'notes'],
+            labels: {
+                'documentType': 'Document Type',
+                'keyPoints': 'Key Points',
+                'author': 'Author',
+                'source': 'Source'
+            }
+        },
+        'url': {
+            fields: ['title', 'description', 'urlType', 'platform', 'topics', 'category', 'purpose', 'tags', 'notes'],
+            labels: {
+                'urlType': 'URL Type',
+                'platform': 'Platform/Website',
+                'category': 'Category',
+                'purpose': 'Purpose'
+            }
+        }
+    };
+    
+    // Add TEXT schema
+    schemas.text = {
+        fields: ['title', 'description', 'contentType', 'topics', 'keyPoints', 'actionItems', 'tags', 'notes'],
+        labels: {
+            'contentType': 'Content Type',
+            'keyPoints': 'Key Points',
+            'actionItems': 'Action Items'
+        }
+    };
+    
+    // Match item type to schema
+    if (type === 'video' || item.fileCategory === 'video') return schemas.video;
+    if (type === 'audio' || item.fileCategory === 'audio') return schemas.audio;
+    if (item.fileCategory === 'code' || item.source === 'code') return schemas.code;
+    if (type === 'pdf' || item.fileExt === '.pdf') return schemas.pdf;
+    if (item.fileCategory === 'data' || ['.json', '.csv', '.yaml'].includes(item.fileExt)) return schemas.data;
+    if (item.type === 'image' || item.isScreenshot) return schemas.image;
+    if (item.type === 'html' || item.html) return schemas.html;
+    // URL detection - single URL with no spaces
+    if (item.content && item.content.trim().match(/^https?:\/\/[^\s]+$/)) return schemas.url;
+    if (item.type === 'text') return schemas.text;
+    
+    // Default: basic schema
+    return {
+        fields: ['title', 'description', 'tags', 'notes'],
+        labels: {}
+    };
+}
+
+// Show metadata modal with DYNAMIC fields based on asset type
 async function showMetadataModal(itemId) {
     const modal = document.getElementById('metadataModal');
     
-    // Get current metadata
+    // Get current metadata AND item
     const result = await window.clipboard.getMetadata(itemId);
     if (!result.success) {
         alert('Could not load metadata');
@@ -1116,13 +2001,383 @@ async function showMetadataModal(itemId) {
     }
     
     const metadata = result.metadata;
+    const item = history.find(h => h.id === itemId);
     
-    // Populate form fields
-    document.getElementById('metaDescription').value = metadata.description || '';
-    document.getElementById('metaNotes').value = metadata.notes || '';
-    document.getElementById('metaInstructions').value = metadata.instructions || '';
-    document.getElementById('metaTags').value = (metadata.tags || []).join(', ');
-    document.getElementById('metaSource').value = metadata.source || '';
+    if (!item) {
+        alert('Item not found');
+        return;
+    }
+    
+    // Get schema for this asset type
+    const schema = getMetadataSchemaForType(item);
+    
+    // Build dynamic form fields
+    const dynamicFields = buildDynamicMetadataFields(metadata, schema);
+    
+    // Insert dynamic fields into modal
+    const dynamicContainer = document.getElementById('dynamicMetadataFields');
+    if (dynamicContainer) {
+        dynamicContainer.innerHTML = dynamicFields;
+    }
+    
+    // Store schema for save
+    modal.dataset.itemId = itemId;
+    modal.dataset.schema = JSON.stringify(schema);
+    
+    // Show asset type indicator
+    const typeIndicator = document.getElementById('assetTypeIndicator');
+    const typeName = document.getElementById('assetTypeName');
+    if (typeIndicator && typeName) {
+        const typeNames = {
+            'video': '🎬 Video',
+            'audio': '🎵 Audio',
+            'code': '💻 Code',
+            'pdf': '📄 PDF Document',
+            'data': '📊 Data File',
+            'image': '📸 Image',
+            'html': '🗂️ HTML Document',
+            'url': '🌐 Web Link'
+        };
+        const assetType = item.fileCategory || item.fileType || item.type;
+        typeName.textContent = typeNames[assetType] || 'Document';
+        typeIndicator.style.display = 'block';
+    }
+    
+    // Handle transcript section for video/audio
+    const transcriptSection = document.getElementById('metaTranscriptSection');
+    const transcriptTextarea = document.getElementById('metaTranscript');
+    const transcriptInfo = document.getElementById('metaTranscriptInfo');
+    const transcriptContent = document.getElementById('transcriptContent');
+    const transcriptToggleIcon = document.getElementById('transcriptToggleIcon');
+    const transcriptPreview = document.getElementById('transcriptPreview');
+    const fetchTranscriptBtn = document.getElementById('fetchTranscriptBtn');
+    const copyTranscriptBtn = document.getElementById('copyTranscriptBtn');
+    
+    // Reset transcript section to collapsed state
+    if (transcriptContent) transcriptContent.style.display = 'none';
+    if (transcriptToggleIcon) transcriptToggleIcon.style.transform = 'rotate(0deg)';
+    if (transcriptPreview) transcriptPreview.style.display = 'inline';
+    
+    // Check if this is a video/audio item
+    const historyItem = history.find(h => h.id === itemId);
+    const isMedia = historyItem && (
+        historyItem.fileCategory === 'video' || 
+        historyItem.fileCategory === 'audio' ||
+        historyItem.fileType?.startsWith('video/') ||
+        historyItem.fileType?.startsWith('audio/')
+    );
+    const isYouTube = metadata.source === 'youtube' || metadata.youtubeUrl;
+    
+    if (isMedia) {
+        transcriptSection.style.display = 'block';
+        
+        // Try to load transcript
+        const transcriptResult = await window.clipboard.getTranscription(itemId);
+        
+        // Store transcript data for toggle
+        let plainTranscript = '';
+        let timecodedTranscript = '';
+        
+        if (transcriptResult.success && transcriptResult.hasTranscription) {
+            plainTranscript = transcriptResult.transcription;
+            
+            // Generate timecoded version if segments available
+            if (transcriptResult.segments && transcriptResult.segments.length > 0) {
+                timecodedTranscript = transcriptResult.segments.map(seg => 
+                    `[${seg.startFormatted || formatSegmentTime(seg.start)}] ${seg.text}`
+                ).join('\n');
+            } else if (metadata.transcript?.segments?.length > 0) {
+                // Try from metadata
+                timecodedTranscript = metadata.transcript.segments.map(seg => 
+                    `[${seg.startFormatted || formatSegmentTime(seg.start)}] ${seg.text}`
+                ).join('\n');
+            }
+            
+            // Helper to format time
+            function formatSegmentTime(seconds) {
+                const h = Math.floor(seconds / 3600);
+                const m = Math.floor((seconds % 3600) / 60);
+                const s = Math.floor(seconds % 60);
+                const ms = Math.floor((seconds % 1) * 1000);
+                return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${ms.toString().padStart(3, '0')}`;
+            }
+            
+            // Default to plain text
+            transcriptTextarea.value = plainTranscript;
+            
+            // Set preview text for collapsed state (first 50 chars)
+            if (transcriptPreview) {
+                const previewText = plainTranscript.substring(0, 80).replace(/\n/g, ' ').trim();
+                transcriptPreview.textContent = previewText ? `"${previewText}..."` : '';
+            }
+            
+            // Show info about the transcript
+            let infoText = `${transcriptResult.transcription.length.toLocaleString()} characters`;
+            if (transcriptResult.source === 'youtube') {
+                infoText += ' • From YouTube captions';
+                if (transcriptResult.isAutoGenerated) infoText += ' (auto-generated)';
+                if (transcriptResult.language) infoText += ` • ${transcriptResult.language}`;
+            } else if (transcriptResult.source === 'whisper') {
+                infoText += ' • Transcribed with Whisper';
+            }
+            if (timecodedTranscript) {
+                infoText += ' • Timecodes available';
+            }
+            transcriptInfo.textContent = infoText;
+            fetchTranscriptBtn.style.display = 'none';
+            
+            // Set up timecode toggle
+            const timecodeToggle = document.getElementById('showTimecodeToggle');
+            if (timecodeToggle && timecodedTranscript) {
+                timecodeToggle.disabled = false;
+                timecodeToggle.onchange = () => {
+                    if (timecodeToggle.checked) {
+                        transcriptTextarea.value = timecodedTranscript;
+                    } else {
+                        transcriptTextarea.value = plainTranscript;
+                    }
+                };
+            } else if (timecodeToggle) {
+                timecodeToggle.disabled = true;
+            }
+        } else {
+            transcriptTextarea.value = '';
+            transcriptTextarea.placeholder = 'No transcript available';
+            transcriptInfo.textContent = isYouTube ? 'YouTube transcript not fetched yet' : 'No transcript available';
+            
+            // Show fetch button for YouTube videos
+            if (isYouTube) {
+                fetchTranscriptBtn.style.display = 'inline-block';
+                fetchTranscriptBtn.onclick = async () => {
+                    fetchTranscriptBtn.disabled = true;
+                    fetchTranscriptBtn.textContent = 'Fetching...';
+                    transcriptInfo.textContent = 'Fetching transcript from YouTube...';
+                    
+                    try {
+                        const fetchResult = await window.youtube.fetchTranscriptForItem(itemId);
+                        if (fetchResult.success) {
+                            transcriptTextarea.value = fetchResult.transcription;
+                            transcriptInfo.textContent = `${fetchResult.transcription.length.toLocaleString()} characters • From YouTube captions`;
+                            fetchTranscriptBtn.style.display = 'none';
+                        } else {
+                            transcriptInfo.textContent = 'Error: ' + fetchResult.error;
+                            fetchTranscriptBtn.textContent = 'Retry';
+                            fetchTranscriptBtn.disabled = false;
+                        }
+                    } catch (e) {
+                        transcriptInfo.textContent = 'Error: ' + e.message;
+                        fetchTranscriptBtn.textContent = 'Retry';
+                        fetchTranscriptBtn.disabled = false;
+                    }
+                };
+            } else {
+                fetchTranscriptBtn.style.display = 'none';
+            }
+        }
+        
+        // Copy button handler
+        copyTranscriptBtn.onclick = () => {
+            const text = transcriptTextarea.value;
+            if (text) {
+                navigator.clipboard.writeText(text);
+                copyTranscriptBtn.textContent = 'Copied!';
+                setTimeout(() => { copyTranscriptBtn.textContent = 'Copy'; }, 2000);
+            }
+        };
+        
+        // Extract Audio button - show for video files
+        const extractAudioBtn = document.getElementById('extractAudioBtn');
+        const isVideo = historyItem?.fileCategory === 'video' || historyItem?.fileType?.startsWith('video/');
+        if (isVideo && extractAudioBtn) {
+            // Check if audio already extracted
+            if (metadata.audioPath) {
+                extractAudioBtn.textContent = '🎵 Download Audio';
+                extractAudioBtn.style.display = 'inline-block';
+                extractAudioBtn.onclick = () => {
+                    // Open file in finder/downloads
+                    if (window.electron?.shell?.showItemInFolder) {
+                        window.electron.shell.showItemInFolder(metadata.audioPath);
+                    } else {
+                        alert('Audio file saved at: ' + metadata.audioPath);
+                    }
+                };
+            } else {
+                extractAudioBtn.textContent = '🎵 Extract Audio';
+                extractAudioBtn.style.display = 'inline-block';
+                extractAudioBtn.onclick = async () => {
+                    extractAudioBtn.disabled = true;
+                    extractAudioBtn.textContent = '⏳ 0%';
+                    
+                    // Set up progress listener
+                    let removeProgressListener = null;
+                    if (window.clipboard.onAudioExtractProgress) {
+                        removeProgressListener = window.clipboard.onAudioExtractProgress((data) => {
+                            if (data.itemId === itemId) {
+                                extractAudioBtn.textContent = `⏳ ${data.percent}%`;
+                            }
+                        });
+                    }
+                    
+                    try {
+                        const result = await window.clipboard.extractAudio(itemId);
+                        
+                        // Clean up listener
+                        if (removeProgressListener) removeProgressListener();
+                        
+                        if (result.success) {
+                            extractAudioBtn.textContent = '✅ Audio Ready';
+                            extractAudioBtn.style.background = 'rgba(34, 197, 94, 0.6)';
+                            
+                            // Update button to download
+                            setTimeout(() => {
+                                extractAudioBtn.textContent = '🎵 Download Audio';
+                                extractAudioBtn.style.background = '';
+                                extractAudioBtn.disabled = false;
+                                extractAudioBtn.onclick = () => {
+                                    if (window.electron?.shell?.showItemInFolder) {
+                                        window.electron.shell.showItemInFolder(result.audioPath);
+                                    } else {
+                                        alert('Audio file saved at: ' + result.audioPath);
+                                    }
+                                };
+                            }, 2000);
+                        } else {
+                            extractAudioBtn.textContent = '❌ Failed';
+                            alert('Error: ' + result.error);
+                            setTimeout(() => {
+                                extractAudioBtn.textContent = '🎵 Extract Audio';
+                                extractAudioBtn.disabled = false;
+                            }, 2000);
+                        }
+                    } catch (e) {
+                        // Clean up listener
+                        if (removeProgressListener) removeProgressListener();
+                        
+                        extractAudioBtn.textContent = '❌ Error';
+                        alert('Error: ' + e.message);
+                        setTimeout(() => {
+                            extractAudioBtn.textContent = '🎵 Extract Audio';
+                            extractAudioBtn.disabled = false;
+                        }, 2000);
+                    }
+                };
+            }
+        } else if (extractAudioBtn) {
+            extractAudioBtn.style.display = 'none';
+        }
+        
+        // Identify Speakers button - show if there's a transcript
+        const identifySpeakersBtn = document.getElementById('identifySpeakersBtn');
+        if (transcriptResult.success && transcriptResult.hasTranscription) {
+            identifySpeakersBtn.style.display = 'inline-block';
+            identifySpeakersBtn.onclick = async () => {
+                console.log('[SpeakerID-UI] Button clicked!');
+                const currentTranscript = transcriptTextarea.value;
+                if (!currentTranscript) {
+                    console.log('[SpeakerID-UI] No transcript to process');
+                    return;
+                }
+                
+                console.log('[SpeakerID-UI] Transcript length:', currentTranscript.length);
+                
+                identifySpeakersBtn.disabled = true;
+                identifySpeakersBtn.textContent = '⏳ Analyzing...';
+                transcriptInfo.textContent = 'AI is analyzing the transcript to identify speakers...';
+                
+                try {
+                    // Get rich context from video metadata to help identify speakers
+                    let contextHint = '';
+                    
+                    // YouTube/video metadata
+                    if (metadata.title) contextHint += `VIDEO TITLE: ${metadata.title}\n`;
+                    if (metadata.uploader) contextHint += `CHANNEL/UPLOADER: ${metadata.uploader}\n`;
+                    if (metadata.youtubeId) contextHint += `YOUTUBE ID: ${metadata.youtubeId}\n`;
+                    
+                    // Full description is very helpful for identifying speakers
+                    if (metadata.description) {
+                        contextHint += `\nVIDEO DESCRIPTION:\n${metadata.description}\n`;
+                    }
+                    
+                    // Tags can provide context
+                    if (metadata.tags && metadata.tags.length > 0) {
+                        contextHint += `\nTAGS: ${metadata.tags.join(', ')}\n`;
+                    }
+                    
+                    // Any AI-generated description
+                    if (metadata.aiDescription) {
+                        contextHint += `\nAI-GENERATED CONTEXT:\n${metadata.aiDescription}\n`;
+                    }
+                    
+                    // Notes from user
+                    if (metadata.notes) {
+                        contextHint += `\nUSER NOTES: ${metadata.notes}\n`;
+                    }
+                    
+                    console.log('[SpeakerID-UI] Context hint length:', contextHint.length);
+                    
+                    console.log('[SpeakerID-UI] Calling identifySpeakers IPC...');
+                    
+                    // Set up progress listener
+                    let removeProgressListener = null;
+                    if (window.clipboard.onSpeakerIdProgress) {
+                        removeProgressListener = window.clipboard.onSpeakerIdProgress((progress) => {
+                            console.log('[SpeakerID-UI] Progress:', progress.status);
+                            
+                            // Update status text
+                            if (progress.chunk && progress.total) {
+                                const pct = Math.round((progress.chunk / progress.total) * 100);
+                                identifySpeakersBtn.textContent = `⏳ ${pct}%`;
+                                transcriptInfo.textContent = progress.status;
+                            } else {
+                                transcriptInfo.textContent = progress.status;
+                            }
+                            
+                            // Show partial results as they come in
+                            if (progress.partialResult) {
+                                transcriptTextarea.value = progress.partialResult;
+                            }
+                        });
+                    }
+                    
+                    const result = await window.clipboard.identifySpeakers({
+                        itemId: itemId,
+                        transcript: currentTranscript,
+                        contextHint: contextHint
+                    });
+                    
+                    // Clean up progress listener
+                    if (removeProgressListener) removeProgressListener();
+                    
+                    console.log('[SpeakerID-UI] Got result:', result?.success, result?.error);
+                    
+                    if (result.success) {
+                        transcriptTextarea.value = result.transcript;
+                        transcriptInfo.textContent = `Speakers identified with ${result.model} • ${result.transcript.length.toLocaleString()} characters`;
+                        identifySpeakersBtn.textContent = '✓ Done';
+                        identifySpeakersBtn.style.background = 'rgba(34, 197, 94, 0.6)';
+                        setTimeout(() => {
+                            identifySpeakersBtn.textContent = '✨ Re-analyze';
+                            identifySpeakersBtn.style.background = '';
+                            identifySpeakersBtn.disabled = false;
+                        }, 3000);
+                    } else {
+                        transcriptInfo.textContent = 'Error: ' + result.error;
+                        identifySpeakersBtn.textContent = '✨ Retry';
+                        identifySpeakersBtn.disabled = false;
+                    }
+                } catch (e) {
+                    console.error('[SpeakerID] Error:', e);
+                    transcriptInfo.textContent = 'Error: ' + e.message;
+                    identifySpeakersBtn.textContent = '✨ Retry';
+                    identifySpeakersBtn.disabled = false;
+                }
+            };
+        } else {
+            identifySpeakersBtn.style.display = 'none';
+        }
+    } else {
+        transcriptSection.style.display = 'none';
+    }
     
     // AI fields
     document.getElementById('metaAiGenerated').checked = metadata.ai_generated || false;
@@ -1170,33 +2425,76 @@ function hideMetadataModal() {
     document.getElementById('metadataModal').style.display = 'none';
 }
 
-// Save metadata
+// Toggle transcript section expanded/collapsed
+function toggleTranscriptSection() {
+    const content = document.getElementById('transcriptContent');
+    const icon = document.getElementById('transcriptToggleIcon');
+    const preview = document.getElementById('transcriptPreview');
+    
+    if (content.style.display === 'none') {
+        content.style.display = 'block';
+        icon.style.transform = 'rotate(90deg)';
+        preview.style.display = 'none';
+    } else {
+        content.style.display = 'none';
+        icon.style.transform = 'rotate(0deg)';
+        preview.style.display = 'inline';
+    }
+}
+
+// Save metadata from DYNAMIC fields
 async function saveMetadata() {
     const modal = document.getElementById('metadataModal');
     const itemId = modal.dataset.itemId;
+    const schema = JSON.parse(modal.dataset.schema || '{"fields":[]}');
+
+    // Collect all dynamic field values
+    const updates = {};
     
-    // Collect form data
-    const updates = {
-        description: document.getElementById('metaDescription').value,
-        notes: document.getElementById('metaNotes').value,
-        instructions: document.getElementById('metaInstructions').value,
-        tags: document.getElementById('metaTags').value.split(',').map(t => t.trim()).filter(t => t),
-        source: document.getElementById('metaSource').value,
-        ai_generated: document.getElementById('metaAiGenerated').checked,
-        ai_assisted: document.getElementById('metaAiAssisted').checked,
-        ai_model: document.getElementById('metaAiModel').value,
-        ai_provider: document.getElementById('metaAiProvider').value,
-        ai_prompt: document.getElementById('metaAiPrompt').value,
-        ai_context: document.getElementById('metaAiContext').value
-    };
+    document.querySelectorAll('.dynamic-field').forEach(field => {
+        const key = field.dataset.field;
+        let value = field.value.trim();
+        
+        // Parse based on field type
+        if (key === 'tags' || key === 'topics' || key === 'speakers' || key === 'dependencies' || key === 'functions' || key === 'entities' || key === 'keyFields' || key === 'visible_urls') {
+            // Array fields (comma-separated)
+            updates[key] = value ? value.split(',').map(v => v.trim()).filter(v => v) : [];
+        } else if (key === 'keyPoints' || key === 'actionItems' || key === 'storyBeats') {
+            // List fields (line-separated)
+            updates[key] = value ? value.split('\n').map(v => v.trim()).filter(v => v) : [];
+        } else {
+            // String fields
+            updates[key] = value;
+        }
+    });
+
+    console.log('[SaveMetadata] Saving dynamic fields:', updates);
+
+    // Legacy field fallback (if no dynamic fields)
+    if (Object.keys(updates).length === 0) {
+        // Parse tags/topics
+        const tagsInput = document.getElementById('metaTags')?.value?.split(',').map(t => t.trim()).filter(t => t) || [];
+
+        const speakersInput = document.getElementById('metaSpeakers')?.value?.split(',').map(s => s.trim()).filter(s => s) || [];
+        const storyBeatsInput = document.getElementById('metaStoryBeats')?.value?.split('\n').map(b => b.trim()).filter(b => b) || [];
+        
+        updates.title = document.getElementById('metaTitle')?.value || '';
+        updates.description = document.getElementById('metaDescription')?.value || '';
+        updates.notes = document.getElementById('metaNotes')?.value || '';
+        updates.instructions = document.getElementById('metaInstructions')?.value || '';
+        updates.tags = tagsInput;
+        updates.source = document.getElementById('metaSource')?.value || '';
+        if (speakersInput.length > 0) updates.speakers = speakersInput;
+        if (storyBeatsInput.length > 0) updates.storyBeats = storyBeatsInput;
+    }
     
     // Save to backend
     const result = await window.clipboard.updateMetadata(itemId, updates);
     
     if (result.success) {
         hideMetadataModal();
-        // Optionally reload to show updated tags
         await loadHistory();
+        showNotification('✅ Metadata saved');
     } else {
         alert('Failed to save metadata: ' + (result.error || 'Unknown error'));
     }
@@ -1246,36 +2544,29 @@ async function generateMetadataWithAI() {
         );
         
         if (result.success) {
-            // Update form fields with generated metadata
+            // Update DYNAMIC form fields with generated metadata
             const metadata = result.metadata;
             
-            document.getElementById('metaDescription').value = metadata.description || '';
-            document.getElementById('metaNotes').value = metadata.notes || '';
-            document.getElementById('metaInstructions').value = metadata.instructions || '';
-            document.getElementById('metaTags').value = (metadata.tags || []).join(', ');
-            document.getElementById('metaSource').value = metadata.source || '';
+            console.log('[AI Generate] Generated metadata:', metadata);
             
-            // Update AI fields
-            document.getElementById('metaAiGenerated').checked = metadata.ai_generated || false;
-            document.getElementById('metaAiAssisted').checked = true; // Mark as AI assisted
-            document.getElementById('metaAiModel').value = metadata.ai_model || '';
-            document.getElementById('metaAiProvider').value = metadata.ai_provider || '';
-            document.getElementById('metaAiPrompt').value = customPrompt || 'AI-generated metadata';
-            document.getElementById('metaAiContext').value = metadata.ai_context || 'Generated using Claude AI';
-            
-            // Update status
-            statusEl.textContent = '✓ Metadata generated successfully! Review and save.';
-            statusEl.style.color = '#64ff64';
-            
-            // Flash the fields that were updated
-            const fieldsToFlash = [
-                'metaDescription', 'metaNotes', 'metaInstructions', 
-                'metaTags', 'metaSource'
-            ];
-            
-            fieldsToFlash.forEach(fieldId => {
-                const field = document.getElementById(fieldId);
-                if (field) {
+            // Update all dynamic fields
+            document.querySelectorAll('.dynamic-field').forEach(field => {
+                const key = field.dataset.field;
+                const value = metadata[key];
+                
+                if (value !== undefined && value !== null) {
+                    if (Array.isArray(value)) {
+                        // Array fields - join with comma or newline
+                        if (key === 'keyPoints' || key === 'actionItems' || key === 'storyBeats') {
+                            field.value = value.join('\n');
+                        } else {
+                            field.value = value.join(', ');
+                        }
+                    } else {
+                        field.value = value;
+                    }
+                    
+                    // Flash this field
                     field.style.transition = 'background-color 0.3s';
                     field.style.backgroundColor = 'rgba(59, 130, 246, 0.2)';
                     setTimeout(() => {
@@ -1283,6 +2574,10 @@ async function generateMetadataWithAI() {
                     }, 1000);
                 }
             });
+            
+            // Update status
+            statusEl.textContent = '✓ Metadata generated successfully! Review and save.';
+            statusEl.style.color = '#64ff64';
             
             // Auto-save after a delay (give user time to review)
             setTimeout(() => {
@@ -1518,6 +2813,17 @@ function setupEventListeners() {
         showSpaceModal();
     });
     
+    // History item double-click to open preview
+    document.getElementById('historyList').addEventListener('dblclick', async (e) => {
+        const item = e.target.closest('.history-item');
+        if (item) {
+            e.preventDefault();
+            e.stopPropagation();
+            const itemId = item.dataset.id;
+            await showPreviewModal(itemId);
+        }
+    });
+    
     // History item actions
     document.getElementById('historyList').addEventListener('click', async (e) => {
         const item = e.target.closest('.history-item');
@@ -1529,7 +2835,9 @@ function setupEventListeners() {
             const actionType = action.dataset.action;
             const itemId = item.dataset.id;
             
-            if (actionType === 'pin') {
+            if (actionType === 'preview') {
+                await showPreviewModal(itemId);
+            } else if (actionType === 'pin') {
                 await window.clipboard.togglePin(itemId);
                 await loadHistory();
             } else if (actionType === 'copy') {
@@ -1578,6 +2886,13 @@ function setupEventListeners() {
                 await showMetadataModal(itemId);
             } else if (actionType === 'menu') {
                 showContextMenu(e, itemId);
+            } else if (actionType === 'delete') {
+                // Direct delete action (used for error items)
+                if (confirm('Delete this item?')) {
+                    await window.clipboard.deleteItem(itemId);
+                    await loadHistory();
+                    await loadSpaces();
+                }
             } else if (actionType === 'pdf-prev' || actionType === 'pdf-next') {
                 // Handle PDF navigation
                 console.log('PDF navigation clicked:', actionType);
@@ -1833,7 +3148,36 @@ function setupEventListeners() {
     });
     
     // Keyboard shortcuts
-    document.addEventListener('keydown', (e) => {
+    document.addEventListener('keydown', async (e) => {
+        // Cmd+V / Ctrl+V - Paste into current space or show space chooser
+        if ((e.metaKey || e.ctrlKey) && e.key === 'v') {
+            // Don't intercept if user is typing in an input field
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) {
+                return;
+            }
+            
+            e.preventDefault();
+            
+            // If a space is selected, paste directly into it
+            if (currentSpace) {
+                const spaceName = spaces.find(s => s.id === currentSpace)?.name || 'Current Space';
+                console.log('[Keyboard Paste] Pasting into current space:', currentSpace, spaceName);
+                
+                try {
+                    await pasteIntoSpace(currentSpace);
+                } catch (error) {
+                    console.error('[Keyboard Paste] Error:', error);
+                    showNotification('❌ Failed to paste: ' + error.message);
+                }
+            } else {
+                // No space selected - show space chooser
+                console.log('[Keyboard Paste] No space selected, showing chooser');
+                showPasteToSpaceModal();
+            }
+            return;
+        }
+        
+        // Escape key handling
         if (e.key === 'Escape') {
             if (document.getElementById('metadataModal').style.display === 'flex') {
                 hideMetadataModal();
@@ -1967,6 +3311,1639 @@ function setupEventListeners() {
     });
 }
 
+// Preview/Edit Panel Functions
+let currentPreviewItem = null;
+let isEditMode = false;
+let originalContent = '';
+
+// Image editing state
+let imageEditHistory = []; // Stack of previous image states for undo
+let currentImageData = null; // Current image data URL
+
+// Show preview modal for an item
+async function showPreviewModal(itemId) {
+    const historyItem = history.find(h => h.id === itemId);
+    
+    if (!historyItem) {
+        console.error('Item not found:', itemId);
+        return;
+    }
+    
+    // Use video-specific modal for video files
+    const isVideo = historyItem.fileType === 'video' || 
+                    historyItem.fileCategory === 'video' ||
+                    historyItem.fileType?.startsWith('video/') ||
+                    (historyItem.metadata?.source === 'youtube') ||
+                    (historyItem.metadata?.youtubeUrl);
+    
+    console.log('[Preview] Item type check:', { 
+        fileType: historyItem.fileType, 
+        fileCategory: historyItem.fileCategory,
+        source: historyItem.metadata?.source,
+        isVideo 
+    });
+    
+    if (isVideo) {
+        showVideoPreviewModal(itemId);
+        return;
+    }
+    
+    const modal = document.getElementById('previewModal');
+    currentPreviewItem = historyItem;
+    isEditMode = false;
+    
+    // Update title based on item type
+    const title = document.getElementById('previewModalTitle');
+    const typeLabel = getTypeLabel(historyItem);
+    title.textContent = `Preview: ${typeLabel}`;
+    
+    // Update item info
+    document.getElementById('previewItemType').textContent = `Type: ${typeLabel}`;
+    document.getElementById('previewItemSize').textContent = `Size: ${getContentSize(historyItem)}`;
+    document.getElementById('previewItemDate').textContent = `Date: ${new Date(historyItem.timestamp).toLocaleString()}`;
+    document.getElementById('previewItemSource').textContent = `Source: ${historyItem.source || historyItem.metadata?.context?.app?.name || 'Unknown'}`;
+    
+    // Get full content
+    let fullContent = '';
+    try {
+        const result = await window.clipboard.getItemContent(itemId);
+        if (result.success) {
+            fullContent = result.content;
+            originalContent = fullContent;
+        } else {
+            fullContent = historyItem.content || historyItem.preview || 'Unable to load content';
+            originalContent = fullContent;
+        }
+    } catch (error) {
+        console.error('Error loading content:', error);
+        fullContent = historyItem.content || historyItem.preview || 'Error loading content';
+        originalContent = fullContent;
+    }
+    
+    // Show appropriate view based on content type
+    hideAllPreviewModes();
+    
+    // Helper function to check if content looks like actual HTML
+    const looksLikeHtml = (content) => {
+        if (!content || typeof content !== 'string') return false;
+        // Check for common HTML patterns - must have actual HTML tags
+        const htmlPattern = /<\s*(html|head|body|div|span|p|a|img|table|ul|ol|li|h[1-6]|script|style|link|meta|form|input|button|header|footer|nav|section|article)[^>]*>/i;
+        return htmlPattern.test(content);
+    };
+    
+    if (historyItem.type === 'image' || (historyItem.type === 'file' && historyItem.fileType === 'image-file')) {
+        // Show image preview
+        const imgSrc = historyItem.content || historyItem.thumbnail || fullContent;
+        document.getElementById('previewImage').src = imgSrc;
+        currentImageData = imgSrc; // Store for AI editing
+        document.getElementById('previewImageMode').style.display = 'block';
+        document.getElementById('previewModeBtn').style.display = 'none'; // Text edit not available for images
+        
+        // Reset image edit state
+        resetImageEditState();
+    } else if (historyItem.type === 'file' && (historyItem.fileType === 'audio' || historyItem.fileType === 'video' || historyItem.fileCategory === 'audio' || historyItem.fileCategory === 'video')) {
+        // Show audio/video preview with transcription option
+        const isAudio = historyItem.fileType === 'audio' || historyItem.fileCategory === 'audio';
+        const mediaType = isAudio ? 'Audio' : 'Video';
+        
+        // Display file info with media player - compact layout
+        let mediaHtml = `
+            <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 16px;">
+                <div style="font-size: 40px;">${isAudio ? '🎵' : '🎬'}</div>
+                <div>
+                    <div style="font-size: 14px; font-weight: 500; color: rgba(255, 255, 255, 0.9);">${escapeHtml(historyItem.fileName || 'Media File')}</div>
+                    <div style="font-size: 11px; color: rgba(255, 255, 255, 0.5);">${formatFileSize(historyItem.fileSize)} • ${historyItem.fileExt?.toUpperCase() || mediaType}</div>
+                </div>
+            </div>
+            <div id="mediaPlayerContainer">
+                <${isAudio ? 'audio' : 'video'} id="previewMediaPlayer" controls style="width: 100%; ${isAudio ? 'height: 54px;' : 'max-height: 250px;'}" preload="auto">
+                    Your browser does not support the ${isAudio ? 'audio' : 'video'} element.
+                </${isAudio ? 'audio' : 'video'}>
+                <div id="mediaLoadStatus" style="text-align: center; margin-top: 8px; font-size: 11px; color: rgba(255, 255, 255, 0.5);">Loading media...</div>
+            </div>
+        `;
+        
+        const viewMode = document.getElementById('previewViewMode');
+        viewMode.innerHTML = mediaHtml;
+        viewMode.style.display = 'block';
+        // Reset text-specific styles for media content
+        viewMode.style.whiteSpace = 'normal';
+        viewMode.style.fontFamily = 'inherit';
+        viewMode.style.overflow = 'visible';
+        viewMode.style.flex = 'none';
+        viewMode.style.minHeight = 'auto';
+        document.getElementById('previewModeBtn').style.display = 'none';
+        
+        // Show transcription section for audio/video
+        document.getElementById('transcriptionSection').style.display = 'block';
+        resetTranscriptionState();
+        
+        // Show video editor section for video files only
+        if (!isAudio) {
+            document.getElementById('videoEditorSection').style.display = 'block';
+        }
+        
+        // Load the media file
+        loadMediaForPreview(historyItem);
+        
+        // Load attached transcription if exists
+        loadAttachedTranscription(historyItem.id);
+    } else if ((historyItem.type === 'generated-document') || (historyItem.metadata?.type === 'generated-document')) {
+        // Generated documents should always render as HTML
+        const iframe = document.getElementById('previewHtmlFrame');
+        iframe.srcdoc = fullContent || historyItem.html || '';
+        document.getElementById('previewHtmlMode').style.display = 'block';
+        document.getElementById('previewModeBtn').style.display = 'inline-block';
+    } else if (historyItem.type === 'html') {
+        // For 'html' type, check if content actually looks like HTML
+        // Use the raw html property if available, otherwise check the fullContent
+        const htmlContent = historyItem.html || fullContent;
+        
+        if (looksLikeHtml(htmlContent)) {
+            // Show HTML preview in iframe
+            const iframe = document.getElementById('previewHtmlFrame');
+            iframe.srcdoc = htmlContent;
+            document.getElementById('previewHtmlMode').style.display = 'block';
+            document.getElementById('previewModeBtn').style.display = 'inline-block';
+        } else {
+            // Content doesn't look like HTML, show as plain text
+            document.getElementById('previewViewMode').textContent = fullContent;
+            document.getElementById('previewViewMode').style.display = 'block';
+            document.getElementById('previewModeBtn').style.display = 'inline-block';
+            // Show TTS for plain text content (even if type is 'html')
+            document.getElementById('textToSpeechSection').style.display = 'block';
+        }
+    } else if (isMarkdownContent(fullContent, historyItem)) {
+        // Show Markdown preview
+        document.getElementById('markdownRendered').innerHTML = renderMarkdown(fullContent);
+        document.getElementById('previewMarkdownMode').style.display = 'block';
+        document.getElementById('previewModeBtn').style.display = 'inline-block';
+        // Show TTS for markdown
+        document.getElementById('textToSpeechSection').style.display = 'block';
+    } else {
+        // Show text preview (default)
+        const viewMode = document.getElementById('previewViewMode');
+        viewMode.textContent = fullContent;
+        viewMode.style.display = 'block';
+        // Reset to text-appropriate styles
+        viewMode.style.whiteSpace = 'pre-wrap';
+        viewMode.style.fontFamily = "'Monaco', 'Consolas', monospace";
+        viewMode.style.overflow = 'auto';
+        viewMode.style.flex = '1';
+        document.getElementById('previewModeBtn').style.display = 'inline-block';
+        // Show TTS for plain text
+        document.getElementById('textToSpeechSection').style.display = 'block';
+    }
+    
+    // Reset TTS state then check for attached audio
+    resetTTSState();
+    
+    // Load attached TTS audio if exists (async but we don't need to await)
+    if (currentPreviewItem && currentPreviewItem.id) {
+        console.log('[TTS] Calling loadAttachedTTSAudio for:', currentPreviewItem.id);
+        loadAttachedTTSAudio(currentPreviewItem.id).then(hasAudio => {
+            console.log('[TTS] loadAttachedTTSAudio returned:', hasAudio);
+        }).catch(err => {
+            console.error('[TTS] loadAttachedTTSAudio error:', err);
+        });
+    }
+    
+    // Reset edit mode button
+    updateEditModeButton();
+    
+    // Show modal
+    modal.style.display = 'flex';
+}
+
+// Hide all preview modes
+function hideAllPreviewModes() {
+    document.getElementById('previewViewMode').style.display = 'none';
+    document.getElementById('previewEditMode').style.display = 'none';
+    document.getElementById('previewImageMode').style.display = 'none';
+    document.getElementById('previewHtmlMode').style.display = 'none';
+    document.getElementById('previewMarkdownMode').style.display = 'none';
+    document.getElementById('textToSpeechSection').style.display = 'none';
+    document.getElementById('transcriptionSection').style.display = 'none';
+    document.getElementById('videoEditorSection').style.display = 'none';
+}
+
+// Reset TTS state
+function resetTTSState() {
+    document.getElementById('ttsAudioContainer').style.display = 'none';
+    document.getElementById('saveTtsAudioBtn').style.display = 'none';
+    document.getElementById('ttsStatus').style.display = 'none';
+    document.getElementById('ttsButtonIcon').textContent = '🎙️';
+    document.getElementById('ttsButtonText').textContent = 'Generate Audio';
+    document.getElementById('generateSpeechBtn').disabled = false;
+    
+    const audioPlayer = document.getElementById('ttsAudioPlayer');
+    audioPlayer.src = '';
+    audioPlayer.load();
+    
+    window.currentTTSAudioData = null;
+    window.currentTTSVoice = null;
+    window.ttsAudioAttached = false;
+}
+
+// Load attached TTS audio for an item
+async function loadAttachedTTSAudio(itemId) {
+    try {
+        console.log('[TTS] Loading attached audio for item:', itemId);
+        const result = await window.clipboard.getTTSAudio(itemId);
+        console.log('[TTS] Get audio result:', result);
+        
+        if (result && result.success && result.hasAudio && result.audioData) {
+            console.log('[TTS] Audio data length:', result.audioData.length);
+            
+            // Audio is attached to this item
+            window.currentTTSAudioData = result.audioData;
+            window.currentTTSVoice = result.voice || 'nova';
+            window.ttsAudioAttached = true;
+            
+            // Set the voice selector to match
+            const voiceSelect = document.getElementById('ttsVoiceSelect');
+            if (voiceSelect && result.voice) {
+                voiceSelect.value = result.voice;
+            }
+            
+            // IMPORTANT: Show the TTS section container first
+            const ttsSection = document.getElementById('textToSpeechSection');
+            ttsSection.style.display = 'block';
+            console.log('[TTS] TTS section display:', ttsSection.style.display);
+            
+            // Show the audio container
+            const audioContainer = document.getElementById('ttsAudioContainer');
+            audioContainer.style.display = 'block';
+            console.log('[TTS] Audio container display:', audioContainer.style.display);
+            
+            // Get the audio player
+            const audioPlayer = document.getElementById('ttsAudioPlayer');
+            
+            // Create a blob from base64 and use blob URL (more reliable than data URL)
+            const byteCharacters = atob(result.audioData);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray], { type: 'audio/mpeg' });
+            const blobUrl = URL.createObjectURL(blob);
+            
+            console.log('[TTS] Created blob URL:', blobUrl);
+            
+            audioPlayer.src = blobUrl;
+            audioPlayer.load(); // Explicitly load the audio
+            
+            // Wait for audio to load
+            audioPlayer.onloadedmetadata = () => {
+                console.log('[TTS] Audio loaded successfully, duration:', audioPlayer.duration);
+            };
+            
+            audioPlayer.onerror = (e) => {
+                console.error('[TTS] Audio load error:', e);
+            };
+            
+            document.getElementById('saveTtsAudioBtn').style.display = 'none'; // Already saved
+            
+            showTTSStatus('🔊 Audio attached to this item', 'success');
+            
+            return true;
+        } else {
+            console.log('[TTS] No audio attached - result:', result);
+        }
+    } catch (error) {
+        console.error('[TTS] Error loading attached TTS audio:', error);
+    }
+    return false;
+}
+
+// Generate speech from text using OpenAI TTS
+async function generateSpeech() {
+    const btn = document.getElementById('generateSpeechBtn');
+    const btnIcon = document.getElementById('ttsButtonIcon');
+    const btnText = document.getElementById('ttsButtonText');
+    const statusEl = document.getElementById('ttsStatus');
+    const voice = document.getElementById('ttsVoiceSelect').value;
+    
+    // Get the text content
+    let textContent = '';
+    if (currentPreviewItem) {
+        // Get from the preview/edit textarea or original content
+        const editTextarea = document.getElementById('previewEditTextarea');
+        if (editTextarea.value) {
+            textContent = editTextarea.value;
+        } else {
+            textContent = originalContent || currentPreviewItem.content || currentPreviewItem.preview || '';
+        }
+    }
+    
+    if (!textContent || textContent.trim().length === 0) {
+        showTTSStatus('No text content to convert', 'error');
+        return;
+    }
+    
+    // Strip markdown/HTML for cleaner speech
+    textContent = textContent
+        .replace(/```[\s\S]*?```/g, '') // Remove code blocks
+        .replace(/`[^`]+`/g, '') // Remove inline code
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // Replace links with text
+        .replace(/[#*_~]/g, '') // Remove markdown formatting
+        .replace(/<[^>]*>/g, '') // Remove HTML tags
+        .replace(/\n{3,}/g, '\n\n') // Normalize line breaks
+        .trim();
+    
+    // OpenAI TTS has a limit of ~4096 characters
+    if (textContent.length > 4000) {
+        textContent = textContent.substring(0, 4000) + '...';
+        showTTSStatus('Text truncated to 4000 characters for TTS', 'warning');
+    }
+    
+    try {
+        btn.disabled = true;
+        btnIcon.textContent = '⏳';
+        btnText.textContent = 'Generating...';
+        showTTSStatus('Generating speech with OpenAI TTS HD...', 'info');
+        
+        // Call the backend to generate speech
+        const result = await window.clipboard.generateSpeech({
+            text: textContent,
+            voice: voice
+        });
+        
+        if (result.success && result.audioData) {
+            // Create audio blob and URL
+            const audioBlob = base64ToBlob(result.audioData, 'audio/mpeg');
+            const audioUrl = URL.createObjectURL(audioBlob);
+            
+            // Set up audio player
+            const audioPlayer = document.getElementById('ttsAudioPlayer');
+            audioPlayer.src = audioUrl;
+            
+            // Store the audio data for saving
+            window.currentTTSAudioData = result.audioData;
+            window.currentTTSVoice = voice;
+            
+            // Show audio player
+            document.getElementById('ttsAudioContainer').style.display = 'block';
+            
+            showTTSStatus('⏳ Saving audio...', 'info');
+            
+            // Auto-save the audio immediately
+            try {
+                const saveResult = await window.clipboard.saveTTSAudio({
+                    audioData: result.audioData,
+                    voice: voice,
+                    sourceItemId: currentPreviewItem?.id,
+                    sourceText: (originalContent || '').substring(0, 100),
+                    attachToSource: true
+                });
+                
+                if (saveResult.success) {
+                    window.ttsAudioAttached = true;
+                    document.getElementById('saveTtsAudioBtn').style.display = 'none';
+                    showTTSStatus('✓ Audio generated and saved!', 'success');
+                } else {
+                    // Show save button as fallback
+                    document.getElementById('saveTtsAudioBtn').style.display = 'inline-block';
+                    showTTSStatus('✓ Audio generated! Click Save to keep it.', 'warning');
+                }
+            } catch (saveError) {
+                console.error('Auto-save failed:', saveError);
+                document.getElementById('saveTtsAudioBtn').style.display = 'inline-block';
+                showTTSStatus('✓ Audio generated! Click Save to keep it.', 'warning');
+            }
+            
+            // Auto-play
+            audioPlayer.play().catch(() => {
+                // Autoplay might be blocked, that's ok
+            });
+        } else {
+            throw new Error(result.error || 'Failed to generate speech');
+        }
+    } catch (error) {
+        console.error('TTS Error:', error);
+        showTTSStatus('Error: ' + error.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btnIcon.textContent = '🎙️';
+        btnText.textContent = 'Generate Audio';
+    }
+}
+
+// Save TTS audio - attaches to source item
+async function saveTTSAudio() {
+    if (!window.currentTTSAudioData) {
+        showTTSStatus('No audio to save', 'error');
+        return;
+    }
+    
+    const btn = document.getElementById('saveTtsAudioBtn');
+    const originalText = btn.textContent;
+    
+    try {
+        btn.disabled = true;
+        btn.textContent = '⏳ Saving...';
+        
+        const result = await window.clipboard.saveTTSAudio({
+            audioData: window.currentTTSAudioData,
+            voice: window.currentTTSVoice,
+            sourceItemId: currentPreviewItem?.id,
+            sourceText: (originalContent || '').substring(0, 100),
+            attachToSource: true  // Attach to the original item
+        });
+        
+        if (result.success) {
+            window.ttsAudioAttached = true;
+            
+            if (result.attached) {
+                showTTSStatus('✓ Audio attached to this item!', 'success');
+                // Hide the save button since it's now attached
+                btn.style.display = 'none';
+                
+                showNotification({
+                    title: 'Audio Attached',
+                    body: 'TTS audio is now part of this item',
+                    type: 'success'
+                });
+            } else {
+                showTTSStatus('✓ Audio saved as new item!', 'success');
+                await loadHistory();
+                
+                showNotification({
+                    title: 'Audio Saved',
+                    body: 'TTS audio has been saved to your space',
+                    type: 'success'
+                });
+            }
+        } else {
+            throw new Error(result.error || 'Failed to save audio');
+        }
+    } catch (error) {
+        console.error('Save TTS Error:', error);
+        showTTSStatus('Error saving: ' + error.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+    }
+}
+
+// Show TTS status message
+function showTTSStatus(message, type = 'info') {
+    const statusEl = document.getElementById('ttsStatus');
+    statusEl.textContent = message;
+    statusEl.style.display = 'block';
+    
+    // Set color based on type
+    switch (type) {
+        case 'error':
+            statusEl.style.color = 'rgba(239, 68, 68, 0.9)';
+            break;
+        case 'warning':
+            statusEl.style.color = 'rgba(251, 191, 36, 0.9)';
+            break;
+        case 'success':
+            statusEl.style.color = 'rgba(34, 197, 94, 0.9)';
+            break;
+        default:
+            statusEl.style.color = 'rgba(100, 200, 255, 0.9)';
+    }
+}
+
+// Helper: Convert base64 to Blob
+function base64ToBlob(base64, mimeType) {
+    const byteCharacters = atob(base64);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    return new Blob([byteArray], { type: mimeType });
+}
+
+// Load media file for preview
+async function loadMediaForPreview(item) {
+    console.log('[Media] loadMediaForPreview called for:', item.id, item.fileName);
+    
+    // Small delay to ensure DOM is ready
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    const mediaPlayer = document.getElementById('previewMediaPlayer');
+    const statusEl = document.getElementById('mediaLoadStatus');
+    
+    if (!mediaPlayer) {
+        console.error('[Media] No media player element found!');
+        return;
+    }
+    
+    try {
+        statusEl.textContent = 'Loading media...';
+        statusEl.style.color = 'rgba(255, 255, 255, 0.5)';
+        
+        // Get the audio/video data
+        console.log('[Media] Calling getAudioData for:', item.id);
+        const result = await window.clipboard.getAudioData(item.id);
+        console.log('[Media] getAudioData result:', result.success, 'isVideo:', result.isVideo, 'hasFilePath:', !!result.filePath, 'hasDataUrl:', !!result.dataUrl);
+        
+        if (result.success) {
+            // Handle video files - use file path directly (no memory loading)
+            if (result.isVideo && result.filePath) {
+                console.log('[Media] Using file path directly for video:', result.filePath);
+                
+                // Use file:// protocol for local files
+                mediaPlayer.src = `file://${result.filePath}`;
+                mediaPlayer.load();
+                
+                // Wait for metadata to load
+                mediaPlayer.onloadedmetadata = () => {
+                    console.log('[Media] Video metadata loaded, duration:', mediaPlayer.duration);
+                    statusEl.textContent = `Ready to play (${Math.round(mediaPlayer.duration)}s)`;
+                    statusEl.style.color = 'rgba(34, 197, 94, 0.8)';
+                };
+                
+                mediaPlayer.onerror = (e) => {
+                    console.error('[Media] Video player error:', e);
+                    statusEl.textContent = 'Error playing video';
+                    statusEl.style.color = 'rgba(239, 68, 68, 0.8)';
+                };
+                
+                // Store for video editor
+                window.currentMediaFilePath = result.filePath;
+                window.currentMediaItem = item;
+                console.log('[Media] Video set up successfully');
+                return;
+            }
+            
+            // Handle audio files with data URL
+            if (result.dataUrl) {
+                // Extract base64 data and create blob URL (more reliable)
+                const matches = result.dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+                if (matches) {
+                    const mimeType = matches[1];
+                    const base64Data = matches[2];
+                    
+                    // Convert base64 to blob
+                    const byteCharacters = atob(base64Data);
+                    const byteNumbers = new Array(byteCharacters.length);
+                    for (let i = 0; i < byteCharacters.length; i++) {
+                        byteNumbers[i] = byteCharacters.charCodeAt(i);
+                    }
+                    const byteArray = new Uint8Array(byteNumbers);
+                    const blob = new Blob([byteArray], { type: mimeType });
+                    const blobUrl = URL.createObjectURL(blob);
+                    
+                    console.log('[Media] Created blob URL:', blobUrl, 'size:', blob.size);
+                    
+                    mediaPlayer.src = blobUrl;
+                    mediaPlayer.load(); // Explicitly load
+                    
+                    // Wait for metadata to load
+                    mediaPlayer.onloadedmetadata = () => {
+                        console.log('[Media] Metadata loaded, duration:', mediaPlayer.duration);
+                        statusEl.textContent = `Ready to play (${Math.round(mediaPlayer.duration)}s)`;
+                        statusEl.style.color = 'rgba(34, 197, 94, 0.8)';
+                    };
+                    
+                    mediaPlayer.onerror = (e) => {
+                        console.error('[Media] Player error:', e);
+                        statusEl.textContent = 'Error playing media';
+                        statusEl.style.color = 'rgba(239, 68, 68, 0.8)';
+                    };
+                    
+                    // Store for transcription
+                    window.currentMediaData = result.dataUrl;
+                    window.currentMediaItem = item;
+                    console.log('[Media] Audio loaded successfully');
+                } else {
+                    // Fallback: use data URL directly
+                    console.log('[Media] Using data URL directly');
+                    mediaPlayer.src = result.dataUrl;
+                    mediaPlayer.load();
+                    
+                    window.currentMediaData = result.dataUrl;
+                    window.currentMediaItem = item;
+                    statusEl.textContent = 'Ready to play';
+                    statusEl.style.color = 'rgba(34, 197, 94, 0.8)';
+                }
+            }
+        } else {
+            console.error('[Media] Failed to load media:', result.error);
+            statusEl.textContent = result.error || 'Unable to load media file';
+            statusEl.style.color = 'rgba(239, 68, 68, 0.8)';
+            
+            window.currentMediaData = null;
+            window.currentMediaFilePath = null;
+            window.currentMediaItem = null;
+        }
+    } catch (error) {
+        console.error('[Media] Error loading media:', error);
+        statusEl.textContent = 'Error: ' + error.message;
+        statusEl.style.color = 'rgba(239, 68, 68, 0.8)';
+        
+        window.currentMediaData = null;
+        window.currentMediaFilePath = null;
+        window.currentMediaItem = null;
+    }
+}
+
+// Reset transcription state
+function resetTranscriptionState() {
+    document.getElementById('transcriptionResult').style.display = 'none';
+    document.getElementById('transcriptionStatus').style.display = 'none';
+    document.getElementById('transcriptionText').textContent = '';
+    document.getElementById('transcribeButtonIcon').textContent = '🎤';
+    document.getElementById('transcribeButtonText').textContent = 'Transcribe';
+    document.getElementById('transcribeBtn').disabled = false;
+    
+    window.currentTranscription = null;
+    window.transcriptionAttached = false;
+}
+
+// Load attached transcription for an item
+async function loadAttachedTranscription(itemId) {
+    try {
+        console.log('[Transcription] Loading attached transcription for:', itemId);
+        const result = await window.clipboard.getTranscription(itemId);
+        
+        if (result.success && result.hasTranscription && result.transcription) {
+            console.log('[Transcription] Found attached transcription, length:', result.transcription.length);
+            
+            window.currentTranscription = result.transcription;
+            window.transcriptionAttached = true;
+            
+            // Show the transcription
+            document.getElementById('transcriptionText').textContent = result.transcription;
+            document.getElementById('transcriptionResult').style.display = 'block';
+            
+            // Update button to show it's already done
+            document.getElementById('transcribeButtonIcon').textContent = '✓';
+            document.getElementById('transcribeButtonText').textContent = 'Transcribed';
+            
+            showTranscriptionStatus('📝 Transcription attached to this item', 'success');
+            
+            return true;
+        }
+    } catch (error) {
+        console.error('[Transcription] Error loading:', error);
+    }
+    return false;
+}
+
+// Open current video in Video Editor
+async function openInVideoEditor() {
+    if (!currentPreviewItem) {
+        console.error('[VideoEditor] No current preview item');
+        return;
+    }
+    
+    console.log('[VideoEditor] Opening video for item:', currentPreviewItem.id, currentPreviewItem.fileName);
+    
+    try {
+        // First, get the actual file path from the backend
+        const pathResult = await window.clipboard.getVideoPath(currentPreviewItem.id);
+        console.log('[VideoEditor] getVideoPath result:', pathResult);
+        
+        if (!pathResult.success || !pathResult.filePath) {
+            console.error('[VideoEditor] Could not find video file:', pathResult.error);
+            showNotification({
+                type: 'error',
+                title: 'Video Not Found',
+                message: pathResult.error || 'Unable to locate video file'
+            });
+            return;
+        }
+        
+        const filePath = pathResult.filePath;
+        console.log('[VideoEditor] Opening video in editor:', filePath);
+        
+        // Send IPC to open video editor with this file
+        const result = await window.clipboard.openVideoEditor(filePath);
+        
+        if (!result.success) {
+            console.error('[VideoEditor] Failed to open editor:', result.error);
+            showNotification({
+                type: 'error',
+                title: 'Failed to Open Editor',
+                message: result.error || 'Unknown error'
+            });
+            return;
+        }
+        
+        // Close the preview modal
+        document.getElementById('previewModal').style.display = 'none';
+        showNotification({
+            type: 'success',
+            title: 'Video Editor',
+            message: 'Opening video editor...'
+        });
+    } catch (error) {
+        console.error('[VideoEditor] Error opening video editor:', error);
+        showNotification({
+            type: 'error',
+            title: 'Error',
+            message: 'Failed to open Video Editor: ' + error.message
+        });
+    }
+}
+
+// Transcribe audio/video using OpenAI Whisper
+async function transcribeMedia() {
+    const btn = document.getElementById('transcribeBtn');
+    const btnIcon = document.getElementById('transcribeButtonIcon');
+    const btnText = document.getElementById('transcribeButtonText');
+    const statusEl = document.getElementById('transcriptionStatus');
+    const language = document.getElementById('transcriptionLanguage').value;
+    
+    // Check for either audio data or video file path
+    const hasMedia = window.currentMediaData || window.currentMediaFilePath;
+    if (!hasMedia || !window.currentMediaItem) {
+        showTranscriptionStatus('No media loaded', 'error');
+        return;
+    }
+    
+    try {
+        btn.disabled = true;
+        btnIcon.textContent = '⏳';
+        btnText.textContent = 'Transcribing...';
+        
+        // For videos, show extracting audio message
+        const isVideo = window.currentMediaFilePath && !window.currentMediaData;
+        if (isVideo) {
+            showTranscriptionStatus('Extracting audio from video...', 'info');
+        } else {
+            showTranscriptionStatus('Sending audio to OpenAI Whisper...', 'info');
+        }
+        
+        // Call the backend to transcribe
+        const result = await window.clipboard.transcribeAudio({
+            itemId: window.currentMediaItem.id,
+            language: language || undefined
+        });
+        
+        if (result.success && result.transcription) {
+            // Store and display transcription
+            window.currentTranscription = result.transcription;
+            
+            document.getElementById('transcriptionText').textContent = result.transcription;
+            document.getElementById('transcriptionResult').style.display = 'block';
+            
+            showTranscriptionStatus('⏳ Saving transcription...', 'info');
+            
+            // Auto-save the transcription to the source item
+            try {
+                const saveResult = await window.clipboard.saveTranscription({
+                    transcription: result.transcription,
+                    sourceItemId: window.currentMediaItem.id,
+                    sourceFileName: window.currentMediaItem.fileName,
+                    attachToSource: true
+                });
+                
+                if (saveResult.success && saveResult.attached) {
+                    window.transcriptionAttached = true;
+                    showTranscriptionStatus(`✓ Transcription saved! (${result.transcription.length} characters)`, 'success');
+                    
+                    // Update button to show it's done
+                    btnIcon.textContent = '✓';
+                    btnText.textContent = 'Transcribed';
+                } else {
+                    showTranscriptionStatus(`✓ Transcription complete! (${result.transcription.length} characters)`, 'success');
+                }
+            } catch (saveError) {
+                console.error('Error saving transcription:', saveError);
+                showTranscriptionStatus(`✓ Transcription complete! (${result.transcription.length} characters)`, 'success');
+            }
+        } else {
+            throw new Error(result.error || 'Failed to transcribe');
+        }
+    } catch (error) {
+        console.error('Transcription Error:', error);
+        showTranscriptionStatus('Error: ' + error.message, 'error');
+    } finally {
+        btn.disabled = false;
+        if (!window.transcriptionAttached) {
+            btnIcon.textContent = '🎤';
+            btnText.textContent = 'Transcribe';
+        }
+    }
+}
+
+// Copy transcription to clipboard
+async function copyTranscription() {
+    if (!window.currentTranscription) {
+        showTranscriptionStatus('No transcription to copy', 'error');
+        return;
+    }
+    
+    try {
+        await navigator.clipboard.writeText(window.currentTranscription);
+        showTranscriptionStatus('✓ Copied to clipboard!', 'success');
+    } catch (error) {
+        console.error('Copy error:', error);
+        showTranscriptionStatus('Error copying: ' + error.message, 'error');
+    }
+}
+
+// Save transcription as text item
+async function saveTranscription() {
+    if (!window.currentTranscription) {
+        showTranscriptionStatus('No transcription to save', 'error');
+        return;
+    }
+    
+    const btn = document.getElementById('saveTranscriptionBtn');
+    const originalText = btn.innerHTML;
+    
+    try {
+        btn.disabled = true;
+        btn.innerHTML = '⏳ Saving...';
+        
+        const result = await window.clipboard.saveTranscription({
+            transcription: window.currentTranscription,
+            sourceItemId: window.currentMediaItem?.id,
+            sourceFileName: window.currentMediaItem?.fileName
+        });
+        
+        if (result.success) {
+            showTranscriptionStatus('✓ Transcription saved to your space!', 'success');
+            
+            // Refresh history
+            await loadHistory();
+            
+            showNotification({
+                title: 'Transcription Saved',
+                body: 'Audio transcription has been saved as a text item',
+                type: 'success'
+            });
+        } else {
+            throw new Error(result.error || 'Failed to save');
+        }
+    } catch (error) {
+        console.error('Save transcription error:', error);
+        showTranscriptionStatus('Error saving: ' + error.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+    }
+}
+
+// Show transcription status message
+function showTranscriptionStatus(message, type = 'info') {
+    const statusEl = document.getElementById('transcriptionStatus');
+    statusEl.textContent = message;
+    statusEl.style.display = 'block';
+    
+    // Set color based on type
+    switch (type) {
+        case 'error':
+            statusEl.style.color = 'rgba(239, 68, 68, 0.9)';
+            break;
+        case 'warning':
+            statusEl.style.color = 'rgba(251, 191, 36, 0.9)';
+            break;
+        case 'success':
+            statusEl.style.color = 'rgba(34, 197, 94, 0.9)';
+            break;
+        default:
+            statusEl.style.color = 'rgba(251, 191, 36, 0.9)';
+    }
+}
+
+// Simple Markdown to HTML renderer
+function renderMarkdown(text) {
+    if (!text) return '';
+    
+    let html = text;
+    
+    // Escape HTML first
+    html = html.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    
+    // Code blocks (fenced) - must be before other processing
+    html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (match, lang, code) => {
+        return `<pre><code class="language-${lang}">${code.trim()}</code></pre>`;
+    });
+    
+    // Inline code
+    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+    
+    // Headers
+    html = html.replace(/^#{6}\s+(.+)$/gm, '<h6>$1</h6>');
+    html = html.replace(/^#{5}\s+(.+)$/gm, '<h5>$1</h5>');
+    html = html.replace(/^#{4}\s+(.+)$/gm, '<h4>$1</h4>');
+    html = html.replace(/^#{3}\s+(.+)$/gm, '<h3>$1</h3>');
+    html = html.replace(/^#{2}\s+(.+)$/gm, '<h2>$1</h2>');
+    html = html.replace(/^#{1}\s+(.+)$/gm, '<h1>$1</h1>');
+    
+    // Bold and italic
+    html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+    html = html.replace(/___(.+?)___/g, '<strong><em>$1</em></strong>');
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/__(.+?)__/g, '<strong>$1</strong>');
+    html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+    html = html.replace(/_(.+?)_/g, '<em>$1</em>');
+    
+    // Strikethrough
+    html = html.replace(/~~(.+?)~~/g, '<del>$1</del>');
+    
+    // Links and images
+    html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1">');
+    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+    
+    // Blockquotes
+    html = html.replace(/^&gt;\s+(.+)$/gm, '<blockquote>$1</blockquote>');
+    // Merge consecutive blockquotes
+    html = html.replace(/<\/blockquote>\n<blockquote>/g, '\n');
+    
+    // Horizontal rules
+    html = html.replace(/^(-{3,}|\*{3,}|_{3,})$/gm, '<hr>');
+    
+    // Task lists
+    html = html.replace(/^(\s*)[-*]\s+\[x\]\s+(.+)$/gim, '$1<li><input type="checkbox" checked disabled> $2</li>');
+    html = html.replace(/^(\s*)[-*]\s+\[\s?\]\s+(.+)$/gim, '$1<li><input type="checkbox" disabled> $2</li>');
+    
+    // Unordered lists
+    html = html.replace(/^[-*+]\s+(.+)$/gm, '<li>$1</li>');
+    html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+    
+    // Ordered lists
+    html = html.replace(/^\d+\.\s+(.+)$/gm, '<oli>$1</oli>');
+    html = html.replace(/(<oli>.*<\/oli>\n?)+/g, (match) => {
+        return '<ol>' + match.replace(/<\/?oli>/g, (tag) => tag.replace('oli', 'li')) + '</ol>';
+    });
+    
+    // Tables
+    html = html.replace(/^\|(.+)\|$/gm, (match, content) => {
+        const cells = content.split('|').map(c => c.trim());
+        // Check if it's a separator row
+        if (cells.every(c => /^[-:]+$/.test(c))) {
+            return '<!-- table separator -->';
+        }
+        const isHeader = html.indexOf(match) === html.indexOf('|');
+        const cellTag = isHeader ? 'th' : 'td';
+        return '<tr>' + cells.map(c => `<${cellTag}>${c}</${cellTag}>`).join('') + '</tr>';
+    });
+    html = html.replace(/<!-- table separator -->\n?/g, '');
+    html = html.replace(/(<tr>.*<\/tr>\n?)+/g, '<table>$&</table>');
+    
+    // Paragraphs - wrap remaining text blocks
+    html = html.replace(/^(?!<[a-z]|$)(.+)$/gm, '<p>$1</p>');
+    
+    // Clean up extra paragraph tags around block elements
+    html = html.replace(/<p>(<(h[1-6]|ul|ol|li|blockquote|pre|table|hr)[^>]*>)/g, '$1');
+    html = html.replace(/(<\/(h[1-6]|ul|ol|li|blockquote|pre|table)>)<\/p>/g, '$1');
+    
+    // Clean up empty paragraphs
+    html = html.replace(/<p>\s*<\/p>/g, '');
+    
+    return html;
+}
+
+// Check if content is Markdown
+function isMarkdownContent(content, item) {
+    // Check file extension
+    if (item?.fileExt === '.md') return true;
+    
+    // Check content patterns
+    if (!content || typeof content !== 'string') return false;
+    
+    let mdScore = 0;
+    if (/^#{1,6}\s+.+/m.test(content)) mdScore += 2;
+    if (/\[.+?\]\(.+?\)/.test(content)) mdScore += 2;
+    if (/```[\s\S]*?```/.test(content)) mdScore += 2;
+    if (/^\s*[-*+]\s+.+/m.test(content)) mdScore += 1;
+    if (/\*\*[^*]+\*\*/.test(content)) mdScore += 1;
+    if (/^>\s+.+/m.test(content)) mdScore += 1;
+    
+    return mdScore >= 2;
+}
+
+// Toggle between view and edit mode
+function togglePreviewEditMode() {
+    if (!currentPreviewItem) return;
+    
+    isEditMode = !isEditMode;
+    
+    // Helper function to check if content looks like actual HTML
+    const looksLikeHtml = (content) => {
+        if (!content || typeof content !== 'string') return false;
+        const htmlPattern = /<\s*(html|head|body|div|span|p|a|img|table|ul|ol|li|h[1-6]|script|style|link|meta|form|input|button|header|footer|nav|section|article)[^>]*>/i;
+        return htmlPattern.test(content);
+    };
+    
+    if (isEditMode) {
+        // Switch to edit mode
+        hideAllPreviewModes();
+        
+        // Get current content
+        let content = originalContent;
+        
+        // For generated documents or actual HTML, get the source
+        if (currentPreviewItem.metadata?.type === 'generated-document') {
+            content = originalContent || currentPreviewItem.html || currentPreviewItem.content || '';
+        } else if (currentPreviewItem.type === 'html') {
+            // Check if it's actual HTML or just text
+            const htmlContent = currentPreviewItem.html || originalContent;
+            content = looksLikeHtml(htmlContent) ? htmlContent : originalContent;
+        }
+        
+        const textarea = document.getElementById('previewEditTextarea');
+        textarea.value = content;
+        document.getElementById('previewEditMode').style.display = 'flex';
+        
+        // Update character count
+        updateEditStats();
+        
+        // Focus textarea
+        textarea.focus();
+    } else {
+        // Switch back to view mode
+        hideAllPreviewModes();
+        
+        if (currentPreviewItem.type === 'image' || (currentPreviewItem.type === 'file' && currentPreviewItem.fileType === 'image-file')) {
+            document.getElementById('previewImageMode').style.display = 'block';
+        } else if (currentPreviewItem.metadata?.type === 'generated-document') {
+            document.getElementById('previewHtmlMode').style.display = 'block';
+        } else if (currentPreviewItem.type === 'html') {
+            // Check if it's actual HTML
+            const htmlContent = currentPreviewItem.html || originalContent;
+            if (looksLikeHtml(htmlContent)) {
+                document.getElementById('previewHtmlMode').style.display = 'block';
+            } else {
+                document.getElementById('previewViewMode').style.display = 'block';
+            }
+        } else if (isMarkdownContent(originalContent, currentPreviewItem)) {
+            // Show Markdown preview with potentially updated content
+            const textarea = document.getElementById('previewEditTextarea');
+            const currentContent = textarea.value;
+            document.getElementById('markdownRendered').innerHTML = renderMarkdown(currentContent);
+            document.getElementById('previewMarkdownMode').style.display = 'block';
+        } else {
+            document.getElementById('previewViewMode').style.display = 'block';
+        }
+    }
+    
+    updateEditModeButton();
+}
+
+// Update the edit mode button text/icon
+function updateEditModeButton() {
+    const btn = document.getElementById('previewModeBtn');
+    const icon = document.getElementById('previewModeIcon');
+    
+    if (isEditMode) {
+        icon.textContent = '◉';
+        btn.innerHTML = '<span id="previewModeIcon">◉</span> View';
+    } else {
+        icon.textContent = '✎';
+        btn.innerHTML = '<span id="previewModeIcon">✎</span> Edit';
+    }
+}
+
+// Update edit stats (character count, etc.)
+function updateEditStats() {
+    const textarea = document.getElementById('previewEditTextarea');
+    const stats = document.getElementById('previewEditStats');
+    const charCount = textarea.value.length;
+    const lineCount = textarea.value.split('\n').length;
+    const wordCount = textarea.value.trim() ? textarea.value.trim().split(/\s+/).length : 0;
+    
+    stats.textContent = `${charCount.toLocaleString()} characters | ${wordCount.toLocaleString()} words | ${lineCount.toLocaleString()} lines`;
+}
+
+// Save edited content
+async function savePreviewContent() {
+    if (!currentPreviewItem) return;
+    
+    const textarea = document.getElementById('previewEditTextarea');
+    const newContent = textarea.value;
+    
+    // Check if content actually changed
+    if (newContent === originalContent) {
+        showNotification({
+            title: 'No Changes',
+            body: 'Content has not been modified',
+            type: 'info'
+        });
+        return;
+    }
+    
+    try {
+        // Save the updated content
+        const result = await window.clipboard.updateItemContent(currentPreviewItem.id, newContent);
+        
+        if (result.success) {
+            originalContent = newContent;
+            
+            // Update the view mode content
+            document.getElementById('previewViewMode').textContent = newContent;
+            
+            // If HTML, update the iframe too
+            if (currentPreviewItem.type === 'html' || currentPreviewItem.metadata?.type === 'generated-document') {
+                document.getElementById('previewHtmlFrame').srcdoc = newContent;
+            }
+            
+            showNotification({
+                title: 'Saved',
+                body: 'Content has been updated successfully',
+                type: 'success'
+            });
+            
+            // Reload history to reflect changes
+            await loadHistory();
+            
+            // Switch back to view mode
+            togglePreviewEditMode();
+        } else {
+            showNotification({
+                title: 'Error',
+                body: result.error || 'Failed to save content',
+                type: 'error'
+            });
+        }
+    } catch (error) {
+        console.error('Error saving content:', error);
+        showNotification({
+            title: 'Error',
+            body: error.message || 'Failed to save content',
+            type: 'error'
+        });
+    }
+}
+
+// Cancel editing and revert
+function cancelPreviewEdit() {
+    const textarea = document.getElementById('previewEditTextarea');
+    textarea.value = originalContent;
+    togglePreviewEditMode();
+}
+
+// Copy preview content
+async function copyPreviewContent() {
+    if (!currentPreviewItem) return;
+    
+    try {
+        await window.clipboard.pasteItem(currentPreviewItem.id);
+        showCopyNotification();
+    } catch (error) {
+        console.error('Error copying content:', error);
+    }
+}
+
+// Hide preview modal
+function hidePreviewModal() {
+    document.getElementById('previewModal').style.display = 'none';
+    currentPreviewItem = null;
+    isEditMode = false;
+}
+
+// Get type label for display
+function getTypeLabel(item) {
+    if (item.type === 'generated-document' || item.metadata?.type === 'generated-document') return 'Generated Document';
+    if (item.type === 'file') {
+        if (item.fileType === 'pdf') return 'PDF Document';
+        if (item.fileType === 'video') return 'Video';
+        if (item.fileType === 'audio') return 'Audio';
+        if (item.fileType === 'image-file') return 'Image File';
+        if (item.fileCategory === 'code') return 'Code File';
+        if (item.fileCategory === 'document') return 'Document';
+        return item.fileExt ? item.fileExt.toUpperCase().replace('.', '') + ' File' : 'File';
+    }
+    if (item.type === 'image') return 'Image';
+    if (item.type === 'html') return 'HTML Content';
+    if (item.source === 'code') return 'Code';
+    if (item.source === 'url') return 'URL';
+    return 'Text';
+}
+
+// Get content size for display
+function getContentSize(item) {
+    if (item.fileSize) return formatFileSize(item.fileSize);
+    if (item.content) return formatFileSize(item.content.length);
+    if (item.preview) return formatFileSize(item.preview.length);
+    return '-';
+}
+
+// AI Image Editing Functions
+
+// Apply AI edit to image
+async function applyImageEdit() {
+    if (!currentPreviewItem) return;
+    
+    const promptInput = document.getElementById('imageEditPrompt');
+    const userPrompt = promptInput.value.trim();
+    
+    if (!userPrompt) {
+        showImageEditStatus('Please enter editing instructions', 'error');
+        return;
+    }
+    
+    const statusEl = document.getElementById('imageEditStatus');
+    const applyBtn = document.getElementById('applyImageEditBtn');
+    const originalBtnText = applyBtn.innerHTML;
+    
+    try {
+        // Show loading state
+        applyBtn.innerHTML = '⏳ Processing...';
+        applyBtn.disabled = true;
+        showImageEditStatus('Sending image to AI for editing...', 'info');
+        
+        // Get current image data
+        const imageEl = document.getElementById('previewImage');
+        const imageData = currentImageData || imageEl.src;
+        
+        // Save current state to history before edit
+        imageEditHistory.push(imageData);
+        updateImageHistoryUI();
+        
+        // Get API settings
+        const settings = await window.api.getSettings();
+        if (!settings.llmApiKey) {
+            throw new Error('API key not configured. Please set up your API key in Settings.');
+        }
+        
+        // Call AI image edit
+        const result = await window.clipboard.editImageWithAI({
+            itemId: currentPreviewItem.id,
+            imageData: imageData,
+            prompt: userPrompt,
+            apiKey: settings.llmApiKey
+        });
+        
+        if (result.success && result.editedImage) {
+            // Update the displayed image
+            currentImageData = result.editedImage;
+            imageEl.src = result.editedImage;
+            
+            showImageEditStatus('✓ Edit applied! Choose how to save below.', 'success');
+            promptInput.value = ''; // Clear the prompt
+            
+            // Show undo button and save options
+            document.getElementById('undoImageEditBtn').style.display = 'inline-block';
+            document.getElementById('imageSaveOptions').style.display = 'block';
+        } else {
+            // Remove the history entry since edit failed
+            imageEditHistory.pop();
+            updateImageHistoryUI();
+            
+            // Check if we got a description (AI analysis preview) or need OpenAI key
+            if (result.needsOpenAIKey || result.description) {
+                // Show the AI analysis in a modal or expanded view
+                showImageEditAnalysis(result.description, result.error, result.needsOpenAIKey);
+            } else {
+                throw new Error(result.error || 'Failed to edit image');
+            }
+        }
+    } catch (error) {
+        console.error('Error applying image edit:', error);
+        showImageEditStatus(`Error: ${error.message}`, 'error');
+    } finally {
+        applyBtn.innerHTML = originalBtnText;
+        applyBtn.disabled = false;
+    }
+}
+
+// Undo last image edit
+function undoImageEdit() {
+    if (imageEditHistory.length === 0) {
+        showImageEditStatus('Nothing to undo', 'info');
+        return;
+    }
+    
+    // Pop the last state and restore it
+    const previousState = imageEditHistory.pop();
+    currentImageData = previousState;
+    
+    const imageEl = document.getElementById('previewImage');
+    imageEl.src = previousState;
+    
+    updateImageHistoryUI();
+    showImageEditStatus('✓ Undo successful', 'success');
+    
+    // Hide undo button and save options if no more history
+    if (imageEditHistory.length === 0) {
+        document.getElementById('undoImageEditBtn').style.display = 'none';
+        document.getElementById('imageSaveOptions').style.display = 'none';
+    }
+}
+
+// Replace original image with edited version
+async function replaceOriginalImage() {
+    if (!currentPreviewItem || !currentImageData) {
+        showImageEditStatus('No edited image to save', 'error');
+        return;
+    }
+    
+    const btn = document.getElementById('replaceOriginalBtn');
+    const originalText = btn.innerHTML;
+    
+    try {
+        btn.innerHTML = '⏳ Saving...';
+        btn.disabled = true;
+        
+        // Call IPC to update the original item's image
+        const result = await window.clipboard.updateItemImage(currentPreviewItem.id, currentImageData);
+        
+        if (result.success) {
+            showImageEditStatus('✓ Original image replaced!', 'success');
+            
+            // Clear edit history since we've saved
+            imageEditHistory = [];
+            updateImageHistoryUI();
+            
+            // Hide save options
+            document.getElementById('imageSaveOptions').style.display = 'none';
+            document.getElementById('undoImageEditBtn').style.display = 'none';
+            
+            // Refresh the history list to show updated thumbnail
+            await loadHistory();
+            
+            showNotification({
+                title: 'Image Saved',
+                body: 'Original image has been replaced with your edit',
+                type: 'success'
+            });
+        } else {
+            throw new Error(result.error || 'Failed to save image');
+        }
+    } catch (error) {
+        console.error('Error replacing image:', error);
+        showImageEditStatus('Error: ' + error.message, 'error');
+    } finally {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+    }
+}
+
+// Save edited image as a new clipboard item
+async function saveImageAsNew() {
+    if (!currentImageData) {
+        showImageEditStatus('No edited image to save', 'error');
+        return;
+    }
+    
+    const btn = document.getElementById('saveAsNewBtn');
+    const originalText = btn.innerHTML;
+    
+    try {
+        btn.innerHTML = '⏳ Saving...';
+        btn.disabled = true;
+        
+        // Call IPC to create a new clipboard item with this image
+        const result = await window.clipboard.saveImageAsNew(currentImageData, {
+            sourceItemId: currentPreviewItem?.id,
+            description: 'AI-edited image'
+        });
+        
+        if (result.success) {
+            showImageEditStatus('✓ Saved as new item!', 'success');
+            
+            // Clear edit history since we've saved
+            imageEditHistory = [];
+            updateImageHistoryUI();
+            
+            // Hide save options
+            document.getElementById('imageSaveOptions').style.display = 'none';
+            document.getElementById('undoImageEditBtn').style.display = 'none';
+            
+            // Refresh the history list to show new item
+            await loadHistory();
+            
+            showNotification({
+                title: 'Image Saved',
+                body: 'Edited image saved as a new clipboard item',
+                type: 'success'
+            });
+        } else {
+            throw new Error(result.error || 'Failed to save image');
+        }
+    } catch (error) {
+        console.error('Error saving image as new:', error);
+        showImageEditStatus('Error: ' + error.message, 'error');
+    } finally {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+    }
+}
+
+// Update the image history UI
+function updateImageHistoryUI() {
+    const historyEl = document.getElementById('imageEditHistory');
+    const countEl = document.getElementById('editHistoryCount');
+    
+    if (imageEditHistory.length > 0) {
+        historyEl.style.display = 'block';
+        countEl.textContent = imageEditHistory.length;
+    } else {
+        historyEl.style.display = 'none';
+    }
+}
+
+// Show AI image analysis (when actual editing isn't available)
+function showImageEditAnalysis(description, fullMessage, needsOpenAIKey = false) {
+    // Create a modal to show the AI analysis
+    const existingModal = document.getElementById('imageAnalysisModal');
+    if (existingModal) existingModal.remove();
+    
+    const modal = document.createElement('div');
+    modal.id = 'imageAnalysisModal';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.8);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 3000;
+    `;
+    
+    const title = needsOpenAIKey ? 'OpenAI API Key Required' : 'AI Image Analysis';
+    const icon = needsOpenAIKey ? '🔑' : '✨';
+    
+    let analysisSection = '';
+    if (description) {
+        analysisSection = `
+            <div style="background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.2); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+                <p style="margin: 0 0 12px 0; color: rgba(255, 255, 255, 0.7); font-size: 13px;">
+                    The AI has analyzed your image and editing request:
+                </p>
+                <div style="color: rgba(255, 255, 255, 0.9); line-height: 1.6; white-space: pre-wrap; font-size: 14px;">
+                    ${description.replace(/\n/g, '<br>')}
+                </div>
+            </div>
+        `;
+    }
+    
+    const noteContent = needsOpenAIKey 
+        ? `<strong>🔑 Add OpenAI API Key:</strong> To edit images with AI, add your OpenAI API key in <strong>Settings → AI Image Editing</strong>. 
+           Get your key at <a href="#" onclick="window.electronAPI?.openExternal?.('https://platform.openai.com/api-keys')" style="color: #8b5cf6;">platform.openai.com</a>`
+        : `<strong>⚠️ Note:</strong> Image editing requires an OpenAI API key. Add it in Settings to enable this feature.`;
+    
+    modal.innerHTML = `
+        <div style="background: rgba(40, 40, 40, 0.98); border-radius: 12px; padding: 24px; max-width: 600px; max-height: 80vh; overflow-y: auto; border: 1px solid rgba(139, 92, 246, 0.3); box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);">
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                <span style="font-size: 24px;">${icon}</span>
+                <h3 style="margin: 0; color: #8b5cf6;">${title}</h3>
+            </div>
+            
+            ${analysisSection}
+            
+            <div style="background: rgba(255, 200, 100, 0.1); border: 1px solid rgba(255, 200, 100, 0.3); border-radius: 8px; padding: 12px; margin-bottom: 16px;">
+                <p style="margin: 0; color: rgba(255, 200, 100, 0.9); font-size: 12px;">
+                    ${noteContent}
+                </p>
+            </div>
+            
+            <div style="display: flex; justify-content: flex-end; gap: 8px;">
+                ${needsOpenAIKey ? `<button onclick="window.electronAPI?.openSettings?.(); this.closest('#imageAnalysisModal').remove();" class="btn" style="background: rgba(139, 92, 246, 0.2); color: #8b5cf6; border: 1px solid rgba(139, 92, 246, 0.3);">
+                    Open Settings
+                </button>` : ''}
+                <button onclick="this.closest('#imageAnalysisModal').remove()" class="btn btn-primary" style="background: #8b5cf6;">
+                    ${needsOpenAIKey ? 'Close' : 'Got it'}
+                </button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Close on click outside
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.remove();
+    });
+    
+    // Close on Escape
+    const closeOnEscape = (e) => {
+        if (e.key === 'Escape') {
+            modal.remove();
+            document.removeEventListener('keydown', closeOnEscape);
+        }
+    };
+    document.addEventListener('keydown', closeOnEscape);
+}
+
+// Show image edit status message
+function showImageEditStatus(message, type = 'info') {
+    const statusEl = document.getElementById('imageEditStatus');
+    statusEl.style.display = 'block';
+    statusEl.textContent = message;
+    
+    // Set color based on type
+    switch (type) {
+        case 'success':
+            statusEl.style.color = '#64ff64';
+            break;
+        case 'error':
+            statusEl.style.color = '#ff6464';
+            break;
+        default:
+            statusEl.style.color = 'rgba(255, 255, 255, 0.6)';
+    }
+    
+    // Auto-hide success messages
+    if (type === 'success') {
+        setTimeout(() => {
+            statusEl.style.display = 'none';
+        }, 3000);
+    }
+}
+
+// Reset image edit state when opening a new image
+function resetImageEditState() {
+    imageEditHistory = [];
+    currentImageData = null;
+    document.getElementById('imageEditPrompt').value = '';
+    document.getElementById('undoImageEditBtn').style.display = 'none';
+    document.getElementById('imageEditStatus').style.display = 'none';
+    document.getElementById('imageEditHistory').style.display = 'none';
+}
+
+// Save edited image
+async function saveEditedImage() {
+    if (!currentPreviewItem || !currentImageData) return;
+    
+    try {
+        const result = await window.clipboard.updateItemImage(currentPreviewItem.id, currentImageData);
+        
+        if (result.success) {
+            showImageEditStatus('✓ Image saved!', 'success');
+            // Clear history after save
+            imageEditHistory = [];
+            updateImageHistoryUI();
+            document.getElementById('undoImageEditBtn').style.display = 'none';
+            
+            // Refresh history to show updated thumbnail
+            await loadHistory();
+        } else {
+            throw new Error(result.error || 'Failed to save image');
+        }
+    } catch (error) {
+        showImageEditStatus(`Save error: ${error.message}`, 'error');
+    }
+}
+
+// Setup preview modal event listeners
+function setupPreviewEventListeners() {
+    // Mode toggle button
+    document.getElementById('previewModeBtn').addEventListener('click', togglePreviewEditMode);
+    
+    // Copy button
+    document.getElementById('previewCopyBtn').addEventListener('click', copyPreviewContent);
+    
+    // Close button
+    document.getElementById('previewClose').addEventListener('click', hidePreviewModal);
+    
+    // Edit mode buttons
+    document.getElementById('previewEditCancel').addEventListener('click', cancelPreviewEdit);
+    document.getElementById('previewEditSave').addEventListener('click', savePreviewContent);
+    
+    // Update stats on input
+    document.getElementById('previewEditTextarea').addEventListener('input', updateEditStats);
+    
+    // AI Image editing buttons
+    document.getElementById('applyImageEditBtn').addEventListener('click', applyImageEdit);
+    document.getElementById('undoImageEditBtn').addEventListener('click', undoImageEdit);
+    document.getElementById('replaceOriginalBtn').addEventListener('click', replaceOriginalImage);
+    document.getElementById('saveAsNewBtn').addEventListener('click', saveImageAsNew);
+    
+    // Text-to-Speech buttons
+    document.getElementById('generateSpeechBtn').addEventListener('click', generateSpeech);
+    document.getElementById('saveTtsAudioBtn').addEventListener('click', saveTTSAudio);
+    
+    // Transcription buttons
+    document.getElementById('transcribeBtn').addEventListener('click', transcribeMedia);
+    document.getElementById('copyTranscriptionBtn').addEventListener('click', copyTranscription);
+    document.getElementById('saveTranscriptionBtn').addEventListener('click', saveTranscription);
+    
+    // Video Editor button
+    document.getElementById('openVideoEditorBtn').addEventListener('click', openInVideoEditor);
+    
+    // Close on Escape when preview is open
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && document.getElementById('previewModal').style.display === 'flex') {
+            if (isEditMode) {
+                cancelPreviewEdit();
+            } else {
+                hidePreviewModal();
+            }
+        }
+    });
+    
+    // Click outside to close
+    document.getElementById('previewModal').addEventListener('click', (e) => {
+        if (e.target.id === 'previewModal') {
+            if (isEditMode) {
+                // Ask to confirm if in edit mode
+                if (confirm('Discard unsaved changes?')) {
+                    hidePreviewModal();
+                }
+            } else {
+                hidePreviewModal();
+            }
+        }
+    });
+}
+
 // Smart Export function
 async function smartExportSpace(spaceId) {
     try {
@@ -2004,9 +4981,709 @@ async function smartExportSpace(spaceId) {
     }
 }
 
+// ========== VIDEO PREVIEW MODAL ==========
+
+// Format seconds to timecode
+function formatSegmentTimeGlobal(seconds) {
+    if (!seconds && seconds !== 0) return '00:00';
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    if (h > 0) {
+        return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    }
+    return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+// Auto-generate AI summary when modal opens
+async function autoGenerateSummary(itemId, transcript, title, descriptionEl) {
+    try {
+        const result = await window.clipboard.generateSummary({
+            itemId: itemId,
+            transcript: transcript,
+            title: title
+        });
+        
+        if (result.success) {
+            descriptionEl.innerHTML = formatSummaryText(result.summary);
+            
+            // Update local item metadata
+            if (currentVideoItem && currentVideoItem.metadata) {
+                currentVideoItem.metadata.aiSummary = result.summary;
+            }
+        } else {
+            descriptionEl.innerHTML = `<p style="color: rgba(255,100,100,0.8);">Failed to generate summary: ${result.error}</p>`;
+        }
+    } catch (err) {
+        descriptionEl.innerHTML = `<p style="color: rgba(255,100,100,0.8);">Error: ${err.message}</p>`;
+    }
+}
+
+// Format AI summary text with proper paragraphs and bullet points
+function formatSummaryText(text) {
+    if (!text) return '';
+    
+    // Escape HTML first
+    const escaped = text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    
+    // Split by double newlines (sections)
+    const sections = escaped
+        .split(/\n\n+/)
+        .map(s => s.trim())
+        .filter(s => s.length > 0);
+    
+    // Process each section
+    return sections.map(section => {
+        // Check if this is a header (OVERVIEW:, KEY POINTS:, MAIN TAKEAWAYS:)
+        const headerMatch = section.match(/^(OVERVIEW|KEY POINTS|MAIN TAKEAWAYS|SUMMARY):\s*/i);
+        if (headerMatch) {
+            const header = headerMatch[1].toUpperCase();
+            const content = section.substring(headerMatch[0].length).trim();
+            
+            // Check if content has bullet points
+            if (content.includes('•') || content.includes('- ')) {
+                const bullets = content
+                    .split(/\n/)
+                    .map(line => line.trim())
+                    .filter(line => line.length > 0)
+                    .map(line => {
+                        // Remove bullet character and format
+                        const bulletContent = line.replace(/^[•\-]\s*/, '');
+                        return `<li style="margin-bottom: 8px; line-height: 1.5;">${bulletContent}</li>`;
+                    })
+                    .join('');
+                return `<div style="margin-bottom: 16px;"><strong style="color: rgba(139, 92, 246, 0.9); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">${header}</strong><ul style="margin: 8px 0 0 0; padding-left: 20px; list-style: none;">${bullets}</ul></div>`;
+            } else {
+                return `<div style="margin-bottom: 16px;"><strong style="color: rgba(139, 92, 246, 0.9); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">${header}</strong><p style="margin: 8px 0 0 0; line-height: 1.6;">${content.replace(/\n/g, '<br>')}</p></div>`;
+            }
+        }
+        
+        // Check if section contains bullet points
+        if (section.includes('•') || section.match(/^\s*-\s/m)) {
+            const lines = section.split(/\n/);
+            let html = '';
+            let inList = false;
+            
+            lines.forEach(line => {
+                const trimmed = line.trim();
+                if (trimmed.startsWith('•') || trimmed.startsWith('- ')) {
+                    if (!inList) {
+                        html += '<ul style="margin: 8px 0; padding-left: 20px; list-style: disc;">';
+                        inList = true;
+                    }
+                    const bulletContent = trimmed.replace(/^[•\-]\s*/, '');
+                    html += `<li style="margin-bottom: 6px; line-height: 1.5;">${bulletContent}</li>`;
+                } else if (trimmed) {
+                    if (inList) {
+                        html += '</ul>';
+                        inList = false;
+                    }
+                    html += `<p style="margin: 0 0 8px 0; line-height: 1.6;">${trimmed}</p>`;
+                }
+            });
+            
+            if (inList) html += '</ul>';
+            return `<div style="margin-bottom: 12px;">${html}</div>`;
+        }
+        
+        // Regular paragraph
+        return `<p style="margin: 0 0 12px 0; line-height: 1.6;">${section.replace(/\n/g, '<br>')}</p>`;
+    }).join('');
+}
+
+let currentVideoItem = null;
+let videoTranscriptPlain = '';
+let videoTranscriptTimecoded = '';
+
+// Show video preview modal
+async function showVideoPreviewModal(itemId) {
+    console.log('[VideoModal] Opening video preview for:', itemId);
+    
+    const modal = document.getElementById('videoPreviewModal');
+    if (!modal) {
+        console.error('[VideoModal] Modal element not found!');
+        return;
+    }
+    
+    // Fetch fresh item data to ensure we have the latest file paths
+    let item = history.find(h => h.id === itemId);
+    
+    // Try to get fresh data from backend
+    try {
+        const freshHistory = await window.clipboard.getHistory();
+        const freshItem = freshHistory.find(h => h.id === itemId);
+        if (freshItem) {
+            item = freshItem;
+            // Update the history array as well
+            const idx = history.findIndex(h => h.id === itemId);
+            if (idx >= 0) {
+                history[idx] = freshItem;
+            }
+        }
+    } catch (e) {
+        console.warn('[VideoModal] Could not refresh item data:', e);
+    }
+    
+    if (!item) {
+        console.error('[VideoModal] Video item not found:', itemId);
+        return;
+    }
+    
+    console.log('[VideoModal] Item data:', { 
+        filePath: item.filePath, 
+        content: item.content,
+        metadataFilePath: item.metadata?.filePath 
+    });
+    
+    currentVideoItem = item;
+    const metadata = item.metadata || {};
+    
+    // Set video source - find the actual VIDEO file, not audio
+    const videoPlayer = document.getElementById('videoModalPlayer');
+    let videoPath = null;
+    
+    // Video file extensions to look for
+    const videoExtensions = ['.mp4', '.webm', '.mkv', '.avi', '.mov', '.m4v'];
+    const audioExtensions = ['.mp3', '.wav', '.aac', '.m4a', '.ogg'];
+    
+    const isVideoFile = (path) => {
+        if (!path || typeof path !== 'string') return false;
+        const lower = path.toLowerCase();
+        return videoExtensions.some(ext => lower.endsWith(ext));
+    };
+    
+    const isAudioFile = (path) => {
+        if (!path || typeof path !== 'string') return false;
+        const lower = path.toLowerCase();
+        return audioExtensions.some(ext => lower.endsWith(ext));
+    };
+    
+    // Collect all possible paths to check
+    const possiblePaths = [
+        metadata.filePath,
+        item.filePath,
+        item.content,
+        metadata.videoPath  // in case we have a separate videoPath field
+    ];
+    
+    console.log('[VideoModal] Checking possible paths:', possiblePaths);
+    
+    // First, try to find a video file
+    for (const path of possiblePaths) {
+        if (isVideoFile(path)) {
+            videoPath = path;
+            break;
+        }
+    }
+    
+    // If no explicit video found, try any non-audio file
+    if (!videoPath) {
+        for (const path of possiblePaths) {
+            if (path && typeof path === 'string' && !isAudioFile(path) && path.includes('/')) {
+                videoPath = path;
+                break;
+            }
+        }
+    }
+    
+    console.log('[VideoModal] Looking for video file:', {
+        metadataFilePath: metadata.filePath,
+        itemFilePath: item.filePath,
+        itemContent: item.content,
+        foundPath: videoPath
+    });
+    
+    if (videoPath) {
+        // Ensure file:// protocol
+        if (!videoPath.startsWith('file://')) {
+            videoPath = `file://${videoPath}`;
+        }
+        videoPlayer.src = videoPath;
+        
+        // Set poster image (thumbnail) to avoid black frame
+        if (metadata.localThumbnail) {
+            let thumbnailPath = metadata.localThumbnail;
+            if (!thumbnailPath.startsWith('file://')) {
+                thumbnailPath = `file://${thumbnailPath}`;
+            }
+            videoPlayer.poster = thumbnailPath;
+            console.log('[VideoModal] Poster image set to:', thumbnailPath);
+        }
+        
+        videoPlayer.style.display = 'block';
+        console.log('[VideoModal] Video source set to:', videoPath);
+    } else {
+        console.warn('[VideoModal] No video file found for item:', item.id);
+        // Show a message in the player area
+        const playerContainer = videoPlayer.parentElement;
+        playerContainer.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:rgba(255,255,255,0.5);font-size:14px;">Video file not found</div>';
+    }
+    
+    // Set title and meta
+    document.getElementById('videoModalTitle').textContent = metadata.title || item.fileName || 'Video';
+    document.getElementById('videoModalChannel').textContent = metadata.uploader || metadata.channel || 'Unknown';
+    document.getElementById('videoModalDuration').textContent = metadata.duration || '--:--';
+    document.getElementById('videoModalSize').textContent = formatFileSize(item.fileSize || 0);
+    
+    // Source badge
+    const sourceBadge = document.getElementById('videoModalSource');
+    if (metadata.source === 'youtube' || metadata.youtubeUrl) {
+        sourceBadge.textContent = 'YouTube';
+        sourceBadge.style.display = 'inline';
+    } else {
+        sourceBadge.style.display = 'none';
+    }
+    
+    // Feature badges
+    const badgesContainer = document.getElementById('videoModalBadges');
+    let badges = '<span class="video-feature-badge video">Video</span>';
+    if (metadata.audioPath) badges += '<span class="video-feature-badge audio">Audio</span>';
+    if (metadata.transcript) badges += '<span class="video-feature-badge transcript">Transcript</span>';
+    if (metadata.storyBeats && metadata.storyBeats.length > 0) badges += '<span class="video-feature-badge beats">Story Beats</span>';
+    if (metadata.speakers && metadata.speakers.length > 0) badges += `<span class="video-feature-badge speakers">${metadata.speakers.length} Speaker${metadata.speakers.length > 1 ? 's' : ''}</span>`;
+    badgesContainer.innerHTML = badges;
+    
+    // Overview tab - show AI summary if available, otherwise show YouTube description with option to generate
+    const descriptionEl = document.getElementById('videoDescription');
+    const generateBtn = document.getElementById('generateSummaryBtn');
+    
+    if (metadata.aiSummary) {
+        // Show AI-generated summary with proper formatting
+        descriptionEl.innerHTML = formatSummaryText(metadata.aiSummary);
+        generateBtn.style.display = 'none';
+    } else if (videoTranscriptPlain) {
+        // Has transcript but no AI summary - auto-generate it
+        descriptionEl.innerHTML = '<p style="color: rgba(255,255,255,0.5); font-style: italic;"><span style="display: inline-block; animation: pulse 1.5s infinite;">⏳</span> Generating AI summary from transcript...</p>';
+        generateBtn.style.display = 'none';
+        
+        // Auto-generate summary
+        autoGenerateSummary(item.id, videoTranscriptPlain, metadata.title || item.fileName, descriptionEl);
+    } else if (metadata.longDescription || metadata.youtubeDescription) {
+        // No transcript but has YouTube description - show it
+        descriptionEl.innerHTML = formatSummaryText(metadata.longDescription || metadata.youtubeDescription);
+        generateBtn.style.display = 'none';
+    } else {
+        // No content at all
+        descriptionEl.textContent = 'No description available.';
+        generateBtn.style.display = 'none';
+    }
+    
+    // Topics
+    const topicsContainer = document.getElementById('videoTopics');
+    if (metadata.topics && metadata.topics.length > 0) {
+        topicsContainer.innerHTML = metadata.topics.map(t => `<span class="video-topic-badge">${escapeHtml(t)}</span>`).join('');
+    } else {
+        topicsContainer.innerHTML = '<span class="no-content">No topics identified</span>';
+    }
+    
+    // Speakers
+    const speakersContainer = document.getElementById('videoSpeakers');
+    if (metadata.speakers && metadata.speakers.length > 0) {
+        speakersContainer.innerHTML = metadata.speakers.map(s => `<div class="video-speaker">• ${escapeHtml(s)}</div>`).join('');
+    } else {
+        speakersContainer.innerHTML = '<span class="no-content">No speakers identified</span>';
+    }
+    
+    // Transcript tab - always use metadata.transcript (will contain speaker labels if identified)
+    videoTranscriptPlain = '';
+    videoTranscriptTimecoded = '';
+    
+    if (metadata.transcript) {
+        videoTranscriptPlain = typeof metadata.transcript === 'string' ? metadata.transcript : metadata.transcript.text || '';
+        
+        // Generate timecoded version (only if speakers haven't been identified)
+        if (!metadata.speakersIdentified && metadata.transcriptSegments && metadata.transcriptSegments.length > 0) {
+            videoTranscriptTimecoded = metadata.transcriptSegments.map(seg => 
+                `[${seg.startFormatted || formatSegmentTimeGlobal(seg.start)}] ${seg.text}`
+            ).join('\n');
+        }
+        
+        console.log('[VideoModal] Loaded transcript, speakers identified:', !!metadata.speakersIdentified);
+    }
+    
+    // Update Identify Speakers button based on whether speakers are already identified
+    const identifySpeakersBtn = document.getElementById('videoIdentifySpeakers');
+    if (identifySpeakersBtn) {
+        if (metadata.speakersIdentified) {
+            identifySpeakersBtn.innerHTML = '<span>🔄</span> Re-identify Speakers';
+            identifySpeakersBtn.title = `Last identified: ${new Date(metadata.speakersIdentifiedAt).toLocaleString()} (Model: ${metadata.speakersIdentifiedModel})`;
+        } else {
+            identifySpeakersBtn.innerHTML = '<span>✨</span> Identify Speakers';
+            identifySpeakersBtn.title = 'Use AI to identify and label speakers in the transcript';
+        }
+    }
+    
+    const transcriptText = document.getElementById('videoTranscriptText');
+    transcriptText.textContent = videoTranscriptPlain || 'No transcript available. Click "Identify Speakers" to generate one.';
+    
+    // Story beats tab
+    const beatsContainer = document.getElementById('videoStoryBeats');
+    if (metadata.storyBeats && metadata.storyBeats.length > 0) {
+        beatsContainer.innerHTML = metadata.storyBeats.map((beat, i) => `
+            <div class="story-beat">
+                <div class="story-beat-number">${i + 1}</div>
+                <div class="story-beat-text">${escapeHtml(beat)}</div>
+            </div>
+        `).join('');
+    } else {
+        beatsContainer.innerHTML = '<span class="no-content">No story beats available. Story beats will be generated when AI metadata is created.</span>';
+    }
+    
+    // Details tab
+    document.getElementById('videoFileName').textContent = item.fileName || '-';
+    document.getElementById('videoFileSize').textContent = formatFileSize(item.fileSize || 0);
+    document.getElementById('videoFileDuration').textContent = metadata.duration || '-';
+    document.getElementById('videoFileSource').textContent = metadata.source || item.source || 'Local';
+    document.getElementById('videoFileDate').textContent = new Date(item.timestamp).toLocaleString();
+    document.getElementById('videoFileUrl').textContent = metadata.youtubeUrl || '-';
+    
+    // Update audio button state
+    const audioBtn = document.getElementById('videoDownloadAudio');
+    if (metadata.audioPath) {
+        audioBtn.innerHTML = '<span>🎵</span> Download Audio';
+        audioBtn.disabled = false;
+    } else {
+        audioBtn.innerHTML = '<span>🎵</span> Extract Audio';
+        audioBtn.disabled = false;
+    }
+    
+    // Update transcript button state
+    const transcriptBtn = document.getElementById('videoCopyTranscript');
+    transcriptBtn.disabled = !videoTranscriptPlain;
+    
+    // Reset to first tab
+    switchVideoTab('overview');
+    
+    // Show modal
+    modal.style.display = 'flex';
+}
+
+// Switch video tabs
+function switchVideoTab(tabName) {
+    // Update tab buttons
+    document.querySelectorAll('.video-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.tab === tabName);
+    });
+    
+    // Update tab content
+    document.querySelectorAll('.video-tab-content').forEach(content => {
+        content.classList.remove('active');
+    });
+    document.getElementById('tab' + tabName.charAt(0).toUpperCase() + tabName.slice(1)).classList.add('active');
+}
+
+// Close video modal
+function closeVideoModal() {
+    const modal = document.getElementById('videoPreviewModal');
+    const videoPlayer = document.getElementById('videoModalPlayer');
+    videoPlayer.pause();
+    videoPlayer.src = '';
+    videoPlayer.poster = '';
+    modal.style.display = 'none';
+    currentVideoItem = null;
+}
+
+// Setup video modal event listeners
+function setupVideoModalListeners() {
+    // Close button
+    document.getElementById('videoModalClose').addEventListener('click', closeVideoModal);
+    
+    // Click outside to close
+    document.getElementById('videoPreviewModal').addEventListener('click', (e) => {
+        if (e.target.id === 'videoPreviewModal') closeVideoModal();
+    });
+    
+    // Tab switching
+    document.querySelectorAll('.video-tab').forEach(tab => {
+        tab.addEventListener('click', () => switchVideoTab(tab.dataset.tab));
+    });
+    
+    // Timecode toggle
+    document.getElementById('videoTimecodeToggle').addEventListener('change', (e) => {
+        const transcriptText = document.getElementById('videoTranscriptText');
+        if (e.target.checked && videoTranscriptTimecoded) {
+            transcriptText.textContent = videoTranscriptTimecoded;
+        } else {
+            transcriptText.textContent = videoTranscriptPlain || 'No transcript available.';
+        }
+    });
+    
+    // Identify speakers button
+    document.getElementById('videoIdentifySpeakers').addEventListener('click', async () => {
+        if (!currentVideoItem) return;
+        
+        const btn = document.getElementById('videoIdentifySpeakers');
+        const status = document.getElementById('videoTranscriptStatus');
+        
+        btn.disabled = true;
+        btn.innerHTML = '<span>⏳</span> Analyzing...';
+        status.textContent = 'Identifying speakers...';
+        status.style.color = 'rgba(255, 255, 255, 0.7)';
+        
+        // Set up progress listener
+        let removeProgressListener = null;
+        if (window.clipboard.onSpeakerIdProgress) {
+            removeProgressListener = window.clipboard.onSpeakerIdProgress((progress) => {
+                console.log('[VideoModal-SpeakerID] Progress:', progress.status);
+                
+                // Update button and status with progress
+                if (progress.chunk && progress.total) {
+                    const pct = Math.round((progress.chunk / progress.total) * 100);
+                    btn.innerHTML = `<span>⏳</span> ${pct}%`;
+                    status.textContent = progress.status;
+                } else {
+                    status.textContent = progress.status;
+                }
+                
+                // Update transcript with partial results
+                if (progress.partialResult) {
+                    document.getElementById('videoTranscriptText').textContent = progress.partialResult;
+                    videoTranscriptPlain = progress.partialResult;
+                }
+            });
+        }
+        
+        // Set a timeout to show warning if taking too long
+        const timeoutWarning = setTimeout(() => {
+            status.textContent = 'Still processing... This may take up to 2 minutes for long transcripts.';
+            status.style.color = 'rgba(255, 200, 100, 0.8)';
+        }, 30000); // Show warning after 30 seconds
+        
+        try {
+            const metadata = currentVideoItem.metadata || {};
+            const contextHint = [metadata.title, metadata.uploader, metadata.youtubeDescription].filter(Boolean).join(' | ');
+            
+            console.log('[VideoModal-SpeakerID] Starting speaker identification...');
+            const result = await window.clipboard.identifySpeakers({
+                itemId: currentVideoItem.id,
+                transcript: videoTranscriptPlain,
+                contextHint: contextHint
+            });
+            
+            clearTimeout(timeoutWarning);
+            
+            // Clean up progress listener
+            if (removeProgressListener) {
+                removeProgressListener();
+            }
+            
+            console.log('[VideoModal-SpeakerID] Result:', result);
+            
+            if (result.success) {
+                document.getElementById('videoTranscriptText').textContent = result.transcript;
+                videoTranscriptPlain = result.transcript;
+                status.textContent = `✅ Speakers identified successfully! (Model: ${result.model})`;
+                status.style.color = 'rgba(100, 255, 100, 0.9)';
+                
+                // Reload history to get updated metadata from disk, then refresh modal
+                setTimeout(async () => {
+                    await loadHistory();
+                    status.textContent = '';
+                    showVideoPreviewModal(currentVideoItem.id);
+                }, 2000);
+            } else {
+                const errorMsg = result.error || 'Failed to identify speakers';
+                console.error('[VideoModal-SpeakerID] Error:', errorMsg);
+                status.textContent = '❌ Error: ' + errorMsg;
+                status.style.color = 'rgba(255, 100, 100, 0.9)';
+                
+                // Show alert with full error
+                alert('Speaker Identification Failed\n\n' + errorMsg + '\n\nPlease check your API key and model settings.');
+            }
+        } catch (err) {
+            clearTimeout(timeoutWarning);
+            console.error('[VideoModal-SpeakerID] Exception:', err);
+            
+            const errorMsg = err.message || 'Unknown error occurred';
+            status.textContent = '❌ Error: ' + errorMsg;
+            status.style.color = 'rgba(255, 100, 100, 0.9)';
+            
+            // Show alert with full error
+            alert('Speaker Identification Failed\n\n' + errorMsg + '\n\nCheck the console for more details.');
+            
+            // Clean up progress listener on error
+            if (removeProgressListener) {
+                removeProgressListener();
+            }
+        }
+        
+        btn.disabled = false;
+        btn.innerHTML = '<span>✨</span> Identify Speakers';
+    });
+    
+    // Download audio button
+    document.getElementById('videoDownloadAudio').addEventListener('click', async () => {
+        if (!currentVideoItem) return;
+        
+        const btn = document.getElementById('videoDownloadAudio');
+        const metadata = currentVideoItem.metadata || {};
+        
+        if (metadata.audioPath) {
+            // Open audio file location
+            if (window.electron?.shell?.showItemInFolder) {
+                window.electron.shell.showItemInFolder(metadata.audioPath);
+            } else {
+                alert('Audio file: ' + metadata.audioPath);
+            }
+        } else {
+            // Extract audio
+            btn.disabled = true;
+            btn.innerHTML = '<span>⏳</span> 0%';
+            
+            // Set up progress listener
+            let removeProgressListener = null;
+            if (window.clipboard.onAudioExtractProgress) {
+                removeProgressListener = window.clipboard.onAudioExtractProgress((data) => {
+                    if (data.itemId === currentVideoItem.id) {
+                        btn.innerHTML = `<span>⏳</span> ${data.percent}%`;
+                    }
+                });
+            }
+            
+            try {
+                const result = await window.clipboard.extractAudio(currentVideoItem.id);
+                
+                // Clean up listener
+                if (removeProgressListener) removeProgressListener();
+                
+                if (result.success) {
+                    btn.innerHTML = '<span>✅</span> Audio Ready!';
+                    setTimeout(() => {
+                        btn.innerHTML = '<span>🎵</span> Download Audio';
+                        btn.disabled = false;
+                        showVideoPreviewModal(currentVideoItem.id);
+                    }, 1500);
+                } else {
+                    alert('Failed to extract audio: ' + (result.error || 'Unknown error'));
+                    btn.innerHTML = '<span>🎵</span> Extract Audio';
+                    btn.disabled = false;
+                }
+            } catch (err) {
+                // Clean up listener
+                if (removeProgressListener) removeProgressListener();
+                
+                alert('Error: ' + err.message);
+                btn.innerHTML = '<span>🎵</span> Extract Audio';
+                btn.disabled = false;
+            }
+        }
+    });
+    
+    // Copy transcript button
+    document.getElementById('videoCopyTranscript').addEventListener('click', () => {
+        if (videoTranscriptPlain) {
+            navigator.clipboard.writeText(videoTranscriptPlain);
+            const btn = document.getElementById('videoCopyTranscript');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<span>✅</span> Copied!';
+            setTimeout(() => btn.innerHTML = originalText, 1500);
+        }
+    });
+    
+    // Generate AI Summary button
+    document.getElementById('generateSummaryBtn').addEventListener('click', async () => {
+        if (!currentVideoItem || !videoTranscriptPlain) return;
+        
+        const btn = document.getElementById('generateSummaryBtn');
+        const descriptionEl = document.getElementById('videoDescription');
+        
+        btn.disabled = true;
+        btn.innerHTML = '<span>⏳</span> Generating...';
+        descriptionEl.textContent = 'Generating AI summary from transcript...';
+        
+        try {
+            const metadata = currentVideoItem.metadata || {};
+            const result = await window.clipboard.generateSummary({
+                itemId: currentVideoItem.id,
+                transcript: videoTranscriptPlain,
+                title: metadata.title || currentVideoItem.fileName
+            });
+            
+            if (result.success) {
+                // Format paragraphs properly
+                descriptionEl.innerHTML = formatSummaryText(result.summary);
+                btn.style.display = 'none';
+                
+                // Update local metadata
+                if (currentVideoItem.metadata) {
+                    currentVideoItem.metadata.aiSummary = result.summary;
+                }
+            } else {
+                descriptionEl.textContent = 'Failed to generate summary: ' + result.error;
+                btn.innerHTML = '<span>✨</span> Retry';
+                btn.disabled = false;
+            }
+        } catch (err) {
+            descriptionEl.textContent = 'Error: ' + err.message;
+            btn.innerHTML = '<span>✨</span> Retry';
+            btn.disabled = false;
+        }
+    });
+    
+    // Open file button
+    document.getElementById('videoOpenFile').addEventListener('click', () => {
+        if (currentVideoItem?.filePath) {
+            if (window.electron?.shell?.showItemInFolder) {
+                window.electron.shell.showItemInFolder(currentVideoItem.filePath);
+            }
+        }
+    });
+    
+    // ESC to close
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && document.getElementById('videoPreviewModal').style.display === 'flex') {
+            closeVideoModal();
+        }
+    });
+}
+
+// Setup drag events for history items
+function setupHistoryItemDrag() {
+    const historyList = document.getElementById('historyList');
+    
+    if (!historyList) return;
+    
+    // Use event delegation for dynamically created history items
+    historyList.addEventListener('dragstart', (e) => {
+        const historyItem = e.target.closest('.history-item');
+        if (!historyItem) return;
+        
+        const itemId = historyItem.dataset.id;
+        if (!itemId) return;
+        
+        console.log('[Drag] Started dragging item:', itemId);
+        
+        // Set drag data
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', itemId);
+        
+        // Visual feedback
+        historyItem.style.opacity = '0.5';
+        
+        // Store the item being dragged
+        historyItem.classList.add('dragging');
+    });
+    
+    historyList.addEventListener('dragend', (e) => {
+        const historyItem = e.target.closest('.history-item');
+        if (!historyItem) return;
+        
+        // Reset visual state
+        historyItem.style.opacity = '1';
+        historyItem.classList.remove('dragging');
+    });
+}
+
 // Initialize when DOM is ready
 // Add a small delay to ensure preload script is fully loaded
 document.addEventListener('DOMContentLoaded', () => {
     // Wait a moment for preload to be ready
-    setTimeout(init, 100);
+    setTimeout(() => {
+        init();
+        setupVideoModalListeners();
+        setupHistoryItemDrag();
+    }, 100);
 }); 

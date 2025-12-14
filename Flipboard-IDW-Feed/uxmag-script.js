@@ -62,6 +62,67 @@ class FlipboardReader {
         this.lastRequestTime = 0;
         this.REQUEST_COOLDOWN = 1000; // 1 second between requests
         
+        // Playlist state
+        this.playlist = [];
+        this.playlistQueue = []; // Articles checked for listening
+        this.currentPlaylistIndex = -1;
+        this.currentlyPlayingArticle = null;
+        this.currentlyPlayingPlayer = null;
+        this.isPlaylistPlaying = false;
+        this.playlistBuilt = false;
+        
+        // Track Blob URLs for cleanup (prevent memory leaks)
+        this.currentAudioBlobUrl = null;
+    }
+    
+    // Helper to set audio source and clean up old Blob URLs
+    setAudioSource(audioPlayer, blob) {
+        // Revoke old Blob URL to prevent memory leak
+        if (this.currentAudioBlobUrl) {
+            console.log('[Memory] 🗑️ Revoking old Blob URL');
+            URL.revokeObjectURL(this.currentAudioBlobUrl);
+        }
+        // Create new Blob URL
+        this.currentAudioBlobUrl = URL.createObjectURL(blob);
+        audioPlayer.src = this.currentAudioBlobUrl;
+        
+        // Log memory usage
+        if (performance.memory) {
+            const usedMB = Math.round(performance.memory.usedJSHeapSize / 1024 / 1024);
+            console.log(`[Memory] 📊 Heap: ${usedMB} MB (after setting audio source)`);
+        }
+    }
+    
+    // Cleanup method for when audio is done
+    cleanupAudioBlobUrl() {
+        if (this.currentAudioBlobUrl) {
+            console.log('[Memory] 🧹 Cleaning up audio Blob URL');
+            URL.revokeObjectURL(this.currentAudioBlobUrl);
+            this.currentAudioBlobUrl = null;
+        }
+    }
+    
+    // Log current memory usage (call from console: window.reader.logMemory())
+    logMemory() {
+        if (performance.memory) {
+            const used = Math.round(performance.memory.usedJSHeapSize / 1024 / 1024);
+            const total = Math.round(performance.memory.totalJSHeapSize / 1024 / 1024);
+            console.log(`[Memory] 📊 Used: ${used} MB / Total: ${total} MB`);
+            return { used, total };
+        }
+        console.log('[Memory] ⚠️ performance.memory not available');
+        return null;
+        
+        // Setup playlist bar when DOM is ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => this.setupPlaylistBar());
+        } else {
+            this.setupPlaylistBar();
+        }
+        
+        // Clear old playlist preferences to start fresh (remove this after fix is verified)
+        // localStorage.removeItem('playlistPreferences');
+        
         // Listen for RSS data if the API is available
         if (window.flipboardAPI && typeof window.flipboardAPI.onRSSData === 'function') {
             window.flipboardAPI.onRSSData((data) => {
@@ -115,6 +176,10 @@ class FlipboardReader {
         // Add image cache
         this.imageCache = new Map();
         this.loadImageCache();
+        
+        // Add article content cache for faster TTS and offline reading
+        this.articleCache = new Map();
+        this.loadArticleCache();
 
         // Initialize reading log to track cumulative seconds read per article.
         this.readingLog = {};
@@ -146,6 +211,781 @@ class FlipboardReader {
                 this.updateTileReadingTime(data.url, data.readingTime);
             });
         }
+    }
+
+    // ==================== PLAYLIST MANAGEMENT ====================
+    
+    setupPlaylistBar() {
+        console.log('[Playlist] setupPlaylistBar called, readyState:', document.readyState);
+        
+        const playPauseBtn = document.getElementById('playlistPlayPause');
+        const prevBtn = document.getElementById('playlistPrev');
+        const nextBtn = document.getElementById('playlistNext');
+        const toggleBtn = document.getElementById('playlistToggle');
+        const progressBar = document.querySelector('.playlist-progress');
+        const selectAllBtn = document.getElementById('playlistSelectAll');
+        
+        console.log('[Playlist] Elements found - toggleBtn:', !!toggleBtn, 'playPauseBtn:', !!playPauseBtn);
+        const deselectAllBtn = document.getElementById('playlistDeselectAll');
+        
+        // Play/Pause button
+        if (playPauseBtn) {
+            playPauseBtn.addEventListener('click', () => this.togglePlaylistPlayback());
+        }
+        
+        // Previous button
+        if (prevBtn) {
+            prevBtn.addEventListener('click', () => this.playPreviousInPlaylist());
+        }
+        
+        // Next button
+        if (nextBtn) {
+            nextBtn.addEventListener('click', () => this.playNextInPlaylist());
+        }
+        
+        // Toggle playlist panel - make both button and the entire queue toggle area clickable
+        const queueToggleArea = document.querySelector('.playlist-queue-toggle');
+        
+        if (toggleBtn) {
+            console.log('[Playlist] Toggle button found, adding click handler');
+            toggleBtn.addEventListener('click', (e) => {
+                console.log('[Playlist] Toggle button clicked!');
+                e.stopPropagation();
+                this.togglePlaylistPanel();
+            });
+        } else {
+            console.error('[Playlist] Toggle button NOT found!');
+        }
+        
+        // Also make the entire queue area clickable
+        if (queueToggleArea) {
+            console.log('[Playlist] Queue toggle area found, adding click handler');
+            queueToggleArea.addEventListener('click', (e) => {
+                // Only trigger if not clicking the button itself (to avoid double trigger)
+                if (e.target !== toggleBtn && !toggleBtn?.contains(e.target)) {
+                    console.log('[Playlist] Queue area clicked!');
+                    this.togglePlaylistPanel();
+                }
+            });
+        }
+        
+        // Progress bar seek
+        if (progressBar) {
+            progressBar.addEventListener('click', (e) => {
+                if (this.currentlyPlayingPlayer && this.currentlyPlayingPlayer.duration) {
+                    const rect = progressBar.getBoundingClientRect();
+                    const clickPosition = (e.clientX - rect.left) / rect.width;
+                    this.currentlyPlayingPlayer.currentTime = clickPosition * this.currentlyPlayingPlayer.duration;
+                }
+            });
+        }
+        
+        // Select/Deselect all
+        if (selectAllBtn) {
+            selectAllBtn.addEventListener('click', () => this.selectAllPlaylist(true));
+        }
+        if (deselectAllBtn) {
+            deselectAllBtn.addEventListener('click', () => this.selectAllPlaylist(false));
+        }
+        
+        // Save state when window is closed or hidden
+        window.addEventListener('beforeunload', () => {
+            if (this.currentlyPlayingPlayer && this.currentlyPlayingArticle) {
+                console.log('[Playlist] Saving state before unload');
+                this.savePlaylistState();
+            }
+        });
+        
+        // Also save when visibility changes (e.g., switching tabs or minimizing)
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden' && this.currentlyPlayingPlayer && this.currentlyPlayingArticle) {
+                console.log('[Playlist] Saving state on visibility change');
+                this.savePlaylistState();
+            }
+        });
+        
+        console.log('[Playlist] Bar initialized');
+    }
+    
+    buildPlaylist() {
+        console.log('[Playlist] ====== buildPlaylist called ======');
+        console.log('[Playlist] this.items count:', this.items?.length || 0);
+        
+        // Build playlist from items (newest first based on pubDate)
+        if (!this.items || this.items.length === 0) {
+            console.log('[Playlist] ERROR: No items to build playlist from');
+            return;
+        }
+        
+        // Filter to only include unread/unlistened articles
+        const unreadItems = this.items.filter(item => {
+            const normalizedUrl = this.normalizeUrl(item.link);
+            const isRead = this.readArticles && this.readArticles.has(item.link);
+            const readingLogEntry = this.readingLog[normalizedUrl];
+            const isListened = readingLogEntry && readingLogEntry.listenCompleted;
+            
+            // Include if NOT read AND NOT fully listened
+            return !isRead && !isListened;
+        });
+        
+        console.log('[Playlist] Unread/unlistened items:', unreadItems.length, 'of', this.items.length);
+        
+        // Sort by date (newest first)
+        const sortedItems = [...unreadItems].sort((a, b) => {
+            const dateA = new Date(a.pubDate || 0);
+            const dateB = new Date(b.pubDate || 0);
+            return dateB - dateA;
+        });
+        
+        console.log('[Playlist] Sorted unread items count:', sortedItems.length);
+        if (sortedItems.length > 0) {
+            console.log('[Playlist] First unread item:', sortedItems[0]?.title);
+        }
+        
+        this.playlist = sortedItems.map((item, index) => ({
+            id: this.normalizeUrl(item.link),
+            title: item.title,
+            link: item.link,
+            source: item.source || 'Unknown',
+            pubDate: item.pubDate,
+            checked: true, // All unread items are checked by default
+            hasAudio: false, // Will be updated when checked
+            index: index
+        }));
+        
+        console.log('[Playlist] Playlist created with', this.playlist.length, 'unread items');
+        
+        // Update queue based on checked items
+        this.updatePlaylistQueue();
+        
+        // Render playlist items
+        console.log('[Playlist] Rendering playlist items...');
+        this.renderPlaylistItems();
+        
+        // Update queue count
+        this.updateQueueCount();
+        
+        console.log(`[Playlist] ====== Playlist build complete: ${this.playlist.length} unread items in queue ======`);
+    }
+    
+    renderPlaylistItems() {
+        const container = document.getElementById('playlistItems');
+        console.log('[Playlist] renderPlaylistItems - container found:', !!container);
+        if (!container) {
+            console.error('[Playlist] ERROR: playlistItems container not found!');
+            return;
+        }
+        
+        container.innerHTML = '';
+        console.log('[Playlist] Rendering', this.playlist.length, 'items to container');
+        
+        this.playlist.forEach((item, index) => {
+            const itemEl = document.createElement('div');
+            itemEl.className = 'playlist-item';
+            if (this.currentPlaylistIndex === index) {
+                itemEl.classList.add('current');
+            }
+            itemEl.dataset.id = item.id;
+            
+            itemEl.innerHTML = `
+                <input type="checkbox" class="playlist-item-checkbox" ${item.checked ? 'checked' : ''}>
+                <span class="playlist-item-number">${index + 1}</span>
+                <div class="playlist-item-info">
+                    <div class="playlist-item-title" title="${item.title}">${item.title}</div>
+                    <div class="playlist-item-meta">
+                        <span>${item.source}</span>
+                        <span>${item.pubDate ? new Date(item.pubDate).toLocaleDateString() : ''}</span>
+                    </div>
+                </div>
+                <span class="playlist-item-status ${item.hasAudio ? 'ready' : ''}">${item.hasAudio ? '✓ Ready' : ''}</span>
+            `;
+            
+            // Checkbox change handler
+            const checkbox = itemEl.querySelector('.playlist-item-checkbox');
+            checkbox.addEventListener('change', (e) => {
+                e.stopPropagation();
+                item.checked = checkbox.checked;
+                this.updatePlaylistQueue();
+                this.updateQueueCount();
+                this.savePlaylistPreferences();
+            });
+            
+            // Click to play
+            itemEl.addEventListener('click', (e) => {
+                if (e.target.type === 'checkbox') return;
+                this.playPlaylistItem(index);
+            });
+            
+            container.appendChild(itemEl);
+        });
+    }
+    
+    updatePlaylistQueue() {
+        this.playlistQueue = this.playlist
+            .map((item, index) => ({ ...item, originalIndex: index }))
+            .filter(item => item.checked);
+        console.log('[Playlist] Queue updated:', this.playlistQueue.length, 'items checked');
+    }
+    
+    updateQueueCount() {
+        const countEl = document.getElementById('playlistQueueCount');
+        console.log('[Playlist] Updating queue count, element found:', !!countEl, 'queue length:', this.playlistQueue.length);
+        if (countEl) {
+            const count = this.playlistQueue.length;
+            countEl.textContent = `${count} in queue`;
+            console.log('[Playlist] Queue count display updated to:', count);
+        }
+    }
+    
+    togglePlaylistPanel() {
+        console.log('[Playlist] togglePlaylistPanel called');
+        
+        // Use the existing preferences panel with the playlist tab
+        const panel = document.getElementById('preferencesPanel');
+        if (!panel) {
+            console.error('[Playlist] Preferences panel not found!');
+            return;
+        }
+        
+        // If panel is already open with playlist tab, close it
+        if (panel.classList.contains('show')) {
+            const playlistTab = document.querySelector('.panel-tab[data-tab="playlist"]');
+            if (playlistTab && playlistTab.classList.contains('active')) {
+                panel.classList.remove('show');
+                return;
+            }
+        }
+        
+        // Switch to playlist tab
+        this.switchPanelTab('playlist');
+        
+        // Open the panel
+        panel.classList.add('show');
+        
+        // Populate the playlist tab
+        this.populatePlaylistTab();
+    }
+    
+    switchPanelTab(tabName) {
+        console.log('[Playlist] switchPanelTab called with:', tabName);
+        
+        // Update tab buttons
+        const tabs = document.querySelectorAll('.panel-tab');
+        console.log('[Playlist] Found', tabs.length, 'tab buttons');
+        tabs.forEach(tab => {
+            const isActive = tab.dataset.tab === tabName;
+            tab.classList.toggle('active', isActive);
+            console.log('[Playlist] Tab:', tab.dataset.tab, 'active:', isActive);
+        });
+        
+        // Update tab content
+        const contents = document.querySelectorAll('.tab-content');
+        console.log('[Playlist] Found', contents.length, 'tab contents');
+        contents.forEach(content => {
+            const targetId = `${tabName}Tab`;
+            const isActive = content.id === targetId;
+            content.classList.toggle('active', isActive);
+            console.log('[Playlist] Content:', content.id, 'looking for:', targetId, 'active:', isActive);
+        });
+    }
+    
+    populatePlaylistTab() {
+        const container = document.getElementById('playlistTabItems');
+        if (!container) {
+            console.error('[Playlist] Playlist tab container not found!');
+            return;
+        }
+        
+        const playlist = this.playlist || [];
+        console.log('[Playlist] Populating playlist tab with', playlist.length, 'items');
+        
+        container.innerHTML = '';
+        
+        if (playlist.length === 0) {
+            container.innerHTML = `
+                <div class="playlist-empty">
+                    <div class="playlist-empty-icon">🎉</div>
+                    <p>No unread articles in queue.</p>
+                    <p style="font-size: 12px; margin-top: 10px;">New articles will appear here automatically.</p>
+                </div>
+            `;
+            return;
+        }
+        
+        playlist.forEach((item, index) => {
+            const itemEl = document.createElement('div');
+            itemEl.className = 'playlist-item' + (this.currentPlaylistIndex === index ? ' playing' : '');
+            itemEl.innerHTML = `
+                <input type="checkbox" class="playlist-item-checkbox" ${item.checked !== false ? 'checked' : ''} data-index="${index}">
+                <span class="playlist-item-number">${index + 1}</span>
+                <div class="playlist-item-info">
+                    <div class="playlist-item-title">${item.title}</div>
+                    <div class="playlist-item-meta">${item.source || 'Unknown'} • ${item.pubDate ? new Date(item.pubDate).toLocaleDateString() : ''}</div>
+                </div>
+            `;
+            
+            // Checkbox handler
+            const checkbox = itemEl.querySelector('.playlist-item-checkbox');
+            checkbox.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.playlist[index].checked = checkbox.checked;
+                this.updateQueueCount();
+                this.savePlaylistPreferences();
+            });
+            
+            // Click to play
+            itemEl.addEventListener('click', (e) => {
+                if (e.target === checkbox) return;
+                document.getElementById('preferencesPanel').classList.remove('show');
+                this.playPlaylistItem(index);
+            });
+            
+            container.appendChild(itemEl);
+        });
+    }
+    
+    selectAllPlaylist(select) {
+        this.playlist.forEach(item => {
+            item.checked = select;
+        });
+        this.updatePlaylistQueue();
+        this.updateQueueCount();
+        this.renderPlaylistItems();
+        this.populatePlaylistTab(); // Refresh the tab view
+        this.savePlaylistPreferences();
+    }
+    
+    async togglePlaylistPlayback() {
+        const playBtn = document.getElementById('playlistPlayPause');
+        const playIcon = playBtn?.querySelector('.playlist-play-icon');
+        
+        if (this.currentlyPlayingPlayer && !this.currentlyPlayingPlayer.paused) {
+            // Pause
+            this.currentlyPlayingPlayer.pause();
+            if (playIcon) playIcon.textContent = '▶';
+            this.isPlaylistPlaying = false;
+            // Save state immediately when pausing
+            this.savePlaylistState();
+        } else if (this.currentlyPlayingPlayer && this.currentlyPlayingPlayer.src) {
+            // Resume
+            this.currentlyPlayingPlayer.play();
+            if (playIcon) playIcon.textContent = '⏸';
+            this.isPlaylistPlaying = true;
+        } else if (this.pendingResumeState) {
+            // Resume from saved state (after app restart)
+            console.log('[Playlist] Resuming from saved state at', this.pendingResumeState.currentTime, 'seconds');
+            const state = this.pendingResumeState;
+            
+            // Find the item in the playlist
+            const itemIndex = this.playlist.findIndex(item => item.link === state.articleLink);
+            if (itemIndex >= 0) {
+                // Store the resume position for playAudioData to use
+                this.resumeFromPosition = state.currentTime;
+                await this.playPlaylistItem(itemIndex);
+            } else {
+                console.log('[Playlist] Could not find article in playlist, starting fresh');
+                this.pendingResumeState = null;
+                if (this.playlistQueue.length > 0) {
+                    await this.playPlaylistItem(this.playlistQueue[0]?.originalIndex || 0);
+                }
+            }
+        } else {
+            // Start from beginning or current position
+            if (this.playlistQueue.length > 0) {
+                const startIndex = this.currentPlaylistIndex >= 0 ? this.currentPlaylistIndex : 0;
+                await this.playPlaylistItem(this.playlistQueue[startIndex]?.originalIndex || 0);
+            }
+        }
+    }
+    
+    async playPlaylistItem(index) {
+        if (index < 0 || index >= this.playlist.length) return;
+        
+        const item = this.playlist[index];
+        this.currentPlaylistIndex = index;
+        
+        // Update UI
+        this.updatePlaylistUI(item);
+        this.highlightCurrentItem(index);
+        
+        // Get or generate audio
+        await this.loadAndPlayArticle(item);
+    }
+    
+    async loadAndPlayArticle(item) {
+        const playBtn = document.getElementById('playlistPlayPause');
+        const playIcon = playBtn?.querySelector('.playlist-play-icon');
+        const labelEl = document.getElementById('playlistLabel');
+        
+        // Show loading
+        if (playIcon) playIcon.textContent = '⏳';
+        if (labelEl) labelEl.textContent = 'Loading...';
+        
+        try {
+            // Check for existing audio
+            const existingAudio = await window.flipboardAPI.getArticleTTS(item.id);
+            
+            if (existingAudio.success && existingAudio.hasAudio) {
+                // Use existing audio
+                await this.playAudioData(item, existingAudio.audioData);
+                item.hasAudio = true;
+                this.updateItemStatus(item.id, 'ready');
+            } else {
+                // Need to generate - trigger tile click or generate here
+                if (labelEl) labelEl.textContent = 'Generating audio...';
+                this.updateItemStatus(item.id, 'generating');
+                
+                // Find the tile and trigger its audio generation
+                const normalizedUrl = this.normalizeUrl(item.link);
+                const tile = document.querySelector(`.tile[data-link="${normalizedUrl}"]`);
+                
+                if (tile) {
+                    const audioBtn = tile.querySelector('.tile-audio-btn');
+                    if (audioBtn) {
+                        audioBtn.click();
+                        // The tile's click handler will generate audio
+                        // We'll hook into when it's ready
+                        return;
+                    }
+                }
+                
+                throw new Error('Could not find article tile to generate audio');
+            }
+        } catch (error) {
+            console.error('[Playlist] Error loading article:', error);
+            if (labelEl) labelEl.textContent = 'Error loading';
+            if (playIcon) playIcon.textContent = '▶';
+            
+            // Try next after delay
+            setTimeout(() => this.playNextInPlaylist(), 2000);
+        }
+    }
+    
+    async playAudioData(item, audioData) {
+        const playIcon = document.getElementById('playlistPlayPause')?.querySelector('.playlist-play-icon');
+        const labelEl = document.getElementById('playlistLabel');
+        
+        // Create or reuse audio player
+        if (!this.currentlyPlayingPlayer) {
+            this.currentlyPlayingPlayer = new Audio();
+        }
+        
+        const audioPlayer = this.currentlyPlayingPlayer;
+        audioPlayer.dataset.articleLink = item.link;
+        
+        // Load audio (with Blob URL cleanup)
+        const blob = this.base64ToBlob(audioData, 'audio/mpeg');
+        this.setAudioSource(audioPlayer, blob);
+        
+        // Set up event handlers
+        this.setupPlaylistProgress(audioPlayer);
+        
+        // Wait for load and play
+        await new Promise((resolve, reject) => {
+            audioPlayer.onloadedmetadata = resolve;
+            audioPlayer.onerror = reject;
+        });
+        
+        // Check if we need to resume from a specific position
+        if (this.resumeFromPosition && this.resumeFromPosition > 0) {
+            console.log('[Playlist] Seeking to saved position:', this.resumeFromPosition, 'seconds');
+            audioPlayer.currentTime = this.resumeFromPosition;
+            this.resumeFromPosition = null; // Clear after using
+            this.pendingResumeState = null; // Clear the pending state
+        }
+        
+        audioPlayer.play();
+        
+        // Update UI
+        if (playIcon) playIcon.textContent = '⏸';
+        if (labelEl) labelEl.textContent = 'Now Playing';
+        this.isPlaylistPlaying = true;
+        
+        // Update currently playing
+        this.currentlyPlayingArticle = { title: item.title, link: item.link };
+        
+        // Save state
+        this.savePlaylistState();
+        
+        console.log('[Playlist] Playing:', item.title);
+    }
+    
+    setupPlaylistProgress(audioPlayer) {
+        const progressFill = document.getElementById('playlistProgressFill');
+        const timeEl = document.getElementById('playlistTime');
+        const playIcon = document.getElementById('playlistPlayPause')?.querySelector('.playlist-play-icon');
+        
+        let lastSaveTime = 0;
+        
+        const updateProgress = () => {
+            if (audioPlayer.duration) {
+                const progress = (audioPlayer.currentTime / audioPlayer.duration) * 100;
+                if (progressFill) progressFill.style.width = `${progress}%`;
+                if (timeEl) timeEl.textContent = `${this.formatTime(audioPlayer.currentTime)} / ${this.formatTime(audioPlayer.duration)}`;
+                
+                // Update reading log
+                const articleLink = audioPlayer.dataset.articleLink;
+                if (articleLink && Math.floor(audioPlayer.currentTime) % 5 === 0) {
+                    this.updateListenProgress(articleLink, audioPlayer.currentTime, audioPlayer.duration);
+                }
+                
+                // Save state periodically
+                const now = Date.now();
+                if (now - lastSaveTime > 5000) {
+                    lastSaveTime = now;
+                    this.savePlaylistState();
+                }
+            }
+        };
+        
+        const updatePlayState = () => {
+            if (playIcon) {
+                playIcon.textContent = audioPlayer.paused ? '▶' : '⏸';
+            }
+        };
+        
+        const handleEnded = () => {
+            // Mark as completed in reading log
+            const articleLink = audioPlayer.dataset.articleLink;
+            if (articleLink && audioPlayer.duration) {
+                this.updateListenProgress(articleLink, audioPlayer.duration, audioPlayer.duration, true);
+            }
+            
+            // Update item status
+            if (this.currentPlaylistIndex >= 0) {
+                const item = this.playlist[this.currentPlaylistIndex];
+                if (item) {
+                    this.markItemPlayed(item.id);
+                }
+            }
+            
+            // Auto-play next
+            this.playNextInPlaylist();
+        };
+        
+        // Remove old listeners
+        audioPlayer.removeEventListener('timeupdate', audioPlayer._playlistUpdate);
+        audioPlayer.removeEventListener('play', audioPlayer._playlistPlayState);
+        audioPlayer.removeEventListener('pause', audioPlayer._playlistPlayState);
+        audioPlayer.removeEventListener('ended', audioPlayer._playlistEnded);
+        
+        // Store and add new listeners
+        audioPlayer._playlistUpdate = updateProgress;
+        audioPlayer._playlistPlayState = updatePlayState;
+        audioPlayer._playlistEnded = handleEnded;
+        
+        audioPlayer.addEventListener('timeupdate', audioPlayer._playlistUpdate);
+        audioPlayer.addEventListener('play', audioPlayer._playlistPlayState);
+        audioPlayer.addEventListener('pause', audioPlayer._playlistPlayState);
+        audioPlayer.addEventListener('ended', audioPlayer._playlistEnded);
+    }
+    
+    playNextInPlaylist() {
+        // Find next checked item
+        const currentQueueIndex = this.playlistQueue.findIndex(
+            item => item.originalIndex === this.currentPlaylistIndex
+        );
+        
+        if (currentQueueIndex >= 0 && currentQueueIndex < this.playlistQueue.length - 1) {
+            const nextItem = this.playlistQueue[currentQueueIndex + 1];
+            this.playPlaylistItem(nextItem.originalIndex);
+        } else {
+            // End of queue
+            console.log('[Playlist] End of queue');
+            this.isPlaylistPlaying = false;
+            const playIcon = document.getElementById('playlistPlayPause')?.querySelector('.playlist-play-icon');
+            const labelEl = document.getElementById('playlistLabel');
+            if (playIcon) playIcon.textContent = '▶';
+            if (labelEl) labelEl.textContent = 'Queue complete';
+        }
+    }
+    
+    playPreviousInPlaylist() {
+        const currentQueueIndex = this.playlistQueue.findIndex(
+            item => item.originalIndex === this.currentPlaylistIndex
+        );
+        
+        if (currentQueueIndex > 0) {
+            const prevItem = this.playlistQueue[currentQueueIndex - 1];
+            this.playPlaylistItem(prevItem.originalIndex);
+        }
+    }
+    
+    updatePlaylistUI(item) {
+        const titleEl = document.getElementById('playlistCurrentTitle');
+        if (titleEl) {
+            titleEl.textContent = item.title;
+            titleEl.title = item.title;
+        }
+    }
+    
+    highlightCurrentItem(index) {
+        const items = document.querySelectorAll('.playlist-item');
+        items.forEach((el, i) => {
+            el.classList.toggle('current', i === index);
+        });
+    }
+    
+    updateItemStatus(itemId, status) {
+        const itemEl = document.querySelector(`.playlist-item[data-id="${itemId}"]`);
+        if (itemEl) {
+            const statusEl = itemEl.querySelector('.playlist-item-status');
+            if (statusEl) {
+                statusEl.className = `playlist-item-status ${status}`;
+                statusEl.textContent = status === 'ready' ? '✓ Ready' : status === 'generating' ? '⏳' : '';
+            }
+        }
+    }
+    
+    markItemPlayed(itemId) {
+        const itemEl = document.querySelector(`.playlist-item[data-id="${itemId}"]`);
+        if (itemEl) {
+            itemEl.classList.add('played');
+        }
+    }
+    
+    // Persistence
+    savePlaylistPreferences() {
+        try {
+            const prefs = this.playlist.map(item => ({
+                id: item.id,
+                checked: item.checked
+            }));
+            localStorage.setItem('playlistPreferences', JSON.stringify(prefs));
+        } catch (e) {
+            console.error('[Playlist] Error saving preferences:', e);
+        }
+    }
+    
+    loadPlaylistPreferences() {
+        try {
+            const saved = localStorage.getItem('playlistPreferences');
+            if (saved) {
+                const prefs = JSON.parse(saved);
+                console.log('[Playlist] Loading saved preferences for', prefs.length, 'items');
+                let matchCount = 0;
+                prefs.forEach(pref => {
+                    const item = this.playlist.find(i => i.id === pref.id);
+                    if (item) {
+                        item.checked = pref.checked;
+                        matchCount++;
+                    }
+                });
+                console.log('[Playlist] Applied preferences to', matchCount, 'items');
+                
+                // If no items are checked, check all by default (fresh start)
+                const checkedCount = this.playlist.filter(i => i.checked).length;
+                if (checkedCount === 0) {
+                    console.log('[Playlist] No items checked, enabling all by default');
+                    this.playlist.forEach(item => item.checked = true);
+                }
+            } else {
+                console.log('[Playlist] No saved preferences, all items checked by default');
+            }
+        } catch (e) {
+            console.error('[Playlist] Error loading preferences:', e);
+            // On error, ensure all are checked
+            this.playlist.forEach(item => item.checked = true);
+        }
+    }
+    
+    savePlaylistState() {
+        if (!this.currentlyPlayingArticle || !this.currentlyPlayingPlayer) return;
+        
+        const state = {
+            articleId: this.normalizeUrl(this.currentlyPlayingArticle.link),
+            articleTitle: this.currentlyPlayingArticle.title,
+            articleLink: this.currentlyPlayingArticle.link,
+            currentTime: this.currentlyPlayingPlayer.currentTime,
+            duration: this.currentlyPlayingPlayer.duration || 0,
+            playlistIndex: this.currentPlaylistIndex,
+            timestamp: Date.now()
+        };
+        
+        try {
+            localStorage.setItem('playlistState', JSON.stringify(state));
+        } catch (e) {
+            console.error('[Playlist] Error saving state:', e);
+        }
+    }
+    
+    async restorePlaylistState() {
+        try {
+            const saved = localStorage.getItem('playlistState');
+            if (!saved) return;
+            
+            const state = JSON.parse(saved);
+            
+            // Check if not too old (24 hours)
+            if (Date.now() - state.timestamp > 24 * 60 * 60 * 1000) {
+                localStorage.removeItem('playlistState');
+                return;
+            }
+            
+            // Update UI to show resume state
+            this.currentPlaylistIndex = state.playlistIndex;
+            this.highlightCurrentItem(state.playlistIndex);
+            
+            const titleEl = document.getElementById('playlistCurrentTitle');
+            const labelEl = document.getElementById('playlistLabel');
+            const progressFill = document.getElementById('playlistProgressFill');
+            const timeEl = document.getElementById('playlistTime');
+            
+            if (titleEl) titleEl.textContent = state.articleTitle;
+            if (labelEl) labelEl.textContent = 'Click ▶ to resume';
+            if (progressFill && state.duration) {
+                progressFill.style.width = `${(state.currentTime / state.duration) * 100}%`;
+            }
+            if (timeEl) {
+                timeEl.textContent = `${this.formatTime(state.currentTime)} / ${this.formatTime(state.duration)}`;
+            }
+            
+            // Store for resume
+            this.pendingResumeState = state;
+            
+            console.log('[Playlist] State restored for:', state.articleTitle);
+            
+        } catch (e) {
+            console.error('[Playlist] Error restoring state:', e);
+        }
+    }
+    
+    // Called from showNowPlaying to integrate with tile audio
+    showNowPlaying(articleTitle, audioPlayer, articleLink) {
+        // Update playlist UI when audio starts from tile
+        this.currentlyPlayingArticle = { title: articleTitle, link: articleLink };
+        this.currentlyPlayingPlayer = audioPlayer;
+        
+        // Find and highlight in playlist
+        const itemIndex = this.playlist.findIndex(item => item.link === articleLink);
+        if (itemIndex >= 0) {
+            this.currentPlaylistIndex = itemIndex;
+            this.highlightCurrentItem(itemIndex);
+            this.playlist[itemIndex].hasAudio = true;
+            this.updateItemStatus(this.playlist[itemIndex].id, 'ready');
+        }
+        
+        // Update bar
+        const titleEl = document.getElementById('playlistCurrentTitle');
+        const labelEl = document.getElementById('playlistLabel');
+        const playIcon = document.getElementById('playlistPlayPause')?.querySelector('.playlist-play-icon');
+        
+        if (titleEl) titleEl.textContent = articleTitle;
+        if (labelEl) labelEl.textContent = 'Now Playing';
+        if (playIcon) playIcon.textContent = '⏸';
+        
+        // Set up progress tracking
+        this.setupPlaylistProgress(audioPlayer);
+        this.isPlaylistPlaying = true;
+        
+        console.log('[Playlist] Now playing from tile:', articleTitle);
+    }
+    
+    formatTime(seconds) {
+        if (!seconds || isNaN(seconds)) return '0:00';
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
     }
 
     setupEventListeners() {
@@ -475,6 +1315,10 @@ class FlipboardReader {
                 return dateB - dateA; // For newest to oldest
             });
             
+            // IMPORTANT: Update this.items with processed/sorted data for playlist
+            this.items = data.items;
+            console.log('[Playlist] Updated this.items with', this.items.length, 'processed items');
+            
             // Process feed items and create tiles
             for (const item of data.items) {
                 if (this.processedItems.has(item.link)) {
@@ -503,6 +1347,14 @@ class FlipboardReader {
                     this.updateReadingProgress(item);
                 });
             }
+            
+            // Build/update playlist after items are loaded
+            if (!this.playlistBuilt || !isCached) {
+                console.log('[Playlist] Building playlist with', this.items.length, 'items');
+                this.buildPlaylist();
+                this.restorePlaylistState();
+                this.playlistBuilt = true;
+            }
         } catch (error) {
             console.error('Error processing RSS data:', error);
         } finally {
@@ -529,6 +1381,24 @@ class FlipboardReader {
         const tile = document.createElement('div');
         tile.setAttribute('data-link', this.normalizeUrl(item.link));
         tile.classList.add('tile');
+        
+        // Create tile header with audio button
+        const tileHeader = document.createElement('div');
+        tileHeader.className = 'tile-header';
+        
+        // Add audio player button in header
+        const audioContainer = document.createElement('div');
+        audioContainer.className = 'tile-audio-container';
+        audioContainer.innerHTML = `
+            <div class="audio-status" style="display: none;"></div>
+            <button class="tile-audio-btn" data-article-id="${this.normalizeUrl(item.link)}" title="Listen to article">
+                <span class="audio-icon">▶</span>
+                <span class="audio-text">Listen</span>
+            </button>
+            <audio class="tile-audio-player"></audio>
+        `;
+        tileHeader.appendChild(audioContainer);
+        tile.appendChild(tileHeader);
         
         // Add source badge
         const sourceBadge = document.createElement('span');
@@ -558,14 +1428,24 @@ class FlipboardReader {
         if (imageUrl && imageUrl !== this.defaultLogos.default) {
             imageElement.style.backgroundImage = `url(${this.cleanImageUrl(imageUrl)})`;
         } else {
-            // Otherwise, attempt to fetch an image directly from the article page.
-            this.fetchArticleImage(item.link).then(articleImageUrl => {
-                if (articleImageUrl) {
-                    imageElement.style.backgroundImage = `url(${this.cleanImageUrl(articleImageUrl)})`;
-                } else {
-                    imageElement.style.backgroundImage = `url(${this.getDefaultLogo(item.link)})`;
-                }
-            });
+            // Check image cache first
+            const normalizedUrl = this.normalizeUrl(item.link);
+            if (this.imageCache.has(normalizedUrl)) {
+                const cachedImage = this.imageCache.get(normalizedUrl);
+                imageElement.style.backgroundImage = `url(${this.cleanImageUrl(cachedImage)})`;
+            } else {
+                // Show default logo immediately while fetching
+                imageElement.style.backgroundImage = `url(${this.getDefaultLogo(item.link)})`;
+                
+                // Fetch image in background and update when ready
+                this.fetchArticleImage(item.link).then(articleImageUrl => {
+                    if (articleImageUrl && articleImageUrl !== this.getDefaultLogo(item.link)) {
+                        imageElement.style.backgroundImage = `url(${this.cleanImageUrl(articleImageUrl)})`;
+                    }
+                }).catch(err => {
+                    console.log('[Image] Fetch failed, keeping default logo');
+                });
+            }
         }
         
         imageContainer.appendChild(imageElement);
@@ -627,9 +1507,10 @@ class FlipboardReader {
         const progressText = document.createElement('div');
         progressText.className = 'reading-progress-text';
         
-        // Get the logged time for this article
+        // Get the logged time for this article (handle both old number format and new object format)
         const articleId = this.normalizeUrl(item.link);
-        const loggedTime = this.readingLog[articleId] || 0;
+        const logEntry = this.readingLog[articleId];
+        const loggedTime = typeof logEntry === 'number' ? logEntry : (logEntry?.readTime || 0);
         
         // Initially show just the logged time, estimated time will be updated when available
         progressText.textContent = `${this.formatTime(loggedTime)} / Loading...`;
@@ -639,20 +1520,326 @@ class FlipboardReader {
         progressBar.appendChild(progressText);
         tile.appendChild(progressBar);
         
-        // Add recent article indicator based on pubDate (within the last week)
-        if (item.pubDate) {
-            const pubDate = new Date(item.pubDate);
-            const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-            if (pubDate >= oneWeekAgo) {
-                // Check if the recent indicator isn't already added
-                if (!tile.querySelector('.recent-pill')) {
-                    const recentPill = document.createElement('span');
-                    recentPill.classList.add('recent-pill');
-                    recentPill.textContent = "Recent";
-                    tile.appendChild(recentPill);
+        // Set up audio button click handler (using audioContainer from header)
+        const audioBtn = audioContainer.querySelector('.tile-audio-btn');
+        const audioPlayer = audioContainer.querySelector('.tile-audio-player');
+        const audioStatus = audioContainer.querySelector('.audio-status');
+        
+        // Store article link for reading log updates
+        audioPlayer.dataset.articleLink = item.link;
+        
+        // Load saved listen progress and display on button
+        const savedLogEntry = this.readingLog[articleId];
+        if (savedLogEntry && typeof savedLogEntry === 'object') {
+            const savedListenProgress = savedLogEntry.listenProgress || 0;
+            if (savedListenProgress > 0) {
+                audioBtn.style.setProperty('--listen-progress', `${savedListenProgress}%`);
+                if (savedLogEntry.listenCompleted) {
+                    audioBtn.classList.add('completed');
                 }
             }
         }
+        
+        audioBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            const articleId = this.normalizeUrl(item.link);
+            const audioIcon = audioBtn.querySelector('.audio-icon');
+            const audioText = audioBtn.querySelector('.audio-text');
+            
+            // Check if audio is currently playing
+            if (!audioPlayer.paused && audioPlayer.src) {
+                audioPlayer.pause();
+                audioIcon.textContent = '▶';
+                audioText.textContent = 'Listen';
+                audioBtn.classList.remove('playing');
+                // Don't hide Now Playing bar - just update play state
+                return;
+            }
+            
+            // Check if we already have audio loaded
+            if (audioPlayer.src && audioPlayer.src !== '') {
+                audioPlayer.play();
+                audioIcon.textContent = '⏸';
+                audioText.textContent = 'Pause';
+                audioBtn.classList.add('playing');
+                // Show Now Playing bar
+                this.showNowPlaying(item.title, audioPlayer, item.link);
+                return;
+            }
+            
+            // Check for existing TTS audio
+            audioIcon.textContent = '⏳';
+            audioText.textContent = '...';
+            audioBtn.classList.add('loading');
+            audioStatus.style.display = 'block';
+            audioStatus.textContent = 'Loading...';
+            
+            try {
+                const existingAudio = await window.flipboardAPI.getArticleTTS(articleId);
+                
+                if (existingAudio.success && existingAudio.hasAudio) {
+                    // Use existing audio (with Blob URL cleanup)
+                    const blob = this.base64ToBlob(existingAudio.audioData, 'audio/mpeg');
+                    this.setAudioSource(audioPlayer, blob);
+                    audioPlayer.play();
+                    audioIcon.textContent = '⏸';
+                    audioText.textContent = 'Pause';
+                    audioBtn.classList.remove('loading');
+                    audioBtn.classList.add('playing');
+                    audioStatus.textContent = 'Playing';
+                    // Show Now Playing bar
+                    this.showNowPlaying(item.title, audioPlayer, item.link);
+                } else {
+                    // Generate new audio
+                    audioStatus.textContent = 'Fetching article...';
+                    
+                    // Get article title
+                    const articleTitle = item.title || '';
+                    
+                    // Fetch FULL article content from the URL (not just RSS description)
+                    console.log('[Audio] Fetching full article from:', item.link);
+                    let fullArticleContent = await this.fetchFullArticleContent(item.link);
+                    
+                    // Fall back to RSS content if fetch fails
+                    if (!fullArticleContent) {
+                        console.log('[Audio] Falling back to RSS content');
+                        fullArticleContent = item.description || item.content || '';
+                    }
+                    
+                    // Strip HTML tags and clean text
+                    const tempDiv = document.createElement('div');
+                    tempDiv.innerHTML = fullArticleContent;
+                    let cleanContent = (tempDiv.textContent || tempDiv.innerText || '').trim();
+                    cleanContent = cleanContent.replace(/\s+/g, ' '); // Normalize whitespace
+                    
+                    console.log('[Audio] Article title:', articleTitle);
+                    console.log('[Audio] Raw article content length:', cleanContent.length);
+                    
+                    if (!cleanContent || cleanContent.length < 100) {
+                        throw new Error('Not enough content to generate audio');
+                    }
+                    
+                    // Use GPT to create an audio-optimized script
+                    audioStatus.textContent = 'Creating script...';
+                    console.log('[Audio] Sending to GPT for audio script creation...');
+                    
+                    const scriptResult = await window.flipboardAPI.createAudioScript({
+                        title: articleTitle,
+                        content: cleanContent
+                    });
+                    
+                    if (!scriptResult.success) {
+                        console.error('[Audio] Script creation failed:', scriptResult.error);
+                        throw new Error(scriptResult.error || 'Failed to create audio script');
+                    }
+                    
+                    const audioScript = scriptResult.script;
+                    console.log('[Audio] Audio script created, length:', audioScript.length);
+                    
+                    // Split script into chunks for streaming playback
+                    const MAX_CHUNK_SIZE = 4000;
+                    const textChunks = [];
+                    
+                    if (audioScript.length <= MAX_CHUNK_SIZE) {
+                        textChunks.push(audioScript);
+                    } else {
+                        let remaining = audioScript;
+                        while (remaining.length > 0) {
+                            if (remaining.length <= MAX_CHUNK_SIZE) {
+                                textChunks.push(remaining);
+                                break;
+                            }
+                            // Find sentence boundary
+                            let breakPoint = MAX_CHUNK_SIZE;
+                            const lastPeriod = remaining.lastIndexOf('. ', MAX_CHUNK_SIZE);
+                            const lastQuestion = remaining.lastIndexOf('? ', MAX_CHUNK_SIZE);
+                            const lastExclaim = remaining.lastIndexOf('! ', MAX_CHUNK_SIZE);
+                            const bestBreak = Math.max(lastPeriod, lastQuestion, lastExclaim);
+                            if (bestBreak > MAX_CHUNK_SIZE * 0.5) {
+                                breakPoint = bestBreak + 1;
+                            }
+                            textChunks.push(remaining.substring(0, breakPoint).trim());
+                            remaining = remaining.substring(breakPoint).trim();
+                        }
+                    }
+                    
+                    console.log(`[Audio] Split into ${textChunks.length} chunks for streaming`);
+                    
+                    // Generate first chunk and start playing immediately
+                    audioStatus.textContent = 'Starting...';
+                    
+                    const firstResult = await window.flipboardAPI.generateTTSChunk({
+                        text: textChunks[0],
+                        voice: 'nova'
+                    });
+                    
+                    if (!firstResult.success) {
+                        throw new Error(firstResult.error || 'Failed to generate audio');
+                    }
+                    
+                    // Start playing first chunk immediately (with Blob URL cleanup)
+                    const firstBlob = this.base64ToBlob(firstResult.audioData, 'audio/mpeg');
+                    this.setAudioSource(audioPlayer, firstBlob);
+                    audioPlayer.play();
+                    audioIcon.textContent = '⏸';
+                    audioText.textContent = 'Pause';
+                    audioBtn.classList.remove('loading');
+                    audioBtn.classList.add('playing');
+                    audioStatus.textContent = 'Playing';
+                    // Show Now Playing bar
+                    this.showNowPlaying(item.title, audioPlayer, item.link);
+                    
+                    // Queue remaining chunks in background
+                    if (textChunks.length > 1) {
+                        const audioQueue = [firstResult.audioData];
+                        let currentChunkIndex = 0;
+                        let isGeneratingChunks = true;
+                        
+                        // Generate remaining chunks in background
+                        (async () => {
+                            for (let i = 1; i < textChunks.length; i++) {
+                                console.log(`[Audio] Generating chunk ${i + 1}/${textChunks.length} in background`);
+                                audioStatus.textContent = `Loading ${i + 1}/${textChunks.length}...`;
+                                
+                                const chunkResult = await window.flipboardAPI.generateTTSChunk({
+                                    text: textChunks[i],
+                                    voice: 'nova'
+                                });
+                                
+                                if (chunkResult.success) {
+                                    audioQueue.push(chunkResult.audioData);
+                                    console.log(`[Audio] Chunk ${i + 1} ready, queue size: ${audioQueue.length}`);
+                                } else {
+                                    console.error(`[Audio] Failed to generate chunk ${i + 1}:`, chunkResult.error);
+                                }
+                            }
+                            isGeneratingChunks = false;
+                            audioStatus.textContent = 'Playing';
+                            console.log('[Audio] All chunks generated');
+                            
+                            // Combine all chunks and save to disk for persistence
+                            console.log('[Audio] Saving combined audio to disk...');
+                            try {
+                                const combinedAudio = this.combineAudioChunks(audioQueue);
+                                await window.flipboardAPI.saveArticleTTS({
+                                    articleId: articleId,
+                                    audioData: combinedAudio
+                                });
+                                console.log('[Audio] Audio saved successfully for:', articleId);
+                            } catch (saveErr) {
+                                console.error('[Audio] Failed to save combined audio:', saveErr);
+                            }
+                        })();
+                        
+                        // When current chunk ends, play next from queue
+                        const playNextChunk = () => {
+                            currentChunkIndex++;
+                            if (currentChunkIndex < audioQueue.length) {
+                                console.log(`[Audio] Playing chunk ${currentChunkIndex + 1}/${textChunks.length}`);
+                                const nextBlob = this.base64ToBlob(audioQueue[currentChunkIndex], 'audio/mpeg');
+                                this.setAudioSource(audioPlayer, nextBlob);
+                                audioPlayer.play();
+                            } else if (isGeneratingChunks) {
+                                // Wait for next chunk to be ready
+                                console.log('[Audio] Waiting for next chunk...');
+                                audioStatus.textContent = 'Buffering...';
+                                const waitForChunk = setInterval(() => {
+                                    if (currentChunkIndex < audioQueue.length) {
+                                        clearInterval(waitForChunk);
+                                        playNextChunk();
+                                    } else if (!isGeneratingChunks) {
+                                        clearInterval(waitForChunk);
+                                        // All done
+                                        audioIcon.textContent = '✓';
+                                        audioText.textContent = 'Done';
+                                        audioBtn.classList.remove('playing');
+                                        audioBtn.classList.add('completed');
+                                    }
+                                }, 500);
+                            } else {
+                                // All chunks played
+                                console.log('[Audio] All chunks played');
+                            }
+                        };
+                        
+                        // Override the ended handler for streaming
+                        audioPlayer.onended = playNextChunk;
+                    } else {
+                        // Single chunk - save immediately
+                        console.log('[Audio] Single chunk, saving to disk...');
+                        try {
+                            await window.flipboardAPI.saveArticleTTS({
+                                articleId: articleId,
+                                audioData: firstResult.audioData
+                            });
+                            console.log('[Audio] Single chunk audio saved for:', articleId);
+                        } catch (saveErr) {
+                            console.error('[Audio] Failed to save single chunk audio:', saveErr);
+                        }
+                    }
+                }
+                
+                // Hide status after a moment
+                setTimeout(() => {
+                    audioStatus.style.display = 'none';
+                }, 2000);
+                
+            } catch (error) {
+                console.error('Audio error:', error);
+                audioIcon.textContent = '!';
+                audioText.textContent = 'Error';
+                audioBtn.classList.remove('loading');
+                const errorMsg = error?.message || 'Error';
+                audioStatus.textContent = errorMsg;
+                
+                setTimeout(() => {
+                    audioIcon.textContent = '▶';
+                    audioText.textContent = 'Listen';
+                    audioStatus.style.display = 'none';
+                }, 2000);
+            }
+        });
+        
+        // Track audio progress and update reading log
+        audioPlayer.addEventListener('timeupdate', () => {
+            if (audioPlayer.duration) {
+                const progress = (audioPlayer.currentTime / audioPlayer.duration) * 100;
+                
+                // Update the button's fill progress (visual indicator)
+                audioBtn.style.setProperty('--listen-progress', `${progress}%`);
+                
+                // Update reading log with listen progress (every 5 seconds)
+                const articleLink = audioPlayer.dataset.articleLink;
+                if (articleLink && Math.floor(audioPlayer.currentTime) % 5 === 0) {
+                    this.updateListenProgress(articleLink, audioPlayer.currentTime, audioPlayer.duration);
+                }
+            }
+        });
+        
+        // Handle audio ended
+        audioPlayer.addEventListener('ended', () => {
+            const audioIcon = audioBtn.querySelector('.audio-icon');
+            const audioText = audioBtn.querySelector('.audio-text');
+            audioIcon.textContent = '✓';
+            audioText.textContent = 'Done';
+            audioBtn.classList.remove('playing');
+            audioBtn.classList.add('completed');
+            audioBtn.style.setProperty('--listen-progress', '100%');
+            
+            // Mark as fully listened in reading log
+            const articleLink = audioPlayer.dataset.articleLink;
+            if (articleLink) {
+                this.updateListenProgress(articleLink, audioPlayer.duration, audioPlayer.duration, true);
+            }
+            
+            // Reset to listen after a moment (but keep progress visible)
+            setTimeout(() => {
+                audioIcon.textContent = '▶';
+                audioText.textContent = 'Listen';
+            }, 3000);
+        });
         
         // Add click event listener to open the article
         console.log('Adding click handler to tile:', item.title);
@@ -664,6 +1851,48 @@ class FlipboardReader {
         });
 
         return tile;
+    }
+    
+    // Helper to convert base64 to blob
+    base64ToBlob(base64, mimeType) {
+        const byteCharacters = atob(base64);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        return new Blob([byteArray], { type: mimeType });
+    }
+    
+    // Helper to combine multiple base64 audio chunks into one
+    combineAudioChunks(base64Chunks) {
+        // Convert each base64 chunk to binary
+        const binaryChunks = base64Chunks.map(chunk => {
+            const binary = atob(chunk);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+                bytes[i] = binary.charCodeAt(i);
+            }
+            return bytes;
+        });
+        
+        // Calculate total length
+        const totalLength = binaryChunks.reduce((sum, chunk) => sum + chunk.length, 0);
+        
+        // Combine all chunks
+        const combined = new Uint8Array(totalLength);
+        let offset = 0;
+        for (const chunk of binaryChunks) {
+            combined.set(chunk, offset);
+            offset += chunk.length;
+        }
+        
+        // Convert back to base64
+        let binary = '';
+        for (let i = 0; i < combined.length; i++) {
+            binary += String.fromCharCode(combined[i]);
+        }
+        return btoa(binary);
     }
 
     truncateText(text, maxLength) {
@@ -848,8 +2077,30 @@ class FlipboardReader {
         try {
             console.log('Fetching article content from:', item.link);
             console.log('Article title:', item.title);
-            // Use the main process to fetch the article content
-            const articleContent = await window.flipboardAPI.fetchArticle(item.link);
+            
+            // Check raw HTML cache first
+            const cacheKey = 'raw_' + this.normalizeUrl(item.link);
+            let articleContent = null;
+            
+            const cachedRaw = this.articleCache.get(cacheKey);
+            if (cachedRaw) {
+                console.log('[Cache] HIT - Using cached raw HTML');
+                articleContent = cachedRaw.content;
+            } else {
+                // Fetch from network
+                articleContent = await window.flipboardAPI.fetchArticle(item.link);
+                
+                // Cache the raw HTML for future use
+                if (articleContent) {
+                    this.articleCache.set(cacheKey, {
+                        content: articleContent,
+                        timestamp: Date.now()
+                    });
+                    this.saveArticleCache();
+                    console.log('[Cache] Stored raw HTML');
+                }
+            }
+            
             console.log('Received article content, length:', articleContent?.length || 0);
             
             // Create a simple hash of the content to see if we're getting the same content
@@ -1191,29 +2442,108 @@ class FlipboardReader {
         return null;
     }
 
-    // Update fetchFullArticleContent to use direct fetching
+    // Update fetchFullArticleContent to use direct fetching with caching
     async fetchFullArticleContent(link) {
         try {
-            console.log("Fetching full article directly from:", link);
+            // Check cache first
+            const cachedContent = this.getCachedArticle(link);
+            if (cachedContent) {
+                console.log("[TTS] Using cached article content");
+                return cachedContent;
+            }
+            
+            console.log("[TTS] Fetching full article from:", link);
             const articleContent = await window.flipboardAPI.fetchArticle(link);
             if (!articleContent) {
-                console.log('No content received for article');
+                console.log('[TTS] No content received for article');
                 return null;
             }
 
             const parser = new DOMParser();
             const doc = parser.parseFromString(articleContent, 'text/html');
-            let fullArticle = doc.querySelector('article');
-            if (!fullArticle) {
-                fullArticle = doc.querySelector('div.entry-content');
+            
+            // Determine source type
+            const isOneReach = link.includes('onereach.ai');
+            const isUXMag = link.includes('uxmag.com');
+            
+            let articleElement = null;
+            
+            if (isUXMag) {
+                // UXMag-specific selectors
+                const selectors = [
+                    '.elementor-widget-theme-post-content .elementor-widget-container',
+                    '.elementor-widget-container',
+                    'article .entry-content',
+                    '.post-content',
+                    'article'
+                ];
+                for (const selector of selectors) {
+                    articleElement = doc.querySelector(selector);
+                    if (articleElement && articleElement.textContent.trim().length > 500) {
+                        console.log('[TTS] Found UXMag content with selector:', selector);
+                        break;
+                    }
+                }
+            } else if (isOneReach) {
+                // OneReach-specific selectors
+                const selectors = [
+                    '.blog-post-content',
+                    '.entry-content',
+                    'article .content',
+                    'main article',
+                    'article'
+                ];
+                for (const selector of selectors) {
+                    articleElement = doc.querySelector(selector);
+                    if (articleElement && articleElement.textContent.trim().length > 500) {
+                        console.log('[TTS] Found OneReach content with selector:', selector);
+                        break;
+                    }
+                }
             }
-            if (!fullArticle) {
-                fullArticle = doc.body;
+            
+            // Generic fallbacks
+            if (!articleElement || articleElement.textContent.trim().length < 500) {
+                const fallbackSelectors = [
+                    'article',
+                    '.entry-content',
+                    '.post-content',
+                    '.content',
+                    'main',
+                    '.blog-content'
+                ];
+                for (const selector of fallbackSelectors) {
+                    const el = doc.querySelector(selector);
+                    if (el && el.textContent.trim().length > 500) {
+                        articleElement = el;
+                        console.log('[TTS] Found content with fallback selector:', selector);
+                        break;
+                    }
+                }
             }
-            console.log("Successfully fetched full article directly. Length:", fullArticle.innerHTML.length);
-            return fullArticle.innerHTML;
+            
+            // Last resort: body
+            if (!articleElement) {
+                articleElement = doc.body;
+                console.log('[TTS] Using body as fallback');
+            }
+            
+            // Remove unwanted elements (nav, scripts, styles, etc.)
+            const unwantedSelectors = ['script', 'style', 'nav', 'header', 'footer', '.comments', '.sidebar', '.related-posts', '.share-buttons', '.author-bio'];
+            unwantedSelectors.forEach(selector => {
+                articleElement.querySelectorAll(selector).forEach(el => el.remove());
+            });
+            
+            console.log("[TTS] Full article content length:", articleElement.innerHTML.length);
+            console.log("[TTS] Full article text length:", articleElement.textContent.trim().length);
+            
+            // Cache the processed content for future use
+            const processedContent = articleElement.innerHTML;
+            this.cacheArticle(link, processedContent);
+            
+            return processedContent;
         } catch (error) {
-            console.error("Error fetching full article:", error);
+            console.error("[TTS] Error fetching full article:", error);
             return null;
         }
     }
@@ -1263,25 +2593,131 @@ class FlipboardReader {
         }
     }
 
-    loadImageCache() {
+    async loadImageCache() {
         try {
+            // Try loading from disk first (persists across app restarts)
+            if (window.flipboardAPI && window.flipboardAPI.loadCache) {
+                const cached = await window.flipboardAPI.loadCache('imageCache');
+                if (cached && cached.data) {
+                    this.imageCache = new Map(cached.data);
+                    console.log(`[ImageCache] Loaded ${this.imageCache.size} cached images from disk`);
+                    return;
+                }
+            }
+            // Fallback to localStorage
             const cached = localStorage.getItem('imageCache');
             if (cached) {
                 this.imageCache = new Map(JSON.parse(cached));
+                console.log(`[ImageCache] Loaded ${this.imageCache.size} cached images from localStorage`);
             }
         } catch (err) {
-            console.error('Error loading image cache:', err);
+            console.error('[ImageCache] Error loading:', err);
         }
     }
 
-    saveImageCache() {
+    async saveImageCache() {
         try {
-            localStorage.setItem('imageCache', 
-                JSON.stringify(Array.from(this.imageCache.entries()))
-            );
+            const data = Array.from(this.imageCache.entries());
+            // Save to disk (persists across app restarts)
+            if (window.flipboardAPI && window.flipboardAPI.saveCache) {
+                await window.flipboardAPI.saveCache('imageCache', data);
+            }
+            // Also save to localStorage as backup
+            localStorage.setItem('imageCache', JSON.stringify(data));
         } catch (err) {
-            console.error('Error saving image cache:', err);
+            console.error('[ImageCache] Error saving:', err);
         }
+    }
+    
+    // Article content cache for faster TTS and offline reading
+    async loadArticleCache() {
+        try {
+            // Try loading from disk first (persists across app restarts)
+            if (window.flipboardAPI && window.flipboardAPI.loadCache) {
+                const cached = await window.flipboardAPI.loadCache('articleCache');
+                if (cached && cached.data) {
+                    this.articleCache = new Map(cached.data);
+                    console.log(`[ArticleCache] Loaded ${this.articleCache.size} cached articles from disk`);
+                    return;
+                }
+            }
+            // Fallback to localStorage
+            const cached = localStorage.getItem('articleCache');
+            if (cached) {
+                const parsed = JSON.parse(cached);
+                this.articleCache = new Map(parsed);
+                console.log(`[ArticleCache] Loaded ${this.articleCache.size} cached articles from localStorage`);
+            }
+        } catch (err) {
+            console.error('[ArticleCache] Error loading:', err);
+            this.articleCache = new Map();
+        }
+    }
+    
+    async saveArticleCache() {
+        try {
+            // Limit cache size (keep most recent 50 articles)
+            const MAX_CACHE_SIZE = 50;
+            if (this.articleCache.size > MAX_CACHE_SIZE) {
+                const entries = Array.from(this.articleCache.entries());
+                // Sort by timestamp (newest first) and keep only MAX_CACHE_SIZE
+                entries.sort((a, b) => (b[1].timestamp || 0) - (a[1].timestamp || 0));
+                this.articleCache = new Map(entries.slice(0, MAX_CACHE_SIZE));
+            }
+            
+            const data = Array.from(this.articleCache.entries());
+            
+            // Save to disk (persists across app restarts)
+            if (window.flipboardAPI && window.flipboardAPI.saveCache) {
+                await window.flipboardAPI.saveCache('articleCache', data);
+            }
+            
+            // Also save to localStorage as backup (may be truncated for large caches)
+            try {
+                localStorage.setItem('articleCache', JSON.stringify(data));
+            } catch (e) {
+                // localStorage might be full, ignore
+            }
+        } catch (err) {
+            console.error('[ArticleCache] Error saving:', err);
+            // If storage is full, clear old entries
+            if (err.name === 'QuotaExceededError') {
+                console.log('[ArticleCache] Storage full, clearing old entries...');
+                const entries = Array.from(this.articleCache.entries());
+                this.articleCache = new Map(entries.slice(-20)); // Keep only 20 newest
+                try {
+                    localStorage.setItem('articleCache', 
+                        JSON.stringify(Array.from(this.articleCache.entries()))
+                    );
+                } catch (e) {
+                    console.error('[Cache] Still cannot save, clearing cache');
+                    localStorage.removeItem('articleCache');
+                }
+            }
+        }
+    }
+    
+    // Get cached article content
+    getCachedArticle(url) {
+        const normalizedUrl = this.normalizeUrl(url);
+        const cached = this.articleCache.get(normalizedUrl);
+        if (cached) {
+            console.log(`[Cache] HIT for ${normalizedUrl}`);
+            return cached.content;
+        }
+        console.log(`[Cache] MISS for ${normalizedUrl}`);
+        return null;
+    }
+    
+    // Cache article content
+    cacheArticle(url, content) {
+        const normalizedUrl = this.normalizeUrl(url);
+        this.articleCache.set(normalizedUrl, {
+            content: content,
+            timestamp: Date.now()
+        });
+        this.saveArticleCache();
+        console.log(`[Cache] Stored article: ${normalizedUrl} (${content.length} chars)`);
     }
 
     // New method to fetch the full article content from the article page
@@ -1311,14 +2747,46 @@ class FlipboardReader {
         }
     }
 
-    // New method: Fetch image from the article page
-    async fetchArticleImage(articleUrl) {
+    // New method: Fetch image from the article page with caching and retry
+    async fetchArticleImage(articleUrl, retryCount = 0) {
+        const maxRetries = 2;
+        
         try {
-            // Use the main process to fetch the article content
-            const articleContent = await window.flipboardAPI.fetchArticle(articleUrl);
+            const normalizedUrl = this.normalizeUrl(articleUrl);
+            
+            // Check image cache first
+            if (this.imageCache.has(normalizedUrl)) {
+                const cachedImage = this.imageCache.get(normalizedUrl);
+                console.log('[ImageCache] HIT for:', normalizedUrl);
+                return cachedImage;
+            }
+            
+            // Check if we have cached article content to extract image from
+            const rawCacheKey = 'raw_' + normalizedUrl;
+            let articleContent = null;
+            
+            const cachedRaw = this.articleCache.get(rawCacheKey);
+            if (cachedRaw) {
+                console.log('[ImageCache] Using cached article HTML');
+                articleContent = cachedRaw.content;
+            } else {
+                // Fetch from network
+                console.log(`[ImageCache] Fetching (attempt ${retryCount + 1}/${maxRetries + 1}):`, articleUrl.substring(0, 50));
+                articleContent = await window.flipboardAPI.fetchArticle(articleUrl);
+                
+                // Cache the raw HTML
+                if (articleContent) {
+                    this.articleCache.set(rawCacheKey, {
+                        content: articleContent,
+                        timestamp: Date.now()
+                    });
+                    this.saveArticleCache();
+                }
+            }
+            
             if (!articleContent) {
-                console.log('No content received for article image');
-                return null;
+                console.log('[ImageCache] No content for article image');
+                return this.getDefaultLogo(articleUrl);
             }
 
             const parser = new DOMParser();
@@ -1331,12 +2799,30 @@ class FlipboardReader {
                 doc.querySelector('.featured-image img')?.src,
                 doc.querySelector('article img')?.src,
                 doc.querySelector('.post-thumbnail img')?.src,
+                doc.querySelector('.elementor-widget-image img')?.src,
+                doc.querySelector('img.wp-post-image')?.src,
             ].filter(Boolean);
 
-            return possibleImages[0] || null;
+            if (possibleImages.length > 0) {
+                const featuredImage = possibleImages[0];
+                // Cache the image URL
+                this.imageCache.set(normalizedUrl, featuredImage);
+                this.saveImageCache();
+                console.log('[ImageCache] Found and cached image:', featuredImage.substring(0, 50) + '...');
+                return featuredImage;
+            }
+            
+            console.log('[ImageCache] No image found, using default');
+            return this.getDefaultLogo(articleUrl);
         } catch (error) {
-            console.error("Error fetching article image:", error);
-            return null;
+            // Retry on failure
+            if (retryCount < maxRetries) {
+                console.log(`[ImageCache] Retry ${retryCount + 1}/${maxRetries} after error:`, error.message || error);
+                await new Promise(r => setTimeout(r, 1000)); // Wait 1 second before retry
+                return this.fetchArticleImage(articleUrl, retryCount + 1);
+            }
+            console.error("[ImageCache] All retries failed for:", articleUrl);
+            return this.getDefaultLogo(articleUrl);
         }
     }
 
@@ -1491,8 +2977,9 @@ class FlipboardReader {
             }
             estimatedTime = rssEstimatedTime;
         }
-        // Get previously logged time for this article (if any)
-        let loggedTime = this.readingLog[articleId] || 0;
+        // Get previously logged time for this article (handle both old and new format)
+        const logEntry = this.readingLog[articleId];
+        let loggedTime = typeof logEntry === 'number' ? logEntry : (logEntry?.readTime || 0);
         let currentSession = 0;
         if (this.currentReadingItem && this.normalizeUrl(this.currentReadingItem.link) === articleId) {
             currentSession = (Date.now() - this.readingStartTime) / 1000;
@@ -1534,7 +3021,17 @@ class FlipboardReader {
                 const articleId = this.normalizeUrl(this.currentReadingItem.link);
                 const sessionTime = (Date.now() - this.readingStartTime) / 1000;
                 console.log('Stopping reading timer for article:', articleId, 'Session time:', sessionTime);
-                this.readingLog[articleId] = (this.readingLog[articleId] || 0) + sessionTime;
+                
+                // Handle both old number format and new object format
+                const currentEntry = this.readingLog[articleId];
+                if (typeof currentEntry === 'number') {
+                    // Convert old format to new format
+                    this.readingLog[articleId] = { readTime: currentEntry + sessionTime, listenTime: 0, listenProgress: 0 };
+                } else if (currentEntry) {
+                    currentEntry.readTime = (currentEntry.readTime || 0) + sessionTime;
+                } else {
+                    this.readingLog[articleId] = { readTime: sessionTime, listenTime: 0, listenProgress: 0 };
+                }
                 // Persist the updated reading log synchronously if possible
                 if (window.flipboardAPI && window.flipboardAPI.saveReadingLogSync) {
                     window.flipboardAPI.saveReadingLogSync(this.readingLog);
@@ -1544,6 +3041,71 @@ class FlipboardReader {
             }
         }
         this.currentReadingItem = null;
+    }
+
+    // Update listen progress in reading log and on screen
+    updateListenProgress(articleLink, currentTime, duration, completed = false) {
+        if (!articleLink || !duration) return;
+        
+        const articleId = this.normalizeUrl(articleLink);
+        const listenProgress = Math.round((currentTime / duration) * 100);
+        const listenTimeSeconds = Math.round(currentTime);
+        
+        // Initialize reading log entry if needed
+        if (!this.readingLog[articleId]) {
+            this.readingLog[articleId] = { readTime: 0, listenTime: 0, listenProgress: 0 };
+        } else if (typeof this.readingLog[articleId] === 'number') {
+            // Convert old format to new format
+            this.readingLog[articleId] = { 
+                readTime: this.readingLog[articleId], 
+                listenTime: 0, 
+                listenProgress: 0 
+            };
+        }
+        
+        // Update listen progress
+        this.readingLog[articleId].listenTime = listenTimeSeconds;
+        this.readingLog[articleId].listenProgress = listenProgress;
+        this.readingLog[articleId].listenCompleted = completed;
+        
+        // Save to persistent storage (throttled)
+        if (window.flipboardAPI?.saveReadingLog) {
+            window.flipboardAPI.saveReadingLog(this.readingLog);
+        }
+        
+        // Update the tile's reading progress bar to reflect combined read+listen progress
+        this.updateTileProgressWithListen(articleLink, listenProgress, completed);
+        
+        console.log(`[Audio] Listen progress: ${listenProgress}% (${listenTimeSeconds}s / ${Math.round(duration)}s)`);
+    }
+    
+    // Update tile progress bar with listen progress
+    updateTileProgressWithListen(articleLink, listenProgress, completed) {
+        const normalizedUrl = this.normalizeUrl(articleLink);
+        const tile = document.querySelector(`.tile[data-link="${normalizedUrl}"]`);
+        
+        if (!tile) return;
+        
+        const progressFill = tile.querySelector('.progress-fill');
+        const progressText = tile.querySelector('.progress-text');
+        
+        if (progressFill && listenProgress > 0) {
+            // Show listen progress in green
+            progressFill.style.background = completed ? '#10b981' : 'linear-gradient(90deg, #3b82f6 0%, #10b981 100%)';
+            
+            // Update progress bar to show listen progress
+            const currentWidth = parseFloat(progressFill.style.width) || 0;
+            const newWidth = Math.max(currentWidth, listenProgress);
+            progressFill.style.width = `${newWidth}%`;
+        }
+        
+        if (progressText && listenProgress > 0) {
+            if (completed) {
+                progressText.textContent = '✓ Listened';
+            } else {
+                progressText.textContent = `🎧 ${listenProgress}%`;
+            }
+        }
     }
 
     // New method to load reading log with better error handling
@@ -1633,8 +3195,9 @@ class FlipboardReader {
                 const minutes = parseInt(readingTime.match(/(\d+)/)[1]);
                 const estimatedSeconds = minutes * 60;
                 
-                // Get the logged time for this article
-                const loggedTime = this.readingLog[normalizedUrl] || 0;
+                // Get the logged time for this article (handle both formats)
+                const logEntry = this.readingLog[normalizedUrl];
+                const loggedTime = typeof logEntry === 'number' ? logEntry : (logEntry?.readTime || 0);
                 
                 // Update progress bar
                 const progress = Math.min(loggedTime / estimatedSeconds, 1);
@@ -1898,21 +3461,22 @@ async function showArticle() {
     document.body.classList.add("article-open");
 }
 
-// Initialize the reader
-console.log('📝 ABOUT TO CREATE FLIPBOARD READER INSTANCE');
+// Initialize the reader - only once after DOM is ready
+console.log('📝 FLIPBOARD READER - Waiting for DOM...');
 console.log('🚨🚨🚨 SCRIPT LOADED AT:', new Date().toISOString());
-console.log('🚨🚨🚨 READING TIME FIX VERSION: 4.0 - SYNTAX FIXED');
-const reader = new FlipboardReader();
-window.reader = reader; // Make it globally available
-console.log('✅ FLIPBOARD READER INSTANCE CREATED SUCCESSFULLY');
+console.log('🚨🚨🚨 READING TIME FIX VERSION: 4.1 - MEMORY LEAK FIX');
 
-// Don't load feed immediately - let the IPC data come through
-// const defaultFeed = 'https://uxmag.com/feed';
-// document.getElementById('rssUrl').value = defaultFeed;
-// reader.loadFeed(defaultFeed); 
-
+// Only create reader once DOM is ready to prevent double instantiation
 document.addEventListener('DOMContentLoaded', () => {
+    // Check if reader already exists to prevent double creation
+    if (window.reader) {
+        console.log('⚠️ FlipboardReader already exists, skipping creation');
+        return;
+    }
+    
+    console.log('📝 Creating FlipboardReader instance...');
     window.reader = new FlipboardReader();
+    console.log('✅ FLIPBOARD READER INSTANCE CREATED SUCCESSFULLY');
     
     // Ensure the close button is set up after DOM is loaded
     const closeButton = document.getElementById('close-article');

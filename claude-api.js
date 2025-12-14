@@ -3,7 +3,7 @@ const { app, net } = require('electron');
 class ClaudeAPI {
   constructor() {
     this.baseURL = 'https://api.anthropic.com/v1';
-    this.defaultModel = 'claude-3-haiku-20240307'; // Fast and cost-effective, supports vision
+    this.defaultModel = 'claude-sonnet-4-20250514'; // Claude Sonnet 4.5 - powerful and supports vision
   }
 
   /**
@@ -286,7 +286,7 @@ Respond with valid JSON only, no markdown formatting.`;
         source: metadata.source || 'unknown',
         ai_generated: metadata.ai_detected || false,
         ai_assisted: false,
-        ai_model: 'claude-3-haiku',
+        ai_model: 'claude-sonnet-4-5',
         ai_provider: 'Anthropic',
         category: metadata.category || 'other'
       };
@@ -432,7 +432,7 @@ Respond with valid JSON only, no markdown formatting.`;
 
     try {
       const requestData = JSON.stringify({
-        model: settings.model || 'claude-3-sonnet-20240229',
+        model: settings.model || 'claude-sonnet-4-20250514',
         max_tokens: maxTokens,
         temperature: temperature,
         system: "You are a technical log analyzer. Analyze the provided logs and return a structured JSON response with the following fields: summary (string), issues (array of objects with title, severity, component, impact, description, fix, and optional codeChanges fields), patterns (array of strings), recommendations (array of strings), and fixes (object with immediate and longTerm arrays). Ensure the response is valid JSON that can be parsed.",

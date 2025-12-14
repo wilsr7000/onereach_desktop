@@ -4,6 +4,9 @@ const fs = require('fs').promises;
 const path = require('path');
 const { getSettingsManager } = require('./settings-manager');
 
+// Token refresh endpoint for GSX
+const TOKEN_REFRESH_URL = 'https://em.edison.api.onereach.ai/http/35254342-4a2e-475b-aec1-18547e517e29/refresh_token';
+
 class GSXFileSync {
   constructor() {
     this.client = null;
@@ -14,10 +17,69 @@ class GSXFileSync {
     this.syncHistory = [];
     this.maxHistorySize = 100;
     this.alertShowing = false; // Track if error alert is already showing
+    this.tokenRefreshInProgress = false; // Track token refresh state
     
     // Lazy initialize paths - will be set on first access
     this._defaultSyncPaths = null;
     this._optionalSyncPaths = null;
+  }
+  
+  /**
+   * Refresh the GSX token when it expires
+   * @returns {Promise<{success: boolean, token?: string, error?: string}>}
+   */
+  async refreshToken() {
+    if (this.tokenRefreshInProgress) {
+      console.log('[GSX Sync] Token refresh already in progress, waiting...');
+      // Wait for the in-progress refresh to complete
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      return { success: !!this.settingsManager.get('gsxToken') };
+    }
+    
+    try {
+      this.tokenRefreshInProgress = true;
+      console.log('[GSX Sync] Attempting to refresh token...');
+      
+      const currentToken = this.settingsManager.get('gsxToken');
+      if (!currentToken) {
+        throw new Error('No current token to refresh');
+      }
+      
+      const response = await fetch(TOKEN_REFRESH_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${currentToken}`
+        },
+        body: JSON.stringify({ token: currentToken })
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Token refresh failed: ${response.status} - ${errorText}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.token) {
+        // Save the new token
+        this.settingsManager.set('gsxToken', data.token);
+        console.log('[GSX Sync] ✓ Token refreshed successfully');
+        
+        // Reset initialization so next operation uses new token
+        this.isInitialized = false;
+        this.client = null;
+        
+        return { success: true, token: data.token };
+      } else {
+        throw new Error('No token in refresh response');
+      }
+    } catch (error) {
+      console.error('[GSX Sync] ✗ Token refresh failed:', error.message);
+      return { success: false, error: error.message };
+    } finally {
+      this.tokenRefreshInProgress = false;
+    }
   }
   
   // Lazy getter for default sync paths
@@ -151,7 +213,15 @@ class GSXFileSync {
         // Provide helpful error message based on error type
         let helpfulMessage = sdkError.message;
         if (sdkError.message && sdkError.message.includes('401')) {
-          helpfulMessage = 'Token rejected (401 Unauthorized). Please verify:\n1. Token is correct and complete\n2. Environment matches where token was created\n3. Token has Files API permissions';
+          // Try to refresh the token automatically
+          console.log('[GSX Sync] Token expired (401), attempting automatic refresh...');
+          const refreshResult = await this.refreshToken();
+          if (refreshResult.success) {
+            console.log('[GSX Sync] Token refreshed, retrying initialization...');
+            // Retry initialization with new token
+            return await this.initialize();
+          }
+          helpfulMessage = 'Token expired and refresh failed. Please update your token in Settings.\nYou may need to generate a new token from OneReach.';
         } else if (sdkError.message && sdkError.message.includes('403')) {
           helpfulMessage = 'Access forbidden (403). Token may not have Files API permissions.';
         } else if (sdkError.message && sdkError.message.includes('serviceUrl')) {
@@ -838,9 +908,9 @@ class GSXFileSync {
     let detail = errorMessage;
     
     // Add helpful guidance based on error type
-    if (errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
+    if (errorMessage.includes('401') || errorMessage.includes('Unauthorized') || errorMessage.includes('expired')) {
       title = 'GSX Authentication Failed';
-      detail = `${errorMessage}\n\n💡 Try this:\n• Check your GSX token in Settings\n• Verify the environment matches where you created the token\n• Ensure the token has Files API permissions`;
+      detail = `${errorMessage}\n\n💡 Token may have expired. The app attempted automatic refresh.\n\nIf the problem persists:\n• Generate a new token from OneReach\n• Update your token in Settings`;
     } else if (errorMessage.includes('403') || errorMessage.includes('forbidden')) {
       title = 'GSX Access Denied';
       detail = `${errorMessage}\n\n💡 Try this:\n• Your token may not have Files API permissions\n• Contact your GSX administrator`;
@@ -1181,6 +1251,16 @@ class GSXFileSync {
         syncInProgress: this.syncInProgress,
         lastSyncTime: this.lastSyncTime
       };
+    });
+    
+    // Manually refresh token
+    ipcMain.handle('gsx:refresh-token', async () => {
+      try {
+        const result = await this.refreshToken();
+        return result;
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
     });
     
     console.log('GSX File Sync IPC handlers registered');

@@ -94,6 +94,8 @@ class SettingsManager {
       autoSave: true,
       claude4ThinkingMode: 'enabled',
       claude4ThinkingLevel: 'default',
+      autoAIMetadata: true, // Auto-generate AI metadata for all clipboard items
+      autoAIMetadataTypes: ['all'], // Types to auto-generate metadata for (default: all)
       gsxToken: '',
       gsxEnvironment: 'production',
       gsxAccountId: '',
@@ -147,7 +149,32 @@ class SettingsManager {
   }
 
   get(key) {
-    return this.settings[key];
+    // If the setting exists, return it
+    if (this.settings[key] !== undefined) {
+      return this.settings[key];
+    }
+    
+    // Otherwise, return the default value
+    const defaults = {
+      llmApiKey: '',
+      llmProvider: 'anthropic',
+      llmModel: 'claude-opus-4-20250514',
+      theme: 'dark',
+      autoSave: true,
+      claude4ThinkingMode: 'enabled',
+      claude4ThinkingLevel: 'default',
+      autoAIMetadata: true,
+      autoAIMetadataTypes: ['all'],
+      gsxToken: '',
+      gsxEnvironment: 'production',
+      gsxAccountId: '',
+      gsxAutoSync: false,
+      gsxSyncInterval: 'daily',
+      gsxSyncPaths: null,
+      openaiApiKey: ''
+    };
+    
+    return defaults[key];
   }
 
   set(key, value) {

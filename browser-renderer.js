@@ -464,9 +464,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let isBlackHoleActive = false; // Track if space chooser is open
     
     // Function to open the Black Hole Widget
-    const openBlackHole = () => {
+    // forPaste: if true, opens in expanded mode with space chooser ready
+    const openBlackHole = (forPaste = false) => {
         if (!isBlackHoleOpen) {
-            console.log('Opening Black Hole Widget');
+            console.log('Opening Black Hole Widget, forPaste:', forPaste);
             isBlackHoleOpen = true;
             
             // Get button position to show black hole near it
@@ -490,7 +491,8 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log('Black Hole calculated position (centered on button):', position);
             
             // Send message to main process to open Black Hole Widget with position
-            window.api.send('open-black-hole-widget', position);
+            // If forPaste, open in expanded mode so space chooser shows immediately
+            window.api.send('open-black-hole-widget', { ...position, startExpanded: forPaste });
             
             // Set timeout to close after 5 seconds (only if not active)
             blackHoleTimeout = setTimeout(() => {
@@ -539,6 +541,38 @@ document.addEventListener('DOMContentLoaded', () => {
             window.api.send('open-clipboard-viewer');
     });
     
+    // Right-click on Spaces button = Paste to Black Hole
+    blackHoleButton.addEventListener('contextmenu', async (e) => {
+        console.log('Black Hole button right-click detected');
+        e.preventDefault();
+        e.stopPropagation(); // Don't show the general context menu
+        cancelAutoClose();
+        
+        // If black hole is already open (from hover), close it first
+        if (isBlackHoleOpen) {
+            console.log('Black hole already open, closing and reopening in expanded mode for paste');
+            window.api.send('close-black-hole-widget');
+            isBlackHoleOpen = false;
+            
+            setTimeout(() => {
+                openBlackHole(true); // Open in expanded mode
+                // Wait for window to load, then trigger paste
+                setTimeout(() => {
+                    console.log('Sending paste trigger to Black Hole widget');
+                    window.api.send('black-hole:trigger-paste');
+                }, 500);
+            }, 200);
+        } else {
+            console.log('Opening black hole widget for right-click paste');
+            openBlackHole(true); // Open in expanded mode
+            // Wait for window to load, then trigger paste
+            setTimeout(() => {
+                console.log('Sending paste trigger to Black Hole widget');
+                window.api.send('black-hole:trigger-paste');
+            }, 500);
+        }
+    });
+    
     blackHoleButton.addEventListener('drop', (e) => {
         console.log('Black Hole drop event triggered');
         e.preventDefault();
@@ -585,19 +619,27 @@ document.addEventListener('DOMContentLoaded', () => {
             e.preventDefault();
             e.stopPropagation();
             
-            // If black hole is not open yet, open it first
-            if (!isBlackHoleOpen) {
+            // If black hole is open but not in expanded mode, close and reopen
+            if (isBlackHoleOpen) {
+                console.log('Black hole already open, closing and reopening in expanded mode for paste');
+                window.api.send('close-black-hole-widget');
+                isBlackHoleOpen = false;
+                
+                setTimeout(() => {
+                    openBlackHole(true);
+                    setTimeout(() => {
+                        console.log('Sending paste trigger to Black Hole widget');
+                        window.api.send('black-hole:trigger-paste');
+                    }, 600);
+                }, 200);
+            } else {
                 console.log('Opening black hole widget for paste');
-                openBlackHole();
+                openBlackHole(true); // true = open expanded for paste
                 // Wait a bit longer for widget to initialize
                 setTimeout(() => {
                     console.log('Sending paste trigger to Black Hole widget');
                     window.api.send('black-hole:trigger-paste');
-                }, 500);
-            } else {
-                // Widget is already open, trigger paste immediately
-                console.log('Black hole already open, sending paste trigger immediately');
-                window.api.send('black-hole:trigger-paste');
+                }, 600);
             }
         }
     });
@@ -614,21 +656,31 @@ document.addEventListener('DOMContentLoaded', () => {
                 e.preventDefault();
                 e.stopPropagation();
                 
-                if (!isBlackHoleOpen) {
-                    // Open the black hole widget first
+                if (isBlackHoleOpen) {
+                    // Close and reopen in expanded mode for paste
+                    console.log('Black hole already open, closing and reopening in expanded mode');
+                    window.api.send('close-black-hole-widget');
+                    isBlackHoleOpen = false;
+                    
+                    setTimeout(() => {
+                        openBlackHole(true);
+                        setTimeout(() => {
+                            console.log('Sending paste trigger to Black Hole widget');
+                            window.api.send('black-hole:trigger-paste');
+                        }, 600);
+                    }, 200);
+                } else {
+                    // Open the black hole widget in paste mode
                     console.log('Opening black hole widget for Cmd/Ctrl+V');
-                    openBlackHole();
+                    openBlackHole(true); // true = open expanded for paste
                     
                     // After a short delay, trigger paste in the widget
                     setTimeout(() => {
                         console.log('Sending paste trigger to Black Hole widget');
                         window.api.send('black-hole:trigger-paste');
-                    }, 500);
-                } else {
-                    // Widget is already open, trigger paste immediately
-                    console.log('Black hole already open, sending paste trigger immediately');
-                    window.api.send('black-hole:trigger-paste');
+                    }, 600);
                 }
+                return; // Don't process the else block below
             }
         }
     });
@@ -831,20 +883,33 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log('Paste to Black Hole clicked from custom menu');
         customContextMenu.style.display = 'none';
         
-        // Send request to show black hole
-        window.api.send('show-black-hole');
-        
-        // Get clipboard text and send to black hole
-        window.api.send('get-clipboard-text');
-        window.api.receive('clipboard-text-result', (text) => {
-            if (text) {
-                console.log('Sending clipboard text to black hole');
-                window.api.send('paste-to-black-hole', {
-                    type: 'text',
-                    content: text
-                });
-            }
-        });
+        // If black hole is already open (from hover), close it first and reopen in expanded mode
+        if (isBlackHoleOpen) {
+            console.log('Black hole already open, closing and reopening in expanded mode');
+            window.api.send('close-black-hole-widget');
+            isBlackHoleOpen = false;
+            
+            // Small delay to let it close
+            setTimeout(() => {
+                console.log('Opening black hole widget for context menu paste (expanded)');
+                openBlackHole(true); // true = open expanded for paste
+                
+                // Wait for widget to initialize, then trigger paste
+                setTimeout(() => {
+                    console.log('Sending paste trigger to Black Hole widget');
+                    window.api.send('black-hole:trigger-paste');
+                }, 600);
+            }, 200);
+        } else {
+            console.log('Opening black hole widget for context menu paste');
+            openBlackHole(true); // true = open expanded for paste
+            
+            // Wait for widget to initialize, then trigger paste
+            setTimeout(() => {
+                console.log('Sending paste trigger to Black Hole widget');
+                window.api.send('black-hole:trigger-paste');
+            }, 600);
+        }
     });
 });
 
@@ -1001,8 +1066,9 @@ function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = 
     webview.setAttribute('allowpopups', 'true');
     // Turn off security features to allow all popups and links
     webview.setAttribute('webpreferences', 'contextIsolation=yes, nativeWindowOpen=true, enableBlinkFeatures=MediaStreamAPI,WebRTC,AudioWorklet,WebAudio,MediaRecorder, allowPopups=true, javascript=true');
-    webview.setAttribute('disablewebsecurity', 'true');  // Allow cross-origin requests
-    webview.setAttribute('allowrunninginsecurecontent', 'true');  // Allow mixed content
+    // Security: Default to secure settings
+    // webview.setAttribute('disablewebsecurity', 'true');
+    // webview.setAttribute('allowrunninginsecurecontent', 'true');
     // Set partition as both attribute and property for proper isolation
     webview.setAttribute('partition', partitionName);
     webview.partition = partitionName;  // Also set as property
@@ -1016,8 +1082,8 @@ function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = 
         webview.setAttribute('preload', 'file://' + window.location.pathname.replace('tabbed-browser.html', 'preload-minimal.js'));
         
         // For OneReach sites, don't disable web security as it can break authentication
-        webview.removeAttribute('disablewebsecurity');
-        webview.removeAttribute('allowrunninginsecurecontent');
+        // webview.removeAttribute('disablewebsecurity');
+        // webview.removeAttribute('allowrunninginsecurecontent');
     }
     
     // Add permissions for media access (microphone for voice mode)

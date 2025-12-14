@@ -67,7 +67,12 @@ const api = {
     openExternal: (url) => {
         // Use shell.openExternal for URLs
         ipcRenderer.send('open-external-link', url);
-    }
+    },
+    
+    // Text-to-Speech functionality
+    generateTTS: (options) => ipcRenderer.invoke('article:generate-tts', options),
+    getArticleTTS: (articleId) => ipcRenderer.invoke('article:get-tts', articleId),
+    getSettings: () => ipcRenderer.invoke('get-settings')
 };
 
 // Expose the API with a unique name

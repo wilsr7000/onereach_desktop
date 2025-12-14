@@ -61,27 +61,52 @@
         .cost-display {
             display: none;
             align-items: center;
-            gap: 8px;
-            padding: 6px 12px;
+            gap: 4px;
+            padding: 8px 14px 12px 14px;
             background: var(--bg-tertiary);
-            border-radius: 6px;
+            border-radius: 8px;
             font-size: 12px;
             cursor: pointer;
             transition: background 0.2s;
+            position: relative;
         }
-        .cost-display:hover { background: rgba(79,140,255,0.2); }
+        .cost-display:hover { background: rgba(79,140,255,0.15); }
         .cost-display.visible { display: flex; }
         
         .cost-badge {
-            background: var(--success);
-            color: #000;
-            padding: 2px 8px;
-            border-radius: 4px;
+            color: var(--success);
             font-weight: 600;
+            font-size: 12px;
+        }
+        .cost-badge.warning { color: var(--warning); }
+        .cost-badge.danger { color: var(--danger); }
+        .cost-separator {
+            color: var(--text-muted);
+            font-size: 10px;
+        }
+        .budget-badge {
+            color: var(--text-secondary);
+            font-weight: 500;
             font-size: 11px;
         }
-        .cost-badge.warning { background: var(--warning); }
-        .cost-badge.danger { background: var(--danger); color: #fff; }
+        .budget-progress {
+            position: absolute;
+            bottom: 4px;
+            left: 10px;
+            right: 10px;
+            height: 3px;
+            background: var(--bg-primary);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        .budget-fill {
+            height: 100%;
+            background: var(--success);
+            transition: width 0.3s, background 0.3s;
+            border-radius: 2px;
+        }
+        .budget-fill.warning { background: var(--warning); }
+        .budget-fill.danger { background: var(--danger); }
         
         .status {
             display: flex;
@@ -118,7 +143,8 @@
             border-right: 1px solid var(--border);
             display: flex;
             flex-direction: column;
-            overflow: hidden;
+            overflow-y: auto;
+            overflow-x: hidden;
             transition: width 0.2s ease;
             position: relative;
         }
@@ -175,6 +201,22 @@
             padding: 2px 6px;
             border-radius: 4px;
             font-size: 10px;
+        }
+        
+        /* Episodic Memory Tabs */
+        .episodic-tab {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            transition: all 0.2s;
+        }
+        .episodic-tab:hover {
+            background: var(--bg-primary);
+        }
+        .episodic-tab.active {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #fff;
         }
         
         /* Space Selector */
@@ -526,6 +568,13 @@
             flex-shrink: 0;
         }
         .cycle-panel.visible { display: flex; align-items: center; gap: 16px; }
+        .cycle-label {
+            font-size: 10px;
+            font-weight: 600;
+            color: var(--accent);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
         
         .cycle-version {
             font-size: 10px;
@@ -665,6 +714,56 @@
         .cycle-ctrl.paused {
             background: var(--warning);
             color: #000;
+        }
+        .cycle-auto-toggle {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: transparent;
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-left: 6px;
+            opacity: 0.5;
+            flex-shrink: 0;
+        }
+        .cycle-auto-toggle:hover {
+            opacity: 1;
+            border-color: var(--text-secondary);
+            color: var(--text-secondary);
+        }
+        .cycle-auto-toggle.active {
+            background: var(--accent);
+            color: #fff;
+            border-color: var(--accent);
+            opacity: 1;
+        }
+        .cycle-auto-toggle svg {
+            width: 10px;
+            height: 10px;
+        }
+        .cycle-help {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            font-size: 10px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-left: auto;
+        }
+        .cycle-help:hover {
+            background: var(--accent);
+            color: #fff;
         }
         .progress-label {
             color: var(--text-secondary);
@@ -1369,9 +1468,13 @@
     <div class="header">
         <h1>GSX Create</h1>
         <div class="header-right">
-            <div class="cost-display" id="costDisplay" onclick="GSXCreate.showTransactionLogs()">
-                <span>Cost:</span>
+            <div class="cost-display" id="costDisplay" onclick="GSXCreate.showBudgetModal()">
                 <span class="cost-badge" id="costBadge">$0.00</span>
+                <span class="cost-separator">/</span>
+                <span class="budget-badge" id="budgetBadge">∞</span>
+                <div class="budget-progress" id="budgetProgress">
+                    <div class="budget-fill" id="budgetFill" style="width: 0%"></div>
+                </div>
             </div>
         <div class="status">
             <span class="status-dot" id="statusDot"></span>
@@ -1457,6 +1560,7 @@
     
     <!-- Meta Learning Cycle Panel - Minimal -->
     <div class="cycle-panel" id="cyclePanel">
+        <span class="cycle-label">Meta Learning Cycle</span>
         <button class="cycle-ctrl" id="cycleCtrlBtn" onclick="GSXCreate.toggleCycle()" title="Start Meta Learning">▶</button>
         <span class="cycle-version" id="cycleVersion">v1</span>
         
@@ -1472,6 +1576,14 @@
             <div class="phase-dot" id="phase-test" data-label="Test" onclick="GSXCreate.goToPhase('test')"></div>
             <div class="phase-line" id="line-4"></div>
             <div class="phase-dot" id="phase-improve" data-label="Improve" onclick="GSXCreate.goToPhase('improve')"></div>
+            <div class="phase-line" id="line-5"></div>
+            <div class="phase-dot" id="phase-finalize" data-label="Finalize" onclick="GSXCreate.goToPhase('finalize')"></div>
+            <button class="cycle-auto-toggle" id="autoCycleBtn" onclick="GSXCreate.toggleAutoCycle()" title="Auto-cycle: Off (click to toggle)">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                    <path d="M3 3v5h5"/>
+                </svg>
+            </button>
         </div>
         
         <div class="version-timeline" id="versionTimeline"></div>
@@ -1482,6 +1594,8 @@
             </div>
             <span id="cycleScore">0%</span>
         </div>
+        
+        <div class="cycle-help" onclick="GSXCreate.showCycleHelp()">?</div>
     </div>
     
     <!-- Main Container -->
@@ -1501,36 +1615,63 @@
                     </select>
                 </div>
                 
-                <!-- Config Options (shown after space selected) -->
+                <!-- Constitutional Memory (shown after space selected) -->
                 <div class="sidebar-section" id="configSection" style="display: none;">
-                    <h3>Configuration</h3>
-                    <div class="form-group" style="margin-bottom: 8px;">
-                        <label>Model</label>
-                        <select class="form-select" id="modelSelect" style="padding: 6px 8px; font-size: 11px;">
-                        </select>
+                    <h3 style="display: flex; align-items: center; justify-content: space-between; cursor: pointer;" onclick="GSXCreate.toggleConfigSection()">
+                        <span>Constitutional Memory</span>
+                        <span id="configToggleIcon" style="font-size: 10px; transition: transform 0.2s;">▶</span>
+                    </h3>
+                    <div id="configSectionContent" style="display: none;">
+                        <!-- Constitutional Files Status -->
+                        <div id="constitutionalStatus" style="margin-bottom: 10px; font-size: 10px;">
+                            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+                                <span id="styleGuideStatus" style="color: var(--text-muted);">○</span>
+                                <span>Style Guide</span>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+                                <span id="journeyMapStatus" style="color: var(--text-muted);">○</span>
+                                <span>Journey Map</span>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+                                <span id="criteriaStatus" style="color: var(--text-muted);">○</span>
+                                <span>Evaluation Criteria</span>
+                            </div>
+                        </div>
+                        
+                        <!-- Summary Status -->
+                        <div id="summaryStatus" style="font-size: 10px; color: var(--text-muted); margin-bottom: 8px; padding: 6px; background: var(--bg-tertiary); border-radius: 4px;">
+                            No summary loaded
+                        </div>
+                        
+                        <div class="form-group" style="margin-bottom: 8px;">
+                            <label>Style Guide</label>
+                            <select class="form-select" id="styleGuideSelect" style="padding: 6px 8px; font-size: 11px;">
+                                <option value="">None</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 8px;">
+                            <label>Journey Map</label>
+                            <select class="form-select" id="journeyMapSelect" style="padding: 6px 8px; font-size: 11px;">
+                                <option value="">None</option>
+                            </select>
+                        </div>
+                        
+                        <div style="display: flex; gap: 6px; margin-top: 8px;">
+                            <button class="btn btn-primary btn-sm" style="flex: 1;" onclick="GSXCreate.startSession()" id="startBtn">
+                                Start Session
+                            </button>
+                            <button class="btn btn-secondary btn-sm" onclick="GSXCreate.refreshConstitutionalMemory()" title="Refresh constitutional memory" style="padding: 6px 10px;">
+                                🔄
+                            </button>
+                        </div>
                     </div>
-                    <div class="form-group" style="margin-bottom: 8px;">
-                        <label>Style Guide</label>
-                        <select class="form-select" id="styleGuideSelect" style="padding: 6px 8px; font-size: 11px;">
-                            <option value="">None</option>
-                        </select>
-                    </div>
-                    <div class="form-group" style="margin-bottom: 8px;">
-                        <label>Journey Map</label>
-                        <select class="form-select" id="journeyMapSelect" style="padding: 6px 8px; font-size: 11px;">
-                            <option value="">None</option>
-                        </select>
-                    </div>
-                    <button class="btn btn-primary btn-sm" style="width: 100%; margin-top: 8px;" onclick="GSXCreate.startSession()" id="startBtn">
-                        Start Session
-                    </button>
                 </div>
                 
-                <!-- Project Files -->
-                <div class="sidebar-section" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+                <!-- Reference Memory -->
+                <div class="sidebar-section">
                     <h3 style="display: flex; align-items: center; justify-content: space-between;">
                         <span>
-                            Files
+                            Reference Memory
                             <span class="badge" id="fileCount">0</span>
                         </span>
                         <button class="btn btn-sm" onclick="GSXCreate.triggerFileUpload()" title="Upload file" style="padding: 2px 6px; font-size: 14px;">
@@ -1538,7 +1679,7 @@
                         </button>
                     </h3>
                     <input type="file" id="fileUploadInput" multiple style="display: none;" onchange="GSXCreate.handleFileUpload(event)">
-                    <div class="file-list" id="fileList" 
+                    <div class="file-list" id="fileList" style="max-height: 180px; overflow-y: auto;"
                          ondragover="GSXCreate.handleDragOver(event)" 
                          ondragleave="GSXCreate.handleDragLeave(event)" 
                          ondrop="GSXCreate.handleFileDrop(event)">
@@ -1557,6 +1698,50 @@
                     <div id="contextList" style="max-height: 120px; overflow-y: auto;">
                         <div style="color: var(--text-muted); font-size: 11px;">
                             Click files to add to context
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Episodic Memory -->
+                <div class="sidebar-section">
+                    <h3 style="display: flex; align-items: center; justify-content: space-between;">
+                        <span>Episodic Memory</span>
+                        <button class="btn btn-sm" onclick="GSXCreate.showTransactionLogs()" title="View all history" style="padding: 2px 6px; font-size: 10px;">
+                            ↗
+                        </button>
+                    </h3>
+                    
+                    <!-- Episodic Memory Tabs -->
+                    <div style="display: flex; gap: 4px; margin-bottom: 8px;">
+                        <button class="btn btn-sm episodic-tab active" id="historyTab" onclick="GSXCreate.switchEpisodicTab('history')" style="flex: 1; padding: 4px 8px; font-size: 10px;">
+                            📜 History <span class="badge" id="historyCount" style="font-size: 9px;">0</span>
+                        </button>
+                        <button class="btn btn-sm episodic-tab" id="planTab" onclick="GSXCreate.switchEpisodicTab('plan')" style="flex: 1; padding: 4px 8px; font-size: 10px;">
+                            📋 Plan <span class="badge" id="planCount" style="font-size: 9px;">0</span>
+                        </button>
+                    </div>
+                    
+                    <!-- History Panel (what we did) -->
+                    <div id="historyPanel" style="max-height: 140px; overflow-y: auto;">
+                        <div id="episodicMemoryList">
+                            <div style="color: var(--text-muted); font-size: 11px;">
+                                No history yet
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Plan Panel (what we plan to do) -->
+                    <div id="planPanel" style="display: none; max-height: 140px; overflow-y: auto;">
+                        <div style="display: flex; gap: 4px; margin-bottom: 6px;">
+                            <input type="text" id="newTodoInput" placeholder="Add task..." 
+                                   style="flex: 1; padding: 4px 8px; font-size: 11px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);"
+                                   onkeypress="if(event.key==='Enter')GSXCreate.addTodo()">
+                            <button class="btn btn-sm btn-primary" onclick="GSXCreate.addTodo()" style="padding: 4px 8px; font-size: 11px;">+</button>
+                        </div>
+                        <div id="todoList">
+                            <div style="color: var(--text-muted); font-size: 11px;">
+                                No tasks planned
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1595,14 +1780,22 @@
                         </div>
                         
                         <!-- Start Button - always visible, disabled until space selected -->
-                        <button class="btn btn-primary" disabled style="width: 100%; margin-top: 24px; padding: 14px; opacity: 0.5; cursor: not-allowed;" onclick="GSXCreate.startSession()" id="mainStartBtn">
-                            Start Session
-                        </button>
+                        <div style="display: flex; gap: 8px; margin-top: 24px;">
+                            <button class="btn btn-primary" disabled style="flex: 1; padding: 14px; opacity: 0.5; cursor: not-allowed;" onclick="GSXCreate.startSession()" id="mainStartBtn">
+                                Start Session
+                            </button>
+                            <button class="btn btn-secondary" onclick="GSXCreate.showSettings()" title="Settings" style="padding: 14px 16px;">
+                                ⚙️
+                            </button>
+                        </div>
+                        <div style="text-align: center; margin-top: 8px; font-size: 11px; color: var(--text-muted);">
+                            Model: <span id="currentModelDisplay">Claude Sonnet 4.5</span>
+                        </div>
                         
                         <!-- Optional config - shown after space selected -->
                         <div id="spaceSelectedConfig" style="display: none; margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--border);">
                             <label style="font-size: 12px; font-weight: 500; margin-bottom: 12px; display: block; color: var(--text-secondary);">
-                                Configuration
+                                Constitutional Memory
                             </label>
                             
                             <!-- Main File Selection -->
@@ -1612,12 +1805,6 @@
                                     <option value="">Auto-detect</option>
                 </select>
             </div>
-            
-                            <div class="form-group" style="margin-bottom: 12px;">
-                                <label style="font-size: 11px;">AI Model</label>
-                                <select class="form-select" id="mainModelSelect" style="padding: 10px;">
-                                </select>
-                            </div>
                             
                             <div style="display: flex; gap: 12px;">
                                 <div class="form-group" style="flex: 1;">
@@ -1654,6 +1841,9 @@
                     <button class="btn btn-secondary btn-sm" onclick="GSXCreate.showTestAgent()" title="Automated testing with Puppeteer" style="background: var(--success);">
                         🧪 Test Agent
                     </button>
+                    <button class="btn btn-secondary btn-sm" onclick="GSXCreate.showSettings()" title="Settings">
+                        ⚙️
+                    </button>
                     <div class="spacer"></div>
                     <button class="btn btn-secondary btn-sm" onclick="GSXCreate.runCodeTest()" title="Analyze code">
                         Test
@@ -1661,8 +1851,8 @@
                     <button class="btn btn-secondary btn-sm" onclick="GSXCreate.showVersionHistory()" title="Version history">
                         History
                     </button>
-                    <button class="btn btn-secondary btn-sm" onclick="GSXCreate.showLogs()" title="View logs">
-                        Logs
+                    <button class="btn btn-secondary btn-sm" onclick="GSXCreate.showTransactionLogs()" title="Episodic Memory">
+                        Episodic Memory
                     </button>
                 </div>
                 
@@ -1743,7 +1933,7 @@
     <div class="modal" id="logModal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>API Transaction Logs</h3>
+                <h3>Episodic Memory</h3>
                 <button class="modal-close" onclick="GSXCreate.closeModal('logModal')">&times;</button>
             </div>
             <div class="modal-body">
@@ -1837,6 +2027,113 @@
                     </p>
                     <button class="btn btn-primary" onclick="GSXCreate.getRepoMap()" style="margin-bottom: 12px;">Generate Repo Map</button>
                     <div id="repomapResults" style="max-height: 400px; overflow-y: auto; font-family: monospace; font-size: 12px; white-space: pre-wrap;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Settings Modal -->
+    <div class="modal" id="settingsModal">
+        <div class="modal-content" style="max-width: 450px;">
+            <div class="modal-header">
+                <h3>⚙️ Settings</h3>
+                <button class="modal-close" onclick="GSXCreate.closeModal('settingsModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group" style="margin-bottom: 16px;">
+                    <label style="font-size: 12px; font-weight: 500; margin-bottom: 8px; display: block; color: var(--text-primary);">
+                        AI Model
+                    </label>
+                    <select class="form-select" id="settingsModelSelect" style="padding: 12px; font-size: 14px;">
+                    </select>
+                    <p style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">
+                        Claude Sonnet 4.5 is faster and more cost-effective. Claude Opus 4.5 is more capable for complex tasks.
+                    </p>
+                </div>
+                
+                <div style="border-top: 1px solid var(--border); padding-top: 16px; margin-top: 16px;">
+                    <button class="btn btn-primary" onclick="GSXCreate.saveSettings()" style="width: 100%; padding: 12px;">
+                        Save Settings
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Budget Modal -->
+    <div class="modal" id="budgetModal">
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header">
+                <h3>💰 Budget & Costs</h3>
+                <button class="modal-close" onclick="GSXCreate.closeModal('budgetModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- Current Session Stats -->
+                <div style="background: var(--bg-tertiary); padding: 16px; border-radius: 8px; margin-bottom: 16px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+                        <span style="color: var(--text-secondary);">Current Cost</span>
+                        <span id="budgetCurrentCost" style="font-weight: 600; color: var(--success);">$0.00</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+                        <span style="color: var(--text-secondary);">Budget</span>
+                        <span id="budgetLimit" style="font-weight: 500;">∞ (No limit)</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                        <span style="color: var(--text-secondary);">Usage</span>
+                        <span id="budgetPercentage" style="font-weight: 500;">0%</span>
+                    </div>
+                    <div style="margin-top: 12px; height: 6px; background: var(--bg-primary); border-radius: 3px; overflow: hidden;">
+                        <div id="budgetModalFill" style="height: 100%; width: 0%; background: var(--success); transition: all 0.3s;"></div>
+                    </div>
+                </div>
+                
+                <!-- Cycle Statistics -->
+                <div style="background: var(--bg-tertiary); padding: 16px; border-radius: 8px; margin-bottom: 16px;">
+                    <h4 style="margin: 0 0 12px 0; font-size: 12px; color: var(--text-primary);">📊 Cycle Statistics</h4>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <span style="color: var(--text-secondary); font-size: 11px;">Cycles Completed</span>
+                        <span id="cyclesCompleted" style="font-size: 11px;">0</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <span style="color: var(--text-secondary); font-size: 11px;">Avg Cost / Cycle</span>
+                        <span id="avgCostPerCycle" style="font-size: 11px; color: var(--accent);">$0.00</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                        <span style="color: var(--text-secondary); font-size: 11px;">Est. Cycles Remaining</span>
+                        <span id="estCyclesRemaining" style="font-size: 11px;">∞</span>
+                    </div>
+                </div>
+                
+                <!-- Set Budget -->
+                <div class="form-group" style="margin-bottom: 16px;">
+                    <label style="font-size: 12px; font-weight: 500; margin-bottom: 8px; display: block; color: var(--text-primary);">
+                        Set Budget Limit
+                    </label>
+                    <div style="display: flex; gap: 8px;">
+                        <input type="number" id="budgetInput" placeholder="e.g. 5.00" step="0.50" min="0" 
+                               style="flex: 1; padding: 10px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); font-size: 14px;">
+                        <button class="btn btn-primary" onclick="GSXCreate.setBudget()" style="padding: 10px 16px;">
+                            Set
+                        </button>
+                    </div>
+                    <p style="font-size: 10px; color: var(--text-muted); margin-top: 6px;">
+                        Auto-cycle will pause when budget is reached. Leave empty for no limit.
+                    </p>
+                </div>
+                
+                <!-- Quick Budget Buttons -->
+                <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px;">
+                    <button class="btn btn-secondary btn-sm" onclick="GSXCreate.setQuickBudget(1)">$1</button>
+                    <button class="btn btn-secondary btn-sm" onclick="GSXCreate.setQuickBudget(5)">$5</button>
+                    <button class="btn btn-secondary btn-sm" onclick="GSXCreate.setQuickBudget(10)">$10</button>
+                    <button class="btn btn-secondary btn-sm" onclick="GSXCreate.setQuickBudget(25)">$25</button>
+                    <button class="btn btn-secondary btn-sm" onclick="GSXCreate.setQuickBudget(null)" style="color: var(--text-muted);">No Limit</button>
+                </div>
+                
+                <div style="border-top: 1px solid var(--border); padding-top: 16px;">
+                    <button class="btn btn-secondary" onclick="GSXCreate.showTransactionLogs()" style="width: 100%; padding: 10px;">
+                        📜 View Transaction History
+                    </button>
                 </div>
             </div>
         </div>
@@ -1971,11 +2268,13 @@
                 paused: false,
                 currentVersion: 1,
                 currentPhase: null,
-                phases: ['evaluate', 'research', 'plan', 'execute', 'test', 'improve'],
+                phases: ['evaluate', 'research', 'plan', 'execute', 'test', 'improve', 'finalize'],
                 versions: [],
                 targetScore: 90,
                 currentScore: 0,
                 autoMode: false,
+                autoCycle: false,          // Auto-restart cycle after completion
+                cycleBudget: null,         // Max cost before stopping auto-cycle
                 objective: null,           // Current iteration objective
                 lastPrompt: null,          // Last user prompt for context
                 todos: [],                 // Current todo list
@@ -1995,6 +2294,16 @@
                     testResults: 'test-results-v{version}.md',
                     evaluationCriteria: 'evaluation-criteria.md'
                 }
+            },
+            
+            // Constitutional Memory State
+            constitutionalMemory: {
+                styleGuide: null,
+                journeyMap: null,
+                evaluationCriteria: null,
+                currentSummary: null,
+                lastTask: null,
+                lastSummarizedAt: null
             },
             
             // Error Analyzer State
@@ -2018,14 +2327,16 @@
                 this.trackBehavior('session_start', { timestamp: new Date().toISOString() });
             },
             
+            // Selected model (stored in settings)
+            selectedModel: localStorage.getItem('gsxCreateModel') || 'claude-sonnet-4-5-20250929',
+            
             // Check API Configuration
             async checkApiConfig() {
                 try {
                     this.apiConfig = await window.aider.getApiConfig();
                     console.log('[GSX Create] API Config:', this.apiConfig);
                     
-                    const modelSelect = document.getElementById('modelSelect');
-                    const mainModelSelect = document.getElementById('mainModelSelect');
+                    const settingsModelSelect = document.getElementById('settingsModelSelect');
                     const noApiWarning = document.getElementById('noApiWarning');
                     const mainSetupForm = document.getElementById('mainSetupForm');
                     
@@ -2038,29 +2349,64 @@
                     noApiWarning.style.display = 'none';
                     if (mainSetupForm) mainSetupForm.style.display = 'block';
                     
-                    // Model options HTML
-                    let modelOptionsHtml = '';
-                    if (this.apiConfig.provider === 'anthropic' || this.apiConfig.provider === 'claude') {
-                        modelOptionsHtml = `
-                            <option value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5 (Recommended)</option>
-                            <option value="claude-haiku-4-5-20250929">Claude Haiku 4.5 (Fastest)</option>
-                            <option value="claude-opus-4-5-20250929">Claude Opus 4.5 (Premium)</option>
-                            <option value="claude-opus-4-1-20250929">Claude Opus 4.1</option>
-                            <option value="claude-sonnet-4-20250514">Claude Sonnet 4 (Legacy)</option>
-                        `;
-                    } else {
-                        modelOptionsHtml = `
-                            <option value="gpt-4o">GPT-4o</option>
-                            <option value="gpt-4-turbo">GPT-4 Turbo</option>
-                        `;
+                    // Model options HTML - Claude models only
+                    const modelOptionsHtml = `
+                        <option value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5</option>
+                        <option value="claude-opus-4-5-20250929">Claude Opus 4.5</option>
+                    `;
+                    
+                    // Populate settings modal model select
+                    if (settingsModelSelect) {
+                        settingsModelSelect.innerHTML = modelOptionsHtml;
+                        settingsModelSelect.value = this.selectedModel;
                     }
                     
-                    // Populate both model selects
-                    if (modelSelect) modelSelect.innerHTML = modelOptionsHtml;
-                    if (mainModelSelect) mainModelSelect.innerHTML = modelOptionsHtml;
+                    // Update model display
+                    this.updateModelDisplay();
                 } catch (error) {
                     console.error('[GSX Create] API config error:', error);
                 }
+            },
+            
+            // Update model display text
+            updateModelDisplay() {
+                const display = document.getElementById('currentModelDisplay');
+                if (display) {
+                    display.textContent = this.getModelDisplayName(this.selectedModel);
+                }
+            },
+            
+            // Show Settings Modal
+            showSettings() {
+                const settingsModelSelect = document.getElementById('settingsModelSelect');
+                if (settingsModelSelect) {
+                    settingsModelSelect.value = this.selectedModel;
+                }
+                document.getElementById('settingsModal').classList.add('active');
+            },
+            
+            // Save Settings
+            saveSettings() {
+                const settingsModelSelect = document.getElementById('settingsModelSelect');
+                if (settingsModelSelect) {
+                    this.selectedModel = settingsModelSelect.value;
+                    localStorage.setItem('gsxCreateModel', this.selectedModel);
+                }
+                this.updateModelDisplay();
+                this.closeModal('settingsModal');
+                // Only show message if chat area is active
+                if (document.getElementById('chatArea').classList.contains('active')) {
+                    this.addMessage('system', `Settings saved. Model: ${this.getModelDisplayName(this.selectedModel)}`);
+                }
+            },
+            
+            // Get human-readable model name
+            getModelDisplayName(modelId) {
+                const names = {
+                    'claude-sonnet-4-5-20250929': 'Claude Sonnet 4.5',
+                    'claude-opus-4-5-20250929': 'Claude Opus 4.5'
+                };
+                return names[modelId] || modelId;
             },
             
             // Load Spaces
@@ -2373,7 +2719,7 @@
                 ]);
             },
             
-            // Load Project Files
+            // Load Reference Memory Files
             // ========== FILE UPLOAD ==========
             
             // Trigger file input click
@@ -2612,7 +2958,7 @@
                 }
             },
             
-            // Render Project Files
+            // Render Reference Memory Files
             renderProjectFiles() {
                 const fileList = document.getElementById('fileList');
                 const fileCount = document.getElementById('fileCount');
@@ -2772,7 +3118,7 @@
             async startSession() {
                 // Get buttons (main or sidebar)
                 const startBtn = document.getElementById('mainStartBtn') || document.getElementById('startBtn');
-                const modelName = (document.getElementById('mainModelSelect') || document.getElementById('modelSelect')).value;
+                const modelName = this.selectedModel;
                 
                 this.trackBehavior('session_starting', { 
                     space: this.currentSpaceName, 
@@ -2827,6 +3173,12 @@
                         
                         // Initialize meta learning cycle panel
                         this.initCyclePanel();
+                        
+                        // Load episodic memory in sidebar
+                        this.loadEpisodicMemory();
+                        
+                        // Load constitutional memory (persistent guidelines)
+                        this.loadConstitutionalMemory();
                         
                         // Check if this is a new project that needs setup
                         const needsSetup = await this.checkIfNeedsSetup();
@@ -5050,17 +5402,127 @@ For each failed test:
             },
             
             updateCostDisplay() {
-                const badge = document.getElementById('costBadge');
-                if (!badge) return;
+                const costBadge = document.getElementById('costBadge');
+                const budgetBadge = document.getElementById('budgetBadge');
+                const budgetFill = document.getElementById('budgetFill');
+                
+                if (!costBadge) return;
                 
                 const total = this.costSummary.totalCost || 0;
-                console.log('[GSX Create] Updating cost display:', total);
+                const budget = this.cycleState.cycleBudget;
                 
-                badge.textContent = '$' + total.toFixed(4);
-                badge.classList.remove('warning', 'danger');
+                console.log('[GSX Create] Updating cost display:', total, 'budget:', budget);
                 
-                if (total > 1) badge.classList.add('danger');
-                else if (total > 0.5) badge.classList.add('warning');
+                // Update cost badge
+                costBadge.textContent = '$' + total.toFixed(2);
+                costBadge.classList.remove('warning', 'danger');
+                
+                // Update budget badge
+                if (budgetBadge) {
+                    budgetBadge.textContent = budget ? '$' + budget.toFixed(2) : '∞';
+                }
+                
+                // Update progress bar
+                if (budgetFill) {
+                    if (budget && budget > 0) {
+                        const percentage = Math.min((total / budget) * 100, 100);
+                        budgetFill.style.width = percentage + '%';
+                        budgetFill.classList.remove('warning', 'danger');
+                        
+                        if (percentage >= 90) {
+                            budgetFill.classList.add('danger');
+                            costBadge.classList.add('danger');
+                        } else if (percentage >= 70) {
+                            budgetFill.classList.add('warning');
+                            costBadge.classList.add('warning');
+                        }
+                    } else {
+                        budgetFill.style.width = '0%';
+                    }
+                }
+            },
+            
+            // Show budget modal
+            showBudgetModal() {
+                const modal = document.getElementById('budgetModal');
+                modal.classList.add('active');
+                
+                // Update current values
+                const total = this.costSummary.totalCost || 0;
+                const budget = this.cycleState.cycleBudget;
+                
+                document.getElementById('budgetCurrentCost').textContent = '$' + total.toFixed(4);
+                document.getElementById('budgetLimit').textContent = budget ? '$' + budget.toFixed(2) : '∞ (No limit)';
+                
+                // Calculate percentage
+                let percentage = 0;
+                if (budget && budget > 0) {
+                    percentage = Math.min((total / budget) * 100, 100);
+                }
+                document.getElementById('budgetPercentage').textContent = budget ? percentage.toFixed(1) + '%' : 'N/A';
+                document.getElementById('budgetModalFill').style.width = percentage + '%';
+                
+                // Set input value
+                document.getElementById('budgetInput').value = budget || '';
+                
+                // Calculate cycle statistics
+                this.updateCycleStatistics();
+            },
+            
+            // Update cycle statistics in budget modal
+            async updateCycleStatistics() {
+                const cyclesCompleted = this.cycleState.currentVersion - 1;
+                const totalCost = this.costSummary.totalCost || 0;
+                const budget = this.cycleState.cycleBudget;
+                
+                document.getElementById('cyclesCompleted').textContent = cyclesCompleted;
+                
+                // Calculate average cost per cycle
+                let avgCost = 0;
+                if (cyclesCompleted > 0) {
+                    avgCost = totalCost / cyclesCompleted;
+                }
+                document.getElementById('avgCostPerCycle').textContent = '$' + avgCost.toFixed(4);
+                
+                // Estimate remaining cycles
+                let estRemaining = '∞';
+                if (budget && avgCost > 0) {
+                    const remaining = (budget - totalCost) / avgCost;
+                    estRemaining = remaining > 0 ? Math.floor(remaining).toString() : '0';
+                }
+                document.getElementById('estCyclesRemaining').textContent = estRemaining;
+            },
+            
+            // Set budget from input
+            setBudget() {
+                const input = document.getElementById('budgetInput');
+                const value = parseFloat(input.value);
+                
+                if (isNaN(value) || value <= 0) {
+                    this.cycleState.cycleBudget = null;
+                    this.addMessage('system', '💰 Budget limit removed (unlimited)');
+                } else {
+                    this.cycleState.cycleBudget = value;
+                    this.addMessage('system', `💰 Budget set to $${value.toFixed(2)}`);
+                }
+                
+                this.updateCostDisplay();
+                this.closeModal('budgetModal');
+            },
+            
+            // Set quick budget
+            setQuickBudget(amount) {
+                this.cycleState.cycleBudget = amount;
+                document.getElementById('budgetInput').value = amount || '';
+                
+                if (amount) {
+                    this.addMessage('system', `💰 Budget set to $${amount.toFixed(2)}`);
+                } else {
+                    this.addMessage('system', '💰 Budget limit removed (unlimited)');
+                }
+                
+                this.updateCostDisplay();
+                this.showBudgetModal(); // Refresh the modal display
             },
             
             async recordApiCost(model, inputTokens, outputTokens, type, promptPreview, actualCost = null) {
@@ -5069,16 +5531,9 @@ For each failed test:
                 // If no actual cost provided, calculate from tokens
                 if (!cost || cost === 0) {
                     const costs = {
-                        // Claude 4.5 models (latest)
+                        // Claude 4.5 models
                         'claude-sonnet-4-5-20250929': { input: 3/1000000, output: 15/1000000 },
-                        'claude-haiku-4-5-20250929': { input: 1/1000000, output: 5/1000000 },
-                        'claude-opus-4-5-20250929': { input: 5/1000000, output: 25/1000000 },
-                        'claude-opus-4-1-20250929': { input: 15/1000000, output: 75/1000000 },
-                        // Legacy Claude 4 models
-                        'claude-opus-4-20250514': { input: 15/1000000, output: 75/1000000 },
-                        'claude-sonnet-4-20250514': { input: 3/1000000, output: 15/1000000 },
-                        'gpt-4o': { input: 5/1000000, output: 15/1000000 },
-                        'gpt-4-turbo': { input: 10/1000000, output: 30/1000000 }
+                        'claude-opus-4-5-20250929': { input: 15/1000000, output: 75/1000000 }
                     };
                     
                     const modelCosts = costs[model] || { input: 3/1000000, output: 15/1000000 };
@@ -5101,6 +5556,7 @@ For each failed test:
                     this.costSummary.totalCost = (this.costSummary.totalCost || 0) + cost;
                     this.costSummary.totalCalls = (this.costSummary.totalCalls || 0) + 1;
                     this.updateCostDisplay();
+                    this.loadEpisodicMemory(); // Refresh sidebar
                 } catch (error) {
                     console.error('[GSX Create] Cost record error:', error);
                 }
@@ -5132,6 +5588,165 @@ For each failed test:
                     }
                 } catch (error) {
                     tbody.innerHTML = `<tr><td colspan="6" style="color: var(--danger);">Error: ${error.message}</td></tr>`;
+                }
+            },
+            
+            // Episodic Memory - Todo list state
+            todos: [],
+            
+            // Load Episodic Memory for sidebar (History tab)
+            async loadEpisodicMemory() {
+                const listEl = document.getElementById('episodicMemoryList');
+                const countEl = document.getElementById('historyCount');
+                
+                if (!listEl) return;
+                
+                try {
+                    const result = await window.aider.txdbGetTransactions({ spaceId: this.currentSpaceId, limit: 10 });
+                    
+                    if (result.success && result.transactions && result.transactions.length > 0) {
+                        if (countEl) countEl.textContent = result.transactions.length;
+                        
+                        listEl.innerHTML = result.transactions.map(tx => {
+                            const time = new Date(tx.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                            const statusIcon = tx.status === 'success' ? '✓' : '✗';
+                            const statusColor = tx.status === 'success' ? 'var(--success)' : 'var(--danger)';
+                            const cost = tx.cost ? `$${tx.cost.toFixed(4)}` : '';
+                            const typeLabel = tx.type === 'chat' ? '💬' : tx.type === 'code' ? '💻' : '📝';
+                            
+                            return `
+                                <div class="episodic-item" style="padding: 6px 8px; margin-bottom: 4px; background: var(--bg-tertiary); border-radius: 4px; font-size: 10px; cursor: pointer;" onclick="GSXCreate.showTransactionLogs()">
+                                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                                        <span>${typeLabel} <span style="color: ${statusColor};">${statusIcon}</span></span>
+                                        <span style="color: var(--text-muted);">${time}</span>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between; margin-top: 2px; color: var(--text-secondary);">
+                                        <span>${tx.input_tokens || 0}/${tx.output_tokens || 0} tokens</span>
+                                        <span style="color: var(--accent);">${cost}</span>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('');
+                    } else {
+                        if (countEl) countEl.textContent = '0';
+                        listEl.innerHTML = '<div style="color: var(--text-muted); font-size: 11px;">No history yet</div>';
+                    }
+                } catch (error) {
+                    console.error('[GSX Create] Load episodic memory error:', error);
+                    listEl.innerHTML = '<div style="color: var(--text-muted); font-size: 11px;">No history yet</div>';
+                }
+                
+                // Also load todos
+                this.loadTodos();
+            },
+            
+            // Switch between History and Plan tabs
+            switchEpisodicTab(tab) {
+                const historyPanel = document.getElementById('historyPanel');
+                const planPanel = document.getElementById('planPanel');
+                const historyTab = document.getElementById('historyTab');
+                const planTab = document.getElementById('planTab');
+                
+                if (tab === 'history') {
+                    historyPanel.style.display = 'block';
+                    planPanel.style.display = 'none';
+                    historyTab.classList.add('active');
+                    planTab.classList.remove('active');
+                } else {
+                    historyPanel.style.display = 'none';
+                    planPanel.style.display = 'block';
+                    historyTab.classList.remove('active');
+                    planTab.classList.add('active');
+                }
+            },
+            
+            // Load todos from storage
+            loadTodos() {
+                const storageKey = `gsx-todos-${this.currentSpaceId || 'default'}`;
+                const stored = localStorage.getItem(storageKey);
+                this.todos = stored ? JSON.parse(stored) : [];
+                this.renderTodos();
+            },
+            
+            // Save todos to storage
+            saveTodos() {
+                const storageKey = `gsx-todos-${this.currentSpaceId || 'default'}`;
+                localStorage.setItem(storageKey, JSON.stringify(this.todos));
+            },
+            
+            // Add a new todo
+            addTodo() {
+                const input = document.getElementById('newTodoInput');
+                const text = input.value.trim();
+                
+                if (!text) return;
+                
+                this.todos.unshift({
+                    id: Date.now(),
+                    text: text,
+                    done: false,
+                    created: new Date().toISOString()
+                });
+                
+                input.value = '';
+                this.saveTodos();
+                this.renderTodos();
+            },
+            
+            // Toggle todo completion
+            toggleTodo(id) {
+                const todo = this.todos.find(t => t.id === id);
+                if (todo) {
+                    todo.done = !todo.done;
+                    if (todo.done) {
+                        todo.completed = new Date().toISOString();
+                    }
+                    this.saveTodos();
+                    this.renderTodos();
+                }
+            },
+            
+            // Remove a todo
+            removeTodo(id) {
+                this.todos = this.todos.filter(t => t.id !== id);
+                this.saveTodos();
+                this.renderTodos();
+            },
+            
+            // Render todos list
+            renderTodos() {
+                const listEl = document.getElementById('todoList');
+                const countEl = document.getElementById('planCount');
+                
+                if (!listEl) return;
+                
+                const pendingCount = this.todos.filter(t => !t.done).length;
+                if (countEl) countEl.textContent = pendingCount;
+                
+                if (this.todos.length === 0) {
+                    listEl.innerHTML = '<div style="color: var(--text-muted); font-size: 11px;">No tasks planned</div>';
+                    return;
+                }
+                
+                listEl.innerHTML = this.todos.map(todo => {
+                    const cycleIndicator = todo.fromCycle ? '<span style="color: var(--accent); margin-right: 4px;" title="From Meta Learning Cycle">🔄</span>' : '';
+                    return `
+                    <div class="todo-item" style="padding: 4px 6px; margin-bottom: 3px; background: var(--bg-tertiary); border-radius: 4px; font-size: 10px; display: flex; align-items: center; gap: 6px; ${todo.done ? 'opacity: 0.5;' : ''} ${todo.fromCycle ? 'border-left: 2px solid var(--accent);' : ''}">
+                        <input type="checkbox" ${todo.done ? 'checked' : ''} onchange="GSXCreate.toggleTodo(${todo.id})" style="margin: 0; cursor: pointer;">
+                        <span style="flex: 1; ${todo.done ? 'text-decoration: line-through;' : ''}">${cycleIndicator}${todo.text}</span>
+                        <button onclick="GSXCreate.removeTodo(${todo.id})" style="background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0; font-size: 12px;" title="Remove">×</button>
+                    </div>
+                `}).join('');
+            },
+            
+            // Mark a cycle task as complete in Episodic Memory
+            markCycleTaskComplete(taskText) {
+                const todo = this.todos.find(t => t.text === taskText && !t.done);
+                if (todo) {
+                    todo.done = true;
+                    todo.completed = new Date().toISOString();
+                    this.saveTodos();
+                    this.renderTodos();
                 }
             },
             
@@ -5317,6 +5932,16 @@ For each failed test:
                     document.getElementById('sidebar').classList.add('collapsed');
                     document.getElementById('sidebarToggleIcon').textContent = '▶';
                 }
+            },
+            
+            // Toggle Configuration section collapse/expand
+            toggleConfigSection() {
+                const content = document.getElementById('configSectionContent');
+                const icon = document.getElementById('configToggleIcon');
+                const isHidden = content.style.display === 'none';
+                
+                content.style.display = isHidden ? 'block' : 'none';
+                icon.style.transform = isHidden ? 'rotate(90deg)' : 'rotate(0deg)';
             },
             
             closeModal(id) {
@@ -6471,11 +7096,37 @@ ${error.aiAnalysis || 'Not analyzed'}
                 this.updateCycleUI();
             },
             
+            // Log cycle event to event database
+            async logCycleEvent(action, details = {}) {
+                const eventData = {
+                    type: 'cycle',
+                    summary: `[Cycle] ${action}`,
+                    message: action,
+                    context: JSON.stringify({
+                        ...details,
+                        version: this.cycleState.currentVersion,
+                        phase: this.cycleState.currentPhase,
+                        score: this.cycleState.currentScore,
+                        objective: this.cycleState.objective
+                    }),
+                    timestamp: new Date().toISOString()
+                };
+                
+                try {
+                    await window.aider.txdbLogEvent(eventData);
+                } catch (e) {
+                    console.log('[Cycle] Event log error:', e);
+                }
+                
+                // Also track behavior for UI
+                this.trackBehavior(`cycle_${action.toLowerCase().replace(/\s+/g, '_')}`, details);
+            },
+            
             // Start meta learning cycle
             async startCycle() {
                 if (this.cycleState.active) return;
                 
-                this.trackBehavior('cycle_started', { version: this.cycleState.currentVersion });
+                await this.logCycleEvent('Cycle Started', { version: this.cycleState.currentVersion });
                 
                 this.cycleState.active = true;
                 this.cycleState.paused = false;
@@ -6538,7 +7189,7 @@ ${error.aiAnalysis || 'Not analyzed'}
             
             // Stop cycle
             stopCycle() {
-                this.trackBehavior('cycle_stopped', { 
+                this.logCycleEvent('Cycle Stopped', { 
                     version: this.cycleState.currentVersion,
                     phase: this.cycleState.currentPhase,
                     score: this.cycleState.currentScore
@@ -6555,7 +7206,7 @@ ${error.aiAnalysis || 'Not analyzed'}
             async runPhase(phase) {
                 if (!this.cycleState.active || this.cycleState.paused) return;
                 
-                this.trackBehavior('phase_started', { phase, version: this.cycleState.currentVersion });
+                await this.logCycleEvent('Phase Started', { phase });
                 
                 this.cycleState.currentPhase = phase;
                 this.updateCycleUI();
@@ -6567,7 +7218,8 @@ ${error.aiAnalysis || 'Not analyzed'}
                     plan: { icon: '📋', name: 'Plan' },
                     execute: { icon: '⚡', name: 'Execute' },
                     test: { icon: '🧪', name: 'Test' },
-                    improve: { icon: '✨', name: 'Improve' }
+                    improve: { icon: '✨', name: 'Improve' },
+                    finalize: { icon: '🎯', name: 'Finalize' }
                 };
                 
                 const info = phaseInfo[phase];
@@ -6599,20 +7251,23 @@ ${error.aiAnalysis || 'Not analyzed'}
                         case 'improve':
                             await this.phaseImprove();
                             break;
+                        case 'finalize':
+                            await this.phaseFinalize();
+                            break;
                     }
                     
                     // Only mark complete if not paused (waiting for user input)
                     if (!this.cycleState.paused) {
                         if (phaseNode) phaseNode.classList.add('completed');
                         this.addMessage('system', `✓ ${info.name} phase complete`);
-                        this.trackBehavior('phase_completed', { phase, version: this.cycleState.currentVersion });
+                        await this.logCycleEvent('Phase Completed', { phase });
                     }
                     
                 } catch (error) {
                     console.error(`[Cycle] Phase ${phase} error:`, error);
                     if (phaseNode) phaseNode.classList.add('failed');
                     this.addMessage('error', `✗ ${info.name} phase failed: ${error.message}`);
-                    this.trackBehavior('phase_failed', { phase, error: error.message });
+                    await this.logCycleEvent('Phase Failed', { phase, error: error.message });
                 }
             },
             
@@ -6662,12 +7317,15 @@ ${error.aiAnalysis || 'Not analyzed'}
                     if (screenshotResult.success) {
                         evaluation.screenshot = screenshotResult.screenshot;
                         this.addMessage('system', `   ✓ Screenshot captured (${Math.round(screenshotResult.size / 1024)}KB)`);
+                        await this.logCycleEvent('Screenshot Captured', { size: screenshotResult.size, file: this.currentPreviewFile });
                     } else {
                         this.addMessage('system', `   ⚠️ Screenshot failed: ${screenshotResult.error || 'Unknown error'}`);
+                        await this.logCycleEvent('Screenshot Failed', { error: screenshotResult.error });
                     }
                 } catch (e) {
                     console.error('[Cycle] Screenshot error:', e);
                     this.addMessage('system', `   ⚠️ Screenshot failed: ${e.message}`);
+                    await this.logCycleEvent('Screenshot Error', { error: e.message });
                 }
                 await this.delay(300);
                 
@@ -6683,9 +7341,11 @@ ${error.aiAnalysis || 'Not analyzed'}
                         const passed = testResult.summary?.passed || 0;
                         const failed = testResult.summary?.failed || 0;
                         this.addMessage('system', `   ✓ Tests: ${passed} passed, ${failed} failed`);
+                        await this.logCycleEvent('Tests Completed', { passed, failed });
                     }
                 } catch (e) {
                     this.addMessage('system', '   ⚠️ Tests skipped: ' + e.message);
+                    await this.logCycleEvent('Tests Skipped', { error: e.message });
                 }
                 await this.delay(300);
                 
@@ -6698,8 +7358,10 @@ ${error.aiAnalysis || 'Not analyzed'}
                         const errorCount = evaluation.consoleLogs.length;
                         if (errorCount > 0) {
                             this.addMessage('system', `   ⚠️ ${errorCount} console error(s) found`);
+                            await this.logCycleEvent('Console Errors Found', { errorCount, errors: evaluation.consoleLogs.slice(0, 5) });
                         } else {
                             this.addMessage('system', '   ✓ No console errors');
+                            await this.logCycleEvent('Console Check Passed', { errorCount: 0 });
                         }
                         // Store AI analysis
                         if (interactiveResult.aiAnalysis) {
@@ -6708,6 +7370,7 @@ ${error.aiAnalysis || 'Not analyzed'}
                     }
                 } catch (e) {
                     this.addMessage('system', '   ⚠️ Console check failed');
+                    await this.logCycleEvent('Console Check Failed', { error: e.message });
                 }
                 await this.delay(300);
                 
@@ -6742,7 +7405,78 @@ ${error.aiAnalysis || 'Not analyzed'}
                 }
                 await this.delay(300);
                 
-                // Step 6: Load criteria
+                // Step 6: Review Journey Map alignment
+                this.addMessage('system', '→ Reviewing Journey Map alignment...');
+                evaluation.journeyMapAnalysis = null;
+                try {
+                    // Get selected journey map or find one in project
+                    const journeyMapSelect = document.getElementById('journeyMapSelect');
+                    let journeyMapContent = null;
+                    let journeyMapName = null;
+                    
+                    if (journeyMapSelect && journeyMapSelect.value) {
+                        const jm = this.journeyMaps.find(j => j.id === journeyMapSelect.value);
+                        if (jm && jm.content) {
+                            journeyMapContent = jm.content;
+                            journeyMapName = jm.name;
+                        }
+                    }
+                    
+                    // Also check for journey-map.md file in project
+                    if (!journeyMapContent) {
+                        const journeyMapFile = `${this.repoPath}/journey-map.md`;
+                        try {
+                            const fileContent = await window.aider.readFile(journeyMapFile);
+                            if (fileContent) {
+                                journeyMapContent = fileContent;
+                                journeyMapName = 'journey-map.md';
+                            }
+                        } catch (e) {
+                            // File doesn't exist, that's ok
+                        }
+                    }
+                    
+                    if (journeyMapContent && evaluation.screenshot) {
+                        this.addMessage('system', `   ✓ Found: ${journeyMapName}`);
+                        
+                        // Analyze screenshot against journey map
+                        const journeyPrompt = `Analyze this UI screenshot against the following Journey Map. 
+                        
+Identify:
+1. Which journey map steps/flows are visible in the UI
+2. Any missing UI elements needed for the journey
+3. UX issues that could block user flows
+4. Alignment score (0-100) of UI to journey map
+
+Journey Map:
+${journeyMapContent}
+
+Respond with a brief analysis.`;
+
+                        const journeyAnalysis = await window.aider.analyzeScreenshot(evaluation.screenshot, journeyPrompt);
+                        if (journeyAnalysis.success && journeyAnalysis.analysis) {
+                            evaluation.journeyMapAnalysis = {
+                                name: journeyMapName,
+                                analysis: journeyAnalysis.analysis
+                            };
+                            this.addMessage('system', `   ✓ Journey Map alignment analyzed`);
+                            await this.logCycleEvent('Journey Map Analyzed', { journeyMap: journeyMapName });
+                        }
+                    } else if (!journeyMapContent) {
+                        this.addMessage('system', '   ⚠️ No Journey Map found - skipping alignment check');
+                        this.addMessage('system', '   💡 Select a Journey Map or create journey-map.md');
+                        await this.logCycleEvent('Journey Map Not Found', {});
+                    } else {
+                        this.addMessage('system', '   ⚠️ No screenshot for Journey Map analysis');
+                    }
+                } catch (e) {
+                    console.error('[Cycle] Journey Map analysis error:', e);
+                    this.addMessage('system', '   ⚠️ Journey Map analysis failed');
+                    await this.logCycleEvent('Journey Map Analysis Failed', { error: e.message });
+                }
+                await this.delay(300);
+                
+                // Step 7: Load criteria
                 const criteriaFile = `${this.repoPath}/evaluation-criteria.md`;
                 let criteria = await this.loadEvaluationCriteria(criteriaFile);
                 
@@ -6776,6 +7510,18 @@ ${error.aiAnalysis || 'Not analyzed'}
                     : 50;
                 this.cycleState.currentScore = Math.round(avgScore);
                 this.updateScoreDisplay();
+                
+                // Log evaluation results
+                await this.logCycleEvent('Evaluation Completed', {
+                    scores: evaluation.scores,
+                    overallScore: this.cycleState.currentScore,
+                    testsPassed: evaluation.testResults?.summary?.passed || 0,
+                    testsFailed: evaluation.testResults?.summary?.failed || 0,
+                    consoleErrors: evaluation.consoleLogs?.length || 0,
+                    feedbackItems: (evaluation.feedback?.endUser?.length || 0) + 
+                                   (evaluation.feedback?.advocate?.length || 0) + 
+                                   (evaluation.feedback?.generated?.length || 0)
+                });
                 
                 this.addMessage('system', `━━━ Overall Score: ${this.cycleState.currentScore}% ━━━`);
                 await this.delay(500);
@@ -6946,6 +7692,19 @@ Track feedback from different sources. Mark items as [x] when addressed.
                     `).join('')
                     : '<div style="font-size: 10px; color: var(--text-muted);">No pending feedback</div>';
                 
+                // Journey Map analysis section
+                let journeyMapHtml = '';
+                if (evaluation.journeyMapAnalysis) {
+                    const analysis = evaluation.journeyMapAnalysis.analysis;
+                    const preview = analysis.length > 150 ? analysis.substring(0, 150) + '...' : analysis;
+                    journeyMapHtml = `
+                        <div style="border-top: 1px solid var(--border); margin-top: 8px; padding-top: 8px;">
+                            <div style="font-size: 11px; font-weight: 600; margin-bottom: 6px;">🗺️ Journey Map Alignment</div>
+                            <div style="font-size: 10px; color: var(--text-secondary);">${preview}</div>
+                        </div>
+                    `;
+                }
+                
                 const html = `
                     <div style="margin: 8px 0; background: var(--bg-tertiary); padding: 12px; border-radius: 6px;">
                         <div style="font-size: 11px; font-weight: 600; margin-bottom: 8px;">📊 Evaluation Scores</div>
@@ -6954,6 +7713,7 @@ Track feedback from different sources. Mark items as [x] when addressed.
                             <div style="font-size: 11px; font-weight: 600; margin-bottom: 6px;">📝 Pending Feedback</div>
                             ${feedbackHtml}
                         </div>
+                        ${journeyMapHtml}
                     </div>
                 `;
                 
@@ -7067,6 +7827,228 @@ Track feedback from different sources. Mark items as [x] when addressed.
                 this.cycleState.waitingForCriteria = false;
                 this.updateCycleUI();
                 this.runPhase('research');
+            },
+            
+            // ========== CONSTITUTIONAL MEMORY MANAGEMENT ==========
+            
+            // Load all constitutional memory files
+            async loadConstitutionalMemory() {
+                console.log('[Constitutional] Loading constitutional memory...');
+                
+                try {
+                    // Load style guide
+                    const styleGuide = await this.loadCycleFile('styleGuide', false);
+                    this.constitutionalMemory.styleGuide = styleGuide;
+                    
+                    // Load journey map
+                    const journeyMap = await this.loadCycleFile('journeyMap', false);
+                    this.constitutionalMemory.journeyMap = journeyMap;
+                    
+                    // Load evaluation criteria
+                    const criteria = await this.loadCycleFile('evaluationCriteria', false);
+                    this.constitutionalMemory.evaluationCriteria = criteria;
+                    
+                    console.log('[Constitutional] Loaded:', {
+                        hasStyleGuide: !!styleGuide,
+                        hasJourneyMap: !!journeyMap,
+                        hasCriteria: !!criteria
+                    });
+                    
+                    // Update sidebar status display
+                    this.updateConstitutionalStatus();
+                    
+                    return true;
+                } catch (error) {
+                    console.error('[Constitutional] Load error:', error);
+                    return false;
+                }
+            },
+            
+            // Summarize constitutional memory for a specific task
+            async summarizeConstitutionalMemory(task) {
+                console.log('[Constitutional] Summarizing for task:', task);
+                
+                // Check if we need to re-summarize
+                const needsResummarize = !this.constitutionalMemory.currentSummary || 
+                                         this.constitutionalMemory.lastTask !== task;
+                
+                if (!needsResummarize) {
+                    console.log('[Constitutional] Using cached summary');
+                    return this.constitutionalMemory.currentSummary;
+                }
+                
+                // Ensure constitutional files are loaded
+                if (!this.constitutionalMemory.styleGuide && !this.constitutionalMemory.journeyMap) {
+                    await this.loadConstitutionalMemory();
+                }
+                
+                // Build context from all constitutional sources
+                let constitutionalContext = '';
+                
+                if (this.constitutionalMemory.styleGuide) {
+                    constitutionalContext += '=== STYLE GUIDE ===\n' + this.constitutionalMemory.styleGuide + '\n\n';
+                }
+                
+                if (this.constitutionalMemory.journeyMap) {
+                    constitutionalContext += '=== JOURNEY MAP ===\n' + this.constitutionalMemory.journeyMap + '\n\n';
+                }
+                
+                if (this.constitutionalMemory.evaluationCriteria) {
+                    constitutionalContext += '=== EVALUATION CRITERIA ===\n' + this.constitutionalMemory.evaluationCriteria + '\n\n';
+                }
+                
+                // If no constitutional data exists, return empty
+                if (!constitutionalContext.trim()) {
+                    console.log('[Constitutional] No constitutional data found');
+                    this.constitutionalMemory.currentSummary = '';
+                    return '';
+                }
+                
+                // Generate task-specific summary using AI
+                try {
+                    const summaryPrompt = `You are summarizing project guidelines for a specific task. 
+                    
+CURRENT TASK: ${task}
+
+CONSTITUTIONAL MEMORY (project guidelines, standards, and principles):
+${constitutionalContext}
+
+Create a BRIEF, FOCUSED summary (max 200 words) that:
+1. Extracts ONLY the guidelines relevant to this specific task
+2. Prioritizes actionable rules and constraints
+3. Highlights any specific patterns or conventions to follow
+4. Omits irrelevant sections entirely
+
+Format as a concise bullet list. Start directly with the bullets, no preamble.`;
+
+                    const result = await window.aider.chat(summaryPrompt);
+                    
+                    if (result.success && result.response) {
+                        this.constitutionalMemory.currentSummary = result.response;
+                        this.constitutionalMemory.lastTask = task;
+                        this.constitutionalMemory.lastSummarizedAt = new Date().toISOString();
+                        
+                        // Update sidebar status
+                        this.updateConstitutionalStatus();
+                        
+                        console.log('[Constitutional] Summary generated:', result.response.substring(0, 100) + '...');
+                        return result.response;
+                    }
+                } catch (error) {
+                    console.error('[Constitutional] Summary generation error:', error);
+                }
+                
+                // Fallback: return truncated raw content
+                const fallback = constitutionalContext.substring(0, 500) + '...';
+                this.constitutionalMemory.currentSummary = fallback;
+                return fallback;
+            },
+            
+            // Get constitutional context for inclusion in prompts
+            // Combines: Constitutional Memory (feature reduced) + User's Global Instructions
+            getConstitutionalContext() {
+                let systemPrompt = '';
+                
+                // Add Constitutional Memory summary (feature reduced)
+                if (this.constitutionalMemory.currentSummary) {
+                    systemPrompt += `=== PROJECT GUIDELINES (Constitutional Memory) ===
+${this.constitutionalMemory.currentSummary}
+=== END GUIDELINES ===
+
+`;
+                }
+                
+                // Append User's Global Instructions
+                if (this.globalInstructionsText && this.globalInstructionsText.trim()) {
+                    systemPrompt += `=== USER INSTRUCTIONS ===
+${this.globalInstructionsText}
+=== END USER INSTRUCTIONS ===
+
+`;
+                }
+                
+                return systemPrompt;
+            },
+            
+            // Force refresh of constitutional memory
+            async refreshConstitutionalMemory() {
+                this.constitutionalMemory.currentSummary = null;
+                this.constitutionalMemory.lastTask = null;
+                await this.loadConstitutionalMemory();
+                this.updateConstitutionalStatus();
+                this.addMessage('system', '🏛️ Constitutional memory refreshed');
+            },
+            
+            // Log the dynamic system prompt for debugging/transparency
+            async logDynamicSystemPrompt(task, systemPrompt) {
+                // Log to console
+                console.log('[Constitutional] Dynamic System Prompt for task:', task);
+                console.log('[Constitutional] System Prompt Content:\n', systemPrompt);
+                
+                // Log to cycle events (Episodic Memory)
+                await this.logCycleEvent('Dynamic System Prompt Generated', {
+                    task: task,
+                    promptLength: systemPrompt.length,
+                    hasConstitutional: systemPrompt.includes('PROJECT GUIDELINES'),
+                    hasUserInstructions: systemPrompt.includes('USER INSTRUCTIONS'),
+                    preview: systemPrompt.substring(0, 300) + (systemPrompt.length > 300 ? '...' : '')
+                });
+                
+                // Show collapsible preview in chat
+                if (systemPrompt.trim()) {
+                    const previewHtml = `
+                        <details style="margin: 4px 0; font-size: 11px;">
+                            <summary style="cursor: pointer; color: var(--text-muted);">
+                                📋 Dynamic System Prompt (${systemPrompt.length} chars) - click to expand
+                            </summary>
+                            <pre style="margin: 8px 0; padding: 8px; background: var(--bg-tertiary); border-radius: 4px; font-size: 10px; white-space: pre-wrap; max-height: 200px; overflow-y: auto;">${this.escapeHtml(systemPrompt)}</pre>
+                        </details>
+                    `;
+                    this.addMessage('system', previewHtml, null, true);
+                }
+            },
+            
+            // Escape HTML for safe display
+            escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            },
+            
+            // Update Constitutional Memory status display in sidebar
+            updateConstitutionalStatus() {
+                // Update file status indicators
+                const styleStatus = document.getElementById('styleGuideStatus');
+                const journeyStatus = document.getElementById('journeyMapStatus');
+                const criteriaStatus = document.getElementById('criteriaStatus');
+                const summaryStatus = document.getElementById('summaryStatus');
+                
+                if (styleStatus) {
+                    styleStatus.textContent = this.constitutionalMemory.styleGuide ? '●' : '○';
+                    styleStatus.style.color = this.constitutionalMemory.styleGuide ? 'var(--success)' : 'var(--text-muted)';
+                }
+                
+                if (journeyStatus) {
+                    journeyStatus.textContent = this.constitutionalMemory.journeyMap ? '●' : '○';
+                    journeyStatus.style.color = this.constitutionalMemory.journeyMap ? 'var(--success)' : 'var(--text-muted)';
+                }
+                
+                if (criteriaStatus) {
+                    criteriaStatus.textContent = this.constitutionalMemory.evaluationCriteria ? '●' : '○';
+                    criteriaStatus.style.color = this.constitutionalMemory.evaluationCriteria ? 'var(--success)' : 'var(--text-muted)';
+                }
+                
+                if (summaryStatus) {
+                    if (this.constitutionalMemory.currentSummary) {
+                        const task = this.constitutionalMemory.lastTask || 'general';
+                        const time = this.constitutionalMemory.lastSummarizedAt 
+                            ? new Date(this.constitutionalMemory.lastSummarizedAt).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})
+                            : '';
+                        summaryStatus.innerHTML = `<span style="color: var(--success);">✓</span> Summary ready<br><span style="font-size: 9px;">Task: ${task.substring(0, 30)}${task.length > 30 ? '...' : ''}</span>`;
+                    } else {
+                        summaryStatus.textContent = 'No summary loaded';
+                    }
+                }
             },
             
             // ========== CYCLE FILE MANAGEMENT ==========
@@ -7414,6 +8396,10 @@ ${results.aiAnalysis || 'No AI analysis available'}
             // Finalize cycle - update all persistent files with current version
             async finalizeCycle() {
                 const version = this.cycleState.currentVersion;
+                const score = this.cycleState.currentScore;
+                const date = new Date().toLocaleDateString();
+                const timestamp = new Date().toISOString();
+                
                 this.addMessage('system', `→ Finalizing v${version} files...`);
                 
                 // Update style guide with version
@@ -7435,12 +8421,172 @@ ${results.aiAnalysis || 'No AI analysis available'}
                 if (feedback) {
                     feedback = feedback.replace(
                         /\*Last updated:.*\*/,
-                        `*Last updated: v${version} - ${new Date().toLocaleDateString()}*`
+                        `*Last updated: v${version} - ${date}*`
                     );
                     await this.saveCycleFile('userFeedback', feedback, false);
                 }
                 
                 this.addMessage('system', `   ✓ Files updated to v${version}`);
+                
+                // Generate Release Notes
+                this.addMessage('system', `→ Generating release notes...`);
+                await this.generateReleaseNotes(version, score);
+                
+                // Update README/Documentation
+                this.addMessage('system', `→ Updating documentation...`);
+                await this.updateDocumentation(version, score);
+            },
+            
+            // Generate release notes for a version
+            async generateReleaseNotes(version, score) {
+                const date = new Date().toLocaleDateString();
+                const timestamp = new Date().toISOString();
+                const releaseNotesPath = `${this.repoPath}/RELEASE-NOTES.md`;
+                
+                // Gather information for release notes
+                const objective = this.cycleState.objective || 'No objective specified';
+                const completedTodos = this.cycleState.todos.filter(t => t.status === 'completed');
+                const versions = this.cycleState.versions || [];
+                
+                // Build the release entry
+                let releaseEntry = `
+## v${version} - ${date}
+
+**Score:** ${score}%  
+**Objective:** ${objective}
+
+### Changes
+${completedTodos.length > 0 
+    ? completedTodos.map(t => `- ✓ ${t.text || t.description || 'Task completed'}`).join('\n')
+    : '- Initial release'}
+
+### Files Modified
+${this.projectFiles.slice(0, 10).map(f => `- \`${f.name}\``).join('\n')}
+
+### Quality Metrics
+- Evaluation Score: ${score}%
+- Target Score: ${this.cycleState.targetScore}%
+- Iterations: ${version}
+
+---
+`;
+
+                try {
+                    // Read existing release notes or create new
+                    let existingNotes = '';
+                    try {
+                        existingNotes = await window.aider.readFile(releaseNotesPath);
+                    } catch (e) {
+                        // File doesn't exist yet
+                    }
+                    
+                    if (existingNotes) {
+                        // Prepend new release after the header
+                        const headerMatch = existingNotes.match(/^#[^\n]+\n/);
+                        if (headerMatch) {
+                            existingNotes = headerMatch[0] + releaseEntry + existingNotes.substring(headerMatch[0].length);
+                        } else {
+                            existingNotes = `# Release Notes\n${releaseEntry}\n${existingNotes}`;
+                        }
+                    } else {
+                        existingNotes = `# Release Notes
+
+*Auto-generated by GSX Create Meta Learning Cycle*
+
+${releaseEntry}`;
+                    }
+                    
+                    await window.aider.writeFile(releaseNotesPath, existingNotes);
+                    this.addMessage('system', `   ✓ Release notes created: RELEASE-NOTES.md`);
+                } catch (error) {
+                    console.error('[Cycle] Release notes error:', error);
+                    this.addMessage('system', `   ⚠️ Could not create release notes`);
+                }
+            },
+            
+            // Update project documentation
+            async updateDocumentation(version, score) {
+                const readmePath = `${this.repoPath}/README.md`;
+                const date = new Date().toLocaleDateString();
+                
+                try {
+                    let readme = '';
+                    try {
+                        readme = await window.aider.readFile(readmePath);
+                    } catch (e) {
+                        // File doesn't exist
+                    }
+                    
+                    // Create or update version badge section
+                    const versionBadge = `**Version:** v${version} | **Score:** ${score}% | **Updated:** ${date}`;
+                    
+                    if (readme) {
+                        // Update existing version info
+                        if (readme.includes('**Version:**')) {
+                            readme = readme.replace(/\*\*Version:\*\*[^\n]+/, versionBadge);
+                        } else {
+                            // Add version after first heading
+                            const firstHeadingEnd = readme.indexOf('\n');
+                            if (firstHeadingEnd > 0) {
+                                readme = readme.substring(0, firstHeadingEnd + 1) + 
+                                         `\n${versionBadge}\n` + 
+                                         readme.substring(firstHeadingEnd + 1);
+                            }
+                        }
+                        
+                        // Update or add changelog section
+                        const changelogEntry = `\n### v${version} (${date})\n- ${this.cycleState.objective || 'Updates and improvements'}\n`;
+                        
+                        if (readme.includes('## Changelog') || readme.includes('## Version History')) {
+                            // Add to existing changelog
+                            readme = readme.replace(
+                                /(## Changelog|## Version History)\n/,
+                                `$1\n${changelogEntry}`
+                            );
+                        } else {
+                            // Add changelog section at the end
+                            readme += `\n\n## Changelog\n${changelogEntry}`;
+                        }
+                        
+                        await window.aider.writeFile(readmePath, readme);
+                        this.addMessage('system', `   ✓ README.md updated`);
+                    } else {
+                        // Create a basic README
+                        const projectName = this.currentSpaceName || 'Project';
+                        const newReadme = `# ${projectName}
+
+${versionBadge}
+
+## Overview
+
+${this.cycleState.objective || 'A project created with GSX Create.'}
+
+## Getting Started
+
+1. Open the main HTML file in your browser
+2. Or run a local server in this directory
+
+## Files
+
+${this.projectFiles.slice(0, 10).map(f => `- \`${f.name}\` - ${f.type || 'file'}`).join('\n')}
+
+## Changelog
+
+### v${version} (${date})
+- Initial release
+- ${this.cycleState.objective || 'Project setup complete'}
+
+---
+
+*Generated by GSX Create Meta Learning Cycle*
+`;
+                        await window.aider.writeFile(readmePath, newReadme);
+                        this.addMessage('system', `   ✓ README.md created`);
+                    }
+                } catch (error) {
+                    console.error('[Cycle] Documentation update error:', error);
+                    this.addMessage('system', `   ⚠️ Could not update documentation`);
+                }
             },
             
             // ========== END CYCLE FILE MANAGEMENT ==========
@@ -7460,12 +8606,14 @@ ${results.aiAnalysis || 'No AI analysis available'}
                     this.addMessage('system', '   Type your goal and press Send');
                     this.cycleState.paused = true;
                     this.cycleState.waitingForObjective = true;
+                    await this.logCycleEvent('Waiting for Objective', {});
                     this.updateCycleUI();
                     return;
                 }
                 
                 // Display the objective
                 this.addMessage('system', `→ Objective: "${this.cycleState.objective}"`);
+                await this.logCycleEvent('Objective Set', { objective: this.cycleState.objective });
                 await this.delay(300);
                 
                 // Step 1: Load pending feedback from user-feedback.md
@@ -7680,6 +8828,7 @@ Based on the objective and feedback, the recommended approach is:
                 
                 if (!this.cycleState.objective) {
                     this.addMessage('error', 'No objective set. Cannot create plan.');
+                    await this.logCycleEvent('Plan Skipped - No Objective', {});
                     await this.runPhase('execute');
                     return;
                 }
@@ -7696,6 +8845,7 @@ Based on the objective and feedback, the recommended approach is:
                 
                 // Store tasks
                 this.cycleState.proposedTasks = tasks;
+                await this.logCycleEvent('Tasks Generated', { taskCount: tasks.length, tasks: tasks.map(t => t.task) });
                 
                 // Show tasks with checkboxes
                 this.showTaskApprovalUI(tasks);
@@ -7703,6 +8853,7 @@ Based on the objective and feedback, the recommended approach is:
                 // Pause and wait for user to approve
                 this.cycleState.paused = true;
                 this.cycleState.waitingForApproval = true;
+                await this.logCycleEvent('Waiting for Task Approval', { taskCount: tasks.length });
                 this.updateCycleUI();
             },
             
@@ -7806,6 +8957,9 @@ Based on the objective and feedback, the recommended approach is:
                     created: new Date().toISOString()
                 }));
                 
+                // Sync to Episodic Memory Plan tab
+                this.syncCycleTodosToEpisodicMemory();
+                
                 this.addMessage('system', `✓ ${approvedTasks.length} task(s) approved`);
                 
                 // Resume cycle
@@ -7815,6 +8969,32 @@ Based on the objective and feedback, the recommended approach is:
                 
                 // Continue to execute
                 this.runPhase('execute');
+            },
+            
+            // Sync cycle todos to Episodic Memory Plan tab
+            syncCycleTodosToEpisodicMemory() {
+                // Add cycle tasks to the sidebar todo list
+                const cycleTasks = this.cycleState.todos || [];
+                
+                // Merge with existing todos (avoid duplicates)
+                cycleTasks.forEach(ct => {
+                    const exists = this.todos.some(t => t.text === ct.task);
+                    if (!exists) {
+                        this.todos.unshift({
+                            id: Date.now() + Math.random(),
+                            text: ct.task,
+                            done: ct.status === 'completed',
+                            created: ct.created,
+                            fromCycle: true // Mark as from meta learning cycle
+                        });
+                    }
+                });
+                
+                this.saveTodos();
+                this.renderTodos();
+                
+                // Switch to Plan tab to show the new tasks
+                this.switchEpisodicTab('plan');
             },
             
             // Placeholder for future AI-based todo generation
@@ -7875,9 +9055,11 @@ Based on the objective and feedback, the recommended approach is:
                     if (this.fixQueue && this.fixQueue.length > 0) {
                         const fix = this.fixQueue.shift();
                         this.addMessage('system', `⚡ Fixing: ${fix.description.substring(0, 50)}...`);
+                        await this.logCycleEvent('Applying Fix', { fix: fix.description.substring(0, 100) });
                         await this.executeTask(`Fix this issue: ${fix.description}`);
                     } else {
                         this.addMessage('system', '✅ All tasks completed');
+                        await this.logCycleEvent('All Tasks Completed', { totalTasks: todos.length });
                     }
                     await this.runPhase('test');
                     return;
@@ -7887,15 +9069,32 @@ Based on the objective and feedback, the recommended approach is:
                 const currentTodo = pendingTodos[0];
                 const todoIndex = todos.indexOf(currentTodo);
                 const taskNum = todos.length - pendingTodos.length + 1;
+                await this.logCycleEvent('Executing Task', { taskNum, totalTasks: todos.length, task: currentTodo.task });
                 
                 this.addMessage('system', `⚡ Task ${taskNum}/${todos.length}: ${currentTodo.task}`);
                 
                 // Execute the todo using AI (automatic - no user input needed)
                 try {
+                    // Step 1: Summarize Constitutional Memory for this specific task
+                    this.addMessage('system', `   🏛️ Loading constitutional context...`);
+                    await this.summarizeConstitutionalMemory(currentTodo.task);
+                    const constitutionalContext = this.getConstitutionalContext();
+                    
+                    // Log the dynamic system prompt
+                    await this.logDynamicSystemPrompt(currentTodo.task, constitutionalContext);
+                    
                     // Check if task involves data persistence
                     const needsApi = this.detectApiNeed(currentTodo.task);
                     
-                    var prompt = 'Complete this task: ' + currentTodo.task + '\n\n' +
+                    // Build prompt with Constitutional Memory context
+                    var prompt = '';
+                    
+                    // Add Constitutional Memory summary first (guiding principles)
+                    if (constitutionalContext) {
+                        prompt += constitutionalContext;
+                    }
+                    
+                    prompt += 'Complete this task: ' + currentTodo.task + '\n\n' +
                         'Context:\n' +
                         '- Objective: ' + this.cycleState.objective + '\n' +
                         '- File: ' + (this.currentPreviewFile ? this.currentPreviewFile.split('/').pop() : 'current project') + '\n\n';
@@ -7910,7 +9109,7 @@ Based on the objective and feedback, the recommended approach is:
                             '5. DO NOT hardcode data - always use the API pattern\n\n';
                     }
                     
-                    prompt += 'Implement the changes needed to complete this specific task.';
+                    prompt += 'Follow the project guidelines above. Implement the changes needed to complete this specific task.';
 
                     await this.executeTask(prompt);
                     
@@ -7922,6 +9121,9 @@ Based on the objective and feedback, the recommended approach is:
                     // Mark todo as completed
                     todos[todoIndex].status = 'completed';
                     await this.updateTodoFile();
+                    
+                    // Sync to Episodic Memory
+                    this.markCycleTaskComplete(currentTodo.task);
                     
                     // Brief pause then continue with next todo
                     await new Promise(function(r) { setTimeout(r, 500); });
@@ -9255,812 +10457,3 @@ Based on the objective and feedback, the recommended approach is:
                 
                 if (!this.currentPreviewFile) {
                     this.addMessage('system', '⚠️ No file selected for testing - skipping');
-                    this.cycleState.currentScore = 100;
-                    await this.runPhase('improve');
-                    return;
-                }
-                
-                // Run API tests if test harness exists
-                this.addMessage('system', '→ Running API tests...');
-                try {
-                    var apiTestResult = await this.runApiTests();
-                    if (apiTestResult) {
-                        testResults.apiTestResults = apiTestResult;
-                        var apiIcon = apiTestResult.failed === 0 ? '✅' : '⚠️';
-                        this.addMessage('system', apiIcon + ' API Tests: ' + apiTestResult.passed + ' passed, ' + apiTestResult.failed + ' failed');
-                        
-                        if (apiTestResult.failed > 0) {
-                            // Add failed API tests to fix queue
-                            for (var i = 0; i < apiTestResult.suites.length; i++) {
-                                var suite = apiTestResult.suites[i];
-                                var failedResults = suite.results.filter(function(r) { return r.status === 'FAIL'; });
-                                for (var j = 0; j < failedResults.length; j++) {
-                                    this.fixQueue = this.fixQueue || [];
-                                    this.fixQueue.push({
-                                        category: 'api-test',
-                                        description: suite.name + ' - ' + failedResults[j].test + ': ' + failedResults[j].message,
-                                        severity: 'high'
-                                    });
-                                }
-                            }
-                            
-                            // Generate API fix instructions document
-                            await this.generateApiFixInstructions(apiTestResult);
-                        }
-                    } else {
-                        this.addMessage('system', '  → No API tests found');
-                    }
-                } catch (e) {
-                    this.addMessage('system', '  → API tests skipped: ' + e.message);
-                }
-                
-                this.addMessage('system', '→ Running functional tests...');
-                
-                try {
-                    // Run functional tests
-                    const testResult = await window.testAgent.runTests(this.currentPreviewFile, { 
-                        browser: 'chromium',
-                        captureScreenshots: true 
-                    });
-                    
-                    if (testResult.success) {
-                        const passRate = testResult.summary?.passRate || 0;
-                        const passed = testResult.summary?.passed || 0;
-                        const failed = testResult.summary?.failed || 0;
-                        
-                        testResults.total = passed + failed;
-                        testResults.passed = passed;
-                        testResults.failed = failed;
-                        testResults.score = passRate;
-                        
-                        this.cycleState.currentScore = passRate;
-                        this.updateScoreDisplay();
-                        
-                        const statusIcon = passRate >= 80 ? '✅' : passRate >= 50 ? '⚠️' : '❌';
-                        this.addMessage('system', `${statusIcon} Functional: ${passed} passed, ${failed} failed (${passRate}%)`);
-                        
-                        // Store failed tests
-                        this.testResults = testResult.results || [];
-                        const failedTests = this.testResults.filter(t => t.status === 'failed');
-                        testResults.failedTests = failedTests.map(t => `${t.name}: ${t.error}`);
-                        
-                        if (failedTests.length > 0) {
-                            this.fixQueue = failedTests.map(t => ({
-                                category: 'test',
-                                description: `Test "${t.name}" failed: ${t.error}`,
-                                severity: 'high'
-                            }));
-                            this.addMessage('system', `→ ${failedTests.length} issues added to fix queue`);
-                        }
-                    } else {
-                        this.addMessage('system', '⚠️ Functional tests skipped');
-                        this.cycleState.currentScore = 50;
-                        testResults.score = 50;
-                    }
-                    
-                    // Run visual analysis
-                    this.addMessage('system', '→ Running visual analysis...');
-                    const visualResult = await window.testAgent.runInteractiveTest(this.currentPreviewFile);
-                    if (visualResult.success) {
-                        if (visualResult.consoleErrors) {
-                            testResults.consoleErrors = visualResult.consoleErrors;
-                        }
-                        if (visualResult.aiAnalysis) {
-                            this.lastVisualAnalysis = visualResult.aiAnalysis;
-                            testResults.aiAnalysis = visualResult.aiAnalysis;
-                            this.addMessage('system', '✅ Visual analysis complete');
-                            
-                            // Show brief summary
-                            const analysisPreview = visualResult.aiAnalysis.substring(0, 150);
-                            this.addMessage('system', `📝 "${analysisPreview}..."`);
-                        }
-                        if (visualResult.screenshot) {
-                            this.addMessage('system', '📸 Screenshot captured');
-                        }
-                    } else {
-                        this.addMessage('system', '⚠️ Visual analysis skipped');
-                    }
-                    
-                } catch (error) {
-                    console.error('[Cycle] Test error:', error);
-                    this.addMessage('error', `Test error: ${error.message}`);
-                    this.cycleState.currentScore = 0;
-                    testResults.score = 0;
-                }
-                
-                // Save test results to file
-                this.addMessage('system', '→ Saving test results...');
-                const testResultsContent = this.generateTestResultsTemplate(testResults);
-                await this.saveCycleFile('testResults', testResultsContent, true);
-                this.addMessage('system', `   ✓ test-results-v${this.cycleState.currentVersion}.md saved`);
-                
-                this.addMessage('system', '📊 Current score: ' + this.cycleState.currentScore + '%');
-                await this.runPhase('improve');
-            },
-            
-            // Run API tests using Playwright or browser-based harness
-            async runApiTests() {
-                // First try Playwright tests (for real API)
-                var playwrightResult = await this.runPlaywrightApiTests();
-                if (playwrightResult) {
-                    return playwrightResult;
-                }
-                
-                // Fall back to browser-based tests (for stub mode)
-                return await this.runBrowserApiTests();
-            },
-            
-            // Run Playwright API tests
-            async runPlaywrightApiTests() {
-                // Check if Playwright tests exist
-                var testFiles = [];
-                try {
-                    var files = await window.aider.listFiles(this.repoPath + '/tests');
-                    if (files) {
-                        testFiles = files.filter(function(f) { return f.endsWith('.api.spec.js'); });
-                    }
-                } catch (e) {
-                    return null;
-                }
-                
-                if (testFiles.length === 0) {
-                    return null;
-                }
-                
-                // Run Playwright tests via IPC
-                try {
-                    this.addMessage('system', '  → Running Playwright API tests...');
-                    
-                    var result = await window.aider.runPlaywrightTests({
-                        project: 'api',
-                        testDir: this.repoPath + '/tests',
-                        configPath: this.repoPath + '/playwright.config.js'
-                    });
-                    
-                    if (result && result.success !== undefined) {
-                        return {
-                            passed: result.passed || 0,
-                            failed: result.failed || 0,
-                            total: (result.passed || 0) + (result.failed || 0),
-                            success: result.failed === 0,
-                            suites: result.suites || [],
-                            source: 'playwright'
-                        };
-                    }
-                } catch (e) {
-                    this.addMessage('system', '  → Playwright not available, using browser tests');
-                }
-                
-                return null;
-            },
-            
-            // Generate API fix instructions for backend developer/agent
-            async generateApiFixInstructions(testResult) {
-                var version = this.cycleState.currentVersion;
-                var fileName = 'API-FIX-INSTRUCTIONS-v' + version + '.md';
-                var filePath = this.repoPath + '/' + this.apiDocsFolder + '/' + fileName;
-                
-                var doc = '# API Fix Instructions\n\n';
-                doc += '> **Copy and paste this into your API Builder Agent prompt**\n\n';
-                doc += '| Property | Value |\n';
-                doc += '|----------|-------|\n';
-                doc += '| App Version | v' + version + ' |\n';
-                doc += '| Generated | ' + new Date().toISOString() + ' |\n';
-                doc += '| Failed Tests | ' + testResult.failed + ' |\n';
-                doc += '| Passed Tests | ' + testResult.passed + ' |\n\n';
-                
-                doc += '---\n\n';
-                doc += '## Summary\n\n';
-                doc += 'The following API endpoints are failing tests and need to be fixed.\n';
-                doc += 'Each issue includes the expected behavior and the actual error.\n\n';
-                
-                doc += '---\n\n';
-                doc += '## Issues to Fix\n\n';
-                
-                var issueNum = 1;
-                var suites = testResult.suites || [];
-                
-                for (var i = 0; i < suites.length; i++) {
-                    var suite = suites[i];
-                    var failedTests = (suite.results || []).filter(function(r) { 
-                        return r.status === 'FAIL' || r.status === 'failed'; 
-                    });
-                    
-                    if (failedTests.length === 0) continue;
-                    
-                    for (var j = 0; j < failedTests.length; j++) {
-                        var test = failedTests[j];
-                        var analysis = this.analyzeApiError(test, suite.name);
-                        
-                        doc += '### Issue ' + issueNum + ': ' + (test.test || test.name) + '\n\n';
-                        doc += '**API:** ' + suite.name + '\n\n';
-                        doc += '**Test:** ' + (test.test || test.name) + '\n\n';
-                        doc += '**Error:** ' + (test.message || test.error || 'Unknown error') + '\n\n';
-                        
-                        doc += '#### What Went Wrong\n\n';
-                        doc += analysis.diagnosis + '\n\n';
-                        
-                        doc += '#### Expected Behavior\n\n';
-                        doc += analysis.expected + '\n\n';
-                        
-                        doc += '#### How to Fix\n\n';
-                        for (var k = 0; k < analysis.steps.length; k++) {
-                            doc += (k + 1) + '. ' + analysis.steps[k] + '\n';
-                        }
-                        doc += '\n';
-                        
-                        if (analysis.example) {
-                            doc += '#### Example Implementation\n\n';
-                            doc += '```\n' + analysis.example + '\n```\n\n';
-                        }
-                        
-                        doc += '---\n\n';
-                        issueNum++;
-                    }
-                }
-                
-                // Add general guidance
-                doc += '## General API Requirements\n\n';
-                doc += 'Ensure all endpoints follow these patterns:\n\n';
-                doc += '### Success Responses\n';
-                doc += '- `200 OK` - Successful GET, PUT, PATCH\n';
-                doc += '- `201 Created` - Successful POST\n';
-                doc += '- `204 No Content` - Successful DELETE\n\n';
-                
-                doc += '### Error Responses\n';
-                doc += '- `400 Bad Request` - Invalid input data\n';
-                doc += '- `401 Unauthorized` - Missing/invalid authentication\n';
-                doc += '- `404 Not Found` - Resource does not exist\n';
-                doc += '- `422 Unprocessable Entity` - Validation failed\n';
-                doc += '- `500 Internal Server Error` - Server-side error\n\n';
-                
-                doc += '### Response Format\n';
-                doc += 'All responses should be JSON with consistent structure:\n\n';
-                doc += '```json\n';
-                doc += '// Success (single item)\n';
-                doc += '{ "id": "...", "field": "value", "createdAt": "...", "updatedAt": "..." }\n\n';
-                doc += '// Success (list)\n';
-                doc += '{ "items": [...], "total": 10, "limit": 20, "offset": 0 }\n\n';
-                doc += '// Error\n';
-                doc += '{ "error": "Error message", "code": "ERROR_CODE", "details": {...} }\n';
-                doc += '```\n\n';
-                
-                doc += '---\n\n';
-                doc += '## Reference Documents\n\n';
-                doc += 'See these files for complete API specifications:\n\n';
-                
-                for (var i = 0; i < suites.length; i++) {
-                    var suiteName = suites[i].name.replace(' API', '').toLowerCase();
-                    doc += '- [`api-specs/' + suiteName + '-api.md`](./api-specs/' + suiteName + '-api.md)\n';
-                }
-                
-                doc += '\n---\n\n';
-                doc += '*Generated by GSX Create Meta Learning*\n';
-                doc += '*Copy this entire document into your API Builder Agent to fix these issues.*\n';
-                
-                try {
-                    await window.aider.writeFile(filePath, doc);
-                    this.addMessage('system', '📝 API fix instructions saved: ' + fileName);
-                    this.addMessage('system', '   → Copy to your API Builder Agent to fix server-side issues');
-                } catch (e) {
-                    console.log('[Test] Save API fix instructions error:', e);
-                }
-            },
-            
-            // Analyze API error and generate fix guidance
-            analyzeApiError(test, suiteName) {
-                var testName = (test.test || test.name || '').toLowerCase();
-                var error = (test.message || test.error || '').toLowerCase();
-                
-                var analysis = {
-                    diagnosis: '',
-                    expected: '',
-                    steps: [],
-                    example: ''
-                };
-                
-                // Analyze based on test type and error
-                if (testName.includes('create') || testName.includes('post')) {
-                    if (error.includes('500') || error.includes('internal')) {
-                        analysis.diagnosis = 'The server encountered an internal error when trying to create a new record. This usually indicates a database connection issue, missing table, or unhandled exception.';
-                        analysis.expected = 'POST request should create a new record and return 201 Created with the created object including generated id, createdAt, and updatedAt fields.';
-                        analysis.steps = [
-                            'Check database connection is working',
-                            'Verify the table/collection exists with correct schema',
-                            'Add try-catch error handling around database operations',
-                            'Log the actual error on the server for debugging',
-                            'Return proper error response instead of 500'
-                        ];
-                    } else if (error.includes('400') || error.includes('validation')) {
-                        analysis.diagnosis = 'The server is rejecting the request data as invalid, but the test data should be valid.';
-                        analysis.expected = 'Valid data should be accepted. Check that validation rules match the API specification.';
-                        analysis.steps = [
-                            'Review validation rules - they may be too strict',
-                            'Check required fields match the API spec',
-                            'Verify data types are being parsed correctly (strings vs numbers)',
-                            'Return specific validation error messages'
-                        ];
-                    } else if (error.includes('404')) {
-                        analysis.diagnosis = 'The endpoint does not exist or is not properly routed.';
-                        analysis.expected = 'POST endpoint should be accessible and handle the request.';
-                        analysis.steps = [
-                            'Verify the endpoint route is defined',
-                            'Check the HTTP method is POST (not GET)',
-                            'Ensure the route path matches exactly',
-                            'Check for typos in the route definition'
-                        ];
-                    } else {
-                        analysis.diagnosis = 'The create operation failed unexpectedly.';
-                        analysis.expected = 'Should create record and return 201 with the created object.';
-                        analysis.steps = [
-                            'Check server logs for the actual error',
-                            'Verify request body is being parsed correctly',
-                            'Ensure response includes all required fields'
-                        ];
-                    }
-                    analysis.example = 'POST /resources\nRequest: { "name": "Example" }\nResponse (201): { "id": "abc123", "name": "Example", "createdAt": "...", "updatedAt": "..." }';
-                    
-                } else if (testName.includes('get') || testName.includes('read')) {
-                    if (error.includes('500')) {
-                        analysis.diagnosis = 'Server error when fetching the record. Database query may be failing.';
-                        analysis.expected = 'GET request should return the record or 404 if not found.';
-                        analysis.steps = [
-                            'Check database query syntax',
-                            'Verify the ID parameter is being received correctly',
-                            'Add error handling for database operations'
-                        ];
-                    } else if (error.includes('404') && !testName.includes('non-existent')) {
-                        analysis.diagnosis = 'The record was not found, but it should exist (was just created).';
-                        analysis.expected = 'Record created in previous test should be retrievable.';
-                        analysis.steps = [
-                            'Verify the create operation is actually saving to database',
-                            'Check the ID format matches between create and read',
-                            'Ensure database transactions are being committed'
-                        ];
-                    } else {
-                        analysis.diagnosis = 'The read operation is not returning expected data.';
-                        analysis.expected = 'Should return the complete record with all fields.';
-                        analysis.steps = [
-                            'Verify all fields are being returned in response',
-                            'Check field names match the API spec',
-                            'Ensure nested objects are properly serialized'
-                        ];
-                    }
-                    analysis.example = 'GET /resources/:id\nResponse (200): { "id": "abc123", "name": "Example", "createdAt": "...", "updatedAt": "..." }';
-                    
-                } else if (testName.includes('update') || testName.includes('put') || testName.includes('patch')) {
-                    if (error.includes('500')) {
-                        analysis.diagnosis = 'Server error during update operation.';
-                        analysis.expected = 'PUT/PATCH should update the record and return the updated object.';
-                        analysis.steps = [
-                            'Check database update query syntax',
-                            'Verify the record exists before updating',
-                            'Ensure updatedAt timestamp is being set'
-                        ];
-                    } else {
-                        analysis.diagnosis = 'Update operation is not working as expected.';
-                        analysis.expected = 'Should update specified fields and return updated record with new updatedAt.';
-                        analysis.steps = [
-                            'Verify partial updates are supported (PATCH behavior)',
-                            'Check that updatedAt is being refreshed',
-                            'Ensure unchanged fields are preserved'
-                        ];
-                    }
-                    analysis.example = 'PUT /resources/:id\nRequest: { "name": "Updated" }\nResponse (200): { "id": "abc123", "name": "Updated", "updatedAt": "..." }';
-                    
-                } else if (testName.includes('delete')) {
-                    if (error.includes('500')) {
-                        analysis.diagnosis = 'Server error during delete operation.';
-                        analysis.expected = 'DELETE should remove the record and return success.';
-                        analysis.steps = [
-                            'Check database delete query syntax',
-                            'Verify the record exists before deleting',
-                            'Handle cascading deletes if needed'
-                        ];
-                    } else if (error.includes('still exists')) {
-                        analysis.diagnosis = 'Delete operation returned success but record still exists.';
-                        analysis.expected = 'Record should be permanently removed from database.';
-                        analysis.steps = [
-                            'Verify delete is actually removing from database (not just marking)',
-                            'Check for soft-delete logic that may be interfering',
-                            'Ensure database transaction is committed'
-                        ];
-                    } else {
-                        analysis.diagnosis = 'Delete operation failed unexpectedly.';
-                        analysis.expected = 'Should remove record and return 200/204.';
-                        analysis.steps = [
-                            'Check server logs for actual error',
-                            'Verify endpoint routing for DELETE method'
-                        ];
-                    }
-                    analysis.example = 'DELETE /resources/:id\nResponse (200): { "success": true }\n\nGET /resources/:id after delete\nResponse (404): { "error": "Not found" }';
-                    
-                } else if (testName.includes('list')) {
-                    analysis.diagnosis = 'List operation is not returning expected format.';
-                    analysis.expected = 'Should return array of items with total count.';
-                    analysis.steps = [
-                        'Return items in an "items" array',
-                        'Include "total" count for pagination',
-                        'Support limit/offset query parameters'
-                    ];
-                    analysis.example = 'GET /resources?limit=10&offset=0\nResponse (200): { "items": [...], "total": 25, "limit": 10, "offset": 0 }';
-                    
-                } else {
-                    // Generic analysis
-                    analysis.diagnosis = 'API operation failed. Check server logs for details.';
-                    analysis.expected = 'Operation should complete successfully with proper response.';
-                    analysis.steps = [
-                        'Check server logs for the actual error',
-                        'Verify endpoint is properly defined',
-                        'Ensure request/response format matches spec'
-                    ];
-                }
-                
-                return analysis;
-            },
-            
-            // Run browser-based API tests (stub mode)
-            async runBrowserApiTests() {
-                // Check if test runner exists
-                var testRunnerPath = this.repoPath + '/tests/test-runner.js';
-                var testRunnerExists = false;
-                
-                try {
-                    var content = await window.aider.readFile(testRunnerPath);
-                    testRunnerExists = content && content.length > 0;
-                } catch (e) {
-                    return null;
-                }
-                
-                if (!testRunnerExists) {
-                    return null;
-                }
-                
-                // Load and run tests in preview context
-                try {
-                    // Get the preview iframe
-                    var previewContent = document.getElementById('previewContent');
-                    var iframe = previewContent ? previewContent.querySelector('iframe') : null;
-                    
-                    if (!iframe || !iframe.contentWindow) {
-                        this.addMessage('system', '  → Cannot access preview for API tests');
-                        return null;
-                    }
-                    
-                    // Check if API client and tests are loaded
-                    var win = iframe.contentWindow;
-                    
-                    if (!win.TestRunner) {
-                        this.addMessage('system', '  → Loading browser test harness...');
-                        
-                        // Load all test files
-                        var testFiles = await window.aider.listFiles(this.repoPath + '/tests');
-                        if (testFiles) {
-                            for (var i = 0; i < testFiles.length; i++) {
-                                var file = testFiles[i];
-                                if (file.endsWith('.test.js')) {
-                                    var code = await window.aider.readFile(this.repoPath + '/tests/' + file);
-                                    if (code) {
-                                        try {
-                                            win.eval(code);
-                                        } catch (e) {
-                                            console.log('[Test] Load error:', file, e);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        
-                        // Also load API client if not loaded
-                        var appName = (this.currentSpaceName || 'App').replace(/[^a-zA-Z0-9]/g, '');
-                        if (!win[appName + 'API']) {
-                            var apiClientPath = this.repoPath + '/' + appName.toLowerCase() + '-api.js';
-                            var apiCode = await window.aider.readFile(apiClientPath);
-                            if (apiCode) {
-                                try {
-                                    win.eval(apiCode);
-                                } catch (e) {
-                                    console.log('[Test] API client load error:', e);
-                                }
-                            }
-                        }
-                    }
-                    
-                    // Run tests
-                    if (win.TestRunner && win.TestRunner.runAllApiTests) {
-                        var result = await win.TestRunner.runAllApiTests();
-                        result.source = 'browser';
-                        return result;
-                    }
-                    
-                    return null;
-                } catch (e) {
-                    console.log('[Test] Browser API test error:', e);
-                    return null;
-                }
-            },
-            
-            // Improve Phase - Evaluate and decide next action
-            async phaseImprove() {
-                const score = this.cycleState.currentScore;
-                const target = this.cycleState.targetScore;
-                
-                this.addMessage('system', `→ Evaluating: ${score}% vs target ${target}%`);
-                
-                // Update files with completed tasks
-                await this.updateCycleFiles();
-                
-                if (score >= target) {
-                    // Target reached!
-                    this.addMessage('system', `🎉 SUCCESS! Target score reached!`);
-                    
-                    // Finalize all files with current version
-                    await this.finalizeCycle();
-                    
-                    // Create new version
-                    this.addMessage('system', `→ Saving version...`);
-                    await this.createVersion(`v${this.cycleState.currentVersion} - Score: ${score}%`);
-                    this.cycleState.currentVersion++;
-                    
-                    // Stop cycle
-                    this.cycleState.active = false;
-                    this.updateCycleUI();
-                    
-                    this.addMessage('system', `━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-                    this.addMessage('system', '✅ META LEARNING CYCLE COMPLETE');
-                    this.addMessage('system', `   Version: v${this.cycleState.currentVersion - 1}`);
-                    this.addMessage('system', `   Score: ${score}%`);
-                    this.addMessage('system', `━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-                    
-                } else {
-                    // Need more iterations
-                    this.addMessage('system', `⚠️ Below target (${score}% < ${target}%)`);
-                    
-                    // If we have fixes to apply, continue cycle
-                    if (this.fixQueue && this.fixQueue.length > 0) {
-                        this.addMessage('system', `→ ${this.fixQueue.length} issues queued for fixing`);
-                        this.addMessage('system', `→ Starting iteration ${this.cycleState.currentVersion + 1}...`);
-                        
-                        // Create checkpoint version
-                        await this.createVersion(`v${this.cycleState.currentVersion} - WIP (${score}%)`);
-                        this.cycleState.currentVersion++;
-                        
-                        // Reset phase indicators
-                        document.querySelectorAll('.phase-dot').forEach(n => {
-                            n.classList.remove('active', 'completed', 'failed');
-                        });
-                        
-                        // Start new cycle iteration
-                        this.addMessage('system', `━━━ ITERATION ${this.cycleState.currentVersion} ━━━`);
-                        setTimeout(() => this.runPhase('execute'), 1000);
-                    } else if (this.lastVisualAnalysis) {
-                        // Use visual analysis to fix issues
-                        this.addMessage('system', `→ Applying visual analysis fixes...`);
-                        this.fixQueue = [{
-                            category: 'visual',
-                            description: this.lastVisualAnalysis,
-                            severity: 'medium'
-                        }];
-                        
-                        await this.createVersion(`v${this.cycleState.currentVersion} - WIP (${score}%)`);
-                        this.cycleState.currentVersion++;
-                        
-                        document.querySelectorAll('.phase-dot').forEach(n => {
-                            n.classList.remove('active', 'completed', 'failed');
-                        });
-                        
-                        this.addMessage('system', `━━━ ITERATION ${this.cycleState.currentVersion} ━━━`);
-                        setTimeout(() => this.runPhase('execute'), 1000);
-                    } else {
-                        // No automatic fixes available
-                        this.addMessage('system', `━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-                        this.addMessage('system', '⏸️ META LEARNING PAUSED');
-                        this.addMessage('system', `   No automatic fixes found`);
-                        this.addMessage('system', `   Enter feedback to continue`);
-                        this.addMessage('system', `━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-                        this.cycleState.active = false;
-                        this.updateCycleUI();
-                    }
-                }
-            },
-            
-            // Create a new version snapshot
-            async createVersion(description) {
-                const version = {
-                    id: `v${this.cycleState.currentVersion}`,
-                    number: this.cycleState.currentVersion,
-                    timestamp: new Date().toISOString(),
-                    description: description,
-                    score: this.cycleState.currentScore,
-                    files: []
-                };
-                
-                // Capture current file state
-                if (this.currentPreviewFile) {
-                    try {
-                        const content = await window.aider.readFile(this.currentPreviewFile);
-                        version.files.push({
-                            path: this.currentPreviewFile,
-                            content: content
-                        });
-                    } catch (e) {
-                        console.log('[Cycle] Version capture error:', e);
-                    }
-                }
-                
-                this.cycleState.versions.push(version);
-                this.renderVersionTimeline();
-                
-                this.addMessage('system', `💾 Version ${version.id} saved: ${description}`);
-                
-                return version;
-            },
-            
-            // Rollback to a previous version
-            async rollbackToVersionCycle(versionId) {
-                const version = this.cycleState.versions.find(v => v.id === versionId);
-                if (!version) {
-                    this.addMessage('error', `Version ${versionId} not found`);
-                    return;
-                }
-                
-                this.addMessage('system', `⏪ Rolling back to ${versionId}...`);
-                
-                // Restore files
-                for (const file of version.files) {
-                    try {
-                        // Use Aider to restore the file
-                        const input = document.getElementById('promptInput');
-                        input.value = `Please restore the file ${file.path} to this exact content:\n\n\`\`\`\n${file.content.substring(0, 500)}...\n\`\`\`\n\n(Restoring to version ${versionId})`;
-                        // Note: In production, you'd use a direct file write API
-                    } catch (e) {
-                        console.error('[Cycle] Rollback error:', e);
-                    }
-                }
-                
-                // Update state
-                this.cycleState.currentScore = version.score;
-                this.updateScoreDisplay();
-                
-                this.addMessage('system', `✅ Rolled back to ${versionId}`);
-            },
-            
-            // Go to a specific phase manually
-            goToPhase(phase) {
-                if (!this.cycleState.active) {
-                    this.addMessage('system', 'Start the cycle first to navigate phases.');
-                    return;
-                }
-                
-                // Reset all phases after this one
-                const phases = this.cycleState.phases;
-                const phaseIndex = phases.indexOf(phase);
-                
-                phases.forEach((p, i) => {
-                    const node = document.getElementById(`phase-${p}`);
-                    if (node) {
-                        node.classList.remove('active', 'completed', 'failed');
-                        if (i < phaseIndex) {
-                            node.classList.add('completed');
-                        }
-                    }
-                });
-                
-                this.runPhase(phase);
-            },
-            
-            // Toggle cycle start/stop
-            toggleCycle() {
-                if (this.cycleState.active) {
-                    this.stopCycle();
-                } else {
-                    this.startCycle();
-                }
-            },
-            
-            // Update cycle UI elements (minimal version)
-            updateCycleUI() {
-                const ctrlBtn = document.getElementById('cycleCtrlBtn');
-                const versionSpan = document.getElementById('cycleVersion');
-                
-                if (ctrlBtn) {
-                    if (this.cycleState.active) {
-                        ctrlBtn.textContent = '■';
-                        ctrlBtn.classList.add('running');
-                        ctrlBtn.classList.remove('paused');
-                        ctrlBtn.title = 'Stop Meta Learning';
-                        
-                        if (this.cycleState.paused) {
-                            ctrlBtn.textContent = '▶';
-                            ctrlBtn.classList.remove('running');
-                            ctrlBtn.classList.add('paused');
-                        }
-                    } else {
-                        ctrlBtn.textContent = '▶';
-                        ctrlBtn.classList.remove('running', 'paused');
-                        ctrlBtn.title = 'Start Meta Learning';
-                    }
-                }
-                
-                if (versionSpan) {
-                    versionSpan.textContent = `v${this.cycleState.currentVersion}`;
-                }
-                
-                // Update phase dots and lines
-                const phases = this.cycleState.phases;
-                const currentIndex = phases.indexOf(this.cycleState.currentPhase);
-                
-                phases.forEach((phase, i) => {
-                    const dot = document.getElementById(`phase-${phase}`);
-                    const line = document.getElementById(`line-${i + 1}`);
-                    
-                    if (dot) {
-                        dot.classList.remove('active', 'completed');
-                        if (i < currentIndex) {
-                            dot.classList.add('completed');
-                        } else if (i === currentIndex) {
-                            dot.classList.add('active');
-                        }
-                    }
-                    if (line) {
-                        line.classList.remove('active', 'completed');
-                        if (i < currentIndex) {
-                            line.classList.add('completed');
-                        } else if (i === currentIndex) {
-                            line.classList.add('active');
-                        }
-                    }
-                });
-            },
-            
-            // Update score display
-            updateScoreDisplay() {
-                const fill = document.getElementById('cycleProgressFill');
-                const scoreSpan = document.getElementById('cycleScore');
-                const score = this.cycleState.currentScore;
-                
-                if (fill) {
-                    fill.style.width = `${score}%`;
-                    fill.classList.remove('good', 'warning');
-                    if (score >= 80) fill.classList.add('good');
-                    else if (score >= 50) fill.classList.add('warning');
-                }
-                if (scoreSpan) {
-                    scoreSpan.textContent = `${score}%`;
-                }
-            },
-            
-            // Render version timeline (minimal)
-            renderVersionTimeline() {
-                const timeline = document.getElementById('versionTimeline');
-                if (!timeline) return;
-                
-                let html = '';
-                
-                // Show last 5 versions max
-                const versions = this.cycleState.versions.slice(-5);
-                versions.forEach((v, i) => {
-                    const isCurrent = i === versions.length - 1;
-                    html += `<div class="version-pill ${isCurrent ? 'current' : ''}" 
-                                 onclick="GSXCreate.rollbackToVersionCycle('${v.id}')"
-                                 title="${v.description}">${v.id}</div>`;
-                });
-                
-                html += `<div class="version-pill add" onclick="GSXCreate.createVersion('Checkpoint')" title="Save checkpoint">+</div>`;
-                
-                timeline.innerHTML = html;
-            },
-            
-            // Set target score
-            setTargetScore(score) {
-                this.cycleState.targetScore = Math.max(0, Math.min(100, score));
-            }
-        };
-        
-        // Initialize on load
-        document.addEventListener('DOMContentLoaded', () => {
-            GSXCreate.init();
-        });
-    </script>
-</body>
-</html>

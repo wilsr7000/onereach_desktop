@@ -289,10 +289,10 @@ class EventDB {
     if (spaceId) {
       const transactions = await this.getTransactions({ spaceId });
       return {
-        total_calls: transactions.length,
-        total_input_tokens: transactions.reduce((sum, t) => sum + (t.inputTokens || 0), 0),
-        total_output_tokens: transactions.reduce((sum, t) => sum + (t.outputTokens || 0), 0),
-        total_cost: transactions.reduce((sum, t) => sum + (t.cost || 0), 0)
+        totalCalls: transactions.length,
+        totalInputTokens: transactions.reduce((sum, t) => sum + (t.inputTokens || 0), 0),
+        totalOutputTokens: transactions.reduce((sum, t) => sum + (t.outputTokens || 0), 0),
+        totalCost: transactions.reduce((sum, t) => sum + (t.cost || 0), 0)
       };
     }
 
@@ -309,12 +309,22 @@ class EventDB {
           FROM read_json_auto('${globPattern}')
         `);
         const rows = await result.getRows();
-        return rows && rows.length > 0 ? rows[0] : null;
+        if (rows && rows.length > 0) {
+          const row = rows[0];
+          // Convert snake_case to camelCase for consistency
+          return {
+            totalCalls: row.total_calls || 0,
+            totalInputTokens: row.total_input_tokens || 0,
+            totalOutputTokens: row.total_output_tokens || 0,
+            totalCost: row.total_cost || 0
+          };
+        }
+        return null;
       } catch (e) {
         console.error('[EventDB] Cost summary query failed:', e);
       }
     }
-    return { total_calls: 0, total_input_tokens: 0, total_output_tokens: 0, total_cost: 0 };
+    return { totalCalls: 0, totalInputTokens: 0, totalOutputTokens: 0, totalCost: 0 };
   }
 
   async getCostByModel(spaceId = null) {

@@ -2,6 +2,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 // Set up console interceptor for renderer process
+// PERFORMANCE: Uses batching to reduce IPC overhead
 (function() {
   // Store original console methods
   const originalConsole = {
@@ -11,6 +12,13 @@ const { contextBridge, ipcRenderer } = require('electron');
     debug: console.debug.bind(console),
     info: console.info.bind(console)
   };
+
+  // PERFORMANCE: Batch log messages to reduce IPC calls
+  const logBuffer = [];
+  const BATCH_INTERVAL = 500; // Flush every 500ms
+  const MAX_BUFFER_SIZE = 50; // Flush if buffer gets too large
+  let flushTimeout = null;
+  let isLoggingEnabled = true; // Can be disabled for maximum performance
 
   // Get window title or URL for context
   function getWindowContext() {
@@ -23,11 +31,35 @@ const { contextBridge, ipcRenderer } = require('electron');
     return windowName;
   }
 
+  // Flush batched logs to main process
+  function flushLogs() {
+    if (logBuffer.length === 0) return;
+    
+    try {
+      // Send all buffered logs in a single IPC call
+      ipcRenderer.send('logger:batch', logBuffer.slice());
+      logBuffer.length = 0; // Clear buffer
+    } catch (err) {
+      // Fail silently
+    }
+    flushTimeout = null;
+  }
+
+  // Schedule a flush if not already scheduled
+  function scheduleFlush() {
+    if (!flushTimeout) {
+      flushTimeout = setTimeout(flushLogs, BATCH_INTERVAL);
+    }
+  }
+
   // Override console methods
   const interceptConsoleMethod = (method, level) => {
     console[method] = function(...args) {
       // Call original console method
       originalConsole[method](...args);
+      
+      // Skip logging if disabled for performance
+      if (!isLoggingEnabled) return;
       
       // Format the message
       const message = args.map(arg => {
@@ -41,19 +73,35 @@ const { contextBridge, ipcRenderer } = require('electron');
         return String(arg);
       }).join(' ');
       
-      // Send to main process via IPC
-      try {
-        ipcRenderer.send(`logger:${level}`, {
-          message: `[Console.${method}] ${message}`,
-          data: {
-            window: getWindowContext(),
-            url: window.location ? window.location.href : 'unknown',
-            consoleMethod: method,
-            timestamp: new Date().toISOString()
-          }
-        });
-      } catch (err) {
-        // Fail silently to avoid infinite loops
+      // Add to buffer
+      const logEntry = {
+        level,
+        message: `[Console.${method}] ${message}`,
+        data: {
+          window: getWindowContext(),
+          url: window.location ? window.location.href : 'unknown',
+          consoleMethod: method,
+          timestamp: new Date().toISOString()
+        }
+      };
+      
+      // Errors are sent immediately for visibility
+      if (level === 'error') {
+        try {
+          ipcRenderer.send('logger:error', logEntry);
+        } catch (err) {
+          // Fail silently
+        }
+      } else {
+        // Batch other logs
+        logBuffer.push(logEntry);
+        
+        // Flush immediately if buffer is full
+        if (logBuffer.length >= MAX_BUFFER_SIZE) {
+          flushLogs();
+        } else {
+          scheduleFlush();
+        }
       }
     };
   };
@@ -65,17 +113,8 @@ const { contextBridge, ipcRenderer } = require('electron');
   interceptConsoleMethod('debug', 'debug');
   interceptConsoleMethod('info', 'info');
   
-  // Update window context when document is ready
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-      // Re-intercept with updated window context
-      interceptConsoleMethod('log', 'info');
-      interceptConsoleMethod('warn', 'warn');
-      interceptConsoleMethod('error', 'error');
-      interceptConsoleMethod('debug', 'debug');
-      interceptConsoleMethod('info', 'info');
-    });
-  }
+  // Flush remaining logs before page unload
+  window.addEventListener('beforeunload', flushLogs);
 })();
 
 // Expose protected methods that allow the renderer process to use the ipcRenderer
@@ -132,6 +171,8 @@ contextBridge.exposeInMainWorld(
         'black-hole:active',
         'black-hole:inactive',
         'black-hole:trigger-paste',
+        'black-hole:debug',
+        'black-hole:widget-ready',
         'open-external-url'
       ];
       if (validChannels.includes(channel)) {
@@ -172,13 +213,17 @@ contextBridge.exposeInMainWorld(
         'black-hole-closed',
         'black-hole-active',
         'black-hole-inactive',
-        'save-generated-document'
+        'save-generated-document',
+        'paste-clipboard-data',
+        'black-hole:init',
+        'black-hole:position-response'
       ];
       if (validChannels.includes(channel)) {
         // Deliberately strip event as it includes `sender` 
         ipcRenderer.on(channel, (event, ...args) => func(...args));
       }
     },
+    // NOTE: invoke method is defined below with all channels merged for better maintainability
     // Methods for setup wizard
     getEntries: () => {
       try {
@@ -297,6 +342,7 @@ contextBridge.exposeInMainWorld(
     getGSXSyncPaths: () => ipcRenderer.invoke('gsx:get-sync-paths'),
     saveGSXSyncPaths: (paths) => ipcRenderer.invoke('gsx:save-sync-paths', paths),
     getGSXStatus: () => ipcRenderer.invoke('gsx:get-status'),
+    refreshGSXToken: () => ipcRenderer.invoke('gsx:refresh-token'),
     
     // Event Logging API  
     logEvent: (eventType, eventData) => ipcRenderer.invoke('log:event', eventType, eventData),
@@ -332,12 +378,19 @@ contextBridge.exposeInMainWorld(
     saveStyleGuide: (guide) => ipcRenderer.invoke('save-style-guide', guide),
     deleteStyleGuide: (id) => ipcRenderer.invoke('delete-style-guide', id),
     
-    // Generic invoke method for smart export features
+    // Unified invoke method for all async IPC calls
+    // PERFORMANCE: Merged all invoke channels into a single definition
     invoke: (channel, ...args) => {
       const validChannels = [
+        // Clipboard channels
+        'get-clipboard-data',
+        'get-clipboard-files',
+        'black-hole:get-pending-data',
+        // Smart export channels
         'smart-export:extract-styles',
         'smart-export:extract-content-guidelines',
         'smart-export:generate-with-guidelines',
+        // Logger channels
         'logger:get-recent-logs',
         'logger:get-stats',
         'logger:export',
@@ -354,7 +407,7 @@ contextBridge.exposeInMainWorld(
       if (validChannels.includes(channel)) {
         return ipcRenderer.invoke(channel, ...args);
       }
-      throw new Error(`Invalid channel: ${channel}`);
+      return Promise.reject(new Error(`Invalid invoke channel: ${channel}`));
     },
 
     // Logging methods
@@ -395,9 +448,11 @@ contextBridge.exposeInMainWorld(
         'clipboard:active-space-changed',
         'clipboard:screenshot-capture-toggled',
         'black-hole:position-response',
+        'black-hole:init',
         'external-file-drop',
         'prepare-for-download',
-        'check-widget-ready'
+        'check-widget-ready',
+        'paste-clipboard-data'
       ];
       if (validChannels.includes(channel)) {
         ipcRenderer.on(channel, (event, ...args) => func(event, ...args));
@@ -411,7 +466,7 @@ contextBridge.exposeInMainWorld(
         }
       },
       on: (channel, func) => {
-        const validChannels = ['black-hole:position-response', 'external-file-drop', 'prepare-for-download', 'check-widget-ready'];
+        const validChannels = ['black-hole:position-response', 'black-hole:init', 'external-file-drop', 'prepare-for-download', 'check-widget-ready', 'paste-clipboard-data'];
         if (validChannels.includes(channel)) {
           ipcRenderer.on(channel, (event, ...args) => func(event, ...args));
         }
@@ -424,6 +479,8 @@ contextBridge.exposeInMainWorld(
           'clipboard:create-space', 
           'clipboard:move-to-space', 
           'clipboard:delete-space',
+          'get-clipboard-data',
+          'get-clipboard-files',
           'get-memory-info',
           'save-test-results',
           'export-test-report',
@@ -480,7 +537,9 @@ contextBridge.exposeInMainWorld('flipboardAPI', {
 // Expose electronAPI for GSX toolbar functionality
 contextBridge.exposeInMainWorld('electronAPI', {
   triggerMissionControl: () => ipcRenderer.send('trigger-mission-control'),
-  clearCacheAndReload: () => ipcRenderer.send('clear-cache-and-reload')
+  clearCacheAndReload: () => ipcRenderer.send('clear-cache-and-reload'),
+  openSettings: () => ipcRenderer.send('open-settings'),
+  openExternal: (url) => ipcRenderer.invoke('open-external', url)
 });
 
 // Expose Aider API for GSX Create
@@ -674,6 +733,46 @@ contextBridge.exposeInMainWorld('clipboard', {
   updateMetadata: (itemId, updates) => ipcRenderer.invoke('clipboard:update-metadata', itemId, updates),
   generateMetadataAI: (itemId, apiKey, customPrompt) => ipcRenderer.invoke('clipboard:generate-metadata-ai', { itemId, apiKey, customPrompt }),
   searchByTags: (tags) => ipcRenderer.invoke('clipboard:search-by-tags', tags),
+  
+  // Video Scenes (for Agentic Player)
+  getVideoScenes: (itemId) => ipcRenderer.invoke('clipboard:get-video-scenes', itemId),
+  updateVideoScenes: (itemId, scenes) => ipcRenderer.invoke('clipboard:update-video-scenes', itemId, scenes),
+  addVideoScene: (itemId, scene) => ipcRenderer.invoke('clipboard:add-video-scene', itemId, scene),
+  deleteVideoScene: (itemId, sceneId) => ipcRenderer.invoke('clipboard:delete-video-scene', itemId, sceneId),
+  getVideosWithScenes: (spaceId) => ipcRenderer.invoke('clipboard:get-videos-with-scenes', spaceId),
+  
+  // Content methods (for preview/edit)
+  getItemContent: (itemId) => ipcRenderer.invoke('clipboard:get-item-content', itemId),
+  updateItemContent: (itemId, content) => ipcRenderer.invoke('clipboard:update-item-content', itemId, content),
+  
+  // AI Image editing
+  editImageWithAI: (options) => ipcRenderer.invoke('clipboard:edit-image-ai', options),
+  updateItemImage: (itemId, imageData) => ipcRenderer.invoke('clipboard:update-item-image', itemId, imageData),
+  saveImageAsNew: (imageData, options) => ipcRenderer.invoke('clipboard:save-image-as-new', imageData, options),
+  
+  // Text-to-Speech
+  generateSpeech: (options) => ipcRenderer.invoke('clipboard:generate-speech', options),
+  saveTTSAudio: (options) => ipcRenderer.invoke('clipboard:save-tts-audio', options),
+  getTTSAudio: (itemId) => ipcRenderer.invoke('clipboard:get-tts-audio', itemId),
+  
+  // Audio Transcription & Extraction
+  transcribeAudio: (options) => ipcRenderer.invoke('clipboard:transcribe-audio', options),
+  saveTranscription: (options) => ipcRenderer.invoke('clipboard:save-transcription', options),
+  getTranscription: (itemId) => ipcRenderer.invoke('clipboard:get-transcription', itemId),
+  identifySpeakers: (options) => ipcRenderer.invoke('clipboard:identify-speakers', options),
+  generateSummary: (options) => ipcRenderer.invoke('clipboard:generate-summary', options),
+  extractAudio: (itemId) => ipcRenderer.invoke('clipboard:extract-audio', itemId),
+  onSpeakerIdProgress: (callback) => {
+    const handler = (event, data) => callback(data);
+    ipcRenderer.on('speaker-id:progress', handler);
+    return () => ipcRenderer.removeListener('speaker-id:progress', handler);
+  },
+  onAudioExtractProgress: (callback) => {
+    const handler = (event, data) => callback(data);
+    ipcRenderer.on('audio-extract-progress', handler);
+    return () => ipcRenderer.removeListener('audio-extract-progress', handler);
+  },
+  verifyItem: (itemId) => ipcRenderer.invoke('clipboard:verify-item', itemId),
   searchAIContent: (options) => ipcRenderer.invoke('clipboard:search-ai-content', options),
   getAudioData: (itemId) => ipcRenderer.invoke('clipboard:get-audio-data', itemId),
   openStorageDirectory: () => ipcRenderer.invoke('clipboard:open-storage-directory'),
@@ -682,6 +781,10 @@ contextBridge.exposeInMainWorld('clipboard', {
   forceResume: () => ipcRenderer.invoke('clipboard:force-resume'),
   manualCheck: () => ipcRenderer.invoke('clipboard:manual-check'),
   showItemInFinder: (itemId) => ipcRenderer.invoke('clipboard:show-item-in-finder', itemId),
+  
+  // Video Editor
+  getVideoPath: (itemId) => ipcRenderer.invoke('clipboard:get-video-path', itemId),
+  openVideoEditor: (filePath) => ipcRenderer.invoke('clipboard:open-video-editor', filePath),
   
   // Get current user
   getCurrentUser: () => ipcRenderer.invoke('clipboard:get-current-user'),
@@ -749,6 +852,69 @@ contextBridge.exposeInMainWorld('clipboard', {
     ipcRenderer.on('clipboard:active-space-changed', (event, data) => {
       callback(data);
     });
+  }
+});
+
+// ============================================
+// YOUTUBE DOWNLOAD API
+// ============================================
+contextBridge.exposeInMainWorld('youtube', {
+  // Check if a URL is a YouTube video
+  isYouTubeUrl: (url) => ipcRenderer.invoke('youtube:is-youtube-url', url),
+  
+  // Extract video ID from URL
+  extractVideoId: (url) => ipcRenderer.invoke('youtube:extract-video-id', url),
+  
+  // Get video info (title, duration, etc.) without downloading
+  getInfo: (url) => ipcRenderer.invoke('youtube:get-info', url),
+  
+  // Download video to Space
+  downloadToSpace: (url, spaceId) => ipcRenderer.invoke('youtube:download-to-space', url, spaceId),
+  
+  // Start background download - returns immediately with placeholder, downloads in background
+  startBackgroundDownload: (url, spaceId) => ipcRenderer.invoke('youtube:start-background-download', url, spaceId),
+  
+  // Download video only (returns file path)
+  download: (url, options) => ipcRenderer.invoke('youtube:download', url, options),
+  
+  // Get transcript/captions from YouTube video (uses YouTube's captions)
+  getTranscript: (url, lang = 'en') => ipcRenderer.invoke('youtube:get-transcript', url, lang),
+  
+  // Fetch and save YouTube transcript for an existing item in the space
+  fetchTranscriptForItem: (itemId, lang = 'en') => ipcRenderer.invoke('youtube:fetch-transcript-for-item', itemId, lang),
+  
+  // Get transcript using OpenAI Whisper (more accurate, word-level timestamps)
+  // Requires OpenAI API key in settings
+  getTranscriptWhisper: (url, lang = 'en') => ipcRenderer.invoke('youtube:get-transcript-whisper', url, lang),
+  
+  // Process speaker recognition (transcription with speaker labels)
+  // Requires AssemblyAI API key in settings
+  processSpeakerRecognition: (url) => ipcRenderer.invoke('youtube:process-speaker-recognition', url),
+  
+  // Listen for transcription progress
+  onTranscribeProgress: (callback) => {
+    ipcRenderer.on('youtube:transcribe-progress', (event, progress) => {
+      callback(progress);
+    });
+  },
+  
+  // Listen for speaker recognition progress
+  onSpeakerRecognitionProgress: (callback) => {
+    ipcRenderer.on('youtube:speaker-recognition-progress', (event, progress) => {
+      callback(progress);
+    });
+  },
+  
+  // Listen for download progress
+  onProgress: (callback) => {
+    ipcRenderer.on('youtube:download-progress', (event, progress) => {
+      callback(progress);
+    });
+  },
+  
+  // Remove progress listener
+  removeProgressListener: () => {
+    ipcRenderer.removeAllListeners('youtube:download-progress');
   }
 });
 

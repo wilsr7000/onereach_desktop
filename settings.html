@@ -265,14 +265,11 @@
             <div class="form-group">
                 <label for="llmModel">Model</label>
                 <select id="llmModel">
-                    <option value="gpt-4">GPT-4</option>
-                    <option value="gpt-4-turbo">GPT-4 Turbo</option>
-                    <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
-                    <option value="claude-opus-4-20250514">Claude 4 Opus</option>
-                    <option value="claude-3.5-sonnet-20241022">Claude 3.5 Sonnet</option>
-                    <option value="claude-3-opus-20240229">Claude 3 Opus</option>
-                    <option value="claude-3-sonnet-20240229">Claude 3 Sonnet</option>
-                    <option value="claude-3-haiku-20240307">Claude 3 Haiku</option>
+                    <option value="gpt-5.1">GPT-5.1</option>
+                    <option value="gpt-4o">GPT-4o</option>
+                    <option value="gpt-4o-mini">GPT-4o Mini</option>
+                    <option value="claude-sonnet-4-20250514">Claude Sonnet 4.5</option>
+                    <option value="claude-opus-4-20250514">Claude Opus 4</option>
                     <option value="gemini-pro">Gemini Pro</option>
                     <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
                     <option value="mistral-large">Mistral Large</option>
@@ -316,14 +313,89 @@
             
             <div class="divider"></div>
             
+            <h3 style="font-size: 16px; margin-bottom: 16px;">AI Image Editing (OpenAI DALL-E)</h3>
+            
+            <div class="form-group api-key-group">
+                <label for="openaiApiKey">
+                    OpenAI API Key
+                    <span id="openaiKeyStatus" class="api-key-status"></span>
+                </label>
+                <div style="position: relative;">
+                    <input type="password" id="openaiApiKey" placeholder="sk-... (required for AI image editing)">
+                    <button class="toggle-visibility" onclick="toggleOpenAIKeyVisibility()">👁</button>
+                </div>
+                <div class="info-text">Required for AI image editing and Whisper transcription. Get your key at <a href="https://platform.openai.com/api-keys" style="color: #8b5cf6;">platform.openai.com</a></div>
+            </div>
+            
+            <div class="divider"></div>
+            
+            <h3 style="font-size: 16px; margin-bottom: 16px;">Speaker Recognition (AssemblyAI)</h3>
+            
+            <div class="form-group api-key-group">
+                <label for="assemblyaiApiKey">
+                    AssemblyAI API Key
+                    <span id="assemblyaiKeyStatus" class="api-key-status"></span>
+                </label>
+                <div style="position: relative;">
+                    <input type="password" id="assemblyaiApiKey" placeholder="(required for speaker recognition)">
+                    <button class="toggle-visibility" onclick="toggleAssemblyAIKeyVisibility()">👁</button>
+                </div>
+                <div class="info-text">Required for speaker recognition in videos. Get your key at <a href="https://www.assemblyai.com/app" style="color: #8b5cf6;">assemblyai.com</a></div>
+            </div>
+            
+            <div class="divider"></div>
+            
             <h3 style="font-size: 16px; margin-bottom: 16px;">AI Features</h3>
             
             <div class="form-group">
                 <div class="checkbox-group">
-                    <input type="checkbox" id="autoGenerateScreenshotMetadata">
-                    <label for="autoGenerateScreenshotMetadata" style="margin-bottom: 0;">Auto-analyze screenshots with AI</label>
+                    <input type="checkbox" id="autoAIMetadata">
+                    <label for="autoAIMetadata" style="margin-bottom: 0;">Auto-generate AI metadata for clipboard items</label>
                 </div>
-                <div class="info-text">Automatically generate descriptions and tags for screenshots using vision AI (requires API key)</div>
+                <div class="info-text">Automatically analyze clipboard content and generate descriptions, tags, and notes using Claude Sonnet 4.5 (requires API key)</div>
+            </div>
+            
+            <div class="form-group" id="autoAIMetadataTypesGroup" style="display: block;">
+                <label>Content types to auto-analyze:</label>
+                <div style="display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px;">
+                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                        <input type="checkbox" id="aiTypeAll" value="all" style="width: 14px; height: 14px;" checked>
+                        <span style="font-size: 13px;">All types</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                        <input type="checkbox" id="aiTypeImage" value="image" style="width: 14px; height: 14px;" checked disabled>
+                        <span style="font-size: 13px;">Images</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                        <input type="checkbox" id="aiTypeScreenshot" value="screenshot" style="width: 14px; height: 14px;" checked disabled>
+                        <span style="font-size: 13px;">Screenshots</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                        <input type="checkbox" id="aiTypeCode" value="code" style="width: 14px; height: 14px;" checked disabled>
+                        <span style="font-size: 13px;">Code</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                        <input type="checkbox" id="aiTypeText" value="text" style="width: 14px; height: 14px;" checked disabled>
+                        <span style="font-size: 13px;">Text</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                        <input type="checkbox" id="aiTypeHtml" value="html" style="width: 14px; height: 14px;" checked disabled>
+                        <span style="font-size: 13px;">HTML</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                        <input type="checkbox" id="aiTypeFile" value="file" style="width: 14px; height: 14px;" checked disabled>
+                        <span style="font-size: 13px;">Files</span>
+                    </label>
+                </div>
+                <div class="info-text" style="margin-top: 8px;">Select which types of content should be automatically analyzed when captured</div>
+            </div>
+            
+            <div class="form-group">
+                <div class="checkbox-group">
+                    <input type="checkbox" id="autoGenerateScreenshotMetadata">
+                    <label for="autoGenerateScreenshotMetadata" style="margin-bottom: 0;">Legacy: Auto-analyze screenshots only</label>
+                </div>
+                <div class="info-text">⚠️ Deprecated - use the new "Auto-generate AI metadata" option above instead</div>
             </div>
         </div>
         
@@ -473,6 +545,8 @@
     <script>
         let settings = {};
         let apiKeyVisible = false;
+        let openaiKeyVisible = false;
+        let assemblyaiKeyVisible = false;
         let gsxTokenVisible = false;
         
         // Load settings when window opens
@@ -488,9 +562,36 @@
                 document.getElementById('llmProvider').value = settings.llmProvider || 'openai';
                 document.getElementById('llmModel').value = settings.llmModel || 'gpt-4';
                 document.getElementById('llmApiKey').value = settings.llmApiKey || '';
+                document.getElementById('openaiApiKey').value = settings.openaiApiKey || '';
+                document.getElementById('assemblyaiApiKey').value = settings.assemblyaiApiKey || '';
                 document.getElementById('theme').value = settings.theme || 'dark';
                 document.getElementById('autoSave').checked = settings.autoSave !== false;
                 document.getElementById('autoGenerateScreenshotMetadata').checked = settings.autoGenerateScreenshotMetadata === true;
+                
+                // Auto AI Metadata settings
+                const autoAIEnabled = settings.autoAIMetadata !== false; // Default to true
+                document.getElementById('autoAIMetadata').checked = autoAIEnabled;
+                document.getElementById('autoAIMetadataTypesGroup').style.display = autoAIEnabled ? 'block' : 'none';
+                
+                // Load AI metadata types (default to 'all')
+                const aiTypes = settings.autoAIMetadataTypes || ['all'];
+                const isAllTypes = aiTypes.includes('all');
+                
+                document.getElementById('aiTypeAll').checked = isAllTypes;
+                document.getElementById('aiTypeImage').checked = aiTypes.includes('image') || isAllTypes;
+                document.getElementById('aiTypeScreenshot').checked = aiTypes.includes('screenshot') || isAllTypes;
+                document.getElementById('aiTypeCode').checked = aiTypes.includes('code') || isAllTypes;
+                document.getElementById('aiTypeText').checked = aiTypes.includes('text') || isAllTypes;
+                document.getElementById('aiTypeHtml').checked = aiTypes.includes('html') || isAllTypes;
+                document.getElementById('aiTypeFile').checked = aiTypes.includes('file') || isAllTypes;
+                
+                // Disable individual checkboxes when "All" is selected
+                document.getElementById('aiTypeImage').disabled = isAllTypes;
+                document.getElementById('aiTypeScreenshot').disabled = isAllTypes;
+                document.getElementById('aiTypeCode').disabled = isAllTypes;
+                document.getElementById('aiTypeText').disabled = isAllTypes;
+                document.getElementById('aiTypeHtml').disabled = isAllTypes;
+                document.getElementById('aiTypeFile').disabled = isAllTypes;
                 
                 // GSX Settings
                 document.getElementById('gsxToken').value = settings.gsxToken || '';
@@ -534,6 +635,18 @@
                     document.getElementById('apiKeyStatus').textContent = '(Key saved)';
                     document.getElementById('apiKeyStatus').className = 'api-key-status status-valid';
                 }
+                
+                // Check if OpenAI API key exists
+                if (settings.openaiApiKey) {
+                    document.getElementById('openaiKeyStatus').textContent = '(Key saved)';
+                    document.getElementById('openaiKeyStatus').className = 'api-key-status status-valid';
+                }
+                
+                // Check if AssemblyAI API key exists
+                if (settings.assemblyaiApiKey) {
+                    document.getElementById('assemblyaiKeyStatus').textContent = '(Key saved)';
+                    document.getElementById('assemblyaiKeyStatus').className = 'api-key-status status-valid';
+                }
             } catch (error) {
                 console.error('Error loading settings:', error);
                 showStatus('Error loading settings', 'error');
@@ -541,15 +654,32 @@
         }
         
         async function saveSettings() {
+            // Collect AI metadata types
+            const aiMetadataTypes = [];
+            if (document.getElementById('aiTypeAll').checked) {
+                aiMetadataTypes.push('all');
+            } else {
+                if (document.getElementById('aiTypeImage').checked) aiMetadataTypes.push('image');
+                if (document.getElementById('aiTypeScreenshot').checked) aiMetadataTypes.push('screenshot');
+                if (document.getElementById('aiTypeCode').checked) aiMetadataTypes.push('code');
+                if (document.getElementById('aiTypeText').checked) aiMetadataTypes.push('text');
+                if (document.getElementById('aiTypeHtml').checked) aiMetadataTypes.push('html');
+                if (document.getElementById('aiTypeFile').checked) aiMetadataTypes.push('file');
+            }
+            
             const newSettings = {
                 llmProvider: document.getElementById('llmProvider').value,
                 llmModel: document.getElementById('llmModel').value,
                 llmApiKey: document.getElementById('llmApiKey').value,
+                openaiApiKey: document.getElementById('openaiApiKey').value,
+                assemblyaiApiKey: document.getElementById('assemblyaiApiKey').value,
                 theme: document.getElementById('theme').value,
                 autoSave: document.getElementById('autoSave').checked,
                 claude4ThinkingMode: document.getElementById('claude4ThinkingMode').value,
                 claude4ThinkingLevel: document.getElementById('claude4ThinkingLevel').value,
                 autoGenerateScreenshotMetadata: document.getElementById('autoGenerateScreenshotMetadata').checked,
+                autoAIMetadata: document.getElementById('autoAIMetadata').checked,
+                autoAIMetadataTypes: aiMetadataTypes,
                 gsxToken: document.getElementById('gsxToken').value,
                 gsxEnvironment: document.getElementById('gsxEnvironment').value,
                 gsxAccountId: document.getElementById('gsxAccountId').value,
@@ -626,7 +756,7 @@
         
         function toggleApiKeyVisibility() {
             const input = document.getElementById('llmApiKey');
-            const button = document.querySelector('.toggle-visibility');
+            const button = input.parentElement.querySelector('.toggle-visibility');
             
             if (apiKeyVisible) {
                 input.type = 'password';
@@ -636,6 +766,36 @@
                 input.type = 'text';
                 button.textContent = '🙈';
                 apiKeyVisible = true;
+            }
+        }
+        
+        function toggleOpenAIKeyVisibility() {
+            const input = document.getElementById('openaiApiKey');
+            const button = input.parentElement.querySelector('.toggle-visibility');
+            
+            if (openaiKeyVisible) {
+                input.type = 'password';
+                button.textContent = '👁';
+                openaiKeyVisible = false;
+            } else {
+                input.type = 'text';
+                button.textContent = '🙈';
+                openaiKeyVisible = true;
+            }
+        }
+        
+        function toggleAssemblyAIKeyVisibility() {
+            const input = document.getElementById('assemblyaiApiKey');
+            const button = input.parentElement.querySelector('.toggle-visibility');
+            
+            if (assemblyaiKeyVisible) {
+                input.type = 'password';
+                button.textContent = '👁';
+                assemblyaiKeyVisible = false;
+            } else {
+                input.type = 'text';
+                button.textContent = '🙈';
+                assemblyaiKeyVisible = true;
             }
         }
         
@@ -655,20 +815,15 @@
             switch (provider) {
                 case 'openai':
                     options = [
+                        { value: 'gpt-5.1', text: 'GPT-5.1' },
                         { value: 'gpt-4o', text: 'GPT-4o' },
-                        { value: 'gpt-4o-mini', text: 'GPT-4o Mini' },
-                        { value: 'gpt-4-turbo', text: 'GPT-4 Turbo' },
-                        { value: 'gpt-4', text: 'GPT-4' },
-                        { value: 'gpt-3.5-turbo', text: 'GPT-3.5 Turbo' }
+                        { value: 'gpt-4o-mini', text: 'GPT-4o Mini' }
                     ];
                     break;
                 case 'anthropic':
                     options = [
-                        { value: 'claude-opus-4-20250514', text: 'Claude 4 Opus' },
-                        { value: 'claude-3.5-sonnet-20241022', text: 'Claude 3.5 Sonnet' },
-                        { value: 'claude-3-opus-20240229', text: 'Claude 3 Opus' },
-                        { value: 'claude-3-sonnet-20240229', text: 'Claude 3 Sonnet' },
-                        { value: 'claude-3-haiku-20240307', text: 'Claude 3 Haiku' }
+                        { value: 'claude-sonnet-4-20250514', text: 'Claude Sonnet 4.5' },
+                        { value: 'claude-opus-4-20250514', text: 'Claude Opus 4' }
                     ];
                     break;
                 case 'google':
@@ -773,6 +928,30 @@
             if (e.target.checked) {
                 saveSettings();
             }
+        });
+        
+        // Handle auto AI metadata toggle
+        document.getElementById('autoAIMetadata').addEventListener('change', (e) => {
+            document.getElementById('autoAIMetadataTypesGroup').style.display = e.target.checked ? 'block' : 'none';
+        });
+        
+        // Handle "All types" checkbox - toggle all other checkboxes
+        document.getElementById('aiTypeAll').addEventListener('change', (e) => {
+            const checked = e.target.checked;
+            document.getElementById('aiTypeImage').checked = checked;
+            document.getElementById('aiTypeScreenshot').checked = checked;
+            document.getElementById('aiTypeCode').checked = checked;
+            document.getElementById('aiTypeText').checked = checked;
+            document.getElementById('aiTypeHtml').checked = checked;
+            document.getElementById('aiTypeFile').checked = checked;
+            
+            // Disable individual checkboxes when "All" is selected
+            document.getElementById('aiTypeImage').disabled = checked;
+            document.getElementById('aiTypeScreenshot').disabled = checked;
+            document.getElementById('aiTypeCode').disabled = checked;
+            document.getElementById('aiTypeText').disabled = checked;
+            document.getElementById('aiTypeHtml').disabled = checked;
+            document.getElementById('aiTypeFile').disabled = checked;
         });
         
         function toggleGSXTokenVisibility() {

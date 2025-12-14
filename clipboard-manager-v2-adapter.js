@@ -35,10 +35,11 @@ class ClipboardManagerV2 {
     // Initialize app context capture
     this.contextCapture = new AppContextCapture();
     
-    // Load data from storage
-    this.history = [];
-    this.spaces = [];
-    this.loadFromStorage();
+    // PERFORMANCE: Defer loading history until first access
+    // This speeds up initial startup significantly
+    this.history = null; // Will be loaded lazily
+    this.spaces = null;  // Will be loaded lazily
+    this._historyLoaded = false;
     
     // Compatibility properties
     this.maxHistorySize = 1000;
@@ -51,22 +52,51 @@ class ClipboardManagerV2 {
     this.screenshotWatcher = null;
     this.processedScreenshots = new Set();
     
-    // Load preferences
+    // Load preferences (lightweight, do immediately)
     this.loadPreferences();
     
-    // Set up screenshot monitoring if enabled
-    if (this.screenshotCaptureEnabled) {
-      this.setupScreenshotWatcher();
-    }
-    
-    // Set up website monitoring periodic checks
-    this.startWebsiteMonitoring();
-    
-    // Set up IPC handlers
+    // Set up IPC handlers (needed immediately for IPC)
     this.setupIPC();
+    
+    // PERFORMANCE: Defer heavy initialization to next tick
+    setImmediate(() => {
+      // Set up screenshot monitoring if enabled
+      if (this.screenshotCaptureEnabled) {
+        this.setupScreenshotWatcher();
+      }
+      
+      // Set up website monitoring periodic checks
+      this.startWebsiteMonitoring();
+    });
+  }
+  
+  // PERFORMANCE: Lazy load history on first access
+  ensureHistoryLoaded() {
+    if (!this._historyLoaded) {
+      console.log('[Clipboard] Lazy loading history...');
+      this.loadFromStorage();
+      this._historyLoaded = true;
+      console.log('[Clipboard] History loaded:', this.history.length, 'items');
+    }
+  }
+  
+  // NOTE: getHistory() is defined below with content loading logic
+  
+  // Getter for spaces that ensures lazy loading
+  getSpaces() {
+    this.ensureHistoryLoaded();
+    return this.spaces;
   }
   
   loadFromStorage() {
+    // Initialize arrays if null (for lazy loading support)
+    if (this.history === null) {
+      this.history = [];
+    }
+    if (this.spaces === null) {
+      this.spaces = [];
+    }
+    
     // Load all items (without content for performance)
     const items = this.storage.getAllItems();
     
@@ -126,6 +156,9 @@ class ClipboardManagerV2 {
   // Main methods that need adaptation
   
   async addToHistory(item) {
+    // Ensure history is loaded before adding
+    this.ensureHistoryLoaded();
+    
     console.log('[V2] Adding item to history:', item.type);
     
     // Capture app context if not already provided
@@ -192,8 +225,13 @@ class ClipboardManagerV2 {
     // Update space counts
     this.updateSpaceCounts();
     
-    // Sync to unified space-metadata.json if item belongs to a space
+    // Update lastUsed timestamp for the space
     const targetSpaceId = indexEntry.spaceId;
+    if (targetSpaceId && targetSpaceId !== 'unclassified') {
+      this.updateSpaceLastUsed(targetSpaceId);
+    }
+    
+    // Sync to unified space-metadata.json if item belongs to a space
     if (targetSpaceId) {
       try {
         const spaceMeta = this.storage.getSpaceMetadata(targetSpaceId);
@@ -233,21 +271,140 @@ class ClipboardManagerV2 {
         });
       }
     }
+    
+    // Auto-generate AI metadata if enabled (run async, don't block)
+    this.maybeAutoGenerateMetadata(indexEntry.id, item.type, item.isScreenshot);
+  }
+  
+  /**
+   * Check settings and auto-generate AI metadata if enabled
+   * This runs asynchronously so it doesn't block clipboard capture
+   */
+  async maybeAutoGenerateMetadata(itemId, itemType, isScreenshot) {
+    try {
+      const { getSettingsManager } = require('./settings-manager');
+      const settingsManager = getSettingsManager();
+      
+      // Check if auto AI metadata is enabled
+      const autoAIMetadata = settingsManager.get('autoAIMetadata');
+      const autoAIMetadataTypes = settingsManager.get('autoAIMetadataTypes') || ['all'];
+      const apiKey = settingsManager.get('llmApiKey');
+      
+      // Also check legacy screenshot setting for backward compatibility
+      const autoGenerateScreenshotMetadata = settingsManager.get('autoGenerateScreenshotMetadata');
+      
+      console.log(`[Auto AI] Settings check for item ${itemId}:`, {
+        itemType,
+        isScreenshot,
+        autoAIMetadata,
+        autoAIMetadataTypes,
+        hasApiKey: !!apiKey,
+        autoGenerateScreenshotMetadata
+      });
+      
+      if (!apiKey) {
+        console.log('[Auto AI] No API key configured, skipping metadata generation');
+        return; // No API key configured
+      }
+      
+      // Determine if we should generate metadata for this item
+      let shouldGenerate = false;
+      
+      if (autoAIMetadata) {
+        // New setting: check if this type is in the allowed list
+        if (autoAIMetadataTypes.includes('all')) {
+          shouldGenerate = true;
+        } else if (isScreenshot && autoAIMetadataTypes.includes('screenshot')) {
+          shouldGenerate = true;
+        } else if (itemType === 'image' && autoAIMetadataTypes.includes('image')) {
+          shouldGenerate = true;
+        } else if (itemType === 'text' && autoAIMetadataTypes.includes('text')) {
+          shouldGenerate = true;
+        } else if (itemType === 'html' && autoAIMetadataTypes.includes('html')) {
+          shouldGenerate = true;
+        } else if (itemType === 'file' && autoAIMetadataTypes.includes('file')) {
+          shouldGenerate = true;
+        } else if (itemType === 'code' && autoAIMetadataTypes.includes('code')) {
+          shouldGenerate = true;
+        } else if (autoAIMetadataTypes.includes(itemType)) {
+          // Fallback: check if type directly matches any setting
+          shouldGenerate = true;
+        }
+      } else if (autoGenerateScreenshotMetadata && isScreenshot) {
+        // Legacy setting: only screenshots
+        shouldGenerate = true;
+      }
+      
+      if (!shouldGenerate) {
+        console.log(`[Auto AI] Skipping metadata generation for ${itemType} (not in enabled types: ${autoAIMetadataTypes.join(', ')})`);
+        return;
+      }
+      
+      console.log(`[Auto AI] Generating metadata for ${itemType} item: ${itemId}`);
+      
+      // Generate metadata using NEW specialized system
+      const MetadataGenerator = require('./metadata-generator');
+      const metadataGen = new MetadataGenerator(this);
+      const result = await metadataGen.generateMetadataForItem(itemId, apiKey);
+      
+      if (result.success) {
+        console.log(`[Auto AI] Successfully generated specialized metadata for ${itemType}: ${itemId}`);
+        
+        // Notify UI to refresh this item
+        this.notifyHistoryUpdate();
+        
+        // Send notification about AI analysis completion
+        if (BrowserWindow) {
+          BrowserWindow.getAllWindows().forEach(window => {
+            window.webContents.send('show-notification', {
+              title: '✨ AI Analysis Complete',
+              body: result.metadata.description ? result.metadata.description.substring(0, 50) + '...' : 'Metadata generated'
+            });
+          });
+        }
+      } else {
+        console.error(`[Auto AI] Failed to generate metadata for item ${itemId}:`, result.error);
+      }
+    } catch (error) {
+      console.error('[Auto AI] Error in auto-generate metadata:', error);
+    }
   }
   
   getHistory() {
-    // Load content on demand for items that need it
+    // Ensure history is loaded (lazy loading)
+    this.ensureHistoryLoaded();
+    
+    // Load content and metadata on demand for items that need it
     return this.history.map(item => {
-      if (item._needsContent) {
+      if (item._needsContent || !item.metadata || Object.keys(item.metadata || {}).length < 3) {
         try {
           const fullItem = this.storage.loadItem(item.id);
           item.content = fullItem.content;
           item.thumbnail = fullItem.thumbnail;
           item._needsContent = false;
           
+          // Merge metadata from storage
+          if (fullItem.metadata) {
+            item.metadata = { ...item.metadata, ...fullItem.metadata };
+            
+            // Update fileSize from metadata if not set
+            if (!item.fileSize && fullItem.metadata.fileSize) {
+              item.fileSize = fullItem.metadata.fileSize;
+            }
+          }
+          
           // For files, update the filePath to the stored location
           if (item.type === 'file' && fullItem.content) {
             item.filePath = fullItem.content; // Storage returns the actual file path
+            
+            // Get file size if not set
+            if (!item.fileSize && fullItem.content) {
+              try {
+                const fs = require('fs');
+                const stats = fs.statSync(fullItem.content);
+                item.fileSize = stats.size;
+              } catch (e) {}
+            }
           }
         } catch (error) {
           console.error('Error loading item content:', error);
@@ -258,6 +415,9 @@ class ClipboardManagerV2 {
   }
   
   async deleteItem(id) {
+    // Ensure history is loaded
+    this.ensureHistoryLoaded();
+    
     // If we have a manager instance, wait for any pending operations
     if (this.manager && this.manager.pendingOperations) {
       const pendingOps = this.manager.pendingOperations.get(id);
@@ -434,7 +594,13 @@ class ClipboardManagerV2 {
   }
   
   createSpace(space) {
-    const newSpace = this.storage.createSpace(space);
+    // Add lastUsed timestamp when creating a space
+    const spaceWithTimestamp = {
+      ...space,
+      lastUsed: Date.now(),
+      createdAt: Date.now()
+    };
+    const newSpace = this.storage.createSpace(spaceWithTimestamp);
     // Reload spaces from storage to stay in sync
     this.spaces = [...(this.storage.index.spaces || [])];
     this.notifySpacesUpdate();
@@ -451,6 +617,20 @@ class ClipboardManagerV2 {
     }
     
     return { success };
+  }
+  
+  // Update lastUsed timestamp for a space (called when space is selected or item added)
+  updateSpaceLastUsed(spaceId) {
+    if (!spaceId) return;
+    
+    const spaceIndex = this.storage.index.spaces.findIndex(s => s.id === spaceId);
+    if (spaceIndex !== -1) {
+      this.storage.index.spaces[spaceIndex].lastUsed = Date.now();
+      this.storage.saveIndex();
+      
+      // Reload in-memory spaces
+      this.spaces = [...(this.storage.index.spaces || [])];
+    }
   }
   
   deleteSpace(id) {
@@ -513,6 +693,11 @@ class ClipboardManagerV2 {
   setActiveSpace(spaceId) {
     this.currentSpace = spaceId;
     this.savePreferences();
+    
+    // Update lastUsed timestamp for this space
+    if (spaceId) {
+      this.updateSpaceLastUsed(spaceId);
+    }
     
     let spaceName = 'All Items';
     if (spaceId) {
@@ -647,6 +832,525 @@ class ClipboardManagerV2 {
     }
   }
   
+  // Generate AI metadata for video content
+  async generateVideoMetadata({ transcript, originalTitle, uploader, description, duration }) {
+    console.log('[AI-Metadata] Generating video metadata...');
+    
+    const { getSettingsManager } = require('./settings-manager');
+    const settingsManager = getSettingsManager();
+    const apiKey = settingsManager.get('llmApiKey');
+    
+    if (!apiKey) {
+      console.log('[AI-Metadata] No API key configured');
+      return null;
+    }
+    
+    // Truncate transcript for API (keep first 8000 chars)
+    const truncatedTranscript = transcript.length > 8000 
+      ? transcript.substring(0, 8000) + '...[truncated]'
+      : transcript;
+    
+    const prompt = `Analyze this video transcript and extract the key information.
+
+VIDEO INFO:
+- Original Title: ${originalTitle || 'Unknown'}
+- Creator/Channel: ${uploader || 'Unknown'}
+- Duration: ${duration || 'Unknown'}
+
+TRANSCRIPT:
+${truncatedTranscript}
+
+Generate a JSON response with these fields:
+{
+  "title": "A clear, descriptive title that captures the main topic (max 80 chars)",
+  "shortDescription": "One sentence capturing the core topic/thesis (max 150 chars)",
+  "longDescription": "A structured summary with the following format (plain text only, no markdown):\n\nOVERVIEW: One paragraph explaining what this content is about and why it matters.\n\nKEY POINTS:\n• Point 1 - explanation\n• Point 2 - explanation\n• Point 3 - explanation\n• Point 4 - explanation\n• Point 5 - explanation\n(Include 5-8 key points)\n\nMAIN TAKEAWAYS: One paragraph summarizing the most important insights or conclusions.",
+  "topics": ["topic1", "topic2", "topic3", "topic4", "topic5"],
+  "speakers": ["Full Name 1", "Full Name 2"] - identify speakers by name if mentioned, otherwise use descriptive labels like "Host", "Guest Expert", "Interviewer",
+  "storyBeats": [
+    "Key insight or argument 1",
+    "Key insight or argument 2", 
+    "Key insight or argument 3",
+    "Key insight or argument 4",
+    "Key insight or argument 5",
+    "Key insight or argument 6",
+    "Key insight or argument 7"
+  ]
+}
+
+IMPORTANT RULES:
+1. Focus ONLY on the actual content and ideas discussed - ignore any sponsor messages, ads, promotional content, or calls to action
+2. Extract substantive points, arguments, and insights - not surface-level observations
+3. The longDescription should be informative and useful - someone reading it should understand the key ideas without watching
+4. Use bullet points (•) for the KEY POINTS section but no other markdown
+5. Story beats should be the most important ideas, arguments, or insights - not timestamps or structural markers
+6. Be specific and concrete in descriptions - avoid vague summaries
+
+Respond ONLY with valid JSON, no other text.`;
+
+    try {
+      const isClaudeKey = apiKey.startsWith('sk-ant-');
+      
+      if (isClaudeKey) {
+        // Use Claude API
+        const https = require('https');
+        
+        const response = await new Promise((resolve, reject) => {
+          const postData = JSON.stringify({
+            model: 'claude-sonnet-4-5-20250929',
+            max_tokens: 1500,
+            messages: [{ role: 'user', content: prompt }]
+          });
+          
+          const options = {
+            hostname: 'api.anthropic.com',
+            port: 443,
+            path: '/v1/messages',
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': apiKey,
+              'anthropic-version': '2023-06-01',
+              'Content-Length': Buffer.byteLength(postData)
+            },
+            timeout: 60000
+          };
+          
+          const req = https.request(options, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+              try {
+                const parsed = JSON.parse(data);
+                if (parsed.content && parsed.content[0] && parsed.content[0].text) {
+                  resolve(parsed.content[0].text);
+                } else if (parsed.error) {
+                  reject(new Error(parsed.error.message));
+                } else {
+                  reject(new Error('Unexpected response format'));
+                }
+              } catch (e) {
+                reject(e);
+              }
+            });
+          });
+          
+          req.on('error', reject);
+          req.on('timeout', () => reject(new Error('Request timeout')));
+          req.write(postData);
+          req.end();
+        });
+        
+        // Parse JSON from response
+        const jsonMatch = response.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          return JSON.parse(jsonMatch[0]);
+        }
+        
+      } else {
+        // Use OpenAI API
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: [{ role: 'user', content: prompt }],
+            max_tokens: 1500,
+            temperature: 0.3
+          })
+        });
+        
+        const data = await response.json();
+        if (data.choices && data.choices[0] && data.choices[0].message) {
+          const content = data.choices[0].message.content;
+          const jsonMatch = content.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            return JSON.parse(jsonMatch[0]);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[AI-Metadata] Error generating metadata:', err.message);
+    }
+    
+    return null;
+  }
+  
+  // Background YouTube download - creates placeholder immediately, downloads in background
+  async downloadYouTubeInBackground(url, spaceId, placeholderId, sender) {
+    const { Notification } = require('electron');
+    
+    console.log('[YouTube-BG] Starting background download for:', url, 'placeholder:', placeholderId);
+    
+    try {
+      // Get the downloader instance
+      const { YouTubeDownloader } = require('./youtube-downloader');
+      const dl = new YouTubeDownloader();
+      
+      // Set up progress callback - update UI on every progress report
+      const progressCallback = (percent, status) => {
+        console.log('[YouTube-BG] Progress:', percent, '%', status);
+        
+        // Update progress in memory
+        const historyItem = this.history.find(h => h.id === placeholderId);
+        if (historyItem && historyItem.metadata) {
+          historyItem.metadata.downloadProgress = percent;
+          historyItem.metadata.downloadStatusText = status;
+        }
+        
+        // Notify UI on every progress update
+        this.notifyHistoryUpdate();
+        
+        // Send to specific sender if still valid
+        if (sender && !sender.isDestroyed()) {
+          sender.send('youtube:download-progress', { percent, status, url, placeholderId });
+        }
+      };
+      
+      // Start a simulated progress indicator while downloading
+      let simulatedProgress = 10;
+      const progressInterval = setInterval(() => {
+        if (simulatedProgress < 85) {
+          simulatedProgress += Math.random() * 5 + 2; // Random increment 2-7%
+          const historyItem = this.history.find(h => h.id === placeholderId);
+          if (historyItem && historyItem.metadata && historyItem.metadata.downloadStatus === 'downloading') {
+            historyItem.metadata.downloadProgress = Math.min(85, Math.round(simulatedProgress));
+            this.notifyHistoryUpdate();
+          }
+        }
+      }, 2000); // Update every 2 seconds
+      
+      // Download the file only (don't add to storage - we already have placeholder)
+      const result = await dl.download(url, { quality: 'high' }, progressCallback);
+      
+      // Stop the simulated progress
+      clearInterval(progressInterval);
+      
+      console.log('[YouTube-BG] Download completed:', JSON.stringify(result));
+      
+      // Try to fetch transcript
+      let transcript = null;
+      if (result.success) {
+        try {
+          console.log('[YouTube-BG] Fetching transcript...');
+          const transcriptResult = await dl.getTranscript(url, 'en');
+          if (transcriptResult.success) {
+            transcript = {
+              text: transcriptResult.transcript,
+              segments: transcriptResult.segments,
+              language: transcriptResult.language,
+              isAutoGenerated: transcriptResult.isAutoGenerated,
+            };
+            console.log('[YouTube-BG] Transcript fetched:', transcript.language);
+          }
+        } catch (e) {
+          console.log('[YouTube-BG] Could not fetch transcript:', e.message);
+        }
+      }
+      
+      if (result.success) {
+        const fs = require('fs');
+        const videoInfo = result.videoInfo || {};
+        const title = videoInfo.title || 'YouTube Video';
+        
+        // Copy the downloaded file to the placeholder's storage directory
+        const itemDir = path.join(this.storage.itemsDir, placeholderId);
+        const destFilePath = path.join(itemDir, result.fileName);
+        
+        try {
+          // Ensure directory exists
+          if (!fs.existsSync(itemDir)) {
+            fs.mkdirSync(itemDir, { recursive: true });
+          }
+          
+          // Copy file
+          fs.copyFileSync(result.filePath, destFilePath);
+          console.log('[YouTube-BG] Copied video to:', destFilePath);
+          
+          // Clean up temp file
+          try { fs.unlinkSync(result.filePath); } catch (e) {}
+          
+        } catch (copyErr) {
+          console.error('[YouTube-BG] Error copying file:', copyErr);
+        }
+        
+        // Update the placeholder with actual data
+        const historyItem = this.history.find(h => h.id === placeholderId);
+        if (historyItem) {
+          historyItem.preview = title;
+          historyItem.fileName = result.fileName;
+          historyItem.content = destFilePath;
+          historyItem.filePath = destFilePath;
+          historyItem.fileSize = result.fileSize;
+          historyItem.thumbnail = videoInfo.thumbnail;
+          historyItem._needsContent = false;
+          
+          if (historyItem.metadata) {
+            historyItem.metadata.downloadStatus = 'complete';
+            historyItem.metadata.downloadProgress = 100;
+            historyItem.metadata.filePath = destFilePath;
+            historyItem.metadata.fileSize = result.fileSize;
+            historyItem.metadata.title = title;
+            historyItem.metadata.description = videoInfo.description;
+            historyItem.metadata.uploader = videoInfo.uploader;
+            historyItem.metadata.duration = videoInfo.duration;
+            historyItem.metadata.thumbnail = videoInfo.thumbnail;
+            if (transcript) {
+              historyItem.metadata.transcript = transcript.text;
+              historyItem.metadata.transcriptSegments = transcript.segments;
+              historyItem.metadata.transcriptLanguage = transcript.language;
+            }
+          }
+        }
+        
+        // Extract thumbnail from video
+        let thumbnailPath = null;
+        try {
+          console.log('[YouTube-BG] Extracting thumbnail...');
+          const ffmpeg = require('fluent-ffmpeg');
+          const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+          ffmpeg.setFfmpegPath(ffmpegPath);
+          
+          thumbnailPath = path.join(itemDir, 'thumbnail.jpg');
+          
+          await new Promise((resolve, reject) => {
+            ffmpeg(destFilePath)
+              .screenshots({
+                timestamps: ['10%'], // Take screenshot at 10% into the video
+                filename: 'thumbnail.jpg',
+                folder: itemDir,
+                size: '480x270' // 16:9 aspect ratio thumbnail
+              })
+              .on('end', () => {
+                console.log('[YouTube-BG] Thumbnail extracted to:', thumbnailPath);
+                resolve();
+              })
+              .on('error', (err) => {
+                console.error('[YouTube-BG] Thumbnail extraction error:', err);
+                reject(err);
+              });
+          });
+        } catch (thumbErr) {
+          console.error('[YouTube-BG] Thumbnail extraction failed:', thumbErr.message);
+          thumbnailPath = null;
+        }
+        
+        // Extract audio file
+        let audioPath = null;
+        try {
+          console.log('[YouTube-BG] Extracting audio...');
+          const ffmpeg = require('fluent-ffmpeg');
+          const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+          ffmpeg.setFfmpegPath(ffmpegPath);
+          
+          const audioFileName = path.parse(result.fileName).name + '.mp3';
+          audioPath = path.join(itemDir, audioFileName);
+          
+          await new Promise((resolve, reject) => {
+            ffmpeg(destFilePath)
+              .noVideo()
+              .audioCodec('libmp3lame')
+              .audioBitrate('128k')
+              .format('mp3')
+              .output(audioPath)
+              .on('end', () => {
+                console.log('[YouTube-BG] Audio extracted to:', audioPath);
+                resolve();
+              })
+              .on('error', (err) => {
+                console.error('[YouTube-BG] Audio extraction error:', err);
+                reject(err);
+              })
+              .run();
+          });
+        } catch (audioErr) {
+          console.error('[YouTube-BG] Audio extraction failed:', audioErr.message);
+          audioPath = null;
+        }
+        
+        // Generate AI metadata if we have transcript
+        let aiMetadata = null;
+        if (transcript && transcript.text && transcript.text.length > 100) {
+          try {
+            console.log('[YouTube-BG] Generating AI metadata...');
+            aiMetadata = await this.generateVideoMetadata({
+              transcript: transcript.text,
+              originalTitle: title,
+              uploader: videoInfo.uploader,
+              description: videoInfo.description,
+              duration: videoInfo.duration
+            });
+            console.log('[YouTube-BG] AI metadata generated:', aiMetadata ? 'success' : 'failed');
+          } catch (aiErr) {
+            console.error('[YouTube-BG] AI metadata generation failed:', aiErr.message);
+          }
+        }
+        
+        // Update storage metadata file
+        try {
+          const metadataPath = path.join(itemDir, 'metadata.json');
+          let metadata = {};
+          if (fs.existsSync(metadataPath)) {
+            metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+          }
+          metadata.downloadStatus = 'complete';
+          metadata.downloadProgress = 100;
+          metadata.filePath = destFilePath;
+          metadata.fileSize = result.fileSize;
+          metadata.originalTitle = title;
+          metadata.uploader = videoInfo.uploader;
+          metadata.duration = videoInfo.duration;
+          metadata.thumbnail = videoInfo.thumbnail;
+          metadata.youtubeDescription = videoInfo.description;
+          
+          // Use AI-generated metadata if available, fallback to YouTube data
+          if (aiMetadata) {
+            metadata.title = aiMetadata.title || title;
+            metadata.shortDescription = aiMetadata.shortDescription || '';
+            metadata.longDescription = aiMetadata.longDescription || videoInfo.description || '';
+            metadata.aiSummary = aiMetadata.longDescription || ''; // Use AI-generated summary for Overview tab
+            metadata.topics = aiMetadata.topics || [];
+            metadata.speakers = aiMetadata.speakers || [];
+            metadata.storyBeats = aiMetadata.storyBeats || [];
+          } else {
+            metadata.title = title;
+            metadata.shortDescription = videoInfo.description ? videoInfo.description.substring(0, 150) : '';
+            metadata.longDescription = videoInfo.description || '';
+            metadata.storyBeats = [];
+          }
+          
+          if (transcript) {
+            metadata.transcript = transcript.text;
+            metadata.transcriptSegments = transcript.segments;
+            metadata.transcriptLanguage = transcript.language;
+          }
+          
+          if (audioPath) {
+            metadata.audioPath = audioPath;
+          }
+          
+          if (thumbnailPath && fs.existsSync(thumbnailPath)) {
+            metadata.localThumbnail = thumbnailPath;
+          }
+          
+          fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+          
+          // Also save transcript as separate file for easy access
+          if (transcript && transcript.text) {
+            const transcriptPath = path.join(itemDir, 'transcript.txt');
+            fs.writeFileSync(transcriptPath, transcript.text);
+            console.log('[YouTube-BG] Transcript saved to:', transcriptPath);
+          }
+          
+          // Update in-memory history with new metadata
+          if (historyItem && historyItem.metadata) {
+            historyItem.metadata.title = metadata.title;
+            historyItem.metadata.shortDescription = metadata.shortDescription;
+            historyItem.metadata.longDescription = metadata.longDescription;
+            historyItem.metadata.audioPath = audioPath;
+          }
+          
+        } catch (err) {
+          console.error('[YouTube-BG] Error updating metadata:', err);
+        }
+        
+        // Notify UI
+        this.notifyHistoryUpdate();
+        
+        // Show system notification
+        if (Notification.isSupported()) {
+          const notification = new Notification({
+            title: '✅ YouTube Download Complete',
+            body: title,
+            silent: false
+          });
+          notification.show();
+        }
+        
+        // Send completion to renderer
+        if (BrowserWindow) {
+          BrowserWindow.getAllWindows().forEach(window => {
+            window.webContents.send('youtube:download-complete', {
+              success: true,
+              placeholderId,
+              title: title,
+              filePath: destFilePath,
+              fileSize: result.fileSize
+            });
+          });
+        }
+        
+      } else {
+        // Download failed - update placeholder to show error
+        const historyItem = this.history.find(h => h.id === placeholderId);
+        if (historyItem) {
+          historyItem.preview = `❌ Download failed: ${historyItem.metadata?.title || 'Video'}`;
+          if (historyItem.metadata) {
+            historyItem.metadata.downloadStatus = 'error';
+            historyItem.metadata.downloadError = result.error;
+          }
+        }
+        
+        this.notifyHistoryUpdate();
+        
+        // Show error notification
+        if (Notification.isSupported()) {
+          const notification = new Notification({
+            title: '❌ YouTube Download Failed',
+            body: result.error || 'Unknown error occurred',
+            silent: false
+          });
+          notification.show();
+        }
+        
+        // Send error to renderer
+        if (BrowserWindow) {
+          BrowserWindow.getAllWindows().forEach(window => {
+            window.webContents.send('youtube:download-complete', {
+              success: false,
+              placeholderId,
+              error: result.error
+            });
+          });
+        }
+      }
+      
+    } catch (error) {
+      console.error('[YouTube-BG] Background download error:', error);
+      
+      // Make sure to clear the progress interval
+      if (typeof progressInterval !== 'undefined') {
+        clearInterval(progressInterval);
+      }
+      
+      // Update placeholder with error
+      const historyItem = this.history.find(h => h.id === placeholderId);
+      if (historyItem) {
+        historyItem.preview = `❌ Download error: ${historyItem.metadata?.title || 'Video'}`;
+        if (historyItem.metadata) {
+          historyItem.metadata.downloadStatus = 'error';
+          historyItem.metadata.downloadError = error.message;
+        }
+      }
+      
+      this.notifyHistoryUpdate();
+      
+      // Show error notification
+      const { Notification } = require('electron');
+      if (Notification.isSupported()) {
+        const notification = new Notification({
+          title: '❌ YouTube Download Failed',
+          body: error.message,
+          silent: false
+        });
+        notification.show();
+      }
+    }
+  }
+  
   // Window management (same as original)
   
   // CRITICAL: For clipboard viewer window (NOT black hole widget)
@@ -725,14 +1429,19 @@ class ClipboardManagerV2 {
   // CRITICAL: Black hole widget window - DO NOT DUPLICATE THIS METHOD!
   // If broken, check TEST-BLACKHOLE.md for troubleshooting
   // Must use app.getAppPath() for preload, NOT __dirname
-  createBlackHoleWindow(position, startExpanded = false) {
+  createBlackHoleWindow(position, startExpanded = false, clipboardData = null) {
     if (this.blackHoleWindow && !this.blackHoleWindow.isDestroyed()) {
       this.blackHoleWindow.focus();
+      // If we have new clipboard data, send it
+      if (clipboardData) {
+        this.blackHoleWindow.webContents.send('paste-clipboard-data', clipboardData);
+      }
       return;
     }
     
-    const width = startExpanded ? 600 : 150;
-    const height = startExpanded ? 800 : 150;
+    // For paste operations, always start expanded with modal showing
+    const width = (startExpanded || clipboardData) ? 600 : 150;
+    const height = (startExpanded || clipboardData) ? 800 : 150;
     
     console.log('[BlackHole] Creating window:', { position, width, height, startExpanded });
     
@@ -770,7 +1479,10 @@ class ClipboardManagerV2 {
     
     this.blackHoleWindow = new BrowserWindow(windowConfig);
     
-    this.blackHoleWindow.loadFile('black-hole.html');
+    // Pass startExpanded via query parameter so it's available immediately
+    this.blackHoleWindow.loadFile('black-hole.html', {
+      query: { startExpanded: startExpanded ? 'true' : 'false' }
+    });
     
     // Check for preload errors
     this.blackHoleWindow.webContents.on('preload-error', (event, preloadPath, error) => {
@@ -781,6 +1493,18 @@ class ClipboardManagerV2 {
       // Position is already set in the config, just show the window
       this.blackHoleWindow.show();
       console.log('[BlackHole] Window shown at position:', this.blackHoleWindow.getBounds());
+    });
+    
+    // Send startExpanded flag and clipboard data to the window after it loads
+    this.blackHoleWindow.webContents.on('did-finish-load', () => {
+      const hasClipboardData = !!clipboardData;
+      console.log('[BlackHole] Window loaded, startExpanded:', startExpanded, 'hasClipboardData:', hasClipboardData);
+      
+      // Send init with clipboard data if available
+      this.blackHoleWindow.webContents.send('black-hole:init', { 
+        startExpanded: startExpanded || hasClipboardData,
+        clipboardData: clipboardData 
+      });
     });
     
     this.blackHoleWindow.on('closed', () => {
@@ -1003,12 +1727,15 @@ class ClipboardManagerV2 {
       if (settings?.autoGenerateScreenshotMetadata && settings?.llmApiKey) {
         console.log('Auto-generating AI metadata for screenshot...');
         
-        // Trigger AI metadata generation in the background
+        // Trigger AI metadata generation using specialized system
         setTimeout(async () => {
           try {
-            const result = await this.generateAIMetadata(item.id, settings.llmApiKey, 'Analyze this screenshot and describe what you see in detail.');
+            const MetadataGenerator = require('./metadata-generator');
+            const metadataGen = new MetadataGenerator(this);
+            const result = await metadataGen.generateMetadataForItem(item.id, settings.llmApiKey);
+            
             if (result.success) {
-              console.log('AI metadata generated successfully for screenshot');
+              console.log('AI metadata generated successfully for screenshot using specialized prompts');
               
               // Send notification about AI analysis completion
               if (BrowserWindow) {
@@ -1077,6 +1804,16 @@ class ClipboardManagerV2 {
       console.log('IPC not available in non-Electron environment');
       return;
     }
+    
+    // Prevent duplicate IPC registration (memory leak prevention)
+    if (ClipboardManagerV2._ipcRegistered) {
+      console.warn('[ClipboardManager] IPC handlers already registered - skipping to prevent memory leak');
+      return;
+    }
+    ClipboardManagerV2._ipcRegistered = true;
+    
+    // Store handler references for cleanup
+    this._ipcOnHandlers = [];
     
     // Black hole window handlers
     ipcMain.on('black-hole:resize-window', (event, { width, height }) => {
@@ -1308,6 +2045,8 @@ class ClipboardManagerV2 {
                 ai_assisted: updates.ai_assisted || metadata.ai_assisted,
                 ai_model: updates.ai_model || metadata.ai_model,
                 ai_provider: updates.ai_provider || metadata.ai_provider,
+                // Video scenes for agentic player
+                scenes: updates.scenes || metadata.scenes || [],
                 updatedAt: new Date().toISOString()
               };
               this.storage.updateSpaceMetadata(item.spaceId, { files: spaceMetadata.files });
@@ -1361,12 +2100,2201 @@ class ClipboardManagerV2 {
           isScreenshot: item.isScreenshot,
           // Type info
           type: item.type,
-          preview: item.preview
+          preview: item.preview,
+          // Video scenes for agentic player
+          scenes: item.metadata?.scenes || []
         };
         
         return { success: true, metadata };
       } catch (error) {
         return { success: false, error: error.message };
+      }
+    });
+
+    // ==================== VIDEO SCENES FOR AGENTIC PLAYER ====================
+    
+    // Get scenes for a video item
+    ipcMain.handle('clipboard:get-video-scenes', (event, itemId) => {
+      try {
+        const item = this.storage.loadItem(itemId);
+        if (!item) return { success: false, error: 'Item not found' };
+        
+        // Check if it's a video
+        if (item.type !== 'file' || !item.fileType?.startsWith('video/')) {
+          return { success: false, error: 'Item is not a video file' };
+        }
+        
+        // Get scenes from metadata
+        const metadataPath = path.join(this.storage.storageRoot, item.metadataPath);
+        let metadata = {};
+        if (fs.existsSync(metadataPath)) {
+          metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+        }
+        
+        return { 
+          success: true, 
+          scenes: metadata.scenes || [],
+          videoUrl: item.content, // Path to the video file
+          fileName: item.fileName,
+          fileType: item.fileType
+        };
+      } catch (error) {
+        console.error('Error getting video scenes:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Update scenes for a video item
+    ipcMain.handle('clipboard:update-video-scenes', (event, itemId, scenes) => {
+      try {
+        const item = this.storage.loadItem(itemId);
+        if (!item) return { success: false, error: 'Item not found' };
+        
+        // Validate scenes array
+        if (!Array.isArray(scenes)) {
+          return { success: false, error: 'Scenes must be an array' };
+        }
+        
+        // Validate each scene has required fields
+        for (const scene of scenes) {
+          if (scene.id === undefined || scene.inTime === undefined || scene.outTime === undefined) {
+            return { success: false, error: 'Each scene must have id, inTime, and outTime' };
+          }
+        }
+        
+        // Update metadata file
+        const metadataPath = path.join(this.storage.storageRoot, item.metadataPath);
+        let metadata = {};
+        if (fs.existsSync(metadataPath)) {
+          metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+        }
+        
+        metadata.scenes = scenes;
+        metadata.scenesUpdatedAt = new Date().toISOString();
+        
+        fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+        
+        // Sync to space metadata if applicable
+        if (item.spaceId) {
+          try {
+            const spaceMetadata = this.storage.getSpaceMetadata(item.spaceId);
+            if (spaceMetadata) {
+              const fileKey = item.fileName || `item-${itemId}`;
+              spaceMetadata.files[fileKey] = {
+                ...spaceMetadata.files[fileKey],
+                scenes: scenes,
+                scenesUpdatedAt: metadata.scenesUpdatedAt
+              };
+              this.storage.updateSpaceMetadata(item.spaceId, { files: spaceMetadata.files });
+              console.log('[Clipboard] Synced video scenes to space-metadata.json:', fileKey);
+            }
+          } catch (syncError) {
+            console.error('[Clipboard] Error syncing scenes to space metadata:', syncError);
+          }
+        }
+        
+        console.log(`[Clipboard] Updated ${scenes.length} scenes for video:`, item.fileName);
+        return { success: true, scenesCount: scenes.length };
+      } catch (error) {
+        console.error('Error updating video scenes:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Add a single scene to a video
+    ipcMain.handle('clipboard:add-video-scene', (event, itemId, scene) => {
+      try {
+        const item = this.storage.loadItem(itemId);
+        if (!item) return { success: false, error: 'Item not found' };
+        
+        // Read existing metadata
+        const metadataPath = path.join(this.storage.storageRoot, item.metadataPath);
+        let metadata = {};
+        if (fs.existsSync(metadataPath)) {
+          metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+        }
+        
+        // Ensure scenes array exists
+        if (!metadata.scenes) metadata.scenes = [];
+        
+        // Generate ID if not provided
+        if (scene.id === undefined) {
+          scene.id = metadata.scenes.length > 0 
+            ? Math.max(...metadata.scenes.map(s => s.id)) + 1 
+            : 1;
+        }
+        
+        // Add scene
+        metadata.scenes.push(scene);
+        metadata.scenesUpdatedAt = new Date().toISOString();
+        
+        fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+        
+        console.log(`[Clipboard] Added scene "${scene.name}" to video:`, item.fileName);
+        return { success: true, scene, totalScenes: metadata.scenes.length };
+      } catch (error) {
+        console.error('Error adding video scene:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Delete a scene from a video
+    ipcMain.handle('clipboard:delete-video-scene', (event, itemId, sceneId) => {
+      try {
+        const item = this.storage.loadItem(itemId);
+        if (!item) return { success: false, error: 'Item not found' };
+        
+        const metadataPath = path.join(this.storage.storageRoot, item.metadataPath);
+        let metadata = {};
+        if (fs.existsSync(metadataPath)) {
+          metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+        }
+        
+        if (!metadata.scenes) return { success: false, error: 'No scenes found' };
+        
+        const initialLength = metadata.scenes.length;
+        metadata.scenes = metadata.scenes.filter(s => s.id !== sceneId);
+        
+        if (metadata.scenes.length === initialLength) {
+          return { success: false, error: 'Scene not found' };
+        }
+        
+        metadata.scenesUpdatedAt = new Date().toISOString();
+        fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+        
+        console.log(`[Clipboard] Deleted scene ${sceneId} from video:`, item.fileName);
+        return { success: true, remainingScenes: metadata.scenes.length };
+      } catch (error) {
+        console.error('Error deleting video scene:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Get all videos with scenes (for agentic player)
+    ipcMain.handle('clipboard:get-videos-with-scenes', (event, spaceId = null) => {
+      try {
+        // Filter items to videos
+        let items = this.storage.index.items.filter(item => 
+          item.type === 'file' && item.fileType?.startsWith('video/')
+        );
+        
+        // Filter by space if specified
+        if (spaceId) {
+          items = items.filter(item => item.spaceId === spaceId);
+        }
+        
+        // Load scenes for each video
+        const videosWithScenes = items.map(item => {
+          let scenes = [];
+          try {
+            const metadataPath = path.join(this.storage.storageRoot, item.metadataPath);
+            if (fs.existsSync(metadataPath)) {
+              const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+              scenes = metadata.scenes || [];
+            }
+          } catch (e) {
+            console.error('Error loading scenes for video:', item.fileName, e);
+          }
+          
+          return {
+            id: item.id,
+            fileName: item.fileName,
+            fileType: item.fileType,
+            spaceId: item.spaceId,
+            videoUrl: path.join(this.storage.storageRoot, item.contentPath),
+            scenes: scenes,
+            sceneCount: scenes.length
+          };
+        });
+        
+        return { 
+          success: true, 
+          videos: videosWithScenes,
+          totalVideos: videosWithScenes.length,
+          videosWithScenes: videosWithScenes.filter(v => v.sceneCount > 0).length
+        };
+      } catch (error) {
+        console.error('Error getting videos with scenes:', error);
+        return { success: false, error: error.message };
+      }
+    });
+
+    // ==================== END VIDEO SCENES ====================
+    
+    // Get item content (for preview/edit)
+    ipcMain.handle('clipboard:get-item-content', (event, itemId) => {
+      try {
+        const item = this.storage.loadItem(itemId);
+        if (!item) return { success: false, error: 'Item not found' };
+        
+        // Return the full content
+        let content = item.content || '';
+        
+        // For HTML items, return HTML content
+        if (item.type === 'html' || item.metadata?.type === 'generated-document') {
+          content = item.html || item.content || '';
+        }
+        
+        // For files, try to read text content if it's a text-based file
+        if (item.type === 'file' && item.content) {
+          const textExtensions = ['.txt', '.md', '.log', '.csv', '.json', '.xml', '.yaml', '.yml', 
+                                  '.js', '.ts', '.jsx', '.tsx', '.py', '.java', '.cpp', '.c', '.h', 
+                                  '.css', '.scss', '.html', '.htm', '.rb', '.go', '.rs', '.php'];
+          if (item.fileExt && textExtensions.includes(item.fileExt.toLowerCase())) {
+            try {
+              // item.content should be the file path for files
+              if (fs.existsSync(item.content)) {
+                content = fs.readFileSync(item.content, 'utf8');
+              }
+            } catch (readError) {
+              console.error('Error reading file content:', readError);
+              content = item.preview || '';
+            }
+          }
+        }
+        
+        return { 
+          success: true, 
+          content,
+          type: item.type,
+          fileType: item.fileType,
+          fileExt: item.fileExt
+        };
+      } catch (error) {
+        console.error('Error getting item content:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Update item content (for editing)
+    ipcMain.handle('clipboard:update-item-content', (event, itemId, newContent) => {
+      try {
+        // Get the index entry to find the original content path
+        const indexEntry = this.storage.index.items.find(i => i.id === itemId);
+        if (!indexEntry) return { success: false, error: 'Item not found in index' };
+        
+        const item = this.storage.loadItem(itemId);
+        if (!item) return { success: false, error: 'Item not found' };
+        
+        // Helper to check if content is actual HTML
+        const looksLikeHtml = (content) => {
+          if (!content || typeof content !== 'string') return false;
+          const htmlPattern = /<\s*(html|head|body|div|span|p|a|img|table|ul|ol|li|h[1-6]|script|style|link|meta|form|input|button|header|footer|nav|section|article)[^>]*>/i;
+          return htmlPattern.test(content);
+        };
+        
+        // Determine where to save - use the ORIGINAL content path
+        let contentPath;
+        
+        if (item.type === 'file' && item.content && fs.existsSync(item.content)) {
+          // For files, update the actual file
+          const textExtensions = ['.txt', '.md', '.log', '.json', '.xml', '.yaml', '.yml', 
+                                  '.js', '.ts', '.jsx', '.tsx', '.py', '.css', '.html', '.htm'];
+          if (item.fileExt && textExtensions.includes(item.fileExt.toLowerCase())) {
+            contentPath = item.content;
+          } else {
+            return { success: false, error: 'This file type cannot be edited' };
+          }
+        } else if (indexEntry.contentPath) {
+          // Use the original content path from the index
+          contentPath = path.join(this.storage.storageRoot, indexEntry.contentPath);
+          
+          // If it's a .txt file and content is plain text, convert to .md
+          if (contentPath.endsWith('.txt') && !looksLikeHtml(newContent)) {
+            const mdPath = contentPath.replace(/\.txt$/, '.md');
+            // If we're converting, update the index contentPath
+            if (fs.existsSync(contentPath)) {
+              // Delete old .txt file after saving to .md
+              fs.unlinkSync(contentPath);
+            }
+            contentPath = mdPath;
+            // Update index with new path
+            const relativePath = path.relative(this.storage.storageRoot, mdPath);
+            indexEntry.contentPath = relativePath;
+          }
+        } else {
+          // Fallback: construct path based on type
+          const itemDir = path.join(this.storage.itemsDir, itemId);
+          if (item.metadata?.type === 'generated-document' || looksLikeHtml(newContent)) {
+            contentPath = path.join(itemDir, 'content.html');
+          } else {
+            // Use .md for plain text
+            contentPath = path.join(itemDir, 'content.md');
+          }
+        }
+        
+        // Ensure directory exists
+        const dir = path.dirname(contentPath);
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+        
+        // Write the content
+        fs.writeFileSync(contentPath, newContent, 'utf8');
+        console.log(`[Clipboard] Saved content to: ${contentPath}`);
+        
+        // Update preview in index (strip HTML tags if present)
+        const preview = newContent.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').substring(0, 200).trim();
+        this.storage.updateItemIndex(itemId, { preview });
+        
+        // Clear cache to force reload
+        this.storage.cache.delete(itemId);
+        
+        // Update the in-memory history item
+        const historyItem = this.history.find(h => h.id === itemId);
+        if (historyItem) {
+          historyItem.preview = preview;
+          historyItem._needsContent = true; // Force reload on next access
+        }
+        
+        // Notify UI of update
+        this.notifyHistoryUpdate();
+        
+        console.log(`[Clipboard] Updated content for item: ${itemId}`);
+        return { success: true };
+      } catch (error) {
+        console.error('Error updating item content:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // AI Image editing using OpenAI DALL-E
+    ipcMain.handle('clipboard:edit-image-ai', async (event, options) => {
+      try {
+        const { itemId, imageData, prompt } = options;
+        
+        // Get settings to check for OpenAI API key
+        const { getSettingsManager } = require('./settings-manager');
+        const settingsManager = getSettingsManager();
+        const openaiKey = settingsManager.get('openaiApiKey');
+        const anthropicKey = settingsManager.get('llmApiKey');
+        
+        if (!imageData) {
+          return { success: false, error: 'No image data provided' };
+        }
+        
+        console.log('[AI Image Edit] Processing edit request:', prompt);
+        
+        // Extract base64 data
+        let base64Data = imageData;
+        let mediaType = 'image/png';
+        
+        if (imageData.startsWith('data:')) {
+          const matches = imageData.match(/^data:([^;]+);base64,(.+)$/);
+          if (matches) {
+            mediaType = matches[1];
+            base64Data = matches[2];
+          }
+        }
+        
+        // Use OpenAI gpt-image-1 for true image editing
+        if (openaiKey) {
+          console.log('[AI Image Edit] Using OpenAI gpt-image-1 for image editing');
+          const https = require('https');
+          
+          try {
+            // Convert base64 to buffer for OpenAI
+            const imageBuffer = Buffer.from(base64Data, 'base64');
+            
+            // Create multipart form data
+            const boundary = '----FormBoundary' + Math.random().toString(36).substr(2);
+            
+            // Build multipart body parts
+            const parts = [];
+            
+            // Add image file
+            parts.push(Buffer.from(
+              `--${boundary}\r\n` +
+              `Content-Disposition: form-data; name="image"; filename="image.png"\r\n` +
+              `Content-Type: image/png\r\n\r\n`, 'utf-8'
+            ));
+            parts.push(imageBuffer);
+            parts.push(Buffer.from('\r\n', 'utf-8'));
+            
+            // Add prompt
+            parts.push(Buffer.from(
+              `--${boundary}\r\n` +
+              `Content-Disposition: form-data; name="prompt"\r\n\r\n` +
+              `${prompt}\r\n`, 'utf-8'
+            ));
+            
+            // Add model - gpt-image-1
+            parts.push(Buffer.from(
+              `--${boundary}\r\n` +
+              `Content-Disposition: form-data; name="model"\r\n\r\n` +
+              `gpt-image-1\r\n`, 'utf-8'
+            ));
+            
+            // Add closing boundary
+            parts.push(Buffer.from(`--${boundary}--\r\n`, 'utf-8'));
+            
+            const fullBody = Buffer.concat(parts);
+            
+            console.log('[AI Image Edit] Sending image to gpt-image-1 edits endpoint...');
+            
+            const response = await new Promise((resolve, reject) => {
+              const req = https.request({
+                hostname: 'api.openai.com',
+                path: '/v1/images/edits',
+                method: 'POST',
+                headers: {
+                  'Content-Type': `multipart/form-data; boundary=${boundary}`,
+                  'Content-Length': fullBody.length,
+                  'Authorization': `Bearer ${openaiKey}`
+                }
+              }, (res) => {
+                let data = '';
+                res.on('data', chunk => data += chunk);
+                res.on('end', () => {
+                  try {
+                    resolve(JSON.parse(data));
+                  } catch (e) {
+                    reject(new Error('Failed to parse response: ' + data));
+                  }
+                });
+              });
+              
+              req.on('error', reject);
+              req.write(fullBody);
+              req.end();
+            });
+            
+            if (response.error) {
+              console.error('[AI Image Edit] gpt-image-1 API error:', response.error);
+              throw new Error(response.error.message);
+            }
+            
+            if (response.data && response.data[0]) {
+              let editedImageData;
+              
+              if (response.data[0].b64_json) {
+                editedImageData = `data:image/png;base64,${response.data[0].b64_json}`;
+              } else if (response.data[0].url) {
+                // Download the image from URL
+                console.log('[AI Image Edit] Downloading edited image from URL...');
+                const imageUrl = response.data[0].url;
+                const imageResponse = await new Promise((resolve, reject) => {
+                  https.get(imageUrl, (res) => {
+                    const chunks = [];
+                    res.on('data', chunk => chunks.push(chunk));
+                    res.on('end', () => resolve(Buffer.concat(chunks)));
+                    res.on('error', reject);
+                  }).on('error', reject);
+                });
+                editedImageData = `data:image/png;base64,${imageResponse.toString('base64')}`;
+              }
+              
+              if (editedImageData) {
+                console.log('[AI Image Edit] Successfully edited image with gpt-image-1');
+                return { 
+                  success: true, 
+                  editedImage: editedImageData
+                };
+              }
+            }
+            
+            throw new Error('No image data in response');
+            
+          } catch (editError) {
+            console.error('[AI Image Edit] gpt-image-1 error:', editError.message);
+            // Fall through to Claude analysis
+          }
+        }
+        
+        // Fallback: Use Claude to analyze and describe the edits
+        if (anthropicKey) {
+          console.log('[AI Image Edit] Using Claude for image analysis (no OpenAI key or DALL-E failed)');
+          
+          const ClaudeAPI = require('./claude-api');
+          const claudeAPI = new ClaudeAPI();
+          
+          const requestData = JSON.stringify({
+            model: 'claude-sonnet-4-5-20250929',
+            max_tokens: 1000,
+            messages: [{
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text: `I want to edit this image with the following changes: "${prompt}"
+
+Please analyze the image and describe:
+1. What you see in the current image
+2. What specific changes would be made based on my request
+3. How the final result would look
+
+Respond in a helpful, conversational way.`
+                },
+                {
+                  type: 'image',
+                  source: {
+                    type: 'base64',
+                    media_type: mediaType,
+                    data: base64Data
+                  }
+                }
+              ]
+            }]
+          });
+          
+          const response = await claudeAPI.makeRequest('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-API-Key': anthropicKey,
+              'anthropic-version': '2023-06-01'
+            }
+          }, requestData);
+          
+          const description = response.content[0].text;
+          
+          return { 
+            success: false, 
+            error: `To edit images, please add your OpenAI API key in Settings.\n\nAI Analysis of your request:\n${description}`,
+            description: description,
+            needsOpenAIKey: true
+          };
+        }
+        
+        return { 
+          success: false, 
+          error: 'No API key configured. Please add your OpenAI API key in Settings to enable image editing.' 
+        };
+        
+      } catch (error) {
+        console.error('[AI Image Edit] Error:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Update item image (save edited image)
+    ipcMain.handle('clipboard:update-item-image', async (event, itemId, imageData) => {
+      try {
+        const item = this.storage.loadItem(itemId);
+        if (!item) return { success: false, error: 'Item not found' };
+        
+        // Extract base64 data
+        let base64Data = imageData;
+        if (imageData.startsWith('data:')) {
+          const matches = imageData.match(/^data:[^;]+;base64,(.+)$/);
+          if (matches) {
+            base64Data = matches[1];
+          }
+        }
+        
+        // Determine the content path
+        const indexEntry = this.storage.index.items.find(i => i.id === itemId);
+        if (!indexEntry) return { success: false, error: 'Item not found in index' };
+        
+        const contentPath = path.join(this.storage.storageRoot, indexEntry.contentPath);
+        
+        // Write the image data
+        fs.writeFileSync(contentPath, Buffer.from(base64Data, 'base64'));
+        
+        // Also update thumbnail if it exists
+        if (indexEntry.thumbnailPath) {
+          const thumbnailPath = path.join(this.storage.storageRoot, indexEntry.thumbnailPath);
+          // Generate a smaller thumbnail from the edited image
+          // For simplicity, we'll use the same image as thumbnail
+          fs.writeFileSync(thumbnailPath, Buffer.from(base64Data, 'base64'));
+        }
+        
+        // Clear cache
+        this.storage.cache.delete(itemId);
+        
+        // Update in-memory item
+        const historyItem = this.history.find(h => h.id === itemId);
+        if (historyItem) {
+          historyItem._needsContent = true;
+          historyItem.thumbnail = imageData; // Update thumbnail
+        }
+        
+        // Notify UI
+        this.notifyHistoryUpdate();
+        
+        console.log(`[Clipboard] Updated image for item: ${itemId}`);
+        return { success: true };
+      } catch (error) {
+        console.error('Error updating item image:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Save image as new clipboard item
+    ipcMain.handle('clipboard:save-image-as-new', async (event, imageData, options = {}) => {
+      try {
+        // Extract base64 data
+        let base64Data = imageData;
+        let mediaType = 'image/png';
+        
+        if (imageData.startsWith('data:')) {
+          const matches = imageData.match(/^data:([^;]+);base64,(.+)$/);
+          if (matches) {
+            mediaType = matches[1];
+            base64Data = matches[2];
+          }
+        }
+        
+        // Create image buffer
+        const imageBuffer = Buffer.from(base64Data, 'base64');
+        
+        // Create a new clipboard item
+        const newItem = {
+          type: 'image',
+          timestamp: Date.now(),
+          image: imageBuffer,
+          preview: options.description || 'AI-edited image',
+          metadata: {
+            source: 'ai-edit',
+            sourceItemId: options.sourceItemId,
+            description: options.description || 'AI-edited image'
+          }
+        };
+        
+        // Save using the storage system
+        const savedItem = await this.storage.saveItem(newItem);
+        
+        // Add to history
+        this.history.unshift({
+          ...savedItem,
+          thumbnail: imageData
+        });
+        
+        // Notify UI
+        this.notifyHistoryUpdate();
+        
+        console.log(`[Clipboard] Saved new image item: ${savedItem.id}`);
+        return { success: true, itemId: savedItem.id };
+      } catch (error) {
+        console.error('Error saving image as new:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Text-to-Speech using OpenAI TTS HD
+    ipcMain.handle('clipboard:generate-speech', async (event, options) => {
+      try {
+        const { text, voice = 'nova' } = options;
+        
+        if (!text || text.trim().length === 0) {
+          return { success: false, error: 'No text provided' };
+        }
+        
+        // Get OpenAI API key from settings
+        const { getSettingsManager } = require('./settings-manager');
+        const settingsManager = getSettingsManager();
+        const openaiKey = settingsManager.get('openaiApiKey');
+        
+        if (!openaiKey) {
+          return { success: false, error: 'OpenAI API key not configured. Please add it in Settings.' };
+        }
+        
+        console.log(`[TTS] Generating speech with voice: ${voice}, text length: ${text.length}`);
+        
+        const https = require('https');
+        
+        // OpenAI TTS has a 4096 character limit - split long texts into chunks
+        const MAX_CHUNK_SIZE = 4000; // Leave some margin
+        const textChunks = [];
+        
+        if (text.length <= MAX_CHUNK_SIZE) {
+          textChunks.push(text);
+        } else {
+          // Split at sentence boundaries to avoid cutting words
+          let remaining = text;
+          while (remaining.length > 0) {
+            if (remaining.length <= MAX_CHUNK_SIZE) {
+              textChunks.push(remaining);
+              break;
+            }
+            
+            // Find a good break point (sentence end) within the limit
+            let breakPoint = MAX_CHUNK_SIZE;
+            const lastPeriod = remaining.lastIndexOf('. ', MAX_CHUNK_SIZE);
+            const lastQuestion = remaining.lastIndexOf('? ', MAX_CHUNK_SIZE);
+            const lastExclaim = remaining.lastIndexOf('! ', MAX_CHUNK_SIZE);
+            const bestBreak = Math.max(lastPeriod, lastQuestion, lastExclaim);
+            
+            if (bestBreak > MAX_CHUNK_SIZE * 0.5) {
+              breakPoint = bestBreak + 1; // Include the punctuation
+            }
+            
+            textChunks.push(remaining.substring(0, breakPoint).trim());
+            remaining = remaining.substring(breakPoint).trim();
+          }
+          console.log(`[TTS] Split text into ${textChunks.length} chunks`);
+        }
+        
+        // Generate audio for each chunk
+        const audioBuffers = [];
+        
+        for (let i = 0; i < textChunks.length; i++) {
+          const chunk = textChunks[i];
+          console.log(`[TTS] Generating chunk ${i + 1}/${textChunks.length}, length: ${chunk.length}`);
+          
+          const requestBody = JSON.stringify({
+            model: 'tts-1-hd',
+            input: chunk,
+            voice: voice,
+            response_format: 'mp3'
+          });
+          
+          const chunkAudio = await new Promise((resolve, reject) => {
+            const req = https.request({
+              hostname: 'api.openai.com',
+              path: '/v1/audio/speech',
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${openaiKey}`
+              }
+            }, (res) => {
+              const chunks = [];
+              
+              res.on('data', chunk => chunks.push(chunk));
+              res.on('end', () => {
+                if (res.statusCode !== 200) {
+                  const errorText = Buffer.concat(chunks).toString();
+                  try {
+                    const errorJson = JSON.parse(errorText);
+                    reject(new Error(errorJson.error?.message || `HTTP ${res.statusCode}`));
+                  } catch {
+                    reject(new Error(`HTTP ${res.statusCode}: ${errorText}`));
+                  }
+                  return;
+                }
+                
+                resolve(Buffer.concat(chunks));
+              });
+            });
+            
+            req.on('error', reject);
+            req.write(requestBody);
+            req.end();
+          });
+          
+          audioBuffers.push(chunkAudio);
+        }
+        
+        // Combine all audio buffers
+        const combinedBuffer = Buffer.concat(audioBuffers);
+        const audioData = combinedBuffer.toString('base64');
+        
+        console.log(`[TTS] Successfully generated audio, ${textChunks.length} chunks, total size: ${combinedBuffer.length} bytes`);
+        
+        return { success: true, audioData };
+        
+      } catch (error) {
+        console.error('[TTS] Error generating speech:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Create audio script from article content using GPT
+    ipcMain.handle('clipboard:create-audio-script', async (event, options) => {
+      try {
+        const { title, content } = options;
+        
+        if (!content || content.trim().length === 0) {
+          return { success: false, error: 'No content provided' };
+        }
+        
+        // Get OpenAI API key from settings
+        const { getSettingsManager } = require('./settings-manager');
+        const settingsManager = getSettingsManager();
+        const openaiKey = settingsManager.get('openaiApiKey');
+        
+        if (!openaiKey) {
+          return { success: false, error: 'OpenAI API key not configured. Please add it in Settings.' };
+        }
+        
+        console.log(`[AudioScript] Creating audio script for: ${title}, content length: ${content.length}`);
+        
+        const https = require('https');
+        
+        // Call OpenAI Chat Completions API with GPT-4o (gpt-5.1 doesn't exist yet, using gpt-4o)
+        const requestBody = JSON.stringify({
+          model: 'gpt-4o',
+          messages: [
+            {
+              role: 'system',
+              content: `You are an expert audio content producer. Your task is to transform written articles into engaging audio scripts optimized for text-to-speech narration.
+
+Guidelines:
+- Maintain ALL key points, insights, and important details from the original article
+- Do NOT summarize or condense - the audio version should be comprehensive
+- Write in a natural, conversational tone suitable for listening
+- Remove visual references like "as shown above" or "see the image below"
+- Convert bullet points and lists into flowing prose
+- Add natural transitions between sections
+- Remove URLs, citations in brackets, and author bylines
+- Keep technical terms but explain them briefly if complex
+- Start with the article title as an introduction
+- Add brief pauses (indicated by "...") between major sections
+- End with a brief conclusion or takeaway
+
+Output ONLY the audio script text, nothing else.`
+            },
+            {
+              role: 'user',
+              content: `Please create an audio script for this article:
+
+Title: ${title}
+
+Content:
+${content}`
+            }
+          ],
+          temperature: 0.7,
+          max_tokens: 8000
+        });
+        
+        const scriptText = await new Promise((resolve, reject) => {
+          const req = https.request({
+            hostname: 'api.openai.com',
+            path: '/v1/chat/completions',
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${openaiKey}`
+            }
+          }, (res) => {
+            const chunks = [];
+            
+            res.on('data', chunk => chunks.push(chunk));
+            res.on('end', () => {
+              const responseText = Buffer.concat(chunks).toString();
+              
+              if (res.statusCode !== 200) {
+                try {
+                  const errorJson = JSON.parse(responseText);
+                  reject(new Error(errorJson.error?.message || `HTTP ${res.statusCode}`));
+                } catch {
+                  reject(new Error(`HTTP ${res.statusCode}: ${responseText}`));
+                }
+                return;
+              }
+              
+              try {
+                const response = JSON.parse(responseText);
+                const script = response.choices?.[0]?.message?.content;
+                if (script) {
+                  resolve(script);
+                } else {
+                  reject(new Error('No script generated'));
+                }
+              } catch (e) {
+                reject(new Error('Failed to parse response'));
+              }
+            });
+          });
+          
+          req.on('error', reject);
+          req.write(requestBody);
+          req.end();
+        });
+        
+        console.log(`[AudioScript] Successfully created script, length: ${scriptText.length}`);
+        
+        return { success: true, script: scriptText };
+        
+      } catch (error) {
+        console.error('[AudioScript] Error creating audio script:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Save TTS audio - attach to source item or create new
+    ipcMain.handle('clipboard:save-tts-audio', async (event, options) => {
+      try {
+        const { audioData, voice, sourceItemId, sourceText, attachToSource } = options;
+        
+        if (!audioData) {
+          return { success: false, error: 'No audio data provided' };
+        }
+        
+        // Create audio buffer
+        const audioBuffer = Buffer.from(audioData, 'base64');
+        const timestamp = Date.now();
+        const filename = `tts-${voice}-${timestamp}.mp3`;
+        
+        // If attaching to source item
+        if (attachToSource && sourceItemId) {
+          console.log(`[TTS] Attaching audio to source item: ${sourceItemId}`);
+          
+          // Find the source item
+          const sourceItem = this.history.find(h => h.id === sourceItemId);
+          if (sourceItem) {
+            // Get the item directory
+            const itemDir = path.join(this.storage.itemsDir, sourceItemId);
+            console.log(`[TTS] Item directory: ${itemDir}`);
+            
+            if (!fs.existsSync(itemDir)) {
+              console.log(`[TTS] Creating directory: ${itemDir}`);
+              fs.mkdirSync(itemDir, { recursive: true });
+            }
+            
+            // Save audio in the item's directory
+            const audioPath = path.join(itemDir, 'tts-audio.mp3');
+            console.log(`[TTS] Writing ${audioBuffer.length} bytes to: ${audioPath}`);
+            fs.writeFileSync(audioPath, audioBuffer);
+            
+            // Verify file was written
+            if (fs.existsSync(audioPath)) {
+              const stats = fs.statSync(audioPath);
+              console.log(`[TTS] File verified, size: ${stats.size} bytes`);
+            } else {
+              console.error(`[TTS] ERROR: File was not written!`);
+            }
+            
+            // Update item metadata to include TTS audio reference
+            const metadataPath = path.join(itemDir, 'metadata.json');
+            let metadata = {};
+            if (fs.existsSync(metadataPath)) {
+              metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+            }
+            
+            metadata.ttsAudio = {
+              path: 'tts-audio.mp3',
+              voice: voice,
+              generatedAt: timestamp,
+              fileSize: audioBuffer.length
+            };
+            
+            fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+            console.log(`[TTS] Metadata updated with ttsAudio reference`);
+            
+            // Update the index entry
+            this.storage.updateItemIndex(sourceItemId, {
+              hasTTSAudio: true,
+              ttsVoice: voice
+            });
+            
+            console.log(`[TTS] Successfully attached audio to item ${sourceItemId}`);
+            return { success: true, itemId: sourceItemId, attached: true };
+          } else {
+            console.error(`[TTS] Source item not found in history: ${sourceItemId}`);
+          }
+        }
+        
+        // Create as new item (fallback or explicit)
+        const preview = sourceText 
+          ? `🔊 TTS: "${sourceText.substring(0, 50)}${sourceText.length > 50 ? '...' : ''}"`
+          : `🔊 TTS Audio (${voice})`;
+        
+        const newItem = {
+          type: 'file',
+          fileType: 'audio',
+          fileCategory: 'audio',
+          fileExt: '.mp3',
+          fileName: filename,
+          timestamp: timestamp,
+          preview: preview,
+          spaceId: this.currentSpace || 'unclassified',
+          metadata: {
+            source: 'tts-generation',
+            voice: voice,
+            sourceItemId: sourceItemId,
+            sourceText: sourceText,
+            generatedAt: timestamp
+          }
+        };
+        
+        const itemId = `item-${timestamp}-${Math.random().toString(36).substr(2, 9)}`;
+        const audioDir = path.join(this.storage.storageRoot, 'files', itemId);
+        
+        if (!fs.existsSync(audioDir)) {
+          fs.mkdirSync(audioDir, { recursive: true });
+        }
+        
+        const audioPath = path.join(audioDir, filename);
+        fs.writeFileSync(audioPath, audioBuffer);
+        
+        newItem.filePath = audioPath;
+        newItem.fileSize = audioBuffer.length;
+        
+        const indexEntry = this.storage.addItem({
+          ...newItem,
+          id: itemId
+        });
+        
+        this.history.unshift({
+          ...newItem,
+          id: indexEntry.id
+        });
+        
+        this.updateSpaceCounts();
+        this.notifyHistoryUpdate();
+        
+        console.log(`[TTS] Saved audio as new item: ${audioPath}`);
+        return { success: true, itemId: indexEntry.id, attached: false };
+        
+      } catch (error) {
+        console.error('[TTS] Error saving audio:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Get TTS audio for an item (if attached)
+    ipcMain.handle('clipboard:get-tts-audio', async (event, itemId) => {
+      try {
+        console.log(`[TTS] Getting audio for item: ${itemId}`);
+        const itemDir = path.join(this.storage.itemsDir, itemId);
+        const audioPath = path.join(itemDir, 'tts-audio.mp3');
+        
+        console.log(`[TTS] Checking path: ${audioPath}`);
+        console.log(`[TTS] File exists: ${fs.existsSync(audioPath)}`);
+        
+        if (fs.existsSync(audioPath)) {
+          const stats = fs.statSync(audioPath);
+          console.log(`[TTS] File size: ${stats.size} bytes`);
+          
+          const audioData = fs.readFileSync(audioPath);
+          const base64 = audioData.toString('base64');
+          console.log(`[TTS] Base64 length: ${base64.length}`);
+          
+          // Get voice from metadata
+          const metadataPath = path.join(itemDir, 'metadata.json');
+          let voice = 'nova';
+          if (fs.existsSync(metadataPath)) {
+            const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+            voice = metadata.ttsAudio?.voice || 'nova';
+          }
+          
+          return { 
+            success: true, 
+            audioData: base64,
+            voice: voice,
+            hasAudio: true
+          };
+        }
+        
+        console.log(`[TTS] No audio file found for item: ${itemId}`);
+        return { success: true, hasAudio: false };
+      } catch (error) {
+        console.error('[TTS] Error getting audio:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Extract audio from video file
+    ipcMain.handle('clipboard:extract-audio', async (event, itemId) => {
+      try {
+        console.log('[AudioExtract] Extracting audio for item:', itemId);
+        
+        // Get item from storage
+        const item = this.history.find(h => h.id === itemId);
+        if (!item) {
+          return { success: false, error: 'Item not found' };
+        }
+        
+        // Get file path
+        let videoPath = item.filePath || item.content;
+        if (!videoPath) {
+          const itemDir = path.join(this.storage.itemsDir, itemId);
+          const files = fs.readdirSync(itemDir);
+          const videoFile = files.find(f => /\.(mp4|mov|avi|mkv|webm)$/i.test(f));
+          if (videoFile) {
+            videoPath = path.join(itemDir, videoFile);
+          }
+        }
+        
+        if (!videoPath || !fs.existsSync(videoPath)) {
+          return { success: false, error: 'Video file not found' };
+        }
+        
+        // Extract audio using ffmpeg
+        const ffmpeg = require('fluent-ffmpeg');
+        const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+        ffmpeg.setFfmpegPath(ffmpegPath);
+        
+        const itemDir = path.join(this.storage.itemsDir, itemId);
+        const audioFileName = path.basename(videoPath, path.extname(videoPath)) + '.mp3';
+        const audioPath = path.join(itemDir, audioFileName);
+        
+        console.log('[AudioExtract] Starting ffmpeg extraction from:', videoPath);
+        console.log('[AudioExtract] Output path:', audioPath);
+        
+        await new Promise((resolve, reject) => {
+          ffmpeg(videoPath)
+            .noVideo()
+            .audioCodec('libmp3lame')
+            .audioBitrate('192k')
+            .format('mp3')
+            .output(audioPath)
+            .on('start', (cmd) => {
+              console.log('[AudioExtract] FFmpeg command:', cmd);
+              // Send initial progress
+              if (event.sender && !event.sender.isDestroyed()) {
+                event.sender.send('audio-extract-progress', { itemId, percent: 0, status: 'Starting...' });
+              }
+            })
+            .on('progress', (progress) => {
+              const percent = progress.percent ? Math.round(progress.percent) : 0;
+              console.log('[AudioExtract] Progress:', percent + '%');
+              // Send progress to renderer
+              if (event.sender && !event.sender.isDestroyed()) {
+                event.sender.send('audio-extract-progress', { itemId, percent, status: `Extracting: ${percent}%` });
+              }
+            })
+            .on('end', () => {
+              console.log('[AudioExtract] FFmpeg completed successfully');
+              if (event.sender && !event.sender.isDestroyed()) {
+                event.sender.send('audio-extract-progress', { itemId, percent: 100, status: 'Complete!' });
+              }
+              resolve();
+            })
+            .on('error', (err) => {
+              console.error('[AudioExtract] FFmpeg error:', err.message);
+              if (event.sender && !event.sender.isDestroyed()) {
+                event.sender.send('audio-extract-progress', { itemId, percent: 0, status: 'Error: ' + err.message });
+              }
+              reject(err);
+            })
+            .run();
+        });
+        
+        console.log('[AudioExtract] Audio extracted to:', audioPath);
+        
+        // Update metadata
+        const metadataPath = path.join(itemDir, 'metadata.json');
+        if (fs.existsSync(metadataPath)) {
+          const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+          metadata.audioPath = audioPath;
+          metadata.audioFileName = audioFileName;
+          fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+        }
+        
+        return { 
+          success: true, 
+          audioPath, 
+          audioFileName,
+          audioSize: fs.statSync(audioPath).size
+        };
+      } catch (error) {
+        console.error('[AudioExtract] Error:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Audio/Video Transcription using OpenAI Whisper
+    ipcMain.handle('clipboard:transcribe-audio', async (event, options) => {
+      try {
+        const { itemId, language } = options;
+        
+        // Get OpenAI API key from settings
+        const { getSettingsManager } = require('./settings-manager');
+        const settingsManager = getSettingsManager();
+        const openaiKey = settingsManager.get('openaiApiKey');
+        
+        if (!openaiKey) {
+          return { success: false, error: 'OpenAI API key not configured. Please add it in Settings.' };
+        }
+        
+        // Load the audio item
+        const item = this.storage.loadItem(itemId);
+        if (!item) {
+          return { success: false, error: 'Item not found' };
+        }
+        
+        // Get the audio file path
+        let audioPath = item.filePath;
+        if (!audioPath || !fs.existsSync(audioPath)) {
+          // Try to find it in the item's content path
+          const indexEntry = this.storage.index.items.find(i => i.id === itemId);
+          if (indexEntry?.contentPath) {
+            audioPath = path.join(this.storage.storageRoot, indexEntry.contentPath);
+          }
+        }
+        
+        if (!audioPath || !fs.existsSync(audioPath)) {
+          return { success: false, error: 'Audio file not found' };
+        }
+        
+        console.log(`[Transcription] Transcribing file: ${audioPath}`);
+        
+        // Check if it's a video file - need to extract audio first
+        const fileExt = path.extname(audioPath).toLowerCase().replace('.', '') || 'mp3';
+        const videoFormats = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'flv', 'wmv', 'm4v'];
+        const isVideo = videoFormats.includes(fileExt) || 
+                       (item.fileType && item.fileType.startsWith('video/')) ||
+                       item.fileCategory === 'video';
+        
+        let audioBuffer;
+        let audioExtension = fileExt;
+        let tempAudioPath = null;
+        
+        if (isVideo) {
+          console.log(`[Transcription] Video file detected, extracting audio...`);
+          
+          // Extract audio from video using ffmpeg
+          try {
+            const ffmpeg = require('fluent-ffmpeg');
+            const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+            ffmpeg.setFfmpegPath(ffmpegPath);
+            
+            // Create temp file for extracted audio
+            const { app } = require('electron');
+            tempAudioPath = path.join(app.getPath('temp'), `transcribe_${Date.now()}.mp3`);
+            
+            await new Promise((resolve, reject) => {
+              ffmpeg(audioPath)
+                .noVideo()
+                .audioCodec('libmp3lame')
+                .audioBitrate('64k')  // Low bitrate to keep file small
+                .format('mp3')
+                .output(tempAudioPath)
+                .on('end', resolve)
+                .on('error', reject)
+                .run();
+            });
+            
+            console.log(`[Transcription] Audio extracted to: ${tempAudioPath}`);
+            audioBuffer = fs.readFileSync(tempAudioPath);
+            audioExtension = 'mp3';
+          } catch (ffmpegError) {
+            console.error('[Transcription] FFmpeg error:', ffmpegError);
+            return { success: false, error: 'Failed to extract audio from video. Make sure ffmpeg is installed.' };
+          }
+        } else {
+          // Read the audio file directly
+          audioBuffer = fs.readFileSync(audioPath);
+        }
+        
+        // Check file size limit (25MB for Whisper)
+        const maxSize = 25 * 1024 * 1024; // 25MB
+        if (audioBuffer.length > maxSize) {
+          // Cleanup temp file if exists
+          if (tempAudioPath && fs.existsSync(tempAudioPath)) {
+            fs.unlinkSync(tempAudioPath);
+          }
+          const sizeMB = (audioBuffer.length / 1024 / 1024).toFixed(1);
+          return { 
+            success: false, 
+            error: `Audio file too large (${sizeMB}MB). Maximum is 25MB. Try using the Video Editor to transcribe in segments.`
+          };
+        }
+        
+        console.log(`[Transcription] Audio size: ${(audioBuffer.length / 1024 / 1024).toFixed(2)}MB`);
+        
+        // OpenAI Whisper supports: flac, mp3, mp4, mpeg, mpga, m4a, ogg, wav, webm
+        const supportedFormats = ['flac', 'mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'ogg', 'wav', 'webm'];
+        if (!supportedFormats.includes(audioExtension)) {
+          // Cleanup temp file if exists
+          if (tempAudioPath && fs.existsSync(tempAudioPath)) {
+            fs.unlinkSync(tempAudioPath);
+          }
+          return { success: false, error: `Unsupported audio format: ${audioExtension}. Supported: ${supportedFormats.join(', ')}` };
+        }
+        
+        // Build multipart form data for Whisper API
+        const https = require('https');
+        const boundary = '----FormBoundary' + Math.random().toString(36).substr(2);
+        
+        const parts = [];
+        
+        // Add audio file
+        parts.push(Buffer.from(
+          `--${boundary}\r\n` +
+          `Content-Disposition: form-data; name="file"; filename="audio.${audioExtension}"\r\n` +
+          `Content-Type: audio/${audioExtension}\r\n\r\n`, 'utf-8'
+        ));
+        parts.push(audioBuffer);
+        parts.push(Buffer.from('\r\n', 'utf-8'));
+        
+        // Add model
+        parts.push(Buffer.from(
+          `--${boundary}\r\n` +
+          `Content-Disposition: form-data; name="model"\r\n\r\n` +
+          `whisper-1\r\n`, 'utf-8'
+        ));
+        
+        // Add language if specified
+        if (language) {
+          parts.push(Buffer.from(
+            `--${boundary}\r\n` +
+            `Content-Disposition: form-data; name="language"\r\n\r\n` +
+            `${language}\r\n`, 'utf-8'
+          ));
+        }
+        
+        // Add response format
+        parts.push(Buffer.from(
+          `--${boundary}\r\n` +
+          `Content-Disposition: form-data; name="response_format"\r\n\r\n` +
+          `text\r\n`, 'utf-8'
+        ));
+        
+        // Add closing boundary
+        parts.push(Buffer.from(`--${boundary}--\r\n`, 'utf-8'));
+        
+        const fullBody = Buffer.concat(parts);
+        
+        const transcription = await new Promise((resolve, reject) => {
+          const req = https.request({
+            hostname: 'api.openai.com',
+            path: '/v1/audio/transcriptions',
+            method: 'POST',
+            headers: {
+              'Content-Type': `multipart/form-data; boundary=${boundary}`,
+              'Content-Length': fullBody.length,
+              'Authorization': `Bearer ${openaiKey}`
+            }
+          }, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+              if (res.statusCode !== 200) {
+                try {
+                  const errorJson = JSON.parse(data);
+                  reject(new Error(errorJson.error?.message || `HTTP ${res.statusCode}`));
+                } catch {
+                  reject(new Error(`HTTP ${res.statusCode}: ${data}`));
+                }
+                return;
+              }
+              
+              // Response is plain text (we requested response_format: text)
+              resolve(data);
+            });
+          });
+          
+          req.on('error', reject);
+          req.write(fullBody);
+          req.end();
+        });
+        
+        console.log(`[Transcription] Successfully transcribed, length: ${transcription.length}`);
+        
+        // Cleanup temp file if exists
+        if (tempAudioPath && fs.existsSync(tempAudioPath)) {
+          fs.unlinkSync(tempAudioPath);
+        }
+        
+        return { success: true, transcription };
+        
+      } catch (error) {
+        console.error('[Transcription] Error:', error);
+        // Cleanup temp file on error too
+        if (typeof tempAudioPath !== 'undefined' && tempAudioPath && fs.existsSync(tempAudioPath)) {
+          try { fs.unlinkSync(tempAudioPath); } catch (e) {}
+        }
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Save transcription - attach to source item or create new
+    ipcMain.handle('clipboard:save-transcription', async (event, options) => {
+      try {
+        const { transcription, sourceItemId, sourceFileName, attachToSource } = options;
+        
+        if (!transcription) {
+          return { success: false, error: 'No transcription provided' };
+        }
+        
+        const timestamp = Date.now();
+        
+        // If attaching to source item
+        if (attachToSource && sourceItemId) {
+          const itemDir = path.join(this.storage.itemsDir, sourceItemId);
+          
+          if (!fs.existsSync(itemDir)) {
+            fs.mkdirSync(itemDir, { recursive: true });
+          }
+          
+          // Save transcription as text file
+          const transcriptionPath = path.join(itemDir, 'transcription.txt');
+          fs.writeFileSync(transcriptionPath, transcription, 'utf8');
+          
+          // Update metadata
+          const metadataPath = path.join(itemDir, 'metadata.json');
+          let metadata = {};
+          if (fs.existsSync(metadataPath)) {
+            metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+          }
+          
+          metadata.transcription = {
+            path: 'transcription.txt',
+            transcribedAt: timestamp,
+            length: transcription.length
+          };
+          
+          fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+          
+          // Update index
+          this.storage.updateItemIndex(sourceItemId, {
+            hasTranscription: true
+          });
+          
+          console.log(`[Transcription] Attached to item ${sourceItemId}`);
+          return { success: true, itemId: sourceItemId, attached: true };
+        }
+        
+        // Create as new item (fallback)
+        const preview = `📝 Transcription: "${transcription.substring(0, 50)}${transcription.length > 50 ? '...' : ''}"`;
+        
+        const newItem = {
+          type: 'text',
+          content: transcription,
+          preview: preview,
+          timestamp: timestamp,
+          spaceId: this.currentSpace || 'unclassified',
+          metadata: {
+            source: 'transcription',
+            sourceItemId: sourceItemId,
+            sourceFileName: sourceFileName,
+            transcribedAt: timestamp
+          }
+        };
+        
+        const indexEntry = this.storage.addItem(newItem);
+        
+        this.history.unshift({
+          ...newItem,
+          id: indexEntry.id
+        });
+        
+        this.updateSpaceCounts();
+        this.notifyHistoryUpdate();
+        
+        console.log(`[Transcription] Saved as new item: ${indexEntry.id}`);
+        return { success: true, itemId: indexEntry.id, attached: false };
+        
+      } catch (error) {
+        console.error('[Transcription] Error saving:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Helper: Convert HH:MM:SS to seconds
+    const timeToSeconds = (timeStr) => {
+      const parts = timeStr.split(':').map(Number);
+      if (parts.length === 3) {
+        return parts[0] * 3600 + parts[1] * 60 + parts[2];
+      } else if (parts.length === 2) {
+        return parts[0] * 60 + parts[1];
+      }
+      return parseFloat(timeStr) || 0;
+    };
+    
+    // Helper: Parse speaker transcription format
+    // Format: "Speaker A [00:00:00 - 00:00:05]: text"
+    const parseSpeakerTranscription = (content) => {
+      const lines = content.split('\n').filter(l => l.trim());
+      const segments = [];
+      
+      // Regex to match: Speaker X [HH:MM:SS - HH:MM:SS]: text
+      const regex = /^(Speaker \w+)\s*\[(\d{2}:\d{2}:\d{2})\s*-\s*(\d{2}:\d{2}:\d{2})\]:\s*(.+)$/;
+      
+      for (const line of lines) {
+        const match = line.match(regex);
+        if (match) {
+          const [, speaker, startTime, endTime, text] = match;
+          segments.push({
+            speaker: speaker,
+            start: timeToSeconds(startTime),
+            end: timeToSeconds(endTime),
+            text: text.trim()
+          });
+        }
+      }
+      
+      return segments.length > 0 ? segments : null;
+    };
+
+    // Get transcription for an item (if attached)
+    ipcMain.handle('clipboard:get-transcription', async (event, itemId) => {
+      try {
+        const itemDir = path.join(this.storage.itemsDir, itemId);
+        
+        // Check multiple possible transcription file locations
+        const transcriptionFiles = [
+          { path: path.join(itemDir, 'transcription.txt'), source: 'whisper' },
+          { path: path.join(itemDir, 'transcript.txt'), source: 'transcript' },
+        ];
+        
+        // Check for transcription-speakers.txt (has timed segments from AssemblyAI)
+        const speakersPath = path.join(itemDir, 'transcription-speakers.txt');
+        let segments = null;
+        
+        if (fs.existsSync(speakersPath)) {
+          try {
+            const speakersContent = fs.readFileSync(speakersPath, 'utf8');
+            // Parse speaker transcription format: "Speaker A [00:00:00 - 00:00:05]: text"
+            segments = parseSpeakerTranscription(speakersContent);
+            console.log('[Transcription] Parsed', segments?.length || 0, 'segments from speakers file');
+          } catch (e) {
+            console.warn('[Transcription] Could not parse speakers file:', e.message);
+          }
+        }
+
+        // Check for plain text transcription files
+        for (const file of transcriptionFiles) {
+          if (fs.existsSync(file.path)) {
+            const transcription = fs.readFileSync(file.path, 'utf8');
+            return {
+              success: true,
+              transcription: transcription,
+              hasTranscription: true,
+              source: file.source,
+              segments: segments // Include parsed segments if available
+            };
+          }
+        }
+
+        // Also check metadata for YouTube transcript
+        const metadataPath = path.join(itemDir, 'metadata.json');
+        if (fs.existsSync(metadataPath)) {
+          const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+
+          // Check for YouTube transcript in metadata
+          if (metadata.transcript && metadata.transcript.text) {
+            return {
+              success: true,
+              transcription: metadata.transcript.text,
+              hasTranscription: true,
+              source: 'youtube',
+              language: metadata.transcript.language,
+              isAutoGenerated: metadata.transcript.isAutoGenerated,
+              segments: metadata.transcript.segments || segments
+            };
+          }
+          
+          // Check for transcription segments directly in metadata
+          if (metadata.transcriptSegments) {
+            return {
+              success: true,
+              transcription: metadata.transcriptSegments.map(s => s.text).join(' '),
+              hasTranscription: true,
+              source: 'metadata',
+              segments: metadata.transcriptSegments
+            };
+          }
+        }
+
+        return { success: true, hasTranscription: false };
+      } catch (error) {
+        console.error('[Transcription] Error getting:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // AI Summary Generation - create a summary from transcript
+    ipcMain.handle('clipboard:generate-summary', async (event, options) => {
+      console.log('[AISummary] ====== Handler called ======');
+      try {
+        const { itemId, transcript, title } = options;
+        console.log('[AISummary] Starting summary generation for item:', itemId);
+        console.log('[AISummary] Transcript length:', transcript?.length || 0);
+        
+        if (!transcript || transcript.length < 100) {
+          return { success: false, error: 'Transcript is too short to summarize' };
+        }
+        
+        // Get API key from settings
+        const { getSettingsManager } = require('./settings-manager');
+        const settingsManager = getSettingsManager();
+        const apiKey = settingsManager.get('llmApiKey');
+        
+        if (!apiKey) {
+          return { success: false, error: 'No LLM API key configured. Please set your API key in Settings.' };
+        }
+        
+        // Truncate transcript if too long (use first 30000 chars for summary)
+        const truncatedTranscript = transcript.length > 30000 
+          ? transcript.substring(0, 30000) + '\n\n[Transcript truncated...]'
+          : transcript;
+        
+        // Detect API type
+        const isAnthropicKey = apiKey.startsWith('sk-ant-');
+        
+        console.log('[AISummary] Using API:', isAnthropicKey ? 'Claude' : 'OpenAI');
+        
+        let summary = '';
+        
+        if (isAnthropicKey) {
+          // Use Claude API
+          const https = require('https');
+          
+          const requestBody = JSON.stringify({
+            model: 'claude-sonnet-4-5-20250929',
+            max_tokens: 2000,
+            messages: [{
+              role: 'user',
+              content: `You are a skilled content summarizer. Given the following transcript${title ? ` from "${title}"` : ''}, write a comprehensive but concise summary.
+
+Create a structured summary with this format:
+
+OVERVIEW: One paragraph explaining what this content is about and why it matters.
+
+KEY POINTS:
+• Point 1 - explanation
+• Point 2 - explanation
+• Point 3 - explanation
+• Point 4 - explanation
+• Point 5 - explanation
+(Include 5-8 substantive key points)
+
+MAIN TAKEAWAYS: One paragraph summarizing the most important insights or conclusions.
+
+IMPORTANT RULES:
+1. Focus ONLY on actual content - ignore sponsor messages, ads, and promotional content
+2. Extract substantive arguments and insights, not surface-level observations
+3. Be specific and concrete - someone reading should understand the key ideas
+4. Use bullet points (•) for KEY POINTS only, no other formatting
+
+TRANSCRIPT:
+${truncatedTranscript}
+
+Write the structured summary now:`
+            }]
+          });
+          
+          const response = await new Promise((resolve, reject) => {
+            const req = https.request({
+              hostname: 'api.anthropic.com',
+              path: '/v1/messages',
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': apiKey,
+                'anthropic-version': '2023-06-01'
+              }
+            }, (res) => {
+              let data = '';
+              res.on('data', chunk => data += chunk);
+              res.on('end', () => {
+                try {
+                  resolve({ statusCode: res.statusCode, body: JSON.parse(data) });
+                } catch (e) {
+                  reject(new Error('Invalid JSON response'));
+                }
+              });
+            });
+            req.on('error', reject);
+            req.write(requestBody);
+            req.end();
+          });
+          
+          if (response.statusCode !== 200) {
+            throw new Error(`Claude API error: ${response.statusCode} - ${JSON.stringify(response.body)}`);
+          }
+          
+          summary = response.body.content?.[0]?.text || '';
+          
+        } else {
+          // Use OpenAI API
+          const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+              model: 'gpt-4o-mini',
+              messages: [{
+                role: 'user',
+                content: `You are a skilled content summarizer. Given the following transcript${title ? ` from "${title}"` : ''}, write a comprehensive but concise summary.
+
+Create a structured summary with this format:
+
+OVERVIEW: One paragraph explaining what this content is about and why it matters.
+
+KEY POINTS:
+• Point 1 - explanation
+• Point 2 - explanation
+• Point 3 - explanation
+• Point 4 - explanation
+• Point 5 - explanation
+(Include 5-8 substantive key points)
+
+MAIN TAKEAWAYS: One paragraph summarizing the most important insights or conclusions.
+
+IMPORTANT RULES:
+1. Focus ONLY on actual content - ignore sponsor messages, ads, and promotional content
+2. Extract substantive arguments and insights, not surface-level observations
+3. Be specific and concrete - someone reading should understand the key ideas
+4. Use bullet points (•) for KEY POINTS only, no other formatting
+
+TRANSCRIPT:
+${truncatedTranscript}
+
+Write the structured summary now:`
+              }],
+              max_tokens: 2000
+            })
+          });
+          
+          if (!response.ok) {
+            const errorBody = await response.text();
+            throw new Error(`OpenAI API error: ${response.status} - ${errorBody}`);
+          }
+          
+          const result = await response.json();
+          summary = result.choices?.[0]?.message?.content || '';
+        }
+        
+        if (!summary) {
+          return { success: false, error: 'Failed to generate summary' };
+        }
+        
+        console.log('[AISummary] Generated summary length:', summary.length);
+        
+        // Save to metadata
+        const itemDir = path.join(this.storage.itemsDir, itemId);
+        const metadataPath = path.join(itemDir, 'metadata.json');
+        if (fs.existsSync(metadataPath)) {
+          const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+          metadata.aiSummary = summary;
+          metadata.aiSummaryGeneratedAt = new Date().toISOString();
+          fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+          
+          // Update in-memory item
+          const historyItem = this.history.find(h => h.id === itemId);
+          if (historyItem && historyItem.metadata) {
+            historyItem.metadata.aiSummary = summary;
+            historyItem.metadata.aiSummaryGeneratedAt = metadata.aiSummaryGeneratedAt;
+          }
+        }
+        
+        return { success: true, summary };
+        
+      } catch (error) {
+        console.error('[AISummary] Error:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // AI Speaker Identification - analyze transcript and assign speakers
+    ipcMain.handle('clipboard:identify-speakers', async (event, options) => {
+      console.log('[SpeakerID] ====== Handler called ======');
+      try {
+        const { itemId, transcript, contextHint } = options;
+        console.log('[SpeakerID] Starting speaker identification for item:', itemId);
+        console.log('[SpeakerID] Transcript length:', transcript?.length || 0);
+        
+        // Get API key from settings
+        const { getSettingsManager } = require('./settings-manager');
+        const settingsManager = getSettingsManager();
+        
+        // Get API keys - try multiple field names
+        const llmApiKey = settingsManager.get('llmApiKey') || '';
+        const claudeApiKey = settingsManager.get('claudeApiKey') || '';
+        const openaiApiKey = settingsManager.get('openaiApiKey') || '';
+        
+        console.log('[SpeakerID] Raw keys - llmApiKey:', !!llmApiKey, 'claudeApiKey:', !!claudeApiKey, 'openaiApiKey:', !!openaiApiKey);
+        
+        // Auto-detect key type by prefix (more reliable than provider setting)
+        let claudeKey = null;
+        let openaiKey = null;
+        
+        // Check llmApiKey first
+        if (llmApiKey.startsWith('sk-ant-')) {
+          claudeKey = llmApiKey;
+        } else if (llmApiKey.startsWith('sk-')) {
+          openaiKey = llmApiKey;
+        }
+        
+        // Check dedicated claudeApiKey field
+        if (!claudeKey && claudeApiKey && claudeApiKey.startsWith('sk-ant-')) {
+          claudeKey = claudeApiKey;
+        }
+        
+        // Also check dedicated openaiApiKey field
+        if (!openaiKey && openaiApiKey && openaiApiKey.startsWith('sk-')) {
+          openaiKey = openaiApiKey;
+        }
+        
+        console.log('[SpeakerID] Key detection - Claude:', !!claudeKey, 'OpenAI:', !!openaiKey);
+        if (claudeKey) console.log('[SpeakerID] Claude key prefix:', claudeKey.substring(0, 15) + '...');
+        
+        if (!claudeKey && !openaiKey) {
+          return { success: false, error: 'No AI API key configured. Please add a Claude or OpenAI API key in Settings.' };
+        }
+        
+        // Get model from settings (defaults to Claude Sonnet 4.5 or GPT-4o)
+        const llmModel = settingsManager.get('llmModel') || (claudeKey ? 'claude-sonnet-4-5-20250929' : 'gpt-4o');
+        console.log('[SpeakerID] Using model:', llmModel);
+        
+        // Try to get timecoded segments from metadata for better analysis
+        let formattedTranscript = transcript;
+        if (itemId) {
+          try {
+            const itemDir = path.join(this.storage.itemsDir, itemId);
+            const metadataPath = path.join(itemDir, 'metadata.json');
+            if (fs.existsSync(metadataPath)) {
+              const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+              if (metadata.transcript?.segments?.length > 0) {
+                // Format with timecodes for better speaker detection
+                formattedTranscript = metadata.transcript.segments.map(seg => 
+                  `[${seg.startFormatted || formatTime(seg.start)}] ${seg.text}`
+                ).join('\n');
+                console.log('[SpeakerID] Using timecoded segments:', metadata.transcript.segments.length, 'segments');
+              }
+            }
+          } catch (e) {
+            console.log('[SpeakerID] Could not load segments, using plain transcript');
+          }
+        }
+        
+        // Truncate transcript if too long (keep first 100k chars for context)
+        const maxChars = 100000;
+        const truncatedTranscript = formattedTranscript.length > maxChars 
+          ? formattedTranscript.substring(0, maxChars) + '\n\n[... transcript truncated for processing ...]'
+          : formattedTranscript;
+        
+        // Helper function to format seconds to timecode
+        function formatTime(seconds) {
+          const h = Math.floor(seconds / 3600);
+          const m = Math.floor((seconds % 3600) / 60);
+          const s = Math.floor(seconds % 60);
+          const ms = Math.floor((seconds % 1) * 1000);
+          return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${ms.toString().padStart(3, '0')}`;
+        }
+        
+        const systemPrompt = `You are an expert at analyzing conversation transcripts and identifying different speakers.
+
+Your task is to take a transcript (which may include timecodes) and add speaker labels to identify who is speaking.
+
+IMPORTANT: You will receive CONTEXT INFORMATION about the video/audio that should help you identify the speakers by name. USE THIS CONTEXT to figure out:
+- Who the host/interviewer is (often the channel owner/uploader)
+- Who the guest(s) are (often mentioned in the title or description)
+- The format of the conversation (interview, podcast, lecture, etc.)
+
+Guidelines:
+1. FIRST, analyze the context (title, description, uploader) to identify speaker names
+2. The transcript may have timecodes in format [HH:MM:SS.mmm] - PRESERVE these
+3. Use speaker patterns to assign dialogue:
+   - Interviewers ask questions, guests give long answers
+   - Hosts often introduce topics and guests
+   - The channel owner is usually the host/interviewer
+4. Look for first-person references that reveal identity:
+   - "At my company SSI..." = the person who founded SSI
+   - "When I interviewed..." = the interviewer
+   - "My research shows..." = likely the expert guest
+5. USE ACTUAL NAMES when you can identify them from context
+6. Format as:
+
+   **[Actual Name]:**
+   [00:00:00.000] Their dialogue...
+   
+   **[Other Name]:**
+   [00:00:10.000] Their response...
+
+7. Group consecutive lines from the same speaker
+8. Only use "Speaker 1/2" if names cannot be determined from context
+9. Preserve ALL original text exactly - only add speaker labels`;
+
+        const userPrompt = `Please analyze this transcript and identify the speakers by name.
+
+${contextHint ? `=== VIDEO/AUDIO CONTEXT ===
+${contextHint}
+=== END CONTEXT ===
+
+Use the above context to identify the actual names of the speakers. The channel/uploader is typically the host/interviewer.
+
+` : ''}=== TRANSCRIPT TO ANALYZE ===
+${truncatedTranscript}`;
+
+        let result;
+        
+        // Process in chunks if transcript is very large (>10K chars)
+        // Smaller chunks = faster API responses and incremental results
+        const chunkSize = 10000;
+        const needsChunking = truncatedTranscript.length > chunkSize;
+        
+        console.log('[SpeakerID] Transcript length:', truncatedTranscript.length, 'needsChunking:', needsChunking);
+        
+        async function callClaude(prompt, systemMsg) {
+          console.log('[SpeakerID] Calling Claude API, prompt length:', prompt.length);
+          console.log('[SpeakerID] Using model:', llmModel);
+          console.log('[SpeakerID] Using key:', claudeKey ? claudeKey.substring(0, 15) + '...' : 'NONE');
+          
+          // Use Node's https module for more reliable requests in Electron
+          const https = require('https');
+          
+          return new Promise((resolve, reject) => {
+            const requestBody = JSON.stringify({
+              model: llmModel,
+              max_tokens: 8000,
+              system: systemMsg,
+              messages: [{ role: 'user', content: prompt }]
+            });
+            
+            const options = {
+              hostname: 'api.anthropic.com',
+              port: 443,
+              path: '/v1/messages',
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(requestBody),
+                'x-api-key': claudeKey,
+                'anthropic-version': '2023-06-01'
+              },
+              timeout: 120000
+            };
+            
+            console.log('[SpeakerID] Sending https request...');
+            
+            const req = https.request(options, (res) => {
+              console.log('[SpeakerID] ✅ Response received! Status:', res.statusCode);
+              let data = '';
+              let totalReceived = 0;
+              
+              res.on('data', (chunk) => {
+                totalReceived += chunk.length;
+                console.log('[SpeakerID] 📦 Received chunk, size:', chunk.length, 'Total so far:', totalReceived);
+                data += chunk;
+              });
+              
+              res.on('end', () => {
+                console.log('[SpeakerID] Response complete, data length:', data.length);
+                
+                if (res.statusCode !== 200) {
+                  console.error('[SpeakerID] ====== API ERROR ======');
+                  console.error('[SpeakerID] Status:', res.statusCode);
+                  console.error('[SpeakerID] Response:', data);
+                  
+                  // Try to parse error from response
+                  let errorMsg = `Claude API returned status ${res.statusCode}`;
+                  try {
+                    const errorData = JSON.parse(data);
+                    if (errorData.error?.message) {
+                      errorMsg = errorData.error.message;
+                    }
+                  } catch (e) {
+                    // Couldn't parse error, use raw data
+                    errorMsg += `: ${data.substring(0, 200)}`;
+                  }
+                  
+                  reject(new Error(errorMsg));
+                  return;
+                }
+                
+                try {
+                  const parsed = JSON.parse(data);
+                  const text = parsed.content?.[0]?.text || '';
+                  console.log('[SpeakerID] ✅ Successfully parsed response, text length:', text.length);
+                  resolve(text);
+                } catch (e) {
+                  console.error('[SpeakerID] Failed to parse response:', e.message);
+                  reject(new Error('Failed to parse Claude response: ' + e.message));
+                }
+              });
+            });
+            
+            req.on('error', (e) => {
+              console.error('[SpeakerID] ====== REQUEST ERROR ======');
+              console.error('[SpeakerID] Error:', e.message);
+              console.error('[SpeakerID] Error code:', e.code);
+              console.error('[SpeakerID] Stack:', e.stack);
+              reject(new Error(`Network error: ${e.message} (${e.code || 'Unknown'})`));
+            });
+            
+            req.on('timeout', () => {
+              console.error('[SpeakerID] ====== REQUEST TIMEOUT ======');
+              console.error('[SpeakerID] Request timed out after 2 minutes!');
+              req.destroy();
+              reject(new Error('Request timed out after 2 minutes. The transcript may be too long or Claude API is slow.'));
+            });
+            
+            console.log('[SpeakerID] Writing request body, size:', Buffer.byteLength(requestBody));
+            req.write(requestBody);
+            console.log('[SpeakerID] Ending request...');
+            req.end();
+            console.log('[SpeakerID] Request sent, waiting for response...');
+          });
+        }
+        
+        async function callOpenAI(prompt, systemMsg) {
+          console.log('[SpeakerID] Calling OpenAI API, prompt length:', prompt.length);
+          console.log('[SpeakerID] Using model:', llmModel);
+          
+          const https = require('https');
+          
+          return new Promise((resolve, reject) => {
+            const requestBody = JSON.stringify({
+              model: llmModel,
+              messages: [
+                { role: 'system', content: systemMsg },
+                { role: 'user', content: prompt }
+              ],
+              max_tokens: 8000
+            });
+            
+            const options = {
+              hostname: 'api.openai.com',
+              port: 443,
+              path: '/v1/chat/completions',
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(requestBody),
+                'Authorization': `Bearer ${openaiKey}`
+              },
+              timeout: 120000
+            };
+            
+            const req = https.request(options, (res) => {
+              console.log('[SpeakerID] OpenAI response status:', res.statusCode);
+              let data = '';
+              
+              res.on('data', (chunk) => {
+                data += chunk;
+              });
+              
+              res.on('end', () => {
+                if (res.statusCode !== 200) {
+                  reject(new Error(`OpenAI API error: ${res.statusCode} - ${data.substring(0, 500)}`));
+                  return;
+                }
+                
+                try {
+                  const parsed = JSON.parse(data);
+                  resolve(parsed.choices[0].message.content);
+                } catch (e) {
+                  reject(new Error('Failed to parse OpenAI response: ' + e.message));
+                }
+              });
+            });
+            
+            req.on('error', (e) => reject(e));
+            req.on('timeout', () => {
+              req.destroy();
+              reject(new Error('Request timed out after 2 minutes'));
+            });
+            
+            req.write(requestBody);
+            req.end();
+          });
+        }
+        
+        const callAI = claudeKey ? callClaude : callOpenAI;
+        
+        // Helper to send progress to renderer
+        const sendProgress = (status, chunk = null, total = null, partialResult = null) => {
+          if (event.sender && !event.sender.isDestroyed()) {
+            event.sender.send('speaker-id:progress', { status, chunk, total, partialResult });
+          }
+        };
+        
+        if (needsChunking) {
+          // Split transcript into chunks by character count (simpler and more reliable)
+          const chunks = [];
+          for (let i = 0; i < truncatedTranscript.length; i += chunkSize) {
+            chunks.push(truncatedTranscript.substring(i, i + chunkSize));
+          }
+          
+          console.log('[SpeakerID] Processing', chunks.length, 'chunks');
+          sendProgress(`Starting analysis: ${chunks.length} chunks to process...`, 0, chunks.length);
+          
+          // Process each chunk
+          const processedChunks = [];
+          let speakerContext = '';
+          
+          for (let i = 0; i < chunks.length; i++) {
+            console.log('[SpeakerID] Processing chunk', i + 1, 'of', chunks.length);
+            sendProgress(`Processing chunk ${i + 1} of ${chunks.length}...`, i + 1, chunks.length);
+            
+            // Include context in first chunk, speaker names in subsequent chunks
+            let chunkPrompt;
+            if (i === 0 && contextHint) {
+              chunkPrompt = `=== VIDEO/AUDIO CONTEXT ===
+${contextHint}
+=== END CONTEXT ===
+
+Use the above context to identify speakers by their actual names.
+
+This is part ${i + 1} of ${chunks.length} of the transcript.
+
+=== TRANSCRIPT CHUNK ===
+${chunks[i]}`;
+            } else {
+              chunkPrompt = `${speakerContext ? `Speakers identified so far: ${speakerContext}\n\n` : ''}This is part ${i + 1} of ${chunks.length} of the transcript. Continue using the same speaker names consistently.\n\n=== TRANSCRIPT CHUNK ===\n${chunks[i]}`;
+            }
+            
+            const chunkResult = await callAI(chunkPrompt, systemPrompt);
+            processedChunks.push(chunkResult);
+            
+            // Extract speaker names for context in next chunk
+            const speakerMatches = chunkResult.match(/\*\*\[([^\]]+)\]\*\*/g) || [];
+            const uniqueSpeakers = [...new Set(speakerMatches.map(m => m.replace(/\*\*\[|\]\*\*/g, '')))];
+            speakerContext = uniqueSpeakers.join(', ');
+            
+            // Send partial results to frontend
+            const partialResult = processedChunks.join('\n\n---\n\n');
+            sendProgress(
+              `Chunk ${i + 1}/${chunks.length} complete. Speakers found: ${uniqueSpeakers.join(', ') || 'analyzing...'}`,
+              i + 1,
+              chunks.length,
+              partialResult
+            );
+          }
+          
+          result = processedChunks.join('\n\n---\n\n');
+          sendProgress('Analysis complete!', chunks.length, chunks.length);
+        } else {
+          // Process in one go
+          console.log('[SpeakerID] Processing in single request');
+          result = await callAI(userPrompt, systemPrompt);
+        }
+        
+        console.log('[SpeakerID] Successfully identified speakers, result length:', result.length);
+        
+        // Save the speaker-identified transcript
+        if (itemId) {
+          const itemDir = path.join(this.storage.itemsDir, itemId);
+          const speakerTranscriptPath = path.join(itemDir, 'transcription-speakers.txt');
+          fs.writeFileSync(speakerTranscriptPath, result, 'utf8');
+          console.log('[SpeakerID] Saved speaker transcript to:', speakerTranscriptPath);
+          
+          // Update metadata - replace transcript with speaker-identified version
+          const metadataPath = path.join(itemDir, 'metadata.json');
+          if (fs.existsSync(metadataPath)) {
+            const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+            
+            // Backup original transcript if not already backed up
+            if (!metadata.originalTranscript && metadata.transcript) {
+              metadata.originalTranscript = metadata.transcript;
+            }
+            
+            // Replace transcript with speaker-identified version
+            metadata.transcript = result;
+            metadata.speakersIdentified = true;
+            metadata.speakersIdentifiedAt = new Date().toISOString();
+            metadata.speakersIdentifiedModel = llmModel;
+            
+            fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+            console.log('[SpeakerID] Updated metadata.transcript with speaker-identified version');
+            
+            // Also update in-memory history item
+            const historyItem = this.history.find(h => h.id === itemId);
+            if (historyItem && historyItem.metadata) {
+              if (!historyItem.metadata.originalTranscript) {
+                historyItem.metadata.originalTranscript = historyItem.metadata.transcript;
+              }
+              historyItem.metadata.transcript = result;
+              historyItem.metadata.speakersIdentified = true;
+              historyItem.metadata.speakersIdentifiedAt = metadata.speakersIdentifiedAt;
+              historyItem.metadata.speakersIdentifiedModel = llmModel;
+            }
+          }
+        }
+        
+        return { 
+          success: true, 
+          transcript: result,
+          model: llmModel
+        };
+      } catch (error) {
+        console.error('[SpeakerID] ====== ERROR ======');
+        console.error('[SpeakerID] Error message:', error.message);
+        console.error('[SpeakerID] Error stack:', error.stack);
+        return { 
+          success: false, 
+          error: error.message || 'Unknown error occurred during speaker identification'
+        };
       }
     });
     
@@ -1425,20 +4353,170 @@ class ClipboardManagerV2 {
       return this.showItemInFinder(itemId);
     });
     
+    // Get video file path from item ID (with optional scenes from metadata)
+    ipcMain.handle('clipboard:get-video-path', async (event, itemId) => {
+      try {
+        console.log('[ClipboardManager] Getting video path for item:', itemId);
+        
+        // First check the index entry's contentPath (most reliable)
+        const indexEntry = this.storage.index.items.find(i => i.id === itemId);
+        console.log('[ClipboardManager] Index entry:', indexEntry ? { contentPath: indexEntry.contentPath, fileName: indexEntry.fileName } : 'null');
+        
+        // Helper to load scenes from metadata
+        const loadScenes = (itemId) => {
+          try {
+            const metadataPath = path.join(this.storage.itemsDir, itemId, 'metadata.json');
+            if (fs.existsSync(metadataPath)) {
+              const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+              return metadata.scenes || [];
+            }
+          } catch (e) {
+            console.error('[ClipboardManager] Error loading scenes:', e);
+          }
+          return [];
+        };
+        
+        if (indexEntry?.contentPath) {
+          const contentPath = path.join(this.storage.storageRoot, indexEntry.contentPath);
+          console.log('[ClipboardManager] Checking contentPath:', contentPath);
+          if (fs.existsSync(contentPath)) {
+            console.log('[ClipboardManager] Found video at contentPath:', contentPath);
+            const scenes = loadScenes(itemId);
+            return { 
+              success: true, 
+              filePath: contentPath, 
+              fileName: indexEntry.fileName,
+              scenes: scenes
+            };
+          } else {
+            console.log('[ClipboardManager] contentPath file does not exist');
+          }
+        }
+        
+        // Try to get from item directly
+        const item = this.history.find(h => h.id === itemId);
+        if (item?.filePath && fs.existsSync(item.filePath)) {
+          console.log('[ClipboardManager] Found filePath on item:', item.filePath);
+          const scenes = loadScenes(itemId);
+          return { 
+            success: true, 
+            filePath: item.filePath, 
+            fileName: item.fileName || path.basename(item.filePath),
+            scenes: scenes
+          };
+        }
+        
+        // Try loading full item from storage
+        const fullItem = this.storage.loadItem(itemId);
+        if (fullItem?.filePath && fs.existsSync(fullItem.filePath)) {
+          console.log('[ClipboardManager] Found filePath in full item:', fullItem.filePath);
+          const scenes = loadScenes(itemId);
+          return { 
+            success: true, 
+            filePath: fullItem.filePath,
+            fileName: fullItem.fileName || path.basename(fullItem.filePath),
+            scenes: scenes
+          };
+        }
+        
+        // Check the item directory for media files
+        const itemDir = path.join(this.storage.itemsDir, itemId);
+        console.log('[ClipboardManager] Checking item dir:', itemDir);
+        if (fs.existsSync(itemDir)) {
+          const files = fs.readdirSync(itemDir);
+          console.log('[ClipboardManager] Files in item dir:', files);
+          const videoExtensions = ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm', '.m4v', '.mpg', '.mpeg'];
+          const videoFile = files.find(f => videoExtensions.some(ext => f.toLowerCase().endsWith(ext)));
+          if (videoFile) {
+            const videoPath = path.join(itemDir, videoFile);
+            console.log('[ClipboardManager] Found video file in item dir:', videoPath);
+            const scenes = loadScenes(itemId);
+            return { 
+              success: true, 
+              filePath: videoPath,
+              fileName: videoFile,
+              scenes: scenes
+            };
+          }
+        }
+        
+        // File not found - provide helpful error
+        const expectedPath = indexEntry?.contentPath 
+          ? path.join(this.storage.storageRoot, indexEntry.contentPath)
+          : 'unknown';
+        console.error('[ClipboardManager] Video file not found. Expected at:', expectedPath);
+        return { 
+          success: false, 
+          error: `Video file is missing from storage. The file may have been deleted or moved. Expected: ${indexEntry?.fileName || 'unknown'}`
+        };
+      } catch (error) {
+        console.error('[ClipboardManager] Error getting video path:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Open video in Video Editor
+    ipcMain.handle('clipboard:open-video-editor', async (event, filePath) => {
+      try {
+        const { BrowserWindow } = require('electron');
+        const path = require('path');
+        
+        console.log('[ClipboardManager] Opening Video Editor with file:', filePath);
+        
+        if (!filePath || !fs.existsSync(filePath)) {
+          console.error('[ClipboardManager] Video file not found:', filePath);
+          return { success: false, error: 'Video file not found: ' + filePath };
+        }
+        
+        const videoEditorWindow = new BrowserWindow({
+          width: 1400,
+          height: 900,
+          title: 'Video Editor',
+          webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            preload: path.join(__dirname, 'preload-video-editor.js')
+          }
+        });
+        
+        // Load the video editor HTML
+        videoEditorWindow.loadFile('video-editor.html');
+        
+        // Once loaded, send the file path to open
+        videoEditorWindow.webContents.on('did-finish-load', () => {
+          console.log('[ClipboardManager] Video Editor loaded, sending file path:', filePath);
+          videoEditorWindow.webContents.send('video-editor:load-file', filePath);
+        });
+        
+        // Setup video editor IPC for this window
+        if (global.videoEditor) {
+          global.videoEditor.setupIPC(videoEditorWindow);
+        }
+        
+        return { success: true };
+      } catch (error) {
+        console.error('[ClipboardManager] Error opening Video Editor:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
     ipcMain.handle('clipboard:get-current-user', () => {
       return os.userInfo().username || 'Unknown';
     });
     
     // AI metadata generation
     ipcMain.handle('clipboard:generate-metadata-ai', async (event, { itemId, apiKey, customPrompt }) => {
-      // Use the helper method that we just fixed
-      const result = await this.generateAIMetadata(itemId, apiKey, customPrompt);
+      // Use the NEW specialized metadata generator
+      const MetadataGenerator = require('./metadata-generator');
+      const metadataGen = new MetadataGenerator(this);
       
+      const result = await metadataGen.generateMetadataForItem(itemId, apiKey, customPrompt);
+
       if (result.success) {
         // Get the updated item to return full metadata
         const item = this.storage.loadItem(itemId);
-          return { 
-            success: true, 
+          return {
+            success: true,
           metadata: item.metadata,
             message: 'Metadata generated successfully'
           };
@@ -1485,35 +4563,69 @@ class ClipboardManagerV2 {
       return { success: true };
     });
     
-    // Get audio file as base64
+    // Get audio/video file - returns file path for videos, base64 for audio
     ipcMain.handle('clipboard:get-audio-data', (event, itemId) => {
+      console.log('[Media] get-audio-data called for:', itemId);
+      
       const item = this.history.find(h => h.id === itemId);
-      if (!item || item.type !== 'file' || item.fileType !== 'audio') {
-        return { success: false, error: 'Audio file not found' };
+      console.log('[Media] Found item:', item ? {
+        type: item.type,
+        fileType: item.fileType,
+        fileCategory: item.fileCategory,
+        filePath: item.filePath,
+        _needsContent: item._needsContent
+      } : 'null');
+      
+      const isAudioOrVideo = item && item.type === 'file' && 
+        (item.fileType === 'audio' || item.fileType === 'video' || 
+         item.fileCategory === 'audio' || item.fileCategory === 'video');
+      
+      if (!item || !isAudioOrVideo) {
+        console.error('[Media] Not an audio/video file or not found');
+        return { success: false, error: 'Audio/video file not found' };
       }
       
       try {
+        let filePath = item.filePath;
+        
         // Load full item if needed
-        if (item._needsContent) {
+        if (item._needsContent || !filePath) {
+          console.log('[Media] Loading full item from storage...');
           const fullItem = this.storage.loadItem(itemId);
-          if (fullItem.filePath && fs.existsSync(fullItem.filePath)) {
-            const audioData = fs.readFileSync(fullItem.filePath);
-            const base64 = audioData.toString('base64');
-            const mimeType = this.getAudioMimeType(item.fileExt);
-            const dataUrl = `data:${mimeType};base64,${base64}`;
-            return { success: true, dataUrl };
+          console.log('[Media] Full item loaded:', fullItem ? { filePath: fullItem.filePath } : 'null');
+          filePath = fullItem?.filePath;
+        }
+        
+        if (filePath && fs.existsSync(filePath)) {
+          const isVideo = item.fileCategory === 'video' || 
+                         (item.fileType && item.fileType.startsWith('video/'));
+          
+          // For videos, return file path directly (don't load into memory)
+          if (isVideo) {
+            console.log('[Media] Video file - returning path:', filePath);
+            const mimeType = this.getMediaMimeType(item.fileExt, item.fileType);
+            return { 
+              success: true, 
+              filePath: filePath,
+              mimeType: mimeType,
+              isVideo: true
+            };
           }
-        } else if (item.filePath && fs.existsSync(item.filePath)) {
-          const audioData = fs.readFileSync(item.filePath);
-          const base64 = audioData.toString('base64');
-          const mimeType = this.getAudioMimeType(item.fileExt);
+          
+          // For audio files, load as base64 (they're typically small enough)
+          console.log('[Media] Audio file - reading into memory:', filePath);
+          const mediaData = fs.readFileSync(filePath);
+          const base64 = mediaData.toString('base64');
+          const mimeType = this.getMediaMimeType(item.fileExt, item.fileType);
           const dataUrl = `data:${mimeType};base64,${base64}`;
+          console.log('[Media] Success - data length:', base64.length);
           return { success: true, dataUrl };
         }
         
-        return { success: false, error: 'Audio file no longer exists' };
+        console.error('[Media] File not found at:', filePath);
+        return { success: false, error: 'Media file no longer exists at: ' + filePath };
       } catch (error) {
-        console.error('Error reading audio file:', error);
+        console.error('[Media] Error reading media file:', error);
         return { success: false, error: error.message };
       }
     });
@@ -1592,46 +4704,102 @@ class ClipboardManagerV2 {
     
     // Black hole handlers
     ipcMain.handle('black-hole:add-text', async (event, data) => {
-      console.log('Black hole: Adding text to space:', data.spaceId);
+      console.log('\n');
+      console.log('╔══════════════════════════════════════════════════════════════╗');
+      console.log('║  BLACK HOLE ADD-TEXT HANDLER CALLED                          ║');
+      console.log('╚══════════════════════════════════════════════════════════════╝');
+      console.log('[BlackHole-Backend] Time:', new Date().toISOString());
+      console.log('[BlackHole-Backend] Data received:', data ? 'YES' : 'NO');
+      if (data) {
+        console.log('[BlackHole-Backend] spaceId:', data.spaceId);
+        console.log('[BlackHole-Backend] content:', data.content ? data.content.substring(0, 80) : 'NONE');
+        console.log('[BlackHole-Backend] content length:', data.content ? data.content.length : 0);
+      }
       
-      // Capture app context for the source of the paste
-      let context = null;
       try {
-        context = await this.contextCapture.getFullContext();
-        console.log('[Black hole] Captured context:', context);
-      } catch (error) {
-        console.error('[Black hole] Error capturing context:', error);
-      }
-      
-      // Enhance source detection with context
-      const detectedSource = context 
-        ? this.contextCapture.enhanceSourceDetection(data.content, context)
-        : this.detectSource(data.content);
-      
-      const item = {
-        type: 'text',
-        content: data.content,
-        preview: this.truncateText(data.content, 100),
-        timestamp: Date.now(),
-        pinned: false,
-        spaceId: data.spaceId || this.currentSpace || 'unclassified',
-        source: detectedSource
-      };
-      
-      // Add context to metadata if available
-      if (context) {
-        item.metadata = {
-          context: {
-            app: context.app,
-            window: context.window,
-            contextDisplay: this.contextCapture.formatContextDisplay(context)
-          }
+        // Check if content is a YouTube URL
+        let isYouTubeUrl;
+        try {
+          const ytModule = require('./youtube-downloader');
+          isYouTubeUrl = ytModule.isYouTubeUrl;
+          console.log('[BlackHole-Backend] YouTube module loaded successfully');
+        } catch (e) {
+          console.error('[BlackHole-Backend] Failed to load youtube-downloader:', e.message);
+          isYouTubeUrl = () => false;
+        }
+        
+        const content = data.content?.trim();
+        const isYT = isYouTubeUrl(content);
+        console.log('[BlackHole-Backend] Content preview:', content?.substring(0, 80));
+        console.log('[BlackHole-Backend] Is YouTube URL:', isYT);
+        
+        if (isYT) {
+          console.log('[BlackHole-Backend] >>> YOUTUBE PATH - Returning YouTube detection <<<');
+          const result = { 
+            success: true, 
+            isYouTube: true, 
+            youtubeUrl: content,
+            spaceId: data.spaceId || this.currentSpace || 'unclassified',
+            message: 'YouTube video detected'
+          };
+          console.log('[BlackHole-Backend] Returning:', JSON.stringify(result));
+          return result;
+        }
+        
+        console.log('[BlackHole-Backend] >>> TEXT PATH - Saving as text <<<');
+        
+        // Capture app context for the source of the paste
+        let context = null;
+        try {
+          context = await this.contextCapture.getFullContext();
+          console.log('[BlackHole-Backend] Context captured');
+        } catch (error) {
+          console.error('[BlackHole-Backend] Context capture error:', error.message);
+        }
+        
+        // Enhance source detection with context
+        const detectedSource = context 
+          ? this.contextCapture.enhanceSourceDetection(data.content, context)
+          : this.detectSource(data.content);
+        
+        console.log('[BlackHole-Backend] Detected source:', detectedSource);
+        
+        const item = {
+          type: 'text',
+          content: data.content,
+          preview: this.truncateText(data.content, 100),
+          timestamp: Date.now(),
+          pinned: false,
+          spaceId: data.spaceId || this.currentSpace || 'unclassified',
+          source: detectedSource
         };
+        
+        console.log('[BlackHole-Backend] Item prepared:', JSON.stringify({ ...item, content: item.content.substring(0, 50) }));
+        
+        // Add context to metadata if available
+        if (context) {
+          item.metadata = {
+            context: {
+              app: context.app,
+              window: context.window,
+              contextDisplay: this.contextCapture.formatContextDisplay(context)
+            }
+          };
+        }
+        
+        console.log('[BlackHole-Backend] Calling addToHistory...');
+        await this.addToHistory(item);
+        console.log('[BlackHole-Backend] addToHistory completed');
+        
+        console.log('[BlackHole-Backend] ========== ADD-TEXT SUCCESS ==========');
+        return { success: true };
+        
+      } catch (error) {
+        console.error('[BlackHole-Backend] ========== ADD-TEXT ERROR ==========');
+        console.error('[BlackHole-Backend] Error:', error);
+        console.error('[BlackHole-Backend] Stack:', error.stack);
+        return { success: false, error: error.message };
       }
-      
-      this.addToHistory(item);
-      
-      return { success: true };
     });
     
     ipcMain.handle('black-hole:add-html', async (event, data) => {
@@ -1673,7 +4841,7 @@ class ClipboardManagerV2 {
         };
       }
       
-      this.addToHistory(item);
+      await this.addToHistory(item);
       
       return { success: true };
     });
@@ -1723,13 +4891,58 @@ class ClipboardManagerV2 {
         };
       }
       
-      this.addToHistory(item);
+      await this.addToHistory(item);
       
       return { success: true };
     });
     
     ipcMain.handle('black-hole:add-file', async (event, data) => {
       console.log('Black hole: Adding file to space:', data.spaceId);
+      console.log('[BlackHole-AddFile] Input data:', {
+        hasFilePath: !!data.filePath,
+        hasFileName: !!data.fileName,
+        hasFileData: !!data.fileData,
+        spaceId: data.spaceId
+      });
+      
+      // CRITICAL FIX: If filePath is provided (from paste), read the file
+      if (data.filePath && !data.fileName) {
+        try {
+          if (!fs.existsSync(data.filePath)) {
+            console.error('[BlackHole-AddFile] File does not exist:', data.filePath);
+            return { success: false, error: 'File does not exist: ' + data.filePath };
+          }
+          
+          const stats = fs.statSync(data.filePath);
+          if (!stats.isFile()) {
+            console.error('[BlackHole-AddFile] Path is not a file:', data.filePath);
+            return { success: false, error: 'Path is not a file: ' + data.filePath };
+          }
+          
+          // Extract file info from path
+          data.fileName = path.basename(data.filePath);
+          data.fileSize = stats.size;
+          
+          // Read file data as base64
+          const fileBuffer = fs.readFileSync(data.filePath);
+          data.fileData = fileBuffer.toString('base64');
+          
+          console.log('[BlackHole-AddFile] File read from path:', {
+            fileName: data.fileName,
+            fileSize: data.fileSize,
+            dataLength: data.fileData.length
+          });
+        } catch (readError) {
+          console.error('[BlackHole-AddFile] Error reading file:', readError);
+          return { success: false, error: 'Error reading file: ' + readError.message };
+        }
+      }
+      
+      // Validate we have required data
+      if (!data.fileName) {
+        console.error('[BlackHole-AddFile] No fileName provided');
+        return { success: false, error: 'No file name provided' };
+      }
       
       // Capture app context for the source of the paste
       let context = null;
@@ -1880,7 +5093,7 @@ class ClipboardManagerV2 {
       }
       
       // Add item to history - this will store the file in the correct location
-      this.addToHistory(item);
+      await this.addToHistory(item);
       
       // Now the file has been copied to items/[id]/fileName by the storage system
       // We need to find the actual stored file path for post-processing
@@ -2329,6 +5542,342 @@ class ClipboardManagerV2 {
         return { success: false, error: error.message };
       }
     });
+    
+    // YouTube download handlers
+    this.setupYouTubeHandlers();
+  }
+  
+  // Setup YouTube download IPC handlers
+  setupYouTubeHandlers() {
+    console.log('[ClipboardManager] Setting up YouTube handlers...');
+    const { YouTubeDownloader, isYouTubeUrl, extractVideoId } = require('./youtube-downloader');
+    console.log('[ClipboardManager] YouTube module loaded, isYouTubeUrl:', typeof isYouTubeUrl);
+    
+    // Lazy-init downloader
+    let downloader = null;
+    const getDownloader = () => {
+      if (!downloader) {
+        downloader = new YouTubeDownloader();
+      }
+      return downloader;
+    };
+    
+    // Check if URL is a YouTube video
+    ipcMain.handle('youtube:is-youtube-url', (event, url) => {
+      return isYouTubeUrl(url);
+    });
+    
+    // Extract video ID from URL
+    ipcMain.handle('youtube:extract-video-id', (event, url) => {
+      return extractVideoId(url);
+    });
+    
+    // Get video info without downloading
+    ipcMain.handle('youtube:get-info', async (event, url) => {
+      try {
+        const dl = getDownloader();
+        return await dl.getVideoInfo(url);
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Verify an item exists with file and metadata, returns checksum
+    ipcMain.handle('clipboard:verify-item', async (event, itemId) => {
+      try {
+        console.log('[Verify] Verifying item:', itemId);
+        const itemDir = path.join(this.storage.itemsDir, itemId);
+        
+        // Check directory exists
+        if (!fs.existsSync(itemDir)) {
+          return { success: false, error: 'Item directory not found' };
+        }
+        
+        // Check for metadata
+        const metadataPath = path.join(itemDir, 'metadata.json');
+        if (!fs.existsSync(metadataPath)) {
+          return { success: false, error: 'Metadata file not found' };
+        }
+        
+        const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+        
+        // Find the main file (video/audio/image)
+        const files = fs.readdirSync(itemDir).filter(f => 
+          !f.endsWith('.json') && !f.endsWith('.txt') && f !== '.DS_Store'
+        );
+        
+        if (files.length === 0) {
+          return { success: false, error: 'No media file found' };
+        }
+        
+        const mainFile = files[0];
+        const filePath = path.join(itemDir, mainFile);
+        const fileStats = fs.statSync(filePath);
+        
+        // Calculate simple checksum (first + last 1MB + size)
+        const crypto = require('crypto');
+        const hash = crypto.createHash('md5');
+        const fd = fs.openSync(filePath, 'r');
+        const buffer = Buffer.alloc(Math.min(1024 * 1024, fileStats.size)); // 1MB max
+        
+        // Read first chunk
+        fs.readSync(fd, buffer, 0, buffer.length, 0);
+        hash.update(buffer);
+        
+        // Read last chunk if file is larger
+        if (fileStats.size > buffer.length) {
+          const lastBuffer = Buffer.alloc(Math.min(1024 * 1024, fileStats.size));
+          fs.readSync(fd, lastBuffer, 0, lastBuffer.length, fileStats.size - lastBuffer.length);
+          hash.update(lastBuffer);
+        }
+        
+        fs.closeSync(fd);
+        hash.update(fileStats.size.toString());
+        const checksum = hash.digest('hex').substring(0, 8); // Short checksum
+        
+        console.log('[Verify] Item verified:', itemId, 'checksum:', checksum);
+        
+        return {
+          success: true,
+          itemId: itemId,
+          fileName: mainFile,
+          fileSize: fileStats.size,
+          fileSizeFormatted: formatBytes(fileStats.size),
+          hasMetadata: true,
+          metadataKeys: Object.keys(metadata),
+          title: metadata.title || mainFile,
+          checksum: checksum,
+          hasTranscript: !!(metadata.transcript?.text),
+          source: metadata.source
+        };
+        
+        function formatBytes(bytes) {
+          if (bytes === 0) return '0 B';
+          const k = 1024;
+          const sizes = ['B', 'KB', 'MB', 'GB'];
+          const i = Math.floor(Math.log(bytes) / Math.log(k));
+          return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+      } catch (error) {
+        console.error('[Verify] Error:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Download video to Space
+    ipcMain.handle('youtube:download-to-space', async (event, url, spaceId) => {
+      console.log('[YouTube] download-to-space called with URL:', url, 'spaceId:', spaceId);
+      try {
+        const dl = getDownloader();
+        console.log('[YouTube] Starting download...');
+        const result = await dl.downloadToSpace(url, this, spaceId || this.currentSpace, (percent, status) => {
+          console.log('[YouTube] Progress:', percent, status);
+          // Send progress updates to renderer
+          if (event.sender && !event.sender.isDestroyed()) {
+            event.sender.send('youtube:download-progress', { percent, status, url });
+          }
+        });
+        console.log('[YouTube] Download result:', JSON.stringify(result));
+        return result;
+      } catch (error) {
+        console.error('[YouTube] Download error:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Start YouTube download in background - returns immediately with placeholder item
+    ipcMain.handle('youtube:start-background-download', async (event, url, spaceId) => {
+      console.log('[YouTube] *** start-background-download called ***');
+      console.log('[YouTube] URL:', url);
+      console.log('[YouTube] spaceId:', spaceId);
+      
+      try {
+        const targetSpaceId = spaceId || this.currentSpace || 'unclassified';
+        console.log('[YouTube] targetSpaceId:', targetSpaceId);
+        
+        // Extract video ID from URL for immediate feedback
+        const { extractVideoId } = require('./youtube-downloader');
+        const videoId = extractVideoId(url);
+        console.log('[YouTube] Extracted videoId:', videoId);
+        
+        // Create placeholder immediately WITHOUT waiting for video info
+        // This makes the UI feel responsive
+        const placeholderItem = {
+          type: 'file',
+          fileType: 'video',
+          fileName: `YouTube Video ${videoId || 'download'}.mp4`,
+          preview: `🎬 Downloading YouTube video...`,
+          timestamp: Date.now(),
+          pinned: false,
+          spaceId: targetSpaceId,
+          source: 'youtube',
+          metadata: {
+            youtubeId: videoId,
+            youtubeUrl: url,
+            title: 'Loading...',
+            downloadStatus: 'downloading',
+            downloadProgress: 0
+          }
+        };
+        
+        // Add placeholder to storage
+        const indexEntry = this.storage.addItem(placeholderItem);
+        const placeholderId = indexEntry.id;
+        console.log('[YouTube] Created placeholder item:', placeholderId);
+        
+        // Add to in-memory history
+        this.history.unshift({
+          ...placeholderItem,
+          id: placeholderId,
+          _needsContent: true
+        });
+        this.updateSpaceCounts();
+        this.notifyHistoryUpdate();
+        
+        // Start download in background (don't await)
+        this.downloadYouTubeInBackground(url, targetSpaceId, placeholderId, event.sender);
+        
+        // Return immediately with placeholder info
+        return {
+          success: true,
+          placeholderId: placeholderId,
+          title: 'YouTube Video',
+          message: `Started downloading YouTube video`
+        };
+        
+      } catch (error) {
+        console.error('[YouTube] Error starting background download:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Download video (returns file path, doesn't add to space)
+    ipcMain.handle('youtube:download', async (event, url, options = {}) => {
+      try {
+        const dl = getDownloader();
+        return await dl.download(url, options, (percent, status) => {
+          if (event.sender && !event.sender.isDestroyed()) {
+            event.sender.send('youtube:download-progress', { percent, status, url });
+          }
+        });
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Get transcript from YouTube video (using YouTube captions)
+    ipcMain.handle('youtube:get-transcript', async (event, url, lang = 'en') => {
+      console.log('[YouTube] get-transcript called for:', url, 'lang:', lang);
+      try {
+        const dl = getDownloader();
+        const result = await dl.getTranscript(url, lang);
+        console.log('[YouTube] Transcript result:', result.success ? 'success' : result.error);
+        return result;
+      } catch (error) {
+        console.error('[YouTube] Transcript error:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Fetch and save YouTube transcript for an existing item
+    ipcMain.handle('youtube:fetch-transcript-for-item', async (event, itemId, lang = 'en') => {
+      console.log('[YouTube] fetch-transcript-for-item called for:', itemId, 'lang:', lang);
+      try {
+        // Load item metadata
+        const itemDir = path.join(this.storage.itemsDir, itemId);
+        const metadataPath = path.join(itemDir, 'metadata.json');
+        
+        if (!fs.existsSync(metadataPath)) {
+          return { success: false, error: 'Item not found' };
+        }
+        
+        const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+        const youtubeUrl = metadata.youtubeUrl;
+        
+        if (!youtubeUrl) {
+          return { success: false, error: 'Not a YouTube video' };
+        }
+        
+        console.log('[YouTube] Fetching transcript for:', youtubeUrl);
+        
+        const dl = getDownloader();
+        const result = await dl.getTranscript(youtubeUrl, lang);
+        
+        if (result.success && result.transcript) {
+          // Update metadata with transcript
+          metadata.transcript = {
+            text: result.transcript,
+            segments: result.segments,
+            language: result.language,
+            isAutoGenerated: result.isAutoGenerated,
+            segmentCount: result.segmentCount,
+            fetchedAt: new Date().toISOString()
+          };
+          
+          fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+          
+          // Also save as transcription.txt for compatibility
+          const transcriptionPath = path.join(itemDir, 'transcription.txt');
+          fs.writeFileSync(transcriptionPath, result.transcript, 'utf8');
+          
+          console.log('[YouTube] Transcript saved for item:', itemId, 'length:', result.transcript.length);
+          
+          return {
+            success: true,
+            transcription: result.transcript,
+            language: result.language,
+            isAutoGenerated: result.isAutoGenerated,
+            segmentCount: result.segmentCount
+          };
+        } else {
+          return { success: false, error: result.error || 'Failed to fetch transcript' };
+        }
+      } catch (error) {
+        console.error('[YouTube] fetch-transcript-for-item error:', error);
+        return { success: false, error: error.message };
+      }
+    });
+
+    // Get transcript using OpenAI Whisper (more accurate, with word-level timestamps)
+    ipcMain.handle('youtube:get-transcript-whisper', async (event, url, lang = 'en') => {
+      console.log('[YouTube] get-transcript-whisper called for:', url, 'lang:', lang);
+      try {
+        const dl = getDownloader();
+        const result = await dl.getTranscriptWithWhisper(url, lang, (percent, status) => {
+          console.log('[YouTube] Whisper progress:', percent, status);
+          if (event.sender && !event.sender.isDestroyed()) {
+            event.sender.send('youtube:transcribe-progress', { percent, status, url });
+          }
+        });
+        console.log('[YouTube] Whisper result:', result.success ? `${result.segmentCount} segments, ${result.wordCount} words` : result.error);
+        return result;
+      } catch (error) {
+        console.error('[YouTube] Whisper error:', error);
+        return { success: false, error: error.message };
+      }
+    });
+
+    // Process speaker recognition (transcription with speaker labels)
+    ipcMain.handle('youtube:process-speaker-recognition', async (event, url) => {
+      console.log('[YouTube] process-speaker-recognition called for:', url);
+      try {
+        const dl = getDownloader();
+        const result = await dl.processSpeakerRecognition(url, (percent, status) => {
+          console.log('[YouTube] Speaker recognition progress:', percent, status);
+          if (event.sender && !event.sender.isDestroyed()) {
+            event.sender.send('youtube:speaker-recognition-progress', { percent, status, url });
+          }
+        });
+        console.log('[YouTube] Speaker recognition result:', result.success ? 
+          `${result.speakerCount} speakers, ${result.utterances?.length} utterances` : result.error);
+        return result;
+      } catch (error) {
+        console.error('[YouTube] Speaker recognition error:', error);
+        return { success: false, error: error.message };
+      }
+    });
+
+    console.log('[ClipboardManager] YouTube download handlers registered');
   }
   
   // Helper method for space names
@@ -2424,6 +5973,11 @@ class ClipboardManagerV2 {
   }
   
   destroy() {
+    // PERFORMANCE: Flush any pending async saves before cleanup
+    if (this.storage && this.storage.flushPendingSaves) {
+      this.storage.flushPendingSaves();
+    }
+    
     if (this.clipboardWindow && !this.clipboardWindow.isDestroyed()) {
       this.clipboardWindow.close();
     }
@@ -2449,6 +6003,10 @@ class ClipboardManagerV2 {
     if (globalShortcut) {
       globalShortcut.unregisterAll();
     }
+    
+    // Reset IPC registration flag to allow re-registration if manager is recreated
+    ClipboardManagerV2._ipcRegistered = false;
+    
     console.log('Clipboard manager cleaned up');
   }
   
@@ -2487,11 +6045,14 @@ class ClipboardManagerV2 {
       const fileExt = item.fileExt ? item.fileExt.toLowerCase() : '';
       
       // Image file types that should use vision
-      const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg', '.ico'];
-      const documentExtensions = ['.pdf', '.doc', '.docx', '.odt', '.rtf'];
-      const codeExtensions = ['.js', '.ts', '.py', '.java', '.cpp', '.c', '.h', '.css', '.html', '.jsx', '.tsx', '.vue', '.rb', '.go', '.rs', '.php', '.swift'];
-      const dataExtensions = ['.json', '.xml', '.csv', '.yaml', '.yml', '.toml'];
-      const textExtensions = ['.txt', '.md', '.log', '.ini', '.conf', '.config'];
+      const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg', '.ico', '.tiff', '.tif', '.heic', '.heif', '.avif', '.raw', '.psd', '.ai', '.eps'];
+      const documentExtensions = ['.pdf', '.doc', '.docx', '.odt', '.rtf', '.xls', '.xlsx', '.ppt', '.pptx', '.pages', '.numbers', '.key', '.epub', '.mobi'];
+      const codeExtensions = ['.js', '.ts', '.py', '.java', '.cpp', '.c', '.h', '.css', '.html', '.jsx', '.tsx', '.vue', '.rb', '.go', '.rs', '.php', '.swift', '.kt', '.scala', '.r', '.m', '.mm', '.sh', '.bash', '.zsh', '.ps1', '.bat', '.cmd', '.sql', '.graphql', '.proto', '.asm', '.s', '.lua', '.perl', '.pl', '.dart', '.elm', '.ex', '.exs', '.clj', '.hs', '.fs', '.ml', '.nim', '.zig', '.v', '.sol'];
+      const dataExtensions = ['.json', '.xml', '.csv', '.yaml', '.yml', '.toml', '.env', '.properties', '.plist', '.ndjson', '.jsonl', '.tsv', '.parquet', '.avro'];
+      const textExtensions = ['.txt', '.md', '.log', '.ini', '.conf', '.config', '.cfg', '.rc', '.gitignore', '.dockerignore', '.editorconfig', '.htaccess', '.readme', '.license', '.changelog', '.todo', '.notes'];
+      const audioExtensions = ['.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a', '.wma', '.aiff', '.opus'];
+      const videoExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.wmv', '.flv', '.webm', '.m4v', '.mpeg', '.mpg', '.3gp'];
+      const archiveExtensions = ['.zip', '.tar', '.gz', '.rar', '.7z', '.bz2', '.xz', '.tgz', '.dmg', '.iso'];
       
       // Check if this is an image that should use vision
       if (item.isScreenshot || 
@@ -2616,6 +6177,55 @@ class ClipboardManagerV2 {
             content = item.fileName || 'Text file';
           }
         }
+      }
+      // Audio files
+      else if (audioExtensions.includes(fileExt) || item.fileCategory === 'audio' || item.fileType === 'audio') {
+        console.log('[AI Metadata] Processing as audio file');
+        
+        content = [
+          `Audio file: ${item.fileName || 'Unknown'}`,
+          `Format: ${fileExt || 'Unknown'}`,
+          `Size: ${item.fileSize ? this.formatFileSize(item.fileSize) : 'Unknown'}`,
+          item.metadata?.duration ? `Duration: ${item.metadata.duration}` : '',
+          item.metadata?.artist ? `Artist: ${item.metadata.artist}` : '',
+          item.metadata?.album ? `Album: ${item.metadata.album}` : '',
+          item.metadata?.title ? `Title: ${item.metadata.title}` : ''
+        ].filter(Boolean).join('\n');
+        
+        contentType = 'audio';
+      }
+      // Video files
+      else if (videoExtensions.includes(fileExt) || item.fileCategory === 'video' || item.fileType === 'video') {
+        console.log('[AI Metadata] Processing as video file');
+        
+        content = [
+          `Video file: ${item.fileName || 'Unknown'}`,
+          `Format: ${fileExt || 'Unknown'}`,
+          `Size: ${item.fileSize ? this.formatFileSize(item.fileSize) : 'Unknown'}`,
+          item.metadata?.duration ? `Duration: ${item.metadata.duration}` : '',
+          item.metadata?.resolution ? `Resolution: ${item.metadata.resolution}` : ''
+        ].filter(Boolean).join('\n');
+        
+        contentType = 'video';
+        
+        // If we have a thumbnail, use vision to analyze frame
+        if (item.thumbnail && !item.thumbnail.includes('svg+xml') && item.thumbnail.length > 1000) {
+          imageData = item.thumbnail;
+          content += '\n\nAnalyzing video thumbnail/preview frame:';
+        }
+      }
+      // Archive files
+      else if (archiveExtensions.includes(fileExt) || item.fileCategory === 'archive') {
+        console.log('[AI Metadata] Processing as archive file');
+        
+        content = [
+          `Archive file: ${item.fileName || 'Unknown'}`,
+          `Format: ${fileExt || 'Unknown'}`,
+          `Size: ${item.fileSize ? this.formatFileSize(item.fileSize) : 'Unknown'}`,
+          'Compressed archive - contents not directly accessible'
+        ].join('\n');
+        
+        contentType = 'archive';
       }
       // Generic file handling
       else if (item.type === 'file') {
@@ -3464,6 +7074,47 @@ class ClipboardManagerV2 {
       '.au': 'audio/basic'
     };
     return mimeTypes[ext] || 'audio/mpeg';
+  }
+  
+  getMediaMimeType(ext, fileType) {
+    // Audio MIME types
+    const audioMimeTypes = {
+      '.mp3': 'audio/mpeg',
+      '.wav': 'audio/wav',
+      '.flac': 'audio/flac',
+      '.aac': 'audio/aac',
+      '.ogg': 'audio/ogg',
+      '.wma': 'audio/x-ms-wma',
+      '.m4a': 'audio/mp4',
+      '.opus': 'audio/opus',
+      '.aiff': 'audio/aiff',
+      '.webm': 'audio/webm'
+    };
+    
+    // Video MIME types
+    const videoMimeTypes = {
+      '.mp4': 'video/mp4',
+      '.mov': 'video/quicktime',
+      '.avi': 'video/x-msvideo',
+      '.mkv': 'video/x-matroska',
+      '.wmv': 'video/x-ms-wmv',
+      '.flv': 'video/x-flv',
+      '.webm': 'video/webm',
+      '.m4v': 'video/mp4',
+      '.mpeg': 'video/mpeg',
+      '.mpg': 'video/mpeg',
+      '.3gp': 'video/3gpp'
+    };
+    
+    // Check audio first
+    if (audioMimeTypes[ext]) return audioMimeTypes[ext];
+    
+    // Check video
+    if (videoMimeTypes[ext]) return videoMimeTypes[ext];
+    
+    // Default based on fileType
+    if (fileType === 'video') return 'video/mp4';
+    return 'audio/mpeg';
   }
   
   // Add missing method from original

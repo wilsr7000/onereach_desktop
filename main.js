@@ -13,9 +13,13 @@ let logger = getLogger(); // This might be a stub initially
 const { createConsoleInterceptor } = require('./console-interceptor');
 const { getGSXFileSync } = require('./gsx-file-sync');
 const { AiderBridgeClient } = require('./aider-bridge-client');
+const VideoEditor = require('./video-editor');
 
 // Global Aider Bridge instance
 let aiderBridge = null;
+
+// Global Video Editor instance
+let videoEditor = null;
 
 // autoUpdater - loaded lazily after app is ready
 let autoUpdater = null;
@@ -427,6 +431,11 @@ app.whenReady().then(() => {
   logger.logAppReady();
   console.log('App is ready, re-initialized logger. Is stub?', logger._isStub);
   
+  // Forward renderer logs to main process console
+  ipcMain.on('log-message', (event, message) => {
+    console.log(message);
+  });
+  
   // Initialize AI log analyzer
   const getLogAIAnalyzer = require('./log-ai-analyzer');
   const logAIAnalyzer = getLogAIAnalyzer();
@@ -503,24 +512,19 @@ app.whenReady().then(() => {
   console.log('Logger directory:', logger.logDir);
   console.log('Current log file:', logger.currentLogFile);
 
-  // Create the main window
+  // Create the main window FIRST for faster perceived startup
   createWindow();
   logger.logWindowCreated('main', 1, {
     bounds: { width: 1400, height: 900 },
     url: 'index.html'
   });
   
-  // Initialize clipboard manager after app is ready
-  clipboardManager = new ClipboardManager();
-  clipboardManager.registerShortcut();
-  global.clipboardManager = clipboardManager;
-  console.log('Clipboard manager initialized');
-  logger.logFeatureUsed('clipboard-manager', {
-    status: 'initialized',
-    shortcutRegistered: true
-  });
+  // Initialize settings manager EARLY (needed for other managers)
+  const { getSettingsManager } = require('./settings-manager');
+  global.settingsManager = getSettingsManager();
+  console.log('Settings manager initialized');
   
-  // Add keyboard shortcuts to open dev tools
+  // Add keyboard shortcuts to open dev tools (lightweight, do immediately)
   const openDevTools = () => {
     console.log('Opening Developer Tools via shortcut');
     const focusedWindow = BrowserWindow.getFocusedWindow();
@@ -538,21 +542,39 @@ app.whenReady().then(() => {
   globalShortcut.register('F12', openDevTools);
   console.log('Registered Cmd+Shift+I and F12 shortcuts for Developer Tools');
   
-  // Initialize module manager
-  moduleManager = new ModuleManager();
-  global.moduleManager = moduleManager;
-  // Make updateApplicationMenu globally available for module manager
-  global.updateApplicationMenu = updateApplicationMenu;
-  console.log('Module manager initialized');
-  logger.logFeatureUsed('module-manager', {
-    status: 'initialized',
-    modulesPath: moduleManager.modulesPath
+  // PERFORMANCE: Defer heavyweight manager initializations until after window shows
+  // This makes the app feel snappier by showing the UI first
+  setImmediate(() => {
+    console.log('[Startup] Initializing deferred managers...');
+    
+    // Initialize clipboard manager
+    clipboardManager = new ClipboardManager();
+    clipboardManager.registerShortcut();
+    global.clipboardManager = clipboardManager;
+    console.log('Clipboard manager initialized');
+    logger.logFeatureUsed('clipboard-manager', {
+      status: 'initialized',
+      shortcutRegistered: true
+    });
+    
+    // Initialize video editor
+    videoEditor = new VideoEditor();
+    global.videoEditor = videoEditor;
+    console.log('Video editor initialized');
+    
+    // Initialize module manager
+    moduleManager = new ModuleManager();
+    global.moduleManager = moduleManager;
+    // Make updateApplicationMenu globally available for module manager
+    global.updateApplicationMenu = updateApplicationMenu;
+    console.log('Module manager initialized');
+    logger.logFeatureUsed('module-manager', {
+      status: 'initialized',
+      modulesPath: moduleManager.modulesPath
+    });
+    
+    console.log('[Startup] Deferred managers initialized');
   });
-  
-  // Initialize settings manager
-  const { getSettingsManager } = require('./settings-manager');
-  global.settingsManager = getSettingsManager();
-  console.log('Settings manager initialized');
   
   // MIGRATION: Migrate idw-entries.json to settings manager if needed
   try {
@@ -585,6 +607,91 @@ app.whenReady().then(() => {
   const moduleAPIBridge = getModuleAPIBridge();
   console.log('Module API bridge initialized');
   logger.info('Module API bridge initialized');
+  
+  // ============================================
+  // MEMORY MONITORING - for leak detection
+  // ============================================
+  const MEMORY_MONITOR_INTERVAL = 30000; // 30 seconds
+  // PERFORMANCE: Disabled by default - only enable with explicit MEMORY_MONITOR=true
+  let memoryMonitorEnabled = process.env.MEMORY_MONITOR === 'true';
+  
+  function logMemoryUsage() {
+    if (!memoryMonitorEnabled) return;
+    
+    // Main process memory
+    const usage = process.memoryUsage();
+    console.log('[Memory Monitor] Main Process:', {
+      heapUsed: Math.round(usage.heapUsed / 1024 / 1024) + ' MB',
+      heapTotal: Math.round(usage.heapTotal / 1024 / 1024) + ' MB',
+      external: Math.round(usage.external / 1024 / 1024) + ' MB',
+      rss: Math.round(usage.rss / 1024 / 1024) + ' MB'
+    });
+    
+    // All process metrics (main + renderers)
+    try {
+      const metrics = app.getAppMetrics();
+      metrics.forEach(proc => {
+        const memoryMB = Math.round(proc.memory.workingSetSize / 1024);
+        const cpuPercent = proc.cpu.percentCPUUsage.toFixed(2);
+        console.log(`[Memory Monitor] ${proc.type} (PID ${proc.pid}): ${memoryMB} KB, CPU: ${cpuPercent}%`);
+      });
+    } catch (err) {
+      console.error('[Memory Monitor] Error getting app metrics:', err.message);
+    }
+  }
+  
+  // Start memory monitoring interval
+  let memoryMonitorInterval = null;
+  if (memoryMonitorEnabled) {
+    console.log('[Memory Monitor] Memory monitoring enabled (interval: 30s)');
+    console.log('[Memory Monitor] Set MEMORY_MONITOR=false to disable');
+    memoryMonitorInterval = setInterval(logMemoryUsage, MEMORY_MONITOR_INTERVAL);
+    // Log initial memory state
+    logMemoryUsage();
+  }
+  
+  // IPC handler to toggle memory monitoring
+  ipcMain.handle('memory-monitor:toggle', (event, enabled) => {
+    memoryMonitorEnabled = enabled;
+    if (enabled && !memoryMonitorInterval) {
+      memoryMonitorInterval = setInterval(logMemoryUsage, MEMORY_MONITOR_INTERVAL);
+      console.log('[Memory Monitor] Monitoring enabled');
+    } else if (!enabled && memoryMonitorInterval) {
+      clearInterval(memoryMonitorInterval);
+      memoryMonitorInterval = null;
+      console.log('[Memory Monitor] Monitoring disabled');
+    }
+    return memoryMonitorEnabled;
+  });
+  
+  // IPC handler to get current memory stats
+  ipcMain.handle('memory-monitor:get-stats', () => {
+    const usage = process.memoryUsage();
+    const metrics = app.getAppMetrics();
+    return {
+      mainProcess: {
+        heapUsed: usage.heapUsed,
+        heapTotal: usage.heapTotal,
+        external: usage.external,
+        rss: usage.rss
+      },
+      allProcesses: metrics.map(proc => ({
+        type: proc.type,
+        pid: proc.pid,
+        memory: proc.memory.workingSetSize,
+        cpu: proc.cpu.percentCPUUsage
+      }))
+    };
+  });
+  
+  // Clean up memory monitor on app quit
+  app.on('will-quit', () => {
+    if (memoryMonitorInterval) {
+      clearInterval(memoryMonitorInterval);
+      memoryMonitorInterval = null;
+    }
+  });
+  // ============================================
   
   // Set up permission handlers for microphone access (voice mode)
   const { session } = require('electron');
@@ -1424,6 +1531,29 @@ function setupAiderIPC() {
     return result.filePaths[0];
   });
   
+  // Dialog handlers for Video Editor and other tools
+  ipcMain.handle('dialog:open-file', async (event, options = {}) => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: options.filters || [
+        { name: 'All Files', extensions: ['*'] }
+      ],
+      title: options.title || 'Select File'
+    });
+    return result;
+  });
+  
+  ipcMain.handle('dialog:save-file', async (event, options = {}) => {
+    const result = await dialog.showSaveDialog({
+      defaultPath: options.defaultPath,
+      filters: options.filters || [
+        { name: 'All Files', extensions: ['*'] }
+      ],
+      title: options.title || 'Save File'
+    });
+    return result;
+  });
+  
   // Get API configuration for Aider UI
   ipcMain.handle('aider:get-api-config', async () => {
     const { getSettingsManager } = require('./settings-manager');
@@ -1446,14 +1576,20 @@ function setupAiderIPC() {
       const storage = new ClipboardStorage();
       const spaces = storage.index.spaces || [];
       
-      // Map spaces to include their folder paths
-      return spaces.map(space => ({
-        id: space.id,
-        name: space.name,
-        icon: space.icon,
-        color: space.color,
-        path: path.join(storage.spacesDir, space.id)
-      }));
+      // Map spaces to include their folder paths and item counts
+      return spaces.map(space => {
+        // Calculate item count for this space from index items
+        const itemCount = (storage.index.items || []).filter(item => item.spaceId === space.id).length;
+        
+        return {
+          id: space.id,
+          name: space.name,
+          icon: space.icon,
+          color: space.color,
+          path: path.join(storage.spacesDir, space.id),
+          itemCount: itemCount
+        };
+      });
     } catch (error) {
       console.error('[GSX Create] Failed to get spaces:', error);
       return [];
@@ -1739,11 +1875,11 @@ function setupAiderIPC() {
       const summary = await eventDb.getCostSummary(spaceId);
       return { 
         success: true, 
-        summary: summary || { totalCost: 0, totalCalls: 0, total_input_tokens: 0, total_output_tokens: 0 } 
+        summary: summary || { totalCost: 0, totalCalls: 0, totalInputTokens: 0, totalOutputTokens: 0 } 
       };
     } catch (error) {
       console.error('[EventDB] Failed to get summary:', error);
-      return { success: false, error: error.message, summary: { totalCost: 0, totalCalls: 0 } };
+      return { success: false, error: error.message, summary: { totalCost: 0, totalCalls: 0, totalInputTokens: 0, totalOutputTokens: 0 } };
     }
   });
   
@@ -2012,8 +2148,6 @@ function setupAiderIPC() {
   ipcMain.handle('aider:register-created-file', async (event, { spaceId, filePath, description, aiModel }) => {
     try {
       const fs = require('fs');
-      const ClipboardStorage = require('./clipboard-storage-v2');
-      const storage = new ClipboardStorage();
       
       // Read the file content
       const content = fs.readFileSync(filePath, 'utf-8');
@@ -2033,6 +2167,7 @@ function setupAiderIPC() {
         fileName: fileName,
         source: 'gsx-create',
         timestamp: Date.now(),
+        preview: content.substring(0, 200),
         metadata: {
           filePath: filePath,
           description: description || `Created by GSX Create`,
@@ -2045,10 +2180,17 @@ function setupAiderIPC() {
         tags: ['ai-generated', 'gsx-create']
       };
       
-      // Add to clipboard storage
-      storage.addItem(item);
-      
-      console.log(`[GSX Create] Registered file as clipboard item: ${fileName} in space ${spaceId}`);
+      // Use global clipboard manager to ensure both storage and in-memory history are updated
+      if (global.clipboardManager) {
+        global.clipboardManager.addToHistory(item);
+        console.log(`[GSX Create] Registered file via clipboard manager: ${fileName} in space ${spaceId}`);
+      } else {
+        // Fallback to direct storage if clipboard manager not available
+        const ClipboardStorage = require('./clipboard-storage-v2');
+        const storage = new ClipboardStorage();
+        storage.addItem(item);
+        console.log(`[GSX Create] Registered file via direct storage: ${fileName} in space ${spaceId}`);
+      }
       
       return { success: true, fileName, spaceId };
     } catch (error) {
@@ -2109,6 +2251,16 @@ function setupAiderIPC() {
         existingItem.timestamp = Date.now();
         storage.saveIndex();
         
+        // Also update in-memory history if clipboard manager is available
+        if (global.clipboardManager) {
+          const historyItem = global.clipboardManager.history.find(h => h.id === existingItem.id);
+          if (historyItem) {
+            historyItem.preview = existingItem.preview;
+            historyItem.timestamp = existingItem.timestamp;
+            historyItem.content = content;
+          }
+        }
+        
         console.log(`[GSX Create] Updated file metadata: ${fileName}`);
         return { success: true, updated: true, fileName };
       } else {
@@ -2124,6 +2276,7 @@ function setupAiderIPC() {
           fileName: fileName,
           source: 'gsx-create',
           timestamp: Date.now(),
+          preview: content.substring(0, 200),
           metadata: {
             filePath: filePath,
             description: description || `Created by GSX Create`,
@@ -2135,7 +2288,12 @@ function setupAiderIPC() {
           tags: ['ai-generated', 'gsx-create']
         };
         
-        storage.addItem(item);
+        // Use global clipboard manager to ensure both storage and in-memory history are updated
+        if (global.clipboardManager) {
+          global.clipboardManager.addToHistory(item);
+        } else {
+          storage.addItem(item);
+        }
         console.log(`[GSX Create] Registered new file as clipboard item: ${fileName}`);
         return { success: true, updated: false, fileName };
       }
@@ -2150,7 +2308,7 @@ function setupAiderIPC() {
     try {
       const ClipboardStorage = require('./clipboard-storage-v2');
       const storage = new ClipboardStorage();
-      const items = storage.getItemsBySpace(spaceId);
+      const items = storage.getSpaceItems(spaceId);
       return { success: true, items };
     } catch (error) {
       console.error('[GSX Create] Failed to get space items:', error);
@@ -2334,6 +2492,17 @@ function setupIPC() {
     console.log('[setupIPC] GSX File Sync IPC handlers registered');
   } catch (error) {
     console.error('[setupIPC] Failed to setup GSX File Sync:', error);
+  }
+  
+  // Initialize Video Editor handlers
+  try {
+    if (global.videoEditor) {
+      const mainWindow = BrowserWindow.getAllWindows()[0];
+      global.videoEditor.setupIPC(mainWindow);
+      console.log('[setupIPC] Video Editor IPC handlers registered');
+    }
+  } catch (error) {
+    console.error('[setupIPC] Failed to setup Video Editor:', error);
   }
   
   // Settings IPC handlers
@@ -2905,6 +3074,31 @@ function setupIPC() {
 
   ipcMain.on('logger:user-action', (event, { action, details }) => {
     logger.logUserAction(action, { ...details, source: 'renderer' });
+  });
+
+  // PERFORMANCE: Handle batched logs from renderer processes
+  ipcMain.on('logger:batch', (event, logEntries) => {
+    if (!Array.isArray(logEntries)) return;
+    
+    for (const entry of logEntries) {
+      const { level, message, data } = entry;
+      switch (level) {
+        case 'info':
+          logger.info(message, { ...data, source: 'renderer' });
+          break;
+        case 'warn':
+          logger.warn(message, { ...data, source: 'renderer' });
+          break;
+        case 'error':
+          logger.error(message, { ...data, source: 'renderer' });
+          break;
+        case 'debug':
+          logger.debug(message, { ...data, source: 'renderer' });
+          break;
+        default:
+          logger.info(message, { ...data, source: 'renderer' });
+      }
+    }
   });
 
   ipcMain.handle('logger:get-stats', async () => {
@@ -3479,11 +3673,14 @@ function setupIPC() {
   });
   
   // Handle opening black hole widget
-  ipcMain.on('open-black-hole-widget', (event, position) => {
-    console.log('Received request to open black hole widget at position:', position);
+  ipcMain.on('open-black-hole-widget', (event, data) => {
+    // data can include { x, y, startExpanded }
+    const position = { x: data.x, y: data.y };
+    const startExpanded = data.startExpanded || false;
+    console.log('Received request to open black hole widget at position:', position, 'startExpanded:', startExpanded);
     if (global.clipboardManager) {
-      console.log('Clipboard manager exists, creating black hole window');
-      global.clipboardManager.createBlackHoleWindow(position);
+      console.log('Clipboard manager exists, creating black hole window, startExpanded:', startExpanded);
+      global.clipboardManager.createBlackHoleWindow(position, startExpanded);
     } else {
       console.error('Clipboard manager not initialized yet');
       // Try to initialize it if app is ready
@@ -3492,13 +3689,134 @@ function setupIPC() {
         global.clipboardManager = new ClipboardManager();
         global.clipboardManager.registerShortcut();
         console.log('Clipboard manager initialized on demand');
-        global.clipboardManager.createBlackHoleWindow(position);
+        global.clipboardManager.createBlackHoleWindow(position, startExpanded);
       } else {
         console.error('App not ready, cannot initialize clipboard manager');
       }
     }
   });
 
+  // Get clipboard data for paste operations
+  ipcMain.handle('get-clipboard-data', () => {
+    const { clipboard } = require('electron');
+    const text = clipboard.readText();
+    const html = clipboard.readHTML();
+    const image = clipboard.readImage();
+
+    // Check if HTML is really meaningful (STRICTER detection)
+    let isRealHtml = false;
+    if (html && text) {
+      // Only consider it real HTML if:
+      // 1. Has meaningful structure (multiple block elements or semantic content)
+      // 2. Not just simple wrapping (like <span> or single <div>)
+      // 3. HTML is significantly different from plain text
+      
+      const hasBlocks = /<(div|p|br|table|ul|ol|li|h[1-6])\b/i.test(html);
+      const hasLinks = /<a\s+[^>]*href\s*=/i.test(html);
+      const hasImages = /<img\s+[^>]*src\s*=/i.test(html);
+      const hasFormatting = /<(strong|em|b|i|u)\b/i.test(html);
+      const hasStructure = /<(section|article|header|footer|nav|aside)\b/i.test(html);
+      
+      // Count total HTML tags
+      const tagCount = (html.match(/<[a-z]+[\s>]/gi) || []).length;
+      
+      // Check if HTML is just wrapping plain text (common for password managers, etc.)
+      const strippedHtml = html.replace(/<[^>]*>/g, '').trim();
+      const textSimilarity = strippedHtml === text.trim();
+      
+      // Only treat as HTML if it has meaningful structure AND is not just wrapped text
+      isRealHtml = (hasLinks || hasImages || hasStructure || 
+                   (hasBlocks && tagCount > 3) || 
+                   (hasFormatting && tagCount > 2)) &&
+                   !textSimilarity;
+      
+      // Additional check: If text is short and matches HTML content exactly, it's just text
+      if (text.length < 100 && textSimilarity) {
+        isRealHtml = false;
+      }
+    }
+
+    const clipboardData = {
+      hasText: !!text,
+      hasHtml: isRealHtml,
+      hasImage: !image.isEmpty(),
+      text: text,
+      html: isRealHtml ? html : null
+    };
+
+    if (!image.isEmpty()) {
+      clipboardData.imageDataUrl = image.toDataURL();
+    }
+
+    console.log('get-clipboard-data:', { hasText: !!text, hasHtml: isRealHtml, hasImage: !image.isEmpty() });
+    return clipboardData;
+  });
+
+  // Get file paths from clipboard
+  ipcMain.handle('get-clipboard-files', () => {
+    const { clipboard } = require('electron');
+    const fs = require('fs');
+    
+    // Try to read file paths from clipboard
+    // Note: Different platforms store file paths differently
+    let filePaths = [];
+    
+    try {
+      // macOS: Files are stored in clipboard as file:// URLs or paths
+      const text = clipboard.readText();
+      const buffer = clipboard.readBuffer('public.file-url');
+      
+      // Try buffer first (macOS file paths)
+      if (buffer && buffer.length > 0) {
+        const fileUrl = buffer.toString('utf8');
+        const cleanPath = fileUrl.replace('file://', '').replace(/\0/g, '');
+        if (fs.existsSync(cleanPath)) {
+          filePaths.push(cleanPath);
+        }
+      }
+      
+      // Try reading as NSFilenamesPboardType (macOS)
+      try {
+        const nsFiles = clipboard.read('NSFilenamesPboardType');
+        if (nsFiles) {
+          const paths = nsFiles.split('\n').filter(p => p && fs.existsSync(p));
+          filePaths.push(...paths);
+        }
+      } catch (e) {
+        // Not available on this platform
+      }
+      
+      // Check if text looks like file paths
+      if (text && !filePaths.length) {
+        const lines = text.split('\n');
+        for (const line of lines) {
+          const trimmed = line.trim();
+          // Check if it's a valid file path
+          if (trimmed && !trimmed.startsWith('http') && fs.existsSync(trimmed)) {
+            filePaths.push(trimmed);
+          }
+        }
+      }
+      
+      console.log('[get-clipboard-files] Found', filePaths.length, 'file(s)');
+      
+      return {
+        success: true,
+        files: filePaths,
+        count: filePaths.length
+      };
+      
+    } catch (error) {
+      console.error('[get-clipboard-files] Error:', error);
+      return {
+        success: false,
+        files: [],
+        count: 0,
+        error: error.message
+      };
+    }
+  });
+  
   // Handle closing black hole widget
   ipcMain.on('close-black-hole-widget', () => {
     console.log('Received request to close black hole widget');
@@ -3511,6 +3829,49 @@ function setupIPC() {
   });
 
   // Handle black hole widget active state (space chooser open)
+  // Debug logging from Black Hole renderer
+  ipcMain.on('black-hole:debug', (event, data) => {
+    console.log('\n╔══════════════════════════════════════════════════════════════╗');
+    console.log('║  BLACK HOLE DEBUG FROM RENDERER                              ║');
+    console.log('╚══════════════════════════════════════════════════════════════╝');
+    console.log('[BlackHole-Debug]', JSON.stringify(data, null, 2));
+  });
+  
+  // Allow renderer to request pending clipboard data
+  ipcMain.handle('black-hole:get-pending-data', async () => {
+    console.log('[BlackHole] Renderer requesting pending data');
+    
+    // Read current clipboard
+    const { clipboard, nativeImage } = require('electron');
+    const text = clipboard.readText();
+    const html = clipboard.readHTML();
+    const image = clipboard.readImage();
+    
+    let isRealHtml = false;
+    if (html && text) {
+      const hasBlocks = /<(div|p|br|table|ul|ol|li|h[1-6])\b/i.test(html);
+      const hasLinks = /<a\s+[^>]*href\s*=/i.test(html);
+      const hasImages = /<img\s+[^>]*src\s*=/i.test(html);
+      const hasFormatting = /<(strong|em|b|i|u)\b/i.test(html);
+      isRealHtml = hasBlocks || hasLinks || hasImages || hasFormatting;
+    }
+    
+    const clipboardData = {
+      hasText: !!text,
+      hasHtml: isRealHtml,
+      hasImage: !image.isEmpty(),
+      text: text,
+      html: isRealHtml ? html : null
+    };
+    
+    if (!image.isEmpty()) {
+      clipboardData.imageDataUrl = image.toDataURL();
+    }
+    
+    console.log('[BlackHole] Returning clipboard data:', { hasText: !!text, hasHtml: isRealHtml, hasImage: !image.isEmpty() });
+    return clipboardData;
+  });
+  
   ipcMain.on('black-hole:active', () => {
     console.log('Black hole widget is active (space chooser open)');
     // Notify all browser windows that black hole is active
@@ -3586,13 +3947,63 @@ function setupIPC() {
         // Focus the window first
         global.clipboardManager.blackHoleWindow.focus();
         
+        // Check if the HTML is really just plain text wrapped in tags
+        // Many apps put both text/plain and text/html in clipboard even for plain text
+        let isRealHtml = false;
+        if (html && text) {
+          // Strip HTML tags and normalize whitespace for comparison
+          const strippedHtml = html
+            .replace(/<[^>]*>/g, '') // Remove all HTML tags
+            .replace(/&nbsp;/g, ' ') // Replace &nbsp; with space
+            .replace(/&amp;/g, '&')  // Decode common entities
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'")
+            .replace(/&#(\d+);/g, (_, num) => String.fromCharCode(num)) // Decode numeric entities
+            .replace(/\s+/g, ' ')    // Normalize whitespace
+            .trim();
+          
+          const normalizedText = text.replace(/\s+/g, ' ').trim();
+          
+          // Check for MEANINGFUL HTML elements that indicate intentional formatting
+          // Structural elements (blocks, containers)
+          const hasBlocks = /<(div|p|br|table|ul|ol|li|h[1-6]|article|section|header|footer|blockquote|pre|code)\b/i.test(html);
+          // Links with actual href
+          const hasLinks = /<a\s+[^>]*href\s*=/i.test(html);
+          // Images
+          const hasImages = /<img\s+[^>]*src\s*=/i.test(html);
+          // Meaningful formatting (not just wrapper spans)
+          const hasFormatting = /<(strong|em|b|i|u|s|mark|sub|sup|del|ins)\b/i.test(html);
+          // Has a full style block (not just inline)
+          const hasStyleBlock = /<style\b/i.test(html);
+          // Has multiple line breaks indicating structured content
+          const hasMultipleBreaks = (html.match(/<br\s*\/?>/gi) || []).length >= 2 || (html.match(/<\/p>/gi) || []).length >= 2;
+          
+          // Content differs significantly (not just wrapper noise)
+          const contentDiffers = strippedHtml !== normalizedText && 
+            Math.abs(strippedHtml.length - normalizedText.length) > 10;
+          
+          // It's ONLY real HTML if it has meaningful formatting elements
+          // Simple span/font wrappers with styles are NOT considered real HTML
+          isRealHtml = hasBlocks || hasLinks || hasImages || hasFormatting || hasStyleBlock || hasMultipleBreaks || contentDiffers;
+          
+          console.log('HTML check - Blocks:', hasBlocks, 'Links:', hasLinks, 'Images:', hasImages, 
+            'Formatting:', hasFormatting, 'Breaks:', hasMultipleBreaks, 'ContentDiffers:', contentDiffers, 
+            'IsRealHtml:', isRealHtml);
+        } else if (html && !text) {
+          // Only HTML, no plain text - check if it has actual content
+          const hasActualContent = /<(div|p|br|table|ul|ol|li|h[1-6]|a|img|strong|em|b|i)\b/i.test(html);
+          isRealHtml = hasActualContent;
+        }
+        
         // Prepare clipboard data to send
         const clipboardData = {
           hasText: !!text,
-          hasHtml: !!html,
+          hasHtml: isRealHtml,
           hasImage: !image.isEmpty(),
           text: text,
-          html: html
+          html: isRealHtml ? html : null
         };
         
         // If there's an image, convert it to data URL
@@ -3602,7 +4013,7 @@ function setupIPC() {
         
         // Send clipboard data to the widget
         global.clipboardManager.blackHoleWindow.webContents.send('paste-clipboard-data', clipboardData);
-        console.log('Sent clipboard data to black hole widget');
+        console.log('Sent clipboard data to black hole widget - isRealHtml:', isRealHtml);
       }
     }
   });
@@ -4168,6 +4579,90 @@ function setupIPC() {
     }
   });
 
+  // Article TTS - Generate speech for article content
+  const articleTTSDir = path.join(app.getPath('userData'), 'article-tts');
+  if (!fs.existsSync(articleTTSDir)) {
+    fs.mkdirSync(articleTTSDir, { recursive: true });
+  }
+
+  // Save article TTS audio (separate from generation)
+  ipcMain.handle('article:save-tts', async (event, options) => {
+    try {
+      const { articleId, audioData } = options;
+      
+      if (!audioData || !articleId) {
+        return { success: false, error: 'Missing audio data or article ID' };
+      }
+      
+      const sanitizedId = articleId.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 50);
+      const audioPath = path.join(articleTTSDir, `${sanitizedId}.mp3`);
+      
+      const audioBuffer = Buffer.from(audioData, 'base64');
+      fs.writeFileSync(audioPath, audioBuffer);
+      
+      console.log(`[Article TTS] Saved audio: ${audioPath} (${audioBuffer.length} bytes)`);
+      return { success: true, audioPath };
+    } catch (error) {
+      console.error('[Article TTS] Error saving:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('article:get-tts', async (event, articleId) => {
+    try {
+      const sanitizedId = articleId.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 50);
+      const audioPath = path.join(articleTTSDir, `${sanitizedId}.mp3`);
+      
+      if (fs.existsSync(audioPath)) {
+        const audioData = fs.readFileSync(audioPath);
+        const base64Audio = audioData.toString('base64');
+        return { 
+          success: true, 
+          audioData: base64Audio,
+          hasAudio: true
+        };
+      }
+      
+      return { success: true, hasAudio: false };
+    } catch (error) {
+      console.error('[Article TTS] Error getting audio:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Persistent cache storage (survives app restart)
+  const cacheDir = path.join(app.getPath('userData'), 'cache');
+  if (!fs.existsSync(cacheDir)) {
+    fs.mkdirSync(cacheDir, { recursive: true });
+  }
+
+  ipcMain.handle('cache:save', async (event, { cacheName, data }) => {
+    try {
+      const cachePath = path.join(cacheDir, `${cacheName}.json`);
+      fs.writeFileSync(cachePath, JSON.stringify(data), 'utf8');
+      console.log(`[Cache] Saved ${cacheName} (${data.length} entries)`);
+      return { success: true };
+    } catch (error) {
+      console.error(`[Cache] Error saving ${cacheName}:`, error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('cache:load', async (event, cacheName) => {
+    try {
+      const cachePath = path.join(cacheDir, `${cacheName}.json`);
+      if (fs.existsSync(cachePath)) {
+        const data = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+        console.log(`[Cache] Loaded ${cacheName} (${data.length} entries)`);
+        return { success: true, data };
+      }
+      return { success: true, data: null };
+    } catch (error) {
+      console.error(`[Cache] Error loading ${cacheName}:`, error);
+      return { success: false, error: error.message };
+    }
+  });
+
   // Handle RSS feed requests
   ipcMain.handle('fetch-rss', async (event, url) => {
     const { net } = require('electron');
@@ -4324,34 +4819,38 @@ function setupIPC() {
     }
   });
 
-  // Handle fetching article content (separate from RSS feeds)
+  // Handle fetching article content (separate from RSS feeds) with retry logic
   ipcMain.handle('fetch-article', async (event, url) => {
     const { net } = require('electron');
+    const maxRetries = 3;
+    const retryDelay = 1000; // 1 second between retries
     
-    return new Promise((resolve, reject) => {
-      console.log('Fetching article content using Electron net module:', url);
-      
-      try {
-        const request = net.request({
-          method: 'GET',
-          url: url
-        });
+    const fetchWithRetry = (attemptNumber = 1) => {
+      return new Promise((resolve, reject) => {
+        console.log(`[Fetch] Attempt ${attemptNumber}/${maxRetries} for: ${url}`);
+        
+        try {
+          const request = net.request({
+            method: 'GET',
+            url: url
+          });
 
-        // Set appropriate headers for HTML pages
-        request.setHeader('User-Agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-        request.setHeader('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8');
-        request.setHeader('Accept-Language', 'en-US,en;q=0.9');
-        request.setHeader('Cache-Control', 'no-cache');
+          // Set appropriate headers for HTML pages
+          request.setHeader('User-Agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+          request.setHeader('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8');
+          request.setHeader('Accept-Language', 'en-US,en;q=0.9');
+          request.setHeader('Cache-Control', 'no-cache');
 
-        let responseData = '';
-        let redirectCount = 0;
-        const maxRedirects = 5;
+          let responseData = '';
+          let redirectCount = 0;
+          const maxRedirects = 5;
 
-        // Set timeout
-        const timeout = setTimeout(() => {
-          request.abort();
-          reject(new Error('Request timeout'));
-        }, 15000);
+          // Set timeout - shorter for retries
+          const timeoutMs = attemptNumber === 1 ? 15000 : 10000;
+          const timeout = setTimeout(() => {
+            request.abort();
+            reject(new Error(`Request timeout after ${timeoutMs}ms`));
+          }, timeoutMs);
 
         request.on('response', (response) => {
           console.log('Article response status:', response.statusCode);
@@ -4482,6 +4981,24 @@ function setupIPC() {
         reject(error);
       }
     });
+    };
+    
+    // Execute with retries
+    let lastError;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await fetchWithRetry(attempt);
+      } catch (error) {
+        lastError = error;
+        console.log(`[Fetch] Attempt ${attempt} failed: ${error.message}`);
+        if (attempt < maxRetries) {
+          console.log(`[Fetch] Retrying in ${retryDelay}ms...`);
+          await new Promise(r => setTimeout(r, retryDelay));
+        }
+      }
+    }
+    console.error(`[Fetch] All ${maxRetries} attempts failed for: ${url}`);
+    throw lastError;
   });
 
   // Handle saving user preferences
@@ -6513,6 +7030,11 @@ function openCSPTestPage() {
     testWindow.once('ready-to-show', () => {
       console.log('CSP test window ready to show');
       testWindow.show();
+    });
+    
+    // Handle window closed event (memory leak prevention)
+    testWindow.on('closed', () => {
+      console.log('CSP test window closed');
     });
   } catch (error) {
     console.error('Error creating CSP test window:', error);

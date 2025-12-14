@@ -39,8 +39,8 @@ function createMainWindow(app) {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(app.getAppPath(), 'preload.js'),
-      webSecurity: false,
-      allowRunningInsecureContent: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
       webviewTag: true,
       // Enable features needed for media/voice
       enableBlinkFeatures: 'MediaStreamAPI,WebRTC,AudioWorklet,WebAudio,MediaRecorder',
@@ -70,7 +70,18 @@ function createMainWindow(app) {
   });
   
   // Enhanced browser fingerprinting to be more Chrome-like
-  session.webRequest.onBeforeSendHeaders((details, callback) => {
+  // PERFORMANCE: Only intercept requests to domains that need Chrome-like headers
+  const headerFilterUrls = [
+    '*://*.onereach.ai/*',
+    '*://*.google.com/*',
+    '*://*.googleapis.com/*',
+    '*://*.gstatic.com/*',
+    '*://*.microsoft.com/*',
+    '*://*.openai.com/*',
+    '*://*.chatgpt.com/*'
+  ];
+  
+  session.webRequest.onBeforeSendHeaders({ urls: headerFilterUrls }, (details, callback) => {
     const headers = { ...details.requestHeaders };
     
     // Set headers to match Chrome exactly
@@ -204,7 +215,10 @@ function createMainWindow(app) {
   });
 
   // Set Content Security Policy
-  mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+  // PERFORMANCE: Only apply CSP to onereach.ai domains (main app content)
+  const cspFilterUrls = ['*://*.onereach.ai/*', 'file://*'];
+  
+  mainWindow.webContents.session.webRequest.onHeadersReceived({ urls: cspFilterUrls }, (details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
@@ -409,34 +423,52 @@ function createMainWindow(app) {
     const contextMenu = new Menu();
     
     contextMenu.append(new MenuItem({
-      label: 'Paste to Black Hole',
+      label: 'Paste to Space',
       click: () => {
-        console.log('[BrowserWindow] Paste to Black Hole clicked');
-        
-        // Send message to main process to show black hole
-        const { ipcMain } = require('electron');
+        console.log('[BrowserWindow] Paste to Space clicked');
         
         // Get clipboard manager from global
         if (global.clipboardManager) {
+          const { clipboard } = require('electron');
+          
+          // Read clipboard data FIRST
+          const text = clipboard.readText();
+          const html = clipboard.readHTML();
+          const image = clipboard.readImage();
+          
+          // Check if HTML is really meaningful
+          let isRealHtml = false;
+          if (html && text) {
+            const hasBlocks = /<(div|p|br|table|ul|ol|li|h[1-6])\b/i.test(html);
+            const hasLinks = /<a\s+[^>]*href\s*=/i.test(html);
+            const hasImages = /<img\s+[^>]*src\s*=/i.test(html);
+            const hasFormatting = /<(strong|em|b|i|u)\b/i.test(html);
+            isRealHtml = hasBlocks || hasLinks || hasImages || hasFormatting;
+          }
+          
+          const clipboardData = {
+            hasText: !!text,
+            hasHtml: isRealHtml,
+            hasImage: !image.isEmpty(),
+            text: text,
+            html: isRealHtml ? html : null
+          };
+          
+          if (!image.isEmpty()) {
+            clipboardData.imageDataUrl = image.toDataURL();
+          }
+          
+          console.log('[BrowserWindow] Clipboard data ready:', { hasText: !!text, hasHtml: isRealHtml, hasImage: !image.isEmpty() });
+          
+          // Position the window
           const bounds = mainWindow.getBounds();
           const position = {
             x: bounds.x + bounds.width - 100,
             y: bounds.y + 100
           };
-          // Pass true as second parameter to show in expanded mode with space chooser
-          global.clipboardManager.createBlackHoleWindow(position, true);
           
-          // Send clipboard content after a delay
-          setTimeout(() => {
-            const { clipboard } = require('electron');
-            const text = clipboard.readText();
-            if (text && global.clipboardManager && global.clipboardManager.blackHoleWindow) {
-              global.clipboardManager.blackHoleWindow.webContents.send('paste-content', {
-                type: 'text',
-                content: text
-              });
-            }
-          }, 300);
+          // Create window with clipboard data - will show modal directly
+          global.clipboardManager.createBlackHoleWindow(position, true, clipboardData);
         }
       }
     }));
@@ -468,16 +500,17 @@ function createSecureContentWindow(parentWindow) {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: false,
-      allowRunningInsecureContent: true,
-      sandbox: false,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      sandbox: true,
       enableRemoteModule: false, // Disable remote module
       preload: path.join(__dirname, 'preload-minimal.js') // Use a minimal preload script
     }
   });
 
   // Set Content Security Policy for the content window
-  contentWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+  // PERFORMANCE: Only apply CSP to onereach.ai domains
+  contentWindow.webContents.session.webRequest.onHeadersReceived({ urls: ['*://*.onereach.ai/*', 'file://*'] }, (details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
@@ -811,7 +844,8 @@ function createSetupWizardWindow(options = {}) {
   });
 
   // Set CSP for wizard window
-  wizardWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+  // PERFORMANCE: Only apply CSP to onereach.ai domains
+  wizardWindow.webContents.session.webRequest.onHeadersReceived({ urls: ['*://*.onereach.ai/*', 'file://*'] }, (details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
@@ -851,7 +885,8 @@ function createTestWindow() {
   });
 
   // Set CSP for test window
-  testWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+  // PERFORMANCE: Only apply CSP to onereach.ai domains
+  testWindow.webContents.session.webRequest.onHeadersReceived({ urls: ['*://*.onereach.ai/*', 'file://*'] }, (details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
@@ -944,7 +979,8 @@ function openGSXWindow(url, title, idwEnvironment) {
   });
   
   // Set Content Security Policy for the GSX window
-  gsxWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+  // PERFORMANCE: Only apply CSP to onereach.ai domains
+  gsxWindow.webContents.session.webRequest.onHeadersReceived({ urls: ['*://*.onereach.ai/*', 'file://*'] }, (details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,

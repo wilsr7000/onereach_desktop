@@ -108,6 +108,133 @@ const api = {
         };
         
         ipcRenderer.on('article-reading-time', handleReadingTime);
+    },
+    
+    // Text-to-Speech for articles
+    generateArticleTTS: async (options) => {
+        console.log('[TTS] Generating TTS for article');
+        try {
+            const result = await ipcRenderer.invoke('article:generate-tts', options);
+            return result;
+        } catch (error) {
+            console.error('[TTS] Error generating TTS:', error);
+            return { success: false, error: error.message };
+        }
+    },
+    
+    // Create audio script using GPT
+    createAudioScript: async (options) => {
+        console.log('[AudioScript] Creating audio script for:', options.title);
+        try {
+            const result = await ipcRenderer.invoke('clipboard:create-audio-script', {
+                title: options.title,
+                content: options.content
+            });
+            return result;
+        } catch (error) {
+            console.error('[AudioScript] Error creating script:', error);
+            return { success: false, error: error?.message || 'Script creation failed' };
+        }
+    },
+    
+    // Generate TTS for a single chunk (for streaming playback)
+    generateTTSChunk: async (options) => {
+        console.log('[TTS] Generating chunk, length:', options.text?.length);
+        try {
+            const result = await ipcRenderer.invoke('clipboard:generate-speech', {
+                text: options.text,
+                voice: options.voice || 'nova'
+            });
+            return result;
+        } catch (error) {
+            console.error('[TTS] Error generating chunk:', error);
+            return { success: false, error: error?.message || 'TTS failed' };
+        }
+    },
+    
+    generateArticleTTS: async (options) => {
+        console.log('[TTS] Generating TTS for article:', options.articleId);
+        try {
+            // First, generate the speech using the same handler as Spaces Manager
+            const speechResult = await ipcRenderer.invoke('clipboard:generate-speech', {
+                text: options.text,
+                voice: options.voice || 'nova'
+            });
+            
+            console.log('[TTS] Speech generation result:', speechResult?.success);
+            
+            if (!speechResult.success) {
+                return speechResult;
+            }
+            
+            // Save to article-tts directory
+            const saveResult = await ipcRenderer.invoke('article:save-tts', {
+                articleId: options.articleId,
+                audioData: speechResult.audioData
+            });
+            
+            return { 
+                success: true, 
+                audioData: speechResult.audioData,
+                saved: saveResult?.success 
+            };
+        } catch (error) {
+            console.error('[TTS] Error generating TTS:', error);
+            return { success: false, error: error?.message || 'TTS generation failed' };
+        }
+    },
+    
+    getArticleTTS: async (articleId) => {
+        console.log('[TTS] Getting TTS for article:', articleId);
+        try {
+            const result = await ipcRenderer.invoke('article:get-tts', articleId);
+            return result;
+        } catch (error) {
+            console.error('[TTS] Error getting TTS:', error);
+            return { success: false, error: error.message };
+        }
+    },
+    
+    saveArticleTTS: async (options) => {
+        console.log('[TTS] Saving TTS for article:', options.articleId);
+        try {
+            const result = await ipcRenderer.invoke('article:save-tts', options);
+            return result;
+        } catch (error) {
+            console.error('[TTS] Error saving TTS:', error);
+            return { success: false, error: error.message };
+        }
+    },
+    
+    // Persistent cache operations (saves to disk, survives app restart)
+    saveCache: async (cacheName, data) => {
+        try {
+            const result = await ipcRenderer.invoke('cache:save', { cacheName, data });
+            return result;
+        } catch (error) {
+            console.error(`[Cache] Error saving ${cacheName}:`, error);
+            return { success: false, error: error.message };
+        }
+    },
+    
+    loadCache: async (cacheName) => {
+        try {
+            const result = await ipcRenderer.invoke('cache:load', cacheName);
+            return result;
+        } catch (error) {
+            console.error(`[Cache] Error loading ${cacheName}:`, error);
+            return { success: false, error: error.message };
+        }
+    },
+    
+    getSettings: async () => {
+        try {
+            const settings = await ipcRenderer.invoke('get-settings');
+            return settings;
+        } catch (error) {
+            console.error('[Settings] Error getting settings:', error);
+            return {};
+        }
     }
 };
 

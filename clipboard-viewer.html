@@ -234,6 +234,21 @@
             opacity: 1;
         }
         
+        /* Drag and Drop Styles */
+        .space-item.drag-over {
+            background: rgba(99, 102, 241, 0.3) !important;
+            border-left: 3px solid rgba(99, 102, 241, 1) !important;
+        }
+        
+        .history-item.dragging {
+            opacity: 0.5;
+            cursor: grabbing;
+        }
+        
+        .history-item[draggable="true"] {
+            cursor: grab;
+        }
+        
         .space-action {
             width: 24px;
             height: 24px;
@@ -474,10 +489,10 @@
         }
         
         .history-item {
-            padding: 16px;
+            padding: 10px 12px;
             background: rgba(255, 255, 255, 0.05);
             border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 12px;
+            border-radius: 8px;
             cursor: pointer;
             transition: all 0.2s;
             position: relative;
@@ -488,7 +503,7 @@
         }
         
         .grid-view .history-item {
-            min-height: 200px;
+            min-height: 120px;
             display: flex;
             flex-direction: column;
         }
@@ -500,8 +515,9 @@
         }
         
         .grid-view .item-image {
-            max-height: 150px;
-            width: 100%;
+            max-width: 300px;
+            max-height: 300px;
+            width: auto;
             object-fit: contain;
             background: rgba(0, 0, 0, 0.1);
         }
@@ -531,6 +547,122 @@
         .history-item.pinned {
             background: rgba(255, 200, 100, 0.08);
             border-color: rgba(255, 200, 100, 0.2);
+        }
+        
+        /* Downloading state - elegant ghost tile */
+        .history-item.downloading {
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.08) 0%, rgba(139, 92, 246, 0.05) 100%);
+            border: 1px dashed rgba(99, 102, 241, 0.4);
+            pointer-events: auto;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .history-item.downloading::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(99, 102, 241, 0.1), transparent);
+            animation: shimmer 2s infinite;
+        }
+        
+        @keyframes shimmer {
+            to { left: 100%; }
+        }
+        
+        .history-item.downloading:hover {
+            transform: none;
+            box-shadow: none;
+        }
+        
+        .history-item.downloading .item-actions button {
+            opacity: 0.3;
+            pointer-events: none;
+        }
+        
+        .history-item.download-error {
+            background: rgba(239, 68, 68, 0.08);
+            border-color: rgba(239, 68, 68, 0.3);
+        }
+        
+        /* Downloading placeholder content */
+        .downloading-placeholder {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            min-height: 100px;
+            text-align: center;
+            position: relative;
+            z-index: 1;
+        }
+        
+        .downloading-placeholder .downloading-icon {
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+        
+        .downloading-placeholder .downloading-title {
+            font-size: 13px;
+            font-weight: 500;
+            color: rgba(255, 255, 255, 0.85);
+            margin-bottom: 12px;
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        .downloading-placeholder .downloading-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: rgba(99, 102, 241, 0.9);
+            margin-bottom: 10px;
+        }
+        
+        .downloading-placeholder.error .downloading-status {
+            color: rgba(239, 68, 68, 0.9);
+        }
+        
+        /* Progress bar */
+        .download-progress-bar {
+            width: 100%;
+            max-width: 180px;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        
+        .download-progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #6366f1, #8b5cf6);
+            border-radius: 2px;
+            transition: width 0.3s ease;
+        }
+        
+        .downloading-spinner {
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(99, 102, 241, 0.3);
+            border-top-color: #6366f1;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.6; transform: scale(0.95); }
         }
         
         /* Context menu for items */
@@ -754,14 +886,28 @@
             background: rgba(255, 255, 255, 0.08);
         }
         
-        .item-content {
-            font-size: 13px;
-            line-height: 1.5;
-            color: rgba(255, 255, 255, 0.8);
+        .item-title {
+            color: rgba(255, 255, 255, 0.95);
+            font-size: 14px;
+            font-weight: 600;
+            line-height: 1.4;
+            margin-bottom: 6px;
+            word-wrap: break-word;
             overflow: hidden;
             text-overflow: ellipsis;
             display: -webkit-box;
-            -webkit-line-clamp: 3;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+        }
+        
+        .item-content {
+            font-size: 13px;
+            line-height: 1.5;
+            color: rgba(255, 255, 255, 0.65);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
             -webkit-box-orient: vertical;
         }
         
@@ -775,10 +921,12 @@
         }
         
         .item-image {
-            margin-top: 8px;
-            border-radius: 4px;
-            max-width: 100%;
-            max-height: 200px;
+            margin-top: 6px;
+            border-radius: 6px;
+            max-width: 300px;
+            max-height: 300px;
+            width: auto;
+            height: auto;
             object-fit: contain;
             background: rgba(0, 0, 0, 0.2);
             display: block;
@@ -883,6 +1031,7 @@
         }
         
         .list-view .item-image {
+            max-width: 300px;
             max-height: 300px;
         }
         
@@ -1093,6 +1242,17 @@
             animation: slideIn 0.2s ease-out;
         }
         
+        @keyframes slideOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+        }
+        
         .file-info {
             display: flex;
             align-items: center;
@@ -1137,6 +1297,668 @@
             border-radius: 6px;
             padding: 8px;
             text-align: center;
+        }
+        
+        /* Video Tile Design */
+        .video-tile {
+            margin-top: 6px;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(139, 92, 246, 0.05));
+            border: 1px solid rgba(99, 102, 241, 0.2);
+            border-radius: 8px;
+            padding: 10px;
+            position: relative;
+        }
+        
+        .video-tile.has-thumbnail {
+            padding: 0;
+            overflow: hidden;
+        }
+        
+        .video-tile-thumbnail {
+            position: relative;
+            max-width: 300px;
+            overflow: hidden;
+            background: #111;
+            border-radius: 6px 6px 0 0;
+        }
+        
+        .video-tile-thumbnail img {
+            width: 100%;
+            height: auto;
+            max-height: 170px;
+            object-fit: contain;
+            display: block;
+            transition: transform 0.3s ease;
+        }
+        
+        .video-tile:hover .video-tile-thumbnail img {
+            transform: scale(1.05);
+        }
+        
+        .video-play-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 32px;
+            height: 32px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            color: white;
+            opacity: 0.9;
+            transition: all 0.2s ease;
+        }
+        
+        .video-tile:hover .video-play-overlay {
+            background: rgba(99, 102, 241, 0.9);
+            transform: translate(-50%, -50%) scale(1.1);
+        }
+        
+        .video-duration-badge {
+            position: absolute;
+            bottom: 8px;
+            right: 8px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            font-size: 11px;
+            font-weight: 500;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+        
+        .video-tile-info {
+            padding: 8px 10px;
+        }
+        
+        .video-tile.has-thumbnail .video-tile-badge {
+            margin-bottom: 4px;
+        }
+        
+        .video-tile.has-thumbnail .video-tile-title {
+            font-size: 12px;
+        }
+        
+        .video-tile.has-thumbnail .video-tile-desc {
+            font-size: 10px;
+            -webkit-line-clamp: 2;
+        }
+        
+        .video-tile-badge {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            margin-bottom: 6px;
+        }
+        
+        .video-badge-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 18px;
+            height: 18px;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            border-radius: 4px;
+            font-size: 8px;
+            color: white;
+        }
+        
+        .video-badge-text {
+            font-size: 8px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            color: rgba(99, 102, 241, 0.9);
+            text-transform: uppercase;
+        }
+        
+        .video-source-badge {
+            font-size: 8px;
+            font-weight: 500;
+            padding: 1px 4px;
+            background: rgba(255, 0, 0, 0.15);
+            color: rgba(255, 100, 100, 0.9);
+            border-radius: 3px;
+            margin-left: auto;
+        }
+        
+        .video-tile-content {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+        
+        .video-tile-title {
+            font-size: 12px;
+            font-weight: 500;
+            color: rgba(255, 255, 255, 0.95);
+            line-height: 1.2;
+        }
+        
+        .video-tile-desc {
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.55);
+            line-height: 1.3;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        
+        .video-tile-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 3px;
+        }
+        
+        .video-meta-item {
+            font-size: 9px;
+            color: rgba(255, 255, 255, 0.4);
+        }
+        
+        .video-meta-item:not(:last-child)::after {
+            content: '•';
+            margin-left: 8px;
+            opacity: 0.5;
+        }
+        
+        /* Downloading state */
+        .video-tile.downloading-tile {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(99, 102, 241, 0.05));
+            border-color: rgba(59, 130, 246, 0.25);
+        }
+        
+        .download-status-badge {
+            font-size: 9px;
+            font-weight: 500;
+            padding: 2px 6px;
+            background: rgba(59, 130, 246, 0.2);
+            color: rgba(100, 160, 255, 0.9);
+            border-radius: 4px;
+            margin-left: auto;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .download-progress-bar {
+            height: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+            overflow: hidden;
+            margin: 8px 0;
+        }
+        
+        .download-progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #6366f1, #8b5cf6);
+            border-radius: 2px;
+            transition: width 0.3s ease;
+        }
+        
+        /* Error state */
+        .video-tile.error-tile {
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.08), rgba(220, 38, 38, 0.05));
+            border-color: rgba(239, 68, 68, 0.25);
+        }
+        
+        .video-badge-icon.error {
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+        }
+        
+        .error-status-badge {
+            font-size: 9px;
+            font-weight: 500;
+            padding: 2px 6px;
+            background: rgba(239, 68, 68, 0.2);
+            color: rgba(255, 120, 120, 0.9);
+            border-radius: 4px;
+            margin-left: auto;
+        }
+        
+        .error-text {
+            color: rgba(255, 120, 120, 0.7) !important;
+        }
+        
+        .type-icon.type-video {
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .type-icon.type-error {
+            color: #ef4444;
+            font-weight: bold;
+        }
+        
+        /* Video feature badges */
+        .video-features {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-top: 5px;
+        }
+        
+        .video-feature-badge {
+            font-size: 8px;
+            font-weight: 500;
+            padding: 2px 5px;
+            border-radius: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.2px;
+        }
+        
+        .video-feature-badge.video {
+            background: rgba(99, 102, 241, 0.15);
+            color: rgba(129, 140, 248, 0.95);
+        }
+        
+        .video-feature-badge.audio {
+            background: rgba(236, 72, 153, 0.15);
+            color: rgba(244, 114, 182, 0.95);
+        }
+        
+        .video-feature-badge.transcript {
+            background: rgba(34, 197, 94, 0.15);
+            color: rgba(74, 222, 128, 0.95);
+        }
+        
+        .video-feature-badge.beats {
+            background: rgba(251, 191, 36, 0.15);
+            color: rgba(252, 211, 77, 0.95);
+        }
+        
+        .video-feature-badge.speakers {
+            background: rgba(56, 189, 248, 0.15);
+            color: rgba(125, 211, 252, 0.95);
+        }
+        
+        .video-tile-desc.pending {
+            font-style: italic;
+            color: rgba(255, 255, 255, 0.35);
+        }
+        
+        /* ========== VIDEO PREVIEW MODAL ========== */
+        #videoPreviewModal {
+            z-index: 10002;
+        }
+        
+        .video-modal {
+            width: 700px;
+            max-width: 95vw;
+            max-height: 90vh;
+            background: linear-gradient(180deg, rgba(25, 25, 30, 0.98) 0%, rgba(20, 20, 25, 0.99) 100%);
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 25px 80px rgba(0, 0, 0, 0.6);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+        
+        .video-modal-close {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            width: 32px;
+            height: 32px;
+            border: none;
+            background: rgba(0, 0, 0, 0.5);
+            color: white;
+            font-size: 20px;
+            border-radius: 50%;
+            cursor: pointer;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+        
+        .video-modal-close:hover {
+            background: rgba(239, 68, 68, 0.8);
+        }
+        
+        .video-modal-player {
+            position: relative;
+            width: 100%;
+            background: #000;
+            aspect-ratio: 16/9;
+            max-height: 300px;
+        }
+        
+        .video-modal-player video {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+        
+        .video-modal-play-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 60px;
+            height: 60px;
+            background: rgba(99, 102, 241, 0.9);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            color: white;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: none;
+        }
+        
+        .video-modal-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        
+        .video-modal-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: rgba(255, 255, 255, 0.95);
+            margin-bottom: 6px;
+            line-height: 1.3;
+        }
+        
+        .video-modal-meta {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.5);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+        
+        .meta-dot {
+            opacity: 0.4;
+        }
+        
+        .video-source-tag {
+            background: rgba(255, 0, 0, 0.15);
+            color: rgba(255, 100, 100, 0.9);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 500;
+            margin-left: 8px;
+        }
+        
+        .video-modal-badges {
+            display: flex;
+            gap: 6px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .video-modal-tabs {
+            display: flex;
+            padding: 0 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(0, 0, 0, 0.2);
+        }
+        
+        .video-tab {
+            padding: 12px 16px;
+            font-size: 12px;
+            font-weight: 500;
+            color: rgba(255, 255, 255, 0.5);
+            background: none;
+            border: none;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        
+        .video-tab:hover {
+            color: rgba(255, 255, 255, 0.8);
+        }
+        
+        .video-tab.active {
+            color: rgba(99, 102, 241, 1);
+            border-bottom-color: rgba(99, 102, 241, 1);
+        }
+        
+        .video-modal-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px 20px;
+            min-height: 200px;
+            max-height: 280px;
+        }
+        
+        .video-tab-content {
+            display: none;
+        }
+        
+        .video-tab-content.active {
+            display: block;
+        }
+        
+        .video-section {
+            margin-bottom: 16px;
+        }
+        
+        .video-section-title {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: rgba(255, 255, 255, 0.4);
+            margin-bottom: 8px;
+        }
+        
+        .video-section-content {
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.8);
+            line-height: 1.5;
+        }
+        
+        .video-topics {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+        
+        .video-topic-badge {
+            font-size: 11px;
+            padding: 4px 10px;
+            background: rgba(99, 102, 241, 0.15);
+            color: rgba(129, 140, 248, 0.95);
+            border-radius: 12px;
+        }
+        
+        .video-speakers {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        
+        .video-speaker {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.7);
+            padding: 6px 10px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 6px;
+        }
+        
+        .transcript-controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+        
+        .timecode-toggle {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.6);
+            cursor: pointer;
+        }
+        
+        .timecode-toggle input {
+            width: 14px;
+            height: 14px;
+        }
+        
+        .btn-action {
+            padding: 6px 12px;
+            font-size: 11px;
+            background: linear-gradient(135deg, rgba(139, 92, 246, 0.8), rgba(168, 85, 247, 0.8));
+            border: none;
+            border-radius: 6px;
+            color: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            transition: all 0.2s;
+        }
+        
+        .btn-action:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+        }
+        
+        .btn-action:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .transcript-status {
+            font-size: 11px;
+            color: rgba(251, 191, 36, 0.9);
+            margin-bottom: 8px;
+            min-height: 16px;
+        }
+        
+        .transcript-text {
+            font-size: 12px;
+            line-height: 1.6;
+            color: rgba(255, 255, 255, 0.75);
+            max-height: 200px;
+            overflow-y: auto;
+            padding: 12px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            white-space: pre-wrap;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+        
+        .story-beats-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        .story-beat {
+            display: flex;
+            gap: 10px;
+            padding: 10px 12px;
+            background: rgba(251, 191, 36, 0.08);
+            border: 1px solid rgba(251, 191, 36, 0.15);
+            border-radius: 8px;
+        }
+        
+        .story-beat-number {
+            width: 24px;
+            height: 24px;
+            background: rgba(251, 191, 36, 0.2);
+            color: rgba(252, 211, 77, 0.95);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+        
+        .story-beat-text {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.8);
+            line-height: 1.4;
+        }
+        
+        .details-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        
+        .detail-item {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        
+        .detail-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: rgba(255, 255, 255, 0.4);
+        }
+        
+        .detail-value {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.8);
+            word-break: break-all;
+        }
+        
+        .video-modal-actions {
+            display: flex;
+            gap: 10px;
+            padding: 16px 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(0, 0, 0, 0.2);
+        }
+        
+        .btn-video-action {
+            flex: 1;
+            padding: 10px 16px;
+            font-size: 12px;
+            font-weight: 500;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            color: rgba(255, 255, 255, 0.8);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+        
+        .btn-video-action:hover {
+            background: rgba(255, 255, 255, 0.12);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+        
+        .btn-video-action:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+        
+        .no-content {
+            color: rgba(255, 255, 255, 0.3);
+            font-style: italic;
         }
         
         .media-preview video,
@@ -1225,8 +2047,35 @@
         /* Ensure the metadata modal can scroll */
         #metadataModal .modal {
             width: 600px;
-            max-height: 80vh;
+            max-height: 85vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        #metadataModal .modal > * {
+            flex-shrink: 0;
+        }
+        
+        #metadataModal .modal h2 {
+            margin-bottom: 16px;
+        }
+        
+        #metadataModal #dynamicMetadataFields,
+        #metadataModal #legacyMetadataFields {
+            flex: 1;
             overflow-y: auto;
+            min-height: 200px;
+            max-height: 50vh;
+        }
+        
+        #metadataModal .modal-buttons {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            flex-shrink: 0;
+            position: sticky;
+            bottom: 0;
+            background: var(--bg-dark);
         }
         
         /* Grid view specific action button styling */
@@ -1346,6 +2195,105 @@
         
         /* Audio preview styles */
         .audio-preview {
+        }
+        
+        /* Markdown rendered styles */
+        #markdownRendered h1, #markdownRendered h2, #markdownRendered h3, 
+        #markdownRendered h4, #markdownRendered h5, #markdownRendered h6 {
+            color: #64c8ff;
+            margin: 1em 0 0.5em 0;
+            font-weight: 600;
+        }
+        #markdownRendered h1 { font-size: 1.8em; border-bottom: 1px solid rgba(100, 200, 255, 0.3); padding-bottom: 0.3em; }
+        #markdownRendered h2 { font-size: 1.5em; border-bottom: 1px solid rgba(100, 200, 255, 0.2); padding-bottom: 0.3em; }
+        #markdownRendered h3 { font-size: 1.3em; }
+        #markdownRendered h4 { font-size: 1.1em; }
+        
+        #markdownRendered p { margin: 0.8em 0; }
+        
+        #markdownRendered ul, #markdownRendered ol {
+            margin: 0.8em 0;
+            padding-left: 2em;
+        }
+        #markdownRendered li { margin: 0.3em 0; }
+        
+        #markdownRendered code {
+            background: rgba(100, 200, 255, 0.15);
+            padding: 0.2em 0.4em;
+            border-radius: 4px;
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 0.9em;
+            color: #ff9966;
+        }
+        
+        #markdownRendered pre {
+            background: rgba(0, 0, 0, 0.4);
+            padding: 16px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 1em 0;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        #markdownRendered pre code {
+            background: none;
+            padding: 0;
+            color: rgba(255, 255, 255, 0.9);
+        }
+        
+        #markdownRendered blockquote {
+            border-left: 4px solid #64c8ff;
+            margin: 1em 0;
+            padding: 0.5em 1em;
+            background: rgba(100, 200, 255, 0.08);
+            border-radius: 0 8px 8px 0;
+            color: rgba(255, 255, 255, 0.8);
+        }
+        
+        #markdownRendered a {
+            color: #64c8ff;
+            text-decoration: none;
+        }
+        #markdownRendered a:hover {
+            text-decoration: underline;
+        }
+        
+        #markdownRendered hr {
+            border: none;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+            margin: 1.5em 0;
+        }
+        
+        #markdownRendered table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 1em 0;
+        }
+        #markdownRendered th, #markdownRendered td {
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 8px 12px;
+            text-align: left;
+        }
+        #markdownRendered th {
+            background: rgba(100, 200, 255, 0.15);
+            font-weight: 600;
+        }
+        #markdownRendered tr:nth-child(even) {
+            background: rgba(255, 255, 255, 0.03);
+        }
+        
+        #markdownRendered img {
+            max-width: 100%;
+            border-radius: 8px;
+            margin: 1em 0;
+        }
+        
+        #markdownRendered strong { color: #fff; }
+        #markdownRendered em { color: rgba(255, 255, 255, 0.85); }
+        
+        /* Task list checkboxes */
+        #markdownRendered input[type="checkbox"] {
+            margin-right: 8px;
+        }
     </style>
 </head>
 <body>
@@ -1415,6 +2363,7 @@
                         <button class="filter-btn active" data-filter="all">All</button>
                         <button class="filter-btn" data-filter="text">Text</button>
                         <button class="filter-btn" data-filter="code">Code</button>
+                        <button class="filter-btn" data-filter="html">HTML</button>
                         <button class="filter-btn" data-filter="design">Design</button>
                         <button class="filter-btn" data-filter="flow">GSX Flows</button>
                         <button class="filter-btn" data-filter="notebook">Jupyter</button>
@@ -1564,26 +2513,53 @@
                 <textarea class="form-input" id="aiPrompt" rows="2" placeholder="Customize the AI prompt (optional). Default: 'Analyze this content and generate comprehensive metadata including description, tags, and relevant notes.'" style="font-size: 12px;"></textarea>
                 <div id="aiGenerationStatus" style="margin-top: 8px; font-size: 12px; color: rgba(255, 255, 255, 0.6); display: none;"></div>
             </div>
-            
-            <!-- Basic Information -->
-            <div class="form-group">
-                <label class="form-label">Description</label>
-                <input type="text" class="form-input" id="metaDescription" placeholder="Brief description of this item">
+
+            <!-- Asset Type Indicator -->
+            <div id="assetTypeIndicator" style="margin-bottom: 16px; padding: 8px 12px; background: rgba(99, 102, 241, 0.15); border-radius: 6px; font-size: 12px; color: rgba(255, 255, 255, 0.8); display: none;">
+                <span style="font-weight: 600;">Asset Type:</span> <span id="assetTypeName"></span>
+                <span style="opacity: 0.6; margin-left: 12px;">• Fields customized for this type</span>
             </div>
-            
-            <div class="form-group">
-                <label class="form-label">Notes</label>
-                <textarea class="form-input" id="metaNotes" rows="3" placeholder="Additional notes or context"></textarea>
+
+            <!-- DYNAMIC METADATA FIELDS (populated based on asset type) -->
+            <div id="dynamicMetadataFields">
+                <!-- Fields will be dynamically inserted here based on asset type -->
             </div>
-            
-            <div class="form-group">
-                <label class="form-label">Instructions</label>
+
+            <!-- Legacy/Fallback Fields (hidden, used if no schema match) -->
+            <div id="legacyMetadataFields" style="display: none;">
+                <div class="form-group">
+                    <label class="form-label">Title</label>
+                    <input type="text" class="form-input" id="metaTitle" placeholder="Title of this content">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Description</label>
+                    <textarea class="form-input" id="metaDescription" rows="6" placeholder="Description" style="font-size: 13px; line-height: 1.5;"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Topics / Tags (comma-separated)</label>
+                    <input type="text" class="form-input" id="metaTags" placeholder="topic1, topic2, tag1">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Notes</label>
+                    <textarea class="form-input" id="metaNotes" rows="3" placeholder="Additional notes or context"></textarea>
+                </div>
+
+                <div class="form-group" style="display: none;">
+                    <label class="form-label">Speakers (comma-separated)</label>
+                    <input type="text" class="form-input" id="metaSpeakers" placeholder="Speaker 1, Speaker 2">
+                </div>
+
+                <div class="form-group" style="display: none;">
+                    <label class="form-label">Story Beats</label>
+                    <textarea class="form-input" id="metaStoryBeats" rows="5" placeholder="Key insights" style="font-size: 13px; line-height: 1.5;"></textarea>
+                </div>
+
+                <div class="form-group" style="display: none;">
+                    <label class="form-label">Instructions</label>
                 <textarea class="form-input" id="metaInstructions" rows="2" placeholder="How to use this item"></textarea>
-            </div>
-            
-            <div class="form-group">
-                <label class="form-label">Tags (comma-separated)</label>
-                <input type="text" class="form-input" id="metaTags" placeholder="tag1, tag2, tag3">
             </div>
             
             <div class="form-group">
@@ -1625,6 +2601,31 @@
                 <textarea class="form-input" id="metaAiContext" rows="2" placeholder="Additional context about AI usage"></textarea>
             </div>
             
+            <!-- Transcript Section (for video/audio) - Collapsible -->
+            <div id="metaTranscriptSection" style="margin-top: 24px; padding-top: 16px; border-top: 1px solid rgba(255, 255, 255, 0.1); display: none;">
+                <div id="transcriptHeader" style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; padding: 8px 0;" onclick="toggleTranscriptSection()">
+                    <h3 style="font-size: 16px; margin: 0; color: rgba(255, 255, 255, 0.8); display: flex; align-items: center; gap: 8px;">
+                        <span id="transcriptToggleIcon" style="transition: transform 0.2s;">▶</span>
+                        📝 Transcript
+                        <span id="transcriptPreview" style="font-size: 12px; color: rgba(255,255,255,0.4); font-weight: normal; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"></span>
+                    </h3>
+                    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;" onclick="event.stopPropagation()">
+                        <label style="display: flex; align-items: center; gap: 4px; font-size: 11px; color: rgba(255,255,255,0.6); cursor: pointer;">
+                            <input type="checkbox" id="showTimecodeToggle" style="width: 14px; height: 14px;">
+                            Timecodes
+                        </label>
+                        <button class="btn btn-secondary" id="fetchTranscriptBtn" style="padding: 4px 12px; font-size: 12px; display: none;">Fetch from YouTube</button>
+                        <button class="btn btn-primary" id="identifySpeakersBtn" style="padding: 4px 12px; font-size: 12px; display: none; background: linear-gradient(135deg, rgba(139, 92, 246, 0.8) 0%, rgba(168, 85, 247, 0.8) 100%);">✨ Identify Speakers</button>
+                        <button class="btn btn-secondary" id="copyTranscriptBtn" style="padding: 4px 12px; font-size: 12px;">Copy</button>
+                        <button class="btn btn-secondary" id="extractAudioBtn" style="padding: 4px 12px; font-size: 12px; display: none;">🎵 Extract Audio</button>
+                    </div>
+                </div>
+                <div id="transcriptContent" style="display: none; margin-top: 12px;">
+                    <div id="metaTranscriptInfo" style="font-size: 12px; color: rgba(255, 255, 255, 0.5); margin-bottom: 8px;"></div>
+                    <textarea class="form-input" id="metaTranscript" rows="8" style="font-size: 12px; line-height: 1.5; resize: vertical;" readonly placeholder="No transcript available"></textarea>
+                </div>
+            </div>
+            
             <!-- Read-only fields -->
             <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid rgba(255, 255, 255, 0.1);">
                 <h3 style="font-size: 14px; margin-bottom: 12px; color: rgba(255, 255, 255, 0.6);">System Information</h3>
@@ -1649,6 +2650,351 @@
         <div style="color: #ff5555; font-size: 18px; font-weight: 600; margin-bottom: 15px;">Failed to Load Spaces Manager</div>
         <div id="errorMessage" style="color: rgba(255,255,255,0.8); margin-bottom: 20px; line-height: 1.5;"></div>
         <button onclick="window.location.reload()" style="background: #4CAF50; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 14px;">Reload Application</button>
+    </div>
+    
+    <!-- Preview/Edit Panel -->
+    <div class="modal-overlay" id="previewModal">
+        <div class="modal" style="width: 800px; max-width: 90vw; height: 80vh; display: flex; flex-direction: column;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h2 class="modal-title" id="previewModalTitle" style="margin: 0;">Preview</h2>
+                <div style="display: flex; gap: 8px;">
+                    <button class="btn btn-secondary" id="previewModeBtn" style="padding: 6px 12px; font-size: 12px;">
+                        <span id="previewModeIcon">✎</span> Edit
+                    </button>
+                    <button class="btn btn-secondary" id="previewCopyBtn" style="padding: 6px 12px; font-size: 12px;">
+                        ⧉ Copy
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Item info bar -->
+            <div id="previewItemInfo" style="display: flex; flex-wrap: wrap; gap: 16px; padding: 12px 16px; background: rgba(100, 200, 255, 0.08); border: 1px solid rgba(100, 200, 255, 0.15); border-radius: 8px; margin-bottom: 16px; font-size: 12px; color: rgba(255, 255, 255, 0.7);">
+                <span id="previewItemType">Type: -</span>
+                <span id="previewItemSize">Size: -</span>
+                <span id="previewItemDate">Date: -</span>
+                <span id="previewItemSource">Source: -</span>
+            </div>
+            
+            <!-- Video Editor Section -->
+            <div id="videoEditorSection" style="display: none; padding: 12px 16px; background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: 8px; margin-bottom: 16px;">
+                <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="font-size: 16px;">🎬</span>
+                        <span style="font-size: 13px; color: rgba(255, 255, 255, 0.8); font-weight: 500;">Video Editor</span>
+                    </div>
+                    
+                    <button id="openVideoEditorBtn" class="btn" style="padding: 6px 14px; background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); border: none; color: white; font-size: 12px; font-weight: 500; display: flex; align-items: center; gap: 6px;">
+                        <span>✂️</span>
+                        <span>Open in Video Editor</span>
+                    </button>
+                    
+                    <span style="font-size: 11px; color: rgba(255, 255, 255, 0.5);">Trim, convert, compress, extract audio & more</span>
+                </div>
+            </div>
+            
+            <!-- Audio/Video Transcription Section -->
+            <div id="transcriptionSection" style="display: none; padding: 12px 16px; background: rgba(251, 191, 36, 0.08); border: 1px solid rgba(251, 191, 36, 0.2); border-radius: 8px; margin-bottom: 16px;">
+                <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="font-size: 16px;">📝</span>
+                        <span style="font-size: 13px; color: rgba(255, 255, 255, 0.8); font-weight: 500;">Transcribe Audio</span>
+                    </div>
+                    
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <label for="transcriptionLanguage" style="font-size: 12px; color: rgba(255, 255, 255, 0.6);">Language:</label>
+                        <select id="transcriptionLanguage" style="padding: 6px 10px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(251, 191, 36, 0.3); border-radius: 6px; color: rgba(255, 255, 255, 0.9); font-size: 12px; cursor: pointer; outline: none;">
+                            <option value="">Auto-detect</option>
+                            <option value="en">English</option>
+                            <option value="es">Spanish</option>
+                            <option value="fr">French</option>
+                            <option value="de">German</option>
+                            <option value="it">Italian</option>
+                            <option value="pt">Portuguese</option>
+                            <option value="nl">Dutch</option>
+                            <option value="ja">Japanese</option>
+                            <option value="ko">Korean</option>
+                            <option value="zh">Chinese</option>
+                            <option value="ru">Russian</option>
+                            <option value="ar">Arabic</option>
+                            <option value="hi">Hindi</option>
+                        </select>
+                    </div>
+                    
+                    <button id="transcribeBtn" class="btn" style="padding: 6px 14px; background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%); border: none; color: #1a1a1a; font-size: 12px; font-weight: 500; display: flex; align-items: center; gap: 6px;">
+                        <span id="transcribeButtonIcon">🎤</span>
+                        <span id="transcribeButtonText">Transcribe</span>
+                    </button>
+                </div>
+                
+                <div id="transcriptionStatus" style="display: none; margin-top: 8px; font-size: 11px; color: rgba(251, 191, 36, 0.8);"></div>
+                
+                <!-- Transcription result -->
+                <div id="transcriptionResult" style="display: none; margin-top: 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="font-size: 12px; color: rgba(255, 255, 255, 0.6);">Transcription:</span>
+                        <div style="display: flex; gap: 6px;">
+                            <button id="copyTranscriptionBtn" class="btn btn-secondary" style="padding: 4px 10px; font-size: 11px;" title="Copy to clipboard">
+                                ⧉ Copy
+                            </button>
+                            <button id="saveTranscriptionBtn" class="btn btn-secondary" style="padding: 4px 10px; font-size: 11px;" title="Save as text item">
+                                💾 Save
+                            </button>
+                        </div>
+                    </div>
+                    <div id="transcriptionText" style="max-height: 200px; overflow-y: auto; padding: 12px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(251, 191, 36, 0.2); border-radius: 6px; font-size: 13px; line-height: 1.6; color: rgba(255, 255, 255, 0.9); white-space: pre-wrap;"></div>
+                </div>
+            </div>
+            
+            <!-- Text-to-Speech Section (for text/markdown content) -->
+            <div id="textToSpeechSection" style="display: none; padding: 12px 16px; background: rgba(34, 197, 94, 0.08); border: 1px solid rgba(34, 197, 94, 0.2); border-radius: 8px; margin-bottom: 16px;">
+                <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="font-size: 16px;">🔊</span>
+                        <span style="font-size: 13px; color: rgba(255, 255, 255, 0.8); font-weight: 500;">Text to Speech</span>
+                    </div>
+                    
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <label for="ttsVoiceSelect" style="font-size: 12px; color: rgba(255, 255, 255, 0.6);">Voice:</label>
+                        <select id="ttsVoiceSelect" style="padding: 6px 10px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 6px; color: rgba(255, 255, 255, 0.9); font-size: 12px; cursor: pointer; outline: none;">
+                            <option value="alloy">Alloy (Neutral)</option>
+                            <option value="echo">Echo (Male)</option>
+                            <option value="fable">Fable (British)</option>
+                            <option value="onyx">Onyx (Deep Male)</option>
+                            <option value="nova" selected>Nova (Female)</option>
+                            <option value="shimmer">Shimmer (Soft Female)</option>
+                        </select>
+                    </div>
+                    
+                    <button id="generateSpeechBtn" class="btn" style="padding: 6px 14px; background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); border: none; color: white; font-size: 12px; display: flex; align-items: center; gap: 6px;">
+                        <span id="ttsButtonIcon">🎙️</span>
+                        <span id="ttsButtonText">Generate Audio</span>
+                    </button>
+                    
+                    <!-- Audio player (hidden until audio is generated) -->
+                    <div id="ttsAudioContainer" style="display: none; flex: 1; min-width: 200px;">
+                        <audio id="ttsAudioPlayer" controls style="width: 100%; height: 32px;"></audio>
+                    </div>
+                    
+                    <button id="saveTtsAudioBtn" class="btn btn-secondary" style="display: none; padding: 6px 10px; font-size: 12px;" title="Save audio to Space">
+                        💾 Save
+                    </button>
+                </div>
+                
+                <div id="ttsStatus" style="display: none; margin-top: 8px; font-size: 11px; color: rgba(34, 197, 94, 0.8);"></div>
+            </div>
+            
+            <!-- Preview/Edit content area -->
+            <div id="previewContentWrapper" style="flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden;">
+                <!-- View mode: shows formatted content -->
+                <div id="previewViewMode" style="flex: 1; overflow: auto; padding: 16px; background: rgba(20, 20, 20, 0.95); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; font-family: 'Monaco', 'Consolas', monospace; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; color: rgba(255, 255, 255, 0.9);">
+                    Loading...
+                </div>
+                
+                <!-- Markdown preview mode -->
+                <div id="previewMarkdownMode" style="flex: 1; display: none; overflow: auto; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(20, 20, 20, 0.95);">
+                    <div id="markdownRendered" style="padding: 20px; color: rgba(255, 255, 255, 0.9); line-height: 1.7;"></div>
+                </div>
+                
+                <!-- Edit mode: textarea for editing -->
+                <div id="previewEditMode" style="flex: 1; display: none; flex-direction: column; min-height: 0;">
+                    <textarea id="previewEditTextarea" style="flex: 1; width: 100%; padding: 16px; background: rgba(20, 20, 20, 0.95); border: 1px solid rgba(100, 200, 255, 0.3); border-radius: 8px; color: rgba(255, 255, 255, 0.9); font-family: 'Monaco', 'Consolas', monospace; font-size: 13px; line-height: 1.6; resize: none; outline: none; caret-color: #64c8ff;" placeholder="Enter content..."></textarea>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding: 8px 12px; background: rgba(100, 200, 255, 0.1); border-radius: 6px;">
+                        <span id="previewEditStats" style="font-size: 11px; color: rgba(255, 255, 255, 0.5);">0 characters</span>
+                        <div style="display: flex; gap: 8px;">
+                            <button class="btn btn-secondary" id="previewEditCancel" style="padding: 6px 12px; font-size: 12px;">Cancel</button>
+                            <button class="btn btn-primary" id="previewEditSave" style="padding: 6px 12px; font-size: 12px;">💾 Save Changes</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Image preview mode -->
+                <div id="previewImageMode" style="flex: 1; display: none; overflow: auto; padding: 16px; background: rgba(20, 20, 20, 0.95); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px;">
+                    <div style="text-align: center; margin-bottom: 16px;">
+                        <img id="previewImage" style="max-width: 100%; max-height: 400px; object-fit: contain; border-radius: 4px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);" alt="Preview">
+                    </div>
+                    
+                    <!-- AI Image Editing Section -->
+                    <div id="imageEditSection" style="margin-top: 16px; padding: 16px; background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 8px;">
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                            <span style="font-size: 16px;">✨</span>
+                            <h4 style="margin: 0; font-size: 14px; color: rgba(255, 255, 255, 0.9);">AI Image Editor</h4>
+                        </div>
+                        
+                        <textarea id="imageEditPrompt" placeholder="Describe the changes you want to make to this image...&#10;&#10;Examples:&#10;• Remove the background&#10;• Make it brighter and more vibrant&#10;• Add a sunset sky&#10;• Convert to black and white&#10;• Remove text/watermarks" style="width: 100%; height: 100px; padding: 12px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 6px; color: rgba(255, 255, 255, 0.9); font-size: 13px; resize: vertical; outline: none; font-family: inherit;"></textarea>
+                        
+                        <div style="display: flex; gap: 8px; margin-top: 12px; align-items: center;">
+                            <button id="applyImageEditBtn" class="btn btn-primary" style="background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%); flex: 1;">
+                                🎨 Apply AI Edit
+                            </button>
+                            <button id="undoImageEditBtn" class="btn btn-secondary" style="display: none;" title="Undo last edit">
+                                ↩ Undo
+                            </button>
+                        </div>
+                        
+                        <!-- Save options - shown after an edit is applied -->
+                        <div id="imageSaveOptions" style="display: none; margin-top: 12px; padding: 12px; background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 8px;">
+                            <div style="font-size: 12px; color: rgba(255, 255, 255, 0.7); margin-bottom: 8px;">Save edited image:</div>
+                            <div style="display: flex; gap: 8px;">
+                                <button id="replaceOriginalBtn" class="btn" style="flex: 1; background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.4); color: #ef4444;" title="Replace the original image with this edit">
+                                    🔄 Replace Original
+                                </button>
+                                <button id="saveAsNewBtn" class="btn" style="flex: 1; background: rgba(34, 197, 94, 0.2); border: 1px solid rgba(34, 197, 94, 0.4); color: #22c55e;" title="Save as a new clipboard item">
+                                    ➕ Save as New
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div id="imageEditStatus" style="margin-top: 12px; font-size: 12px; color: rgba(255, 255, 255, 0.6); display: none;"></div>
+                        
+                        <!-- Edit history indicator -->
+                        <div id="imageEditHistory" style="margin-top: 8px; font-size: 11px; color: rgba(139, 92, 246, 0.8); display: none;">
+                            <span id="editHistoryCount">0</span> edit(s) applied
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- HTML preview mode -->
+                <div id="previewHtmlMode" style="flex: 1; display: none; overflow: auto; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(20, 20, 20, 0.95); padding: 8px;">
+                    <iframe id="previewHtmlFrame" style="width: 100%; height: 100%; border: none; background: white; border-radius: 6px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);"></iframe>
+                </div>
+            </div>
+            
+            <div class="modal-buttons" style="margin-top: 16px;">
+                <button class="btn btn-secondary" id="previewClose">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Video Preview Modal -->
+    <div class="modal-overlay" id="videoPreviewModal">
+        <div class="video-modal">
+            <button class="video-modal-close" id="videoModalClose">×</button>
+            
+            <!-- Video Player Section -->
+            <div class="video-modal-player">
+                <video id="videoModalPlayer" controls preload="metadata">
+                    <source src="" type="video/mp4">
+                </video>
+                <div class="video-modal-play-overlay" id="videoPlayOverlay">▶</div>
+            </div>
+            
+            <!-- Video Info Header -->
+            <div class="video-modal-header">
+                <div class="video-modal-title" id="videoModalTitle">Video Title</div>
+                <div class="video-modal-meta">
+                    <span id="videoModalChannel">Channel</span>
+                    <span class="meta-dot">•</span>
+                    <span id="videoModalDuration">00:00</span>
+                    <span class="meta-dot">•</span>
+                    <span id="videoModalSize">0 MB</span>
+                    <span id="videoModalSource" class="video-source-tag">YouTube</span>
+                </div>
+                <div class="video-modal-badges" id="videoModalBadges">
+                    <!-- Badges inserted by JS -->
+                </div>
+            </div>
+            
+            <!-- Tabs -->
+            <div class="video-modal-tabs">
+                <button class="video-tab active" data-tab="overview">Overview</button>
+                <button class="video-tab" data-tab="transcript">Transcript</button>
+                <button class="video-tab" data-tab="beats">Story Beats</button>
+                <button class="video-tab" data-tab="details">Details</button>
+            </div>
+            
+            <!-- Tab Content -->
+            <div class="video-modal-content">
+                <!-- Overview Tab -->
+                <div class="video-tab-content active" id="tabOverview">
+                    <div class="video-section">
+                        <div class="video-section-title" style="display: flex; justify-content: space-between; align-items: center;">
+                            <span>AI Summary</span>
+                            <button id="generateSummaryBtn" class="btn btn-secondary" style="padding: 4px 12px; font-size: 11px; display: none;">
+                                <span>✨</span> Generate Summary
+                            </button>
+                        </div>
+                        <div class="video-section-content" id="videoDescription">No description available.</div>
+                    </div>
+                    <div class="video-section">
+                        <div class="video-section-title">Topics</div>
+                        <div class="video-topics" id="videoTopics">
+                            <!-- Topic badges inserted by JS -->
+                        </div>
+                    </div>
+                    <div class="video-section">
+                        <div class="video-section-title">Speakers</div>
+                        <div class="video-speakers" id="videoSpeakers">
+                            <!-- Speakers inserted by JS -->
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Transcript Tab -->
+                <div class="video-tab-content" id="tabTranscript">
+                    <div class="transcript-controls">
+                        <label class="timecode-toggle">
+                            <input type="checkbox" id="videoTimecodeToggle">
+                            <span>Show Timecodes</span>
+                        </label>
+                        <button class="btn-action" id="videoIdentifySpeakers">
+                            <span>✨</span> Identify Speakers
+                        </button>
+                    </div>
+                    <div class="transcript-status" id="videoTranscriptStatus"></div>
+                    <div class="transcript-text" id="videoTranscriptText">No transcript available.</div>
+                </div>
+                
+                <!-- Story Beats Tab -->
+                <div class="video-tab-content" id="tabBeats">
+                    <div class="story-beats-list" id="videoStoryBeats">
+                        <!-- Story beats inserted by JS -->
+                    </div>
+                </div>
+                
+                <!-- Details Tab -->
+                <div class="video-tab-content" id="tabDetails">
+                    <div class="details-grid">
+                        <div class="detail-item">
+                            <span class="detail-label">File Name</span>
+                            <span class="detail-value" id="videoFileName">-</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">File Size</span>
+                            <span class="detail-value" id="videoFileSize">-</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Duration</span>
+                            <span class="detail-value" id="videoFileDuration">-</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Source</span>
+                            <span class="detail-value" id="videoFileSource">-</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Added</span>
+                            <span class="detail-value" id="videoFileDate">-</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Original URL</span>
+                            <span class="detail-value" id="videoFileUrl">-</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Action Bar -->
+            <div class="video-modal-actions">
+                <button class="btn-video-action" id="videoDownloadAudio">
+                    <span>🎵</span> Download Audio
+                </button>
+                <button class="btn-video-action" id="videoCopyTranscript">
+                    <span>📋</span> Copy Transcript
+                </button>
+                <button class="btn-video-action" id="videoOpenFile">
+                    <span>📂</span> Open File
+                </button>
+            </div>
+        </div>
     </div>
 
     <script src="clipboard-viewer.js"></script>

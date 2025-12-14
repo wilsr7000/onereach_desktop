@@ -208,8 +208,10 @@ else
     git commit -m "Release v${NEW_VERSION}"
 fi
 
-git push origin main
-echo -e "${GREEN}✅ Pushed to private repository${NC}"
+# Get current branch
+CURRENT_BRANCH=$(git branch --show-current)
+git push origin $CURRENT_BRANCH
+echo -e "${GREEN}✅ Pushed to private repository (branch: $CURRENT_BRANCH)${NC}"
 
 # Step 3: Clean previous builds
 echo ""

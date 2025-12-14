@@ -2,6 +2,99 @@ const { app, Menu, shell, BrowserWindow, globalShortcut, ipcMain } = require('el
 const fs = require('fs');
 const path = require('path');
 
+// ============================================
+// PERFORMANCE: Menu data caching
+// ============================================
+// Cache menu configuration data to avoid repeated file I/O
+const menuCache = {
+  idwEnvironments: null,
+  gsxLinks: null,
+  externalBots: null,
+  imageCreators: null,
+  videoCreators: null,
+  audioGenerators: null,
+  uiDesignTools: null,
+  userPrefs: null,
+  lastLoaded: 0,
+  cacheValidMs: 60000, // Cache valid for 60 seconds
+  
+  // Check if cache is still valid
+  isValid() {
+    return this.lastLoaded > 0 && (Date.now() - this.lastLoaded) < this.cacheValidMs;
+  },
+  
+  // Invalidate cache (call when files are updated)
+  invalidate() {
+    this.lastLoaded = 0;
+    console.log('[Menu Cache] Cache invalidated');
+  },
+  
+  // Load all menu data with caching
+  loadAll() {
+    if (this.isValid()) {
+      console.log('[Menu Cache] Using cached menu data');
+      return {
+        idwEnvironments: this.idwEnvironments || [],
+        gsxLinks: this.gsxLinks || [],
+        externalBots: this.externalBots || [],
+        imageCreators: this.imageCreators || [],
+        videoCreators: this.videoCreators || [],
+        audioGenerators: this.audioGenerators || [],
+        uiDesignTools: this.uiDesignTools || [],
+        userPrefs: this.userPrefs || {}
+      };
+    }
+    
+    console.log('[Menu Cache] Loading menu data from files...');
+    const startTime = Date.now();
+    
+    try {
+      const electronApp = require('electron').app;
+      const userDataPath = electronApp.getPath('userData');
+      
+      // Load all files
+      this.idwEnvironments = this._loadJsonFile(path.join(userDataPath, 'idw-entries.json'), []);
+      this.gsxLinks = this._loadJsonFile(path.join(userDataPath, 'gsx-links.json'), []);
+      this.externalBots = this._loadJsonFile(path.join(userDataPath, 'external-bots.json'), []);
+      this.imageCreators = this._loadJsonFile(path.join(userDataPath, 'image-creators.json'), []);
+      this.videoCreators = this._loadJsonFile(path.join(userDataPath, 'video-creators.json'), []);
+      this.audioGenerators = this._loadJsonFile(path.join(userDataPath, 'audio-generators.json'), []);
+      this.uiDesignTools = this._loadJsonFile(path.join(userDataPath, 'ui-design-tools.json'), []);
+      this.userPrefs = this._loadJsonFile(path.join(userDataPath, 'user-preferences.json'), {});
+      
+      this.lastLoaded = Date.now();
+      console.log(`[Menu Cache] Loaded all menu data in ${Date.now() - startTime}ms`);
+      
+    } catch (error) {
+      console.error('[Menu Cache] Error loading menu data:', error);
+    }
+    
+    return {
+      idwEnvironments: this.idwEnvironments || [],
+      gsxLinks: this.gsxLinks || [],
+      externalBots: this.externalBots || [],
+      imageCreators: this.imageCreators || [],
+      videoCreators: this.videoCreators || [],
+      audioGenerators: this.audioGenerators || [],
+      uiDesignTools: this.uiDesignTools || [],
+      userPrefs: this.userPrefs || {}
+    };
+  },
+  
+  // Helper to load a JSON file with default value
+  _loadJsonFile(filePath, defaultValue) {
+    try {
+      if (fs.existsSync(filePath)) {
+        const data = fs.readFileSync(filePath, 'utf8');
+        return JSON.parse(data);
+      }
+    } catch (error) {
+      console.error(`[Menu Cache] Error loading ${filePath}:`, error.message);
+    }
+    return defaultValue;
+  }
+};
+
 /**
  * Helper function to open GSX content in a large app window
  * @param {string} url The URL to load
@@ -315,6 +408,31 @@ function openLearningWindow(url, title = 'Agentic University') {
     learningWindow.webContents.executeJavaScript(`
       document.body.classList.add('learning-loaded');
     `).catch(err => console.error('[Learning Window] Error hiding loading indicator:', err));
+    
+    // Apply custom CSS for Wiser Method site (fix dark text on dark bg)
+    if (url.includes('wisermethod.com')) {
+      learningWindow.webContents.insertCSS(`
+        /* Fix text visibility on Wiser Method */
+        body, p, span, div, h1, h2, h3, h4, h5, h6, li, a, td, th, label {
+          color: #e0e0e0 !important;
+        }
+        a {
+          color: #7eb3ff !important;
+        }
+        a:hover {
+          color: #aaccff !important;
+        }
+        /* Keep buttons and specific elements readable */
+        button, input, select, textarea {
+          color: #333 !important;
+          background-color: #fff !important;
+        }
+        /* Ensure headings stand out */
+        h1, h2, h3 {
+          color: #ffffff !important;
+        }
+      `).catch(err => console.error('[Learning Window] Error injecting Wiser Method CSS:', err));
+    }
   });
   
   // Also remove on did-stop-loading as a fallback
@@ -368,189 +486,55 @@ function openLearningWindow(url, title = 'Agentic University') {
 function createMenu(showTestMenu = false, idwEnvironments = []) {
   console.log('[Menu] Creating application menu...');
   const isMac = process.platform === 'darwin';
+  const startTime = Date.now();
   
-  // --- IDW Environment Loading ---
-  console.log('[Menu] Attempting to load IDW environments...');
+  // PERFORMANCE: Use cached menu data instead of reading files every time
+  const cachedData = menuCache.loadAll();
+  
+  // Use passed IDW environments or fall back to cache
   if (!idwEnvironments || !idwEnvironments.length) {
-    console.log('[Menu] No IDW environments passed as argument, attempting to load from file.');
-    try {
-      // Explicitly require app here if not available globally
-      const electronApp = require('electron').app; 
-      const userDataPath = electronApp.getPath('userData');
-      const idwConfigPath = path.join(userDataPath, 'idw-entries.json');
-      console.log(`[Menu] Checking for IDW config at: ${idwConfigPath}`);
-      
-      if (fs.existsSync(idwConfigPath)) {
-        console.log('[Menu] Found idw-entries.json.');
-        try {
-          const data = fs.readFileSync(idwConfigPath, 'utf8');
-          idwEnvironments = JSON.parse(data);
-          console.log('[Menu] Successfully parsed idw-entries.json:', JSON.stringify(idwEnvironments, null, 2));
-        } catch (error) {
-          console.error('[Menu] Error parsing idw-entries.json:', error);
-          idwEnvironments = []; // Reset to empty if parsing fails
-        }
-      } else {
-        console.log('[Menu] idw-entries.json not found.');
-        idwEnvironments = [];
-      }
-    } catch (error) {
-      console.error('[Menu] Error reading IDW environments from file:', error);
-      idwEnvironments = [];
-    }
-  } else {
-    console.log('[Menu] Using IDW environments passed as argument:', JSON.stringify(idwEnvironments, null, 2));
+    idwEnvironments = cachedData.idwEnvironments;
+    console.log(`[Menu] Using cached IDW environments: ${idwEnvironments.length} items`);
   }
   
-  // --- GSX Link Loading ---
-  let allGsxLinks = [];
-  try {
-    const electronApp = require('electron').app;
-    const userDataPath = electronApp.getPath('userData');
-    const gsxConfigPath = path.join(userDataPath, 'gsx-links.json');
-    console.log(`[Menu] Checking for GSX config at: ${gsxConfigPath}`);
-    if (fs.existsSync(gsxConfigPath)) {
-      console.log('[Menu] Found gsx-links.json.');
+  // Use cached data for other menu items
+  let allGsxLinks = cachedData.gsxLinks;
+  let externalBots = cachedData.externalBots;
+  let imageCreators = cachedData.imageCreators;
+  let videoCreators = cachedData.videoCreators;
+  let audioGenerators = cachedData.audioGenerators;
+  let uiDesignTools = cachedData.uiDesignTools;
+  
+  // Generate default GSX links if none exist
+  if (allGsxLinks.length === 0 && idwEnvironments.length > 0) {
+    console.log('[Menu] No GSX links found, generating defaults');
+    const gsxAccountId = cachedData.userPrefs.gsxAccountId || '';
+    allGsxLinks = generateDefaultGSXLinks(idwEnvironments, gsxAccountId);
+    
+    // Save generated links
+    if (allGsxLinks.length) {
       try {
-        const data = fs.readFileSync(gsxConfigPath, 'utf8');
-        allGsxLinks = JSON.parse(data);
-        console.log('[Menu] Successfully parsed gsx-links.json:', JSON.stringify(allGsxLinks, null, 2));
-        
-        // DEBUG: Check if GSX link URLs contain the expected environment names
-        console.log('[Menu] Checking if GSX URLs contain environment names from IDW environments:');
-        if (idwEnvironments && idwEnvironments.length > 0) {
-          idwEnvironments.forEach(env => {
-            if (env.environment) {
-              console.log(`[Menu] IDW environment '${env.label}' has environment name: '${env.environment}'`);
-              
-              // Check each GSX link against this environment
-              allGsxLinks.forEach(link => {
-                if (link.url) {
-                  try {
-                    const url = new URL(link.url);
-                    const hostname = url.hostname;
-                    const matches = hostname.includes(env.environment);
-                    console.log(`[Menu] GSX URL '${hostname}' includes '${env.environment}'? ${matches}`);
-                  } catch (e) {
-                    console.warn(`[Menu] Invalid GSX URL: ${link.url}`);
-                  }
-                }
-              });
-            } else {
-              console.warn(`[Menu] IDW environment '${env.label}' does not have an environment property`);
-            }
-          });
-        }
-      } catch (error) {
-        console.error('[Menu] Error parsing gsx-links.json:', error);
-        allGsxLinks = [];
-      }
-    } else {
-      console.log('[Menu] gsx-links.json not found – generating default links');
-      
-      // Load user preferences to get GSX account ID
-      let gsxAccountId = '';
-      try {
-        const prefsPath = path.join(userDataPath, 'user-preferences.json');
-        if (fs.existsSync(prefsPath)) {
-          const prefsData = fs.readFileSync(prefsPath, 'utf8');
-          const userPrefs = JSON.parse(prefsData);
-          if (userPrefs.gsxAccountId) {
-            gsxAccountId = userPrefs.gsxAccountId;
-            console.log('[Menu] Found GSX Account ID in user preferences:', gsxAccountId);
-          }
-        }
-      } catch (error) {
-        console.error('[Menu] Error loading user preferences for GSX account ID:', error);
-      }
-      
-      allGsxLinks = generateDefaultGSXLinks(idwEnvironments, gsxAccountId);
-      if (allGsxLinks.length) {
-        try {
-          fs.writeFileSync(gsxConfigPath, JSON.stringify(allGsxLinks, null, 2));
-          console.log(`[Menu] Wrote ${allGsxLinks.length} default GSX links to`, gsxConfigPath);
-        } catch (err) {
-          console.error('[Menu] Failed to write default GSX links:', err);
-        }
+        const electronApp = require('electron').app;
+        const userDataPath = electronApp.getPath('userData');
+        const gsxConfigPath = path.join(userDataPath, 'gsx-links.json');
+        fs.writeFileSync(gsxConfigPath, JSON.stringify(allGsxLinks, null, 2));
+        console.log(`[Menu] Wrote ${allGsxLinks.length} default GSX links`);
+        menuCache.gsxLinks = allGsxLinks;
+      } catch (err) {
+        console.error('[Menu] Failed to write default GSX links:', err);
       }
     }
-  } catch (error) {
-    console.error('[Menu] Error reading GSX links from file:', error);
-    allGsxLinks = [];
   }
+  
+  console.log(`[Menu] Data loading took ${Date.now() - startTime}ms`);
 
   // --- Menu Item Creation ---
   const idwMenuItems = [];
   const gsxMenuItems = [];
   
-  // Get userDataPath for loading external bots
+  // Get userDataPath for any needed operations
   const electronApp = require('electron').app;
   const userDataPath = electronApp.getPath('userData');
-  
-  // Load external bots
-  let externalBots = [];
-  try {
-    const botsPath = path.join(userDataPath, 'external-bots.json');
-    if (fs.existsSync(botsPath)) {
-      const botsData = fs.readFileSync(botsPath, 'utf8');
-      externalBots = JSON.parse(botsData);
-      console.log(`[Menu] Loaded ${externalBots.length} external bots`);
-    }
-  } catch (error) {
-    console.error('[Menu] Error loading external bots:', error);
-  }
-  
-  // Load image creators
-  let imageCreators = [];
-  try {
-    const creatorsPath = path.join(userDataPath, 'image-creators.json');
-    if (fs.existsSync(creatorsPath)) {
-      const creatorsData = fs.readFileSync(creatorsPath, 'utf8');
-      imageCreators = JSON.parse(creatorsData);
-      console.log(`[Menu] Loaded ${imageCreators.length} image creators`);
-    }
-  } catch (error) {
-    console.error('[Menu] Error loading image creators:', error);
-  }
-  
-  // Load video creators
-  let videoCreators = [];
-  try {
-    const videoCreatorsPath = path.join(userDataPath, 'video-creators.json');
-    if (fs.existsSync(videoCreatorsPath)) {
-      const videoCreatorsData = fs.readFileSync(videoCreatorsPath, 'utf8');
-      videoCreators = JSON.parse(videoCreatorsData);
-      console.log(`[Menu] Loaded ${videoCreators.length} video creators`);
-    }
-  } catch (error) {
-    console.error('[Menu] Error loading video creators:', error);
-  }
-  
-  // Load audio generators
-  let audioGenerators = [];
-  try {
-    const audioGeneratorsPath = path.join(userDataPath, 'audio-generators.json');
-    if (fs.existsSync(audioGeneratorsPath)) {
-      const audioGeneratorsData = fs.readFileSync(audioGeneratorsPath, 'utf8');
-      audioGenerators = JSON.parse(audioGeneratorsData);
-      console.log(`[Menu] Loaded ${audioGenerators.length} audio generators`);
-    }
-  } catch (error) {
-    console.error('[Menu] Error loading audio generators:', error);
-  }
-  
-  // === NEW: Load UI Design tools ===
-  let uiDesignTools = [];
-  try {
-    const uiDesignToolsPath = path.join(userDataPath, 'ui-design-tools.json');
-    if (fs.existsSync(uiDesignToolsPath)) {
-      const uiDesignToolsData = fs.readFileSync(uiDesignToolsPath, 'utf8');
-      uiDesignTools = JSON.parse(uiDesignToolsData);
-      console.log(`[Menu] Loaded ${uiDesignTools.length} UI design tools`);
-    }
-  } catch (error) {
-    console.error('[Menu] Error loading UI design tools:', error);
-  }
   
   console.log('[Menu] Processing IDW environments to create menu items...');
   if (idwEnvironments && idwEnvironments.length > 0) {
@@ -1827,6 +1811,32 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
               }
             }
           ]
+        },
+        { type: 'separator' },
+        {
+          label: 'AI Run Times',
+          click: () => {
+            const aiWindow = new BrowserWindow({
+              width: 1200,
+              height: 800,
+              webPreferences: {
+                nodeIntegration: false,
+                contextIsolation: true,
+                webSecurity: true,
+                preload: path.join(__dirname, 'Flipboard-IDW-Feed/preload.js')
+              }
+            });
+            
+            // Load the UXmag.html file
+            aiWindow.loadFile('Flipboard-IDW-Feed/uxmag.html');
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Wiser Method',
+          click: () => {
+            openLearningWindow('https://www.wisermethod.com/', 'Wiser Method');
+          }
         }
       ]
     },
@@ -1977,6 +1987,23 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
         ...(global.moduleManager ? global.moduleManager.getWebToolMenuItems() : []),
         ...(global.moduleManager && global.moduleManager.getWebTools().length > 0 ? [{ type: 'separator' }] : []),
         {
+          label: 'Black Hole (Paste to Spaces)',
+          accelerator: 'CommandOrControl+Shift+B',
+          click: () => {
+            if (global.clipboardManager) {
+              // Position near center of screen
+              const { screen } = require('electron');
+              const primaryDisplay = screen.getPrimaryDisplay();
+              const { width, height } = primaryDisplay.workAreaSize;
+              const position = {
+                x: Math.round(width / 2 - 75),
+                y: Math.round(height / 2 - 75)
+              };
+              global.clipboardManager.createBlackHoleWindow(position, true);
+            }
+          }
+        },
+        {
           label: 'GSX Create',
           accelerator: 'CommandOrControl+Shift+A',
           click: () => {
@@ -1994,23 +2021,27 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
             aiderWindow.loadFile('aider-ui.html');
           }
         },
-        { type: 'separator' },
         {
-          label: 'AI Run Times',
+          label: 'Video Editor',
+          accelerator: 'CommandOrControl+Shift+V',
           click: () => {
-            const aiWindow = new BrowserWindow({
-              width: 1200,
-              height: 800,
+            const videoEditorWindow = new BrowserWindow({
+              width: 1400,
+              height: 900,
+              title: 'Video Editor',
               webPreferences: {
                 nodeIntegration: false,
                 contextIsolation: true,
-                webSecurity: true,
-                preload: path.join(__dirname, 'Flipboard-IDW-Feed/preload.js')
+                preload: path.join(__dirname, 'preload-video-editor.js')
               }
             });
             
-            // Load the UXmag.html file
-            aiWindow.loadFile('Flipboard-IDW-Feed/uxmag.html');
+            videoEditorWindow.loadFile('video-editor.html');
+            
+            // Setup video editor IPC for this window
+            if (global.videoEditor) {
+              global.videoEditor.setupIPC(videoEditorWindow);
+            }
           }
         },
         { type: 'separator' },
@@ -2867,6 +2898,10 @@ function registerTestMenuShortcut() {
  */
 function refreshGSXLinks() {
   console.log('[Menu] Refreshing GSX links from file system');
+  
+  // PERFORMANCE: Invalidate cache so fresh data is loaded
+  menuCache.invalidate();
+  
   try {
     // Get current IDW environments first
     let idwEnvironments = [];
@@ -3050,5 +3085,7 @@ module.exports = {
   setApplicationMenu,
   registerTestMenuShortcut,
   refreshGSXLinks,
-  refreshApplicationMenu
+  refreshApplicationMenu,
+  // PERFORMANCE: Expose cache invalidation for when menu data files are updated
+  invalidateMenuCache: () => menuCache.invalidate()
 }; 
