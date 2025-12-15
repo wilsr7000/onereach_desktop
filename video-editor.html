@@ -5861,7 +5861,7 @@
           if (this.videoPath) {
             options.instructions = `Record a segment to replace or add to: ${this.videoPath.split('/').pop()}`;
             if (this.selectedSpace) {
-              options.spaceId = this.selectedSpace;
+              options.spaceId = this.selectedSpace.id || this.selectedSpace;
             }
           }
           
@@ -9449,7 +9449,8 @@
         
         // Create project if not exists
         if (!this.currentProject && this.videoPath) {
-          await this.createProject(this.videoPath, this.selectedSpace);
+          const spaceId = this.selectedSpace?.id || this.selectedSpace || null;
+          await this.createProject(this.videoPath, spaceId);
         }
 
         // Reset audio state
@@ -10994,9 +10995,14 @@
         this.closeTranslationPanel();
         this.showToast('success', 'Translation applied to timeline!');
         
-        // Auto-advance to next segment if available
-        if (this.currentSegmentIndex < this.translationSegments.length - 1) {
+        // Auto-advance to next unapproved segment if available
+        const nextUnapproved = this.translationSegments.findIndex((s, i) => 
+          i > this.currentSegmentIndex && s.status !== 'approved'
+        );
+        
+        if (nextUnapproved !== -1) {
           setTimeout(() => {
+            this.currentSegmentIndex = nextUnapproved - 1; // navigateToSegment will increment
             this.navigateToSegment('next');
           }, 500);
         }
@@ -12040,22 +12046,32 @@ ${new Date().toLocaleDateString()}
           return;
         }
         
-        // Mark this as a translation segment
-        const segment = this.markTranslationSegment(
-          this.selectedRegion.start,
-          this.selectedRegion.end
+        // Check if segment already exists for this region (avoid duplicates)
+        let segment = this.translationSegments.find(s => 
+          Math.abs(s.start - this.selectedRegion.start) < 0.1 && 
+          Math.abs(s.end - this.selectedRegion.end) < 0.1
         );
         
+        if (segment) {
+          // Use existing segment
+          this.currentSegmentIndex = this.translationSegments.indexOf(segment);
+        } else {
+          // Mark this as a new translation segment
+          segment = this.markTranslationSegment(
+            this.selectedRegion.start,
+            this.selectedRegion.end
+          );
+        }
+        
         // Get transcription for this region if available
-        let sourceText = '';
-        if (this.transcriptSegments) {
+        let sourceText = segment.sourceText || '';
+        if (!sourceText && this.transcriptSegments) {
           const segments = this.transcriptSegments.filter(seg => 
             seg.start >= this.selectedRegion.start && seg.end <= this.selectedRegion.end
           );
           sourceText = segments.map(s => s.text).join(' ');
+          segment.sourceText = sourceText;
         }
-        
-        segment.sourceText = sourceText;
         
         // Update segment nav
         this.updateSegmentNav();
