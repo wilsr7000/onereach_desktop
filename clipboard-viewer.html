@@ -2013,6 +2013,175 @@
             color: rgba(255, 255, 255, 0.6);
         }
         
+        /* Tag Filter Styles */
+        .tag-filter-container {
+            position: relative;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-left: 8px;
+        }
+
+        .tag-filter-btn {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            color: rgba(255, 255, 255, 0.7);
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+
+        .tag-filter-btn:hover {
+            background: rgba(255, 255, 255, 0.12);
+            color: #fff;
+        }
+
+        .tag-filter-btn.has-tags {
+            background: rgba(100, 200, 255, 0.15);
+            border-color: rgba(100, 200, 255, 0.3);
+            color: rgba(100, 200, 255, 0.9);
+        }
+
+        .tag-filter-btn .tag-count {
+            background: rgba(100, 200, 255, 0.3);
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-size: 10px;
+            min-width: 16px;
+            text-align: center;
+        }
+
+        .tag-dropdown {
+            position: absolute;
+            top: 100%;
+            right: 0;
+            margin-top: 8px;
+            background: rgba(30, 30, 35, 0.98);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 12px;
+            padding: 12px;
+            min-width: 280px;
+            max-width: 400px;
+            max-height: 300px;
+            overflow-y: auto;
+            z-index: 1000;
+            backdrop-filter: blur(20px);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+            display: none;
+        }
+
+        .tag-dropdown.visible {
+            display: block;
+            animation: fadeIn 0.15s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .tag-dropdown-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .tag-dropdown-title {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        .tag-clear-btn {
+            font-size: 11px;
+            color: rgba(255, 100, 100, 0.7);
+            cursor: pointer;
+            padding: 2px 6px;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+
+        .tag-clear-btn:hover {
+            background: rgba(255, 100, 100, 0.2);
+            color: rgba(255, 100, 100, 1);
+        }
+
+        .tag-pills-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .tag-pill {
+            padding: 4px 10px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.7);
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .tag-pill:hover {
+            background: rgba(255, 255, 255, 0.15);
+            color: #fff;
+        }
+
+        .tag-pill.selected {
+            background: rgba(100, 200, 255, 0.2);
+            border-color: rgba(100, 200, 255, 0.4);
+            color: rgba(100, 200, 255, 1);
+        }
+
+        .tag-pill .tag-pill-count {
+            font-size: 9px;
+            opacity: 0.6;
+        }
+
+        /* Selected tags shown inline */
+        .selected-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-left: 8px;
+        }
+
+        .selected-tag {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 8px;
+            background: rgba(100, 200, 255, 0.15);
+            border: 1px solid rgba(100, 200, 255, 0.3);
+            border-radius: 10px;
+            font-size: 10px;
+            color: rgba(100, 200, 255, 0.9);
+        }
+
+        .selected-tag .remove-tag {
+            cursor: pointer;
+            opacity: 0.6;
+            font-size: 10px;
+        }
+
+        .selected-tag .remove-tag:hover {
+            opacity: 1;
+        }
+
         .search-input {
             width: 100%;
             padding: 12px 48px 12px 20px;
@@ -2044,38 +2213,323 @@
             font-size: 18px;
         }
         
-        /* Ensure the metadata modal can scroll */
+        /* ============================================
+           REDESIGNED METADATA MODAL
+           ============================================ */
         #metadataModal .modal {
-            width: 600px;
-            max-height: 85vh;
+            width: 700px;
+            max-width: 95vw;
+            max-height: 90vh;
             display: flex;
             flex-direction: column;
+            padding: 0;
+            overflow: hidden;
+            border-radius: 16px;
+            background: linear-gradient(180deg, rgba(30, 32, 40, 0.98) 0%, rgba(25, 27, 35, 0.98) 100%);
         }
-        
-        #metadataModal .modal > * {
+
+        /* Modal Header */
+        .metadata-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 20px 24px;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(139, 92, 246, 0.1) 100%);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
             flex-shrink: 0;
         }
-        
-        #metadataModal .modal h2 {
-            margin-bottom: 16px;
+
+        .metadata-header-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
         }
-        
-        #metadataModal #dynamicMetadataFields,
-        #metadataModal #legacyMetadataFields {
+
+        .metadata-asset-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .metadata-header-info h2 {
+            margin: 0 0 4px 0;
+            font-size: 18px;
+            font-weight: 600;
+            color: #fff;
+        }
+
+        .metadata-header-type {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.6);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .metadata-header-type .type-badge {
+            padding: 2px 8px;
+            background: rgba(99, 102, 241, 0.2);
+            border-radius: 4px;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: rgba(139, 92, 246, 1);
+        }
+
+        .metadata-close-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            border: none;
+            background: rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 0.7);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            transition: all 0.2s;
+        }
+
+        .metadata-close-btn:hover {
+            background: rgba(255, 100, 100, 0.2);
+            color: rgba(255, 100, 100, 1);
+        }
+
+        /* Tabs Navigation */
+        .metadata-tabs {
+            display: flex;
+            gap: 4px;
+            padding: 12px 24px;
+            background: rgba(0, 0, 0, 0.2);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            flex-shrink: 0;
+            overflow-x: auto;
+        }
+
+        .metadata-tab {
+            padding: 8px 16px;
+            background: transparent;
+            border: none;
+            border-radius: 8px;
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .metadata-tab:hover {
+            background: rgba(255, 255, 255, 0.08);
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        .metadata-tab.active {
+            background: rgba(99, 102, 241, 0.2);
+            color: rgba(139, 92, 246, 1);
+        }
+
+        /* Tab Content */
+        .metadata-content {
             flex: 1;
             overflow-y: auto;
-            min-height: 200px;
-            max-height: 50vh;
+            padding: 24px;
         }
-        
-        #metadataModal .modal-buttons {
-            margin-top: 16px;
-            padding-top: 16px;
-            border-top: 1px solid rgba(255, 255, 255, 0.1);
+
+        .metadata-tab-panel {
+            display: none;
+        }
+
+        .metadata-tab-panel.active {
+            display: block;
+            animation: fadeIn 0.2s ease;
+        }
+
+        /* Field Groups */
+        .metadata-field-group {
+            margin-bottom: 24px;
+        }
+
+        .metadata-field-group-title {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: rgba(255, 255, 255, 0.4);
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .metadata-field-group-title::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        /* Individual Fields */
+        .metadata-field {
+            margin-bottom: 16px;
+        }
+
+        .metadata-field label {
+            display: block;
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.6);
+            margin-bottom: 6px;
+        }
+
+        .metadata-field input,
+        .metadata-field textarea,
+        .metadata-field select {
+            width: 100%;
+            padding: 10px 14px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            color: #fff;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+
+        .metadata-field input:focus,
+        .metadata-field textarea:focus,
+        .metadata-field select:focus {
+            outline: none;
+            border-color: rgba(99, 102, 241, 0.5);
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        .metadata-field textarea {
+            min-height: 80px;
+            resize: vertical;
+        }
+
+        /* Tags Display */
+        .metadata-tags-display {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 8px;
+        }
+
+        .metadata-tag {
+            padding: 4px 10px;
+            background: rgba(99, 102, 241, 0.15);
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            border-radius: 12px;
+            font-size: 11px;
+            color: rgba(139, 92, 246, 1);
+        }
+
+        /* Read-only Info Grid */
+        .metadata-info-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            padding: 16px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+        }
+
+        .metadata-info-item {
+            font-size: 12px;
+        }
+
+        .metadata-info-item .label {
+            color: rgba(255, 255, 255, 0.4);
+            margin-bottom: 2px;
+        }
+
+        .metadata-info-item .value {
+            color: rgba(255, 255, 255, 0.8);
+            font-family: 'SF Mono', Monaco, monospace;
+        }
+
+        /* AI Generation Card */
+        .ai-generation-card {
+            padding: 16px;
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(139, 92, 246, 0.1) 100%);
+            border: 1px solid rgba(99, 102, 241, 0.2);
+            border-radius: 12px;
+            margin-bottom: 20px;
+        }
+
+        .ai-generation-card h4 {
+            margin: 0 0 12px 0;
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.9);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .ai-btn {
+            padding: 10px 20px;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.8) 0%, rgba(139, 92, 246, 0.8) 100%);
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .ai-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+        }
+
+        /* Footer Buttons */
+        .metadata-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+            padding: 16px 24px;
+            background: rgba(0, 0, 0, 0.3);
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
             flex-shrink: 0;
-            position: sticky;
-            bottom: 0;
-            background: var(--bg-dark);
+        }
+
+        .metadata-footer .btn {
+            padding: 10px 24px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .metadata-footer .btn-cancel {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .metadata-footer .btn-cancel:hover {
+            background: rgba(255, 255, 255, 0.15);
+            color: #fff;
+        }
+
+        .metadata-footer .btn-save {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            border: none;
+            color: #fff;
+        }
+
+        .metadata-footer .btn-save:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
         }
         
         /* Grid view specific action button styling */
@@ -2354,6 +2808,23 @@
                             <input type="text" class="search-input" placeholder="Search clipboard history..." id="searchInput">
                             <span class="search-icon">⊙</span>
                         </div>
+                        <div class="selected-tags" id="selectedTags"></div>
+                        <div class="tag-filter-container">
+                            <button class="tag-filter-btn" id="tagFilterBtn" title="Filter by tags">
+                                <span>🏷</span>
+                                <span>Tags</span>
+                                <span class="tag-count" id="tagCount" style="display: none;">0</span>
+                            </button>
+                            <div class="tag-dropdown" id="tagDropdown">
+                                <div class="tag-dropdown-header">
+                                    <span class="tag-dropdown-title">Filter by Tags</span>
+                                    <span class="tag-clear-btn" id="clearTagsBtn">Clear all</span>
+                                </div>
+                                <div class="tag-pills-container" id="tagPillsContainer">
+                                    <div style="color: rgba(255,255,255,0.4); font-size: 11px;">Loading tags...</div>
+                                </div>
+                            </div>
+                        </div>
                         <div class="view-toggle">
                             <button class="view-btn" data-view="grid">Grid</button>
                             <button class="view-btn active" data-view="list">List</button>
@@ -2499,148 +2970,157 @@
         </div>
     </div>
     
-    <!-- Modal for editing metadata -->
+    <!-- Modal for editing metadata - REDESIGNED -->
     <div class="modal-overlay" id="metadataModal">
         <div class="modal">
-            <h2 class="modal-title">Edit Metadata</h2>
-            
-            <!-- AI Generation Section -->
-            <div class="ai-generation-section" style="margin-bottom: 24px; padding: 16px; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.2); border-radius: 8px;">
-                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
-                    <h3 style="font-size: 16px; margin: 0; color: rgba(255, 255, 255, 0.9);">✨ AI Metadata Generation</h3>
-                    <button class="btn btn-primary" id="generateMetadataBtn" style="margin-left: auto; background: linear-gradient(135deg, rgba(59, 130, 246, 0.8) 0%, rgba(99, 102, 241, 0.8) 100%);">Generate with AI</button>
-                </div>
-                <textarea class="form-input" id="aiPrompt" rows="2" placeholder="Customize the AI prompt (optional). Default: 'Analyze this content and generate comprehensive metadata including description, tags, and relevant notes.'" style="font-size: 12px;"></textarea>
-                <div id="aiGenerationStatus" style="margin-top: 8px; font-size: 12px; color: rgba(255, 255, 255, 0.6); display: none;"></div>
-            </div>
-
-            <!-- Asset Type Indicator -->
-            <div id="assetTypeIndicator" style="margin-bottom: 16px; padding: 8px 12px; background: rgba(99, 102, 241, 0.15); border-radius: 6px; font-size: 12px; color: rgba(255, 255, 255, 0.8); display: none;">
-                <span style="font-weight: 600;">Asset Type:</span> <span id="assetTypeName"></span>
-                <span style="opacity: 0.6; margin-left: 12px;">• Fields customized for this type</span>
-            </div>
-
-            <!-- DYNAMIC METADATA FIELDS (populated based on asset type) -->
-            <div id="dynamicMetadataFields">
-                <!-- Fields will be dynamically inserted here based on asset type -->
-            </div>
-
-            <!-- Legacy/Fallback Fields (hidden, used if no schema match) -->
-            <div id="legacyMetadataFields" style="display: none;">
-                <div class="form-group">
-                    <label class="form-label">Title</label>
-                    <input type="text" class="form-input" id="metaTitle" placeholder="Title of this content">
-                </div>
-
-                <div class="form-group">
-                    <label class="form-label">Description</label>
-                    <textarea class="form-input" id="metaDescription" rows="6" placeholder="Description" style="font-size: 13px; line-height: 1.5;"></textarea>
-                </div>
-
-                <div class="form-group">
-                    <label class="form-label">Topics / Tags (comma-separated)</label>
-                    <input type="text" class="form-input" id="metaTags" placeholder="topic1, topic2, tag1">
-                </div>
-
-                <div class="form-group">
-                    <label class="form-label">Notes</label>
-                    <textarea class="form-input" id="metaNotes" rows="3" placeholder="Additional notes or context"></textarea>
-                </div>
-
-                <div class="form-group" style="display: none;">
-                    <label class="form-label">Speakers (comma-separated)</label>
-                    <input type="text" class="form-input" id="metaSpeakers" placeholder="Speaker 1, Speaker 2">
-                </div>
-
-                <div class="form-group" style="display: none;">
-                    <label class="form-label">Story Beats</label>
-                    <textarea class="form-input" id="metaStoryBeats" rows="5" placeholder="Key insights" style="font-size: 13px; line-height: 1.5;"></textarea>
-                </div>
-
-                <div class="form-group" style="display: none;">
-                    <label class="form-label">Instructions</label>
-                <textarea class="form-input" id="metaInstructions" rows="2" placeholder="How to use this item"></textarea>
-            </div>
-            
-            <div class="form-group">
-                <label class="form-label">Source</label>
-                <input type="text" class="form-input" id="metaSource" placeholder="Where this came from">
-            </div>
-            
-            <!-- AI Information Section -->
-            <h3 style="font-size: 16px; margin-top: 24px; margin-bottom: 16px; color: rgba(255, 255, 255, 0.8);">AI Information</h3>
-            
-            <div style="display: flex; gap: 16px; margin-bottom: 16px;">
-                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                    <input type="checkbox" id="metaAiGenerated" style="width: 16px; height: 16px;">
-                    <span style="font-size: 14px;">AI Generated</span>
-                </label>
-                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                    <input type="checkbox" id="metaAiAssisted" style="width: 16px; height: 16px;">
-                    <span style="font-size: 14px;">AI Assisted</span>
-                </label>
-            </div>
-            
-            <div class="form-group">
-                <label class="form-label">AI Model</label>
-                <input type="text" class="form-input" id="metaAiModel" placeholder="e.g., GPT-4, Claude 3, Gemini Pro">
-            </div>
-            
-            <div class="form-group">
-                <label class="form-label">AI Provider</label>
-                <input type="text" class="form-input" id="metaAiProvider" placeholder="e.g., OpenAI, Anthropic, Google">
-            </div>
-            
-            <div class="form-group">
-                <label class="form-label">AI Prompt</label>
-                <textarea class="form-input" id="metaAiPrompt" rows="2" placeholder="The prompt used to generate this content"></textarea>
-            </div>
-            
-            <div class="form-group">
-                <label class="form-label">AI Context</label>
-                <textarea class="form-input" id="metaAiContext" rows="2" placeholder="Additional context about AI usage"></textarea>
-            </div>
-            
-            <!-- Transcript Section (for video/audio) - Collapsible -->
-            <div id="metaTranscriptSection" style="margin-top: 24px; padding-top: 16px; border-top: 1px solid rgba(255, 255, 255, 0.1); display: none;">
-                <div id="transcriptHeader" style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; padding: 8px 0;" onclick="toggleTranscriptSection()">
-                    <h3 style="font-size: 16px; margin: 0; color: rgba(255, 255, 255, 0.8); display: flex; align-items: center; gap: 8px;">
-                        <span id="transcriptToggleIcon" style="transition: transform 0.2s;">▶</span>
-                        📝 Transcript
-                        <span id="transcriptPreview" style="font-size: 12px; color: rgba(255,255,255,0.4); font-weight: normal; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"></span>
-                    </h3>
-                    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;" onclick="event.stopPropagation()">
-                        <label style="display: flex; align-items: center; gap: 4px; font-size: 11px; color: rgba(255,255,255,0.6); cursor: pointer;">
-                            <input type="checkbox" id="showTimecodeToggle" style="width: 14px; height: 14px;">
-                            Timecodes
-                        </label>
-                        <button class="btn btn-secondary" id="fetchTranscriptBtn" style="padding: 4px 12px; font-size: 12px; display: none;">Fetch from YouTube</button>
-                        <button class="btn btn-primary" id="identifySpeakersBtn" style="padding: 4px 12px; font-size: 12px; display: none; background: linear-gradient(135deg, rgba(139, 92, 246, 0.8) 0%, rgba(168, 85, 247, 0.8) 100%);">✨ Identify Speakers</button>
-                        <button class="btn btn-secondary" id="copyTranscriptBtn" style="padding: 4px 12px; font-size: 12px;">Copy</button>
-                        <button class="btn btn-secondary" id="extractAudioBtn" style="padding: 4px 12px; font-size: 12px; display: none;">🎵 Extract Audio</button>
+            <!-- Header -->
+            <div class="metadata-header">
+                <div class="metadata-header-left">
+                    <div class="metadata-asset-icon" id="metadataAssetIcon">📄</div>
+                    <div class="metadata-header-info">
+                        <h2 id="metadataTitle">Asset Metadata</h2>
+                        <div class="metadata-header-type">
+                            <span class="type-badge" id="metadataTypeBadge">Document</span>
+                            <span id="metadataFileName"></span>
+                        </div>
                     </div>
                 </div>
-                <div id="transcriptContent" style="display: none; margin-top: 12px;">
-                    <div id="metaTranscriptInfo" style="font-size: 12px; color: rgba(255, 255, 255, 0.5); margin-bottom: 8px;"></div>
-                    <textarea class="form-input" id="metaTranscript" rows="8" style="font-size: 12px; line-height: 1.5; resize: vertical;" readonly placeholder="No transcript available"></textarea>
+                <button class="metadata-close-btn" id="metadataCloseBtn" title="Close">✕</button>
+            </div>
+
+            <!-- Tabs -->
+            <div class="metadata-tabs">
+                <button class="metadata-tab active" data-tab="details">📝 Details</button>
+                <button class="metadata-tab" data-tab="ai">✨ AI Generation</button>
+                <button class="metadata-tab" data-tab="transcript" id="transcriptTab" style="display: none;">📜 Transcript</button>
+                <button class="metadata-tab" data-tab="system">⚙️ System</button>
+            </div>
+
+            <!-- Content -->
+            <div class="metadata-content">
+                <!-- Details Tab -->
+                <div class="metadata-tab-panel active" id="tabDetails">
+                    <!-- Dynamic fields inserted here -->
+                    <div id="dynamicMetadataFields"></div>
+                    
+                    <!-- Tags Display -->
+                    <div class="metadata-field-group" id="tagsDisplaySection" style="display: none;">
+                        <div class="metadata-field-group-title">Tags</div>
+                        <div class="metadata-tags-display" id="metadataTagsDisplay"></div>
+                    </div>
+                </div>
+
+                <!-- AI Tab -->
+                <div class="metadata-tab-panel" id="tabAI">
+                    <div class="ai-generation-card">
+                        <h4>✨ Generate Metadata with AI</h4>
+                        <p style="font-size: 12px; color: rgba(255,255,255,0.6); margin-bottom: 12px;">
+                            Use AI to automatically analyze this content and generate comprehensive metadata.
+                        </p>
+                        <textarea class="form-input" id="aiPrompt" rows="2" placeholder="Custom prompt (optional)..." style="margin-bottom: 12px; font-size: 12px;"></textarea>
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <button class="ai-btn" id="generateMetadataBtn">
+                                <span>✨</span> Generate with AI
+                            </button>
+                            <span id="aiGenerationStatus" style="font-size: 12px; color: rgba(255,255,255,0.5);"></span>
+                        </div>
+                    </div>
+
+                    <div class="metadata-field-group">
+                        <div class="metadata-field-group-title">AI Attribution</div>
+                        
+                        <div style="display: flex; gap: 16px; margin-bottom: 16px;">
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px;">
+                                <input type="checkbox" id="metaAiGenerated" style="width: 16px; height: 16px;">
+                                AI Generated
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px;">
+                                <input type="checkbox" id="metaAiAssisted" style="width: 16px; height: 16px;">
+                                AI Assisted
+                            </label>
+                        </div>
+                        
+                        <div class="metadata-field">
+                            <label>AI Model</label>
+                            <input type="text" id="metaAiModel" placeholder="e.g., GPT-5.2, Claude Sonnet 4">
+                        </div>
+                        
+                        <div class="metadata-field">
+                            <label>AI Provider</label>
+                            <input type="text" id="metaAiProvider" placeholder="e.g., OpenAI, Anthropic">
+                        </div>
+                        
+                        <div class="metadata-field">
+                            <label>Original Prompt</label>
+                            <textarea id="metaAiPrompt" rows="3" placeholder="The prompt used to generate this content"></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Transcript Tab -->
+                <div class="metadata-tab-panel" id="tabTranscript">
+                    <div class="metadata-field-group">
+                        <div class="metadata-field-group-title">
+                            Transcript
+                            <span id="metaTranscriptInfo" style="font-size: 11px; color: rgba(255,255,255,0.4); margin-left: auto;"></span>
+                        </div>
+                        
+                        <div style="display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;">
+                            <label style="display: flex; align-items: center; gap: 4px; font-size: 12px; color: rgba(255,255,255,0.6); cursor: pointer;">
+                                <input type="checkbox" id="showTimecodeToggle" style="width: 14px; height: 14px;">
+                                Show Timecodes
+                            </label>
+                            <button class="btn btn-secondary" id="fetchTranscriptBtn" style="padding: 6px 12px; font-size: 12px; display: none;">Fetch from YouTube</button>
+                            <button class="ai-btn" id="identifySpeakersBtn" style="padding: 6px 12px; font-size: 12px; display: none;">✨ Identify Speakers</button>
+                            <button class="btn btn-secondary" id="copyTranscriptBtn" style="padding: 6px 12px; font-size: 12px; margin-left: auto;">📋 Copy</button>
+                        </div>
+                        
+                        <textarea id="metaTranscript" rows="12" readonly placeholder="No transcript available" style="font-size: 12px; line-height: 1.6;"></textarea>
+                    </div>
+                </div>
+
+                <!-- System Tab -->
+                <div class="metadata-tab-panel" id="tabSystem">
+                    <div class="metadata-field-group">
+                        <div class="metadata-field-group-title">System Information</div>
+                        <div class="metadata-info-grid">
+                            <div class="metadata-info-item">
+                                <div class="label">Created</div>
+                                <div class="value" id="metaDateCreated">-</div>
+                            </div>
+                            <div class="metadata-info-item">
+                                <div class="label">Author</div>
+                                <div class="value" id="metaAuthor">-</div>
+                            </div>
+                            <div class="metadata-info-item">
+                                <div class="label">Version</div>
+                                <div class="value" id="metaVersion">-</div>
+                            </div>
+                            <div class="metadata-info-item">
+                                <div class="label">Item ID</div>
+                                <div class="value" id="metaId" style="font-size: 10px;">-</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="metadata-field-group">
+                        <div class="metadata-field-group-title">Source</div>
+                        <div class="metadata-field">
+                            <label>Source Location</label>
+                            <input type="text" id="metaSource" placeholder="Where this came from">
+                        </div>
+                        <div class="metadata-field">
+                            <label>Context</label>
+                            <textarea id="metaContext" rows="2" placeholder="Additional context"></textarea>
+                        </div>
+                    </div>
                 </div>
             </div>
-            
-            <!-- Read-only fields -->
-            <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid rgba(255, 255, 255, 0.1);">
-                <h3 style="font-size: 14px; margin-bottom: 12px; color: rgba(255, 255, 255, 0.6);">System Information</h3>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 12px; color: rgba(255, 255, 255, 0.5);">
-                    <div>Created: <span id="metaDateCreated"></span></div>
-                    <div>Author: <span id="metaAuthor"></span></div>
-                    <div>Version: <span id="metaVersion"></span></div>
-                    <div>ID: <span id="metaId" style="font-family: monospace;"></span></div>
-                    <div style="grid-column: 1 / -1;">Context: <span id="metaContext"></span></div>
-                </div>
-            </div>
-            
-            <div class="modal-buttons">
-                <button class="btn btn-secondary" id="metadataCancel">Cancel</button>
-                <button class="btn btn-primary" id="metadataSave">Save Changes</button>
+
+            <!-- Footer -->
+            <div class="metadata-footer">
+                <button class="btn btn-cancel" id="metadataCancel">Cancel</button>
+                <button class="btn btn-save" id="metadataSave">💾 Save Changes</button>
             </div>
         </div>
     </div>

@@ -524,23 +524,29 @@ app.whenReady().then(() => {
   global.settingsManager = getSettingsManager();
   console.log('Settings manager initialized');
   
-  // Add keyboard shortcuts to open dev tools (lightweight, do immediately)
-  const openDevTools = () => {
-    console.log('Opening Developer Tools via shortcut');
-    const focusedWindow = BrowserWindow.getFocusedWindow();
-    if (focusedWindow) {
-      focusedWindow.webContents.openDevTools();
-    } else {
-      const allWindows = BrowserWindow.getAllWindows();
-      if (allWindows.length > 0) {
-        allWindows[0].webContents.openDevTools();
-      }
-    }
-  };
+  // Add keyboard shortcuts to open dev tools (only in development mode)
+  const isDevelopment = process.env.NODE_ENV === 'development' || !app.isPackaged;
   
-  globalShortcut.register('CommandOrControl+Shift+I', openDevTools);
-  globalShortcut.register('F12', openDevTools);
-  console.log('Registered Cmd+Shift+I and F12 shortcuts for Developer Tools');
+  if (isDevelopment) {
+    const openDevTools = () => {
+      console.log('Opening Developer Tools via shortcut');
+      const focusedWindow = BrowserWindow.getFocusedWindow();
+      if (focusedWindow) {
+        focusedWindow.webContents.openDevTools();
+      } else {
+        const allWindows = BrowserWindow.getAllWindows();
+        if (allWindows.length > 0) {
+          allWindows[0].webContents.openDevTools();
+        }
+      }
+    };
+    
+    globalShortcut.register('CommandOrControl+Shift+I', openDevTools);
+    globalShortcut.register('F12', openDevTools);
+    console.log('Registered Cmd+Shift+I and F12 shortcuts for Developer Tools (dev mode)');
+  } else {
+    console.log('DevTools shortcuts disabled in production mode');
+  }
   
   // PERFORMANCE: Defer heavyweight manager initializations until after window shows
   // This makes the app feel snappier by showing the UI first
@@ -573,6 +579,20 @@ app.whenReady().then(() => {
       modulesPath: moduleManager.modulesPath
     });
     
+    // Initialize Speech Recognition Bridge (Whisper-based, for web apps)
+    const { getSpeechBridge } = require('./speech-recognition-bridge');
+    const speechBridge = getSpeechBridge();
+    speechBridge.setupIPC();
+    global.speechBridge = speechBridge;
+    console.log('[SpeechBridge] Speech recognition bridge initialized (Whisper API)');
+
+    // Initialize Realtime Speech (OpenAI Realtime API for streaming transcription)
+    const { getRealtimeSpeech } = require('./realtime-speech');
+    const realtimeSpeech = getRealtimeSpeech();
+    realtimeSpeech.setupIPC();
+    global.realtimeSpeech = realtimeSpeech;
+    console.log('[RealtimeSpeech] Realtime streaming speech initialized');
+
     console.log('[Startup] Deferred managers initialized');
   });
   
@@ -694,8 +714,26 @@ app.whenReady().then(() => {
   // ============================================
   
   // Set up permission handlers for microphone access (voice mode)
-  const { session } = require('electron');
-  
+  const { session, systemPreferences } = require('electron');
+
+  // Request microphone access from macOS (triggers the permission dialog)
+  if (process.platform === 'darwin') {
+    (async () => {
+      try {
+        const micStatus = systemPreferences.getMediaAccessStatus('microphone');
+        console.log(`[Permissions] Microphone access status: ${micStatus}`);
+        
+        if (micStatus !== 'granted') {
+          console.log('[Permissions] Requesting microphone access from macOS...');
+          const granted = await systemPreferences.askForMediaAccess('microphone');
+          console.log(`[Permissions] Microphone access ${granted ? 'GRANTED' : 'DENIED'}`);
+        }
+      } catch (err) {
+        console.error('[Permissions] Error requesting microphone access:', err);
+      }
+    })();
+  }
+
   // Handle permission requests globally
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
     console.log(`Permission requested: ${permission} from ${webContents.getURL()}`);

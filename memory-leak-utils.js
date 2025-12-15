@@ -278,3 +278,4 @@ module.exports = {
   resetListenerHistory,
   formatBytes
 };
+

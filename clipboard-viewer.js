@@ -8,6 +8,8 @@ let spacesEnabled = true;
 let activeSpaceId = null;
 let currentView = 'list'; // Add view state
 let screenshotCaptureEnabled = true;
+let selectedTags = []; // Tags currently selected for filtering
+let allTags = {}; // Map of tag -> count
 
 // Helper function to get asset paths in Electron
 function getAssetPath(filename) {
@@ -1325,10 +1327,205 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// ============================================
+// Tag Filtering Functions
+// ============================================
+
+// Extract all unique tags from items
+function extractAllTags(items) {
+    const tagCounts = {};
+    
+    items.forEach(item => {
+        // Get tags from metadata
+        const tags = item.metadata?.tags || item.tags || [];
+        if (Array.isArray(tags)) {
+            tags.forEach(tag => {
+                if (typeof tag === 'string' && tag.trim()) {
+                    const normalizedTag = tag.trim().toLowerCase();
+                    tagCounts[normalizedTag] = (tagCounts[normalizedTag] || 0) + 1;
+                }
+            });
+        }
+    });
+    
+    return tagCounts;
+}
+
+// Update the tag dropdown with available tags
+function updateTagDropdown() {
+    const container = document.getElementById('tagPillsContainer');
+    if (!container) return;
+    
+    // Get items based on current space
+    const items = currentSpace === null ? history : history.filter(item => item.spaceId === currentSpace);
+    allTags = extractAllTags(items);
+    
+    // Sort tags by count (most used first), then alphabetically
+    const sortedTags = Object.entries(allTags)
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .slice(0, 30); // Limit to top 30 tags
+    
+    if (sortedTags.length === 0) {
+        container.innerHTML = '<div style="color: rgba(255,255,255,0.4); font-size: 11px;">No tags found</div>';
+        return;
+    }
+    
+    container.innerHTML = sortedTags.map(([tag, count]) => {
+        const isSelected = selectedTags.includes(tag);
+        return `<div class="tag-pill ${isSelected ? 'selected' : ''}" data-tag="${escapeHtml(tag)}">
+            <span>${escapeHtml(tag)}</span>
+            <span class="tag-pill-count">(${count})</span>
+        </div>`;
+    }).join('');
+    
+    // Add click handlers
+    container.querySelectorAll('.tag-pill').forEach(pill => {
+        pill.addEventListener('click', () => {
+            const tag = pill.dataset.tag;
+            toggleTag(tag);
+        });
+    });
+}
+
+// Toggle a tag selection
+function toggleTag(tag) {
+    const index = selectedTags.indexOf(tag);
+    if (index === -1) {
+        selectedTags.push(tag);
+    } else {
+        selectedTags.splice(index, 1);
+    }
+    
+    updateTagUI();
+    filterItems();
+}
+
+// Remove a tag
+function removeTag(tag) {
+    const index = selectedTags.indexOf(tag);
+    if (index !== -1) {
+        selectedTags.splice(index, 1);
+        updateTagUI();
+        filterItems();
+    }
+}
+
+// Clear all selected tags
+function clearAllTags() {
+    selectedTags = [];
+    updateTagUI();
+    filterItems();
+}
+
+// Update tag UI (button state, selected tags display, dropdown pills)
+function updateTagUI() {
+    const tagBtn = document.getElementById('tagFilterBtn');
+    const tagCount = document.getElementById('tagCount');
+    const selectedTagsContainer = document.getElementById('selectedTags');
+    
+    // Update button state
+    if (tagBtn) {
+        if (selectedTags.length > 0) {
+            tagBtn.classList.add('has-tags');
+        } else {
+            tagBtn.classList.remove('has-tags');
+        }
+    }
+    
+    // Update count badge
+    if (tagCount) {
+        if (selectedTags.length > 0) {
+            tagCount.textContent = selectedTags.length;
+            tagCount.style.display = 'inline';
+        } else {
+            tagCount.style.display = 'none';
+        }
+    }
+    
+    // Update selected tags display
+    if (selectedTagsContainer) {
+        if (selectedTags.length > 0) {
+            selectedTagsContainer.innerHTML = selectedTags.map(tag => 
+                `<div class="selected-tag" data-tag="${escapeHtml(tag)}">
+                    <span>${escapeHtml(tag)}</span>
+                    <span class="remove-tag" data-tag="${escapeHtml(tag)}">✕</span>
+                </div>`
+            ).join('');
+            
+            // Add remove handlers
+            selectedTagsContainer.querySelectorAll('.remove-tag').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    removeTag(btn.dataset.tag);
+                });
+            });
+        } else {
+            selectedTagsContainer.innerHTML = '';
+        }
+    }
+    
+    // Update dropdown pills
+    updateTagDropdown();
+}
+
+// Check if an item matches the selected tags
+function itemMatchesTags(item) {
+    if (selectedTags.length === 0) return true;
+    
+    const itemTags = item.metadata?.tags || item.tags || [];
+    if (!Array.isArray(itemTags)) return false;
+    
+    const normalizedItemTags = itemTags.map(t => 
+        typeof t === 'string' ? t.trim().toLowerCase() : ''
+    );
+    
+    // Item must have ALL selected tags (AND logic)
+    return selectedTags.every(tag => normalizedItemTags.includes(tag));
+}
+
+// Initialize tag filter UI
+function initTagFilter() {
+    const tagBtn = document.getElementById('tagFilterBtn');
+    const tagDropdown = document.getElementById('tagDropdown');
+    const clearBtn = document.getElementById('clearTagsBtn');
+    
+    if (tagBtn && tagDropdown) {
+        // Toggle dropdown
+        tagBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            tagDropdown.classList.toggle('visible');
+            if (tagDropdown.classList.contains('visible')) {
+                updateTagDropdown();
+            }
+        });
+        
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!tagDropdown.contains(e.target) && e.target !== tagBtn) {
+                tagDropdown.classList.remove('visible');
+            }
+        });
+        
+        // Prevent dropdown close when clicking inside
+        tagDropdown.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
+    }
+    
+    if (clearBtn) {
+        clearBtn.addEventListener('click', clearAllTags);
+    }
+}
+
+// ============================================
+// Filter items (with tag support)
+// ============================================
+
 // Filter items
 function filterItems() {
     let items = currentSpace === null ? history : history.filter(item => item.spaceId === currentSpace);
     
+    // Apply type filter
     if (currentFilter !== 'all') {
         items = items.filter(item => {
             if (currentFilter === 'pinned') return item.pinned;
@@ -1360,6 +1557,11 @@ function filterItems() {
             if (currentFilter === 'screenshot') return item.isScreenshot === true;
             return false;
         });
+    }
+    
+    // Apply tag filter
+    if (selectedTags.length > 0) {
+        items = items.filter(itemMatchesTags);
     }
     
     renderHistory(items);
@@ -1410,6 +1612,11 @@ async function searchItems(query) {
             if (currentFilter === 'screenshot') return item.isScreenshot === true;
             return false;
         });
+    }
+    
+    // Apply tag filter
+    if (selectedTags.length > 0) {
+        filtered = filtered.filter(itemMatchesTags);
     }
     
     renderHistory(filtered);
@@ -2024,52 +2231,77 @@ async function showMetadataModal(itemId) {
     modal.dataset.itemId = itemId;
     modal.dataset.schema = JSON.stringify(schema);
     
-    // Show asset type indicator
-    const typeIndicator = document.getElementById('assetTypeIndicator');
-    const typeName = document.getElementById('assetTypeName');
-    if (typeIndicator && typeName) {
-        const typeNames = {
-            'video': '🎬 Video',
-            'audio': '🎵 Audio',
-            'code': '💻 Code',
-            'pdf': '📄 PDF Document',
-            'data': '📊 Data File',
-            'image': '📸 Image',
-            'html': '🗂️ HTML Document',
-            'url': '🌐 Web Link'
-        };
-        const assetType = item.fileCategory || item.fileType || item.type;
-        typeName.textContent = typeNames[assetType] || 'Document';
-        typeIndicator.style.display = 'block';
+    // Update header with asset info
+    const assetType = item.fileCategory || item.fileType || item.type;
+    const typeConfig = {
+        'video': { icon: '🎬', name: 'Video', color: '#8b5cf6' },
+        'audio': { icon: '🎵', name: 'Audio', color: '#f59e0b' },
+        'code': { icon: '💻', name: 'Code', color: '#10b981' },
+        'pdf': { icon: '📄', name: 'PDF', color: '#ef4444' },
+        'data': { icon: '📊', name: 'Data', color: '#06b6d4' },
+        'image': { icon: '🖼️', name: 'Image', color: '#ec4899' },
+        'html': { icon: '🗂️', name: 'Document', color: '#6366f1' },
+        'url': { icon: '🌐', name: 'Web Link', color: '#3b82f6' },
+        'text': { icon: '📝', name: 'Text', color: '#64748b' },
+        'file': { icon: '📁', name: 'File', color: '#78716c' }
+    };
+    
+    const config = typeConfig[assetType] || typeConfig['file'];
+    
+    // Update header
+    document.getElementById('metadataAssetIcon').textContent = config.icon;
+    document.getElementById('metadataTitle').textContent = metadata.title || item.fileName || 'Untitled';
+    document.getElementById('metadataTypeBadge').textContent = config.name;
+    document.getElementById('metadataFileName').textContent = item.fileName || '';
+    
+    // Update tags display
+    const tagsSection = document.getElementById('tagsDisplaySection');
+    const tagsContainer = document.getElementById('metadataTagsDisplay');
+    if (tagsSection && tagsContainer) {
+        const tags = metadata.tags || [];
+        if (tags.length > 0) {
+            tagsSection.style.display = 'block';
+            tagsContainer.innerHTML = tags.map(tag => 
+                `<span class="metadata-tag">${escapeHtml(tag)}</span>`
+            ).join('');
+        } else {
+            tagsSection.style.display = 'none';
+        }
     }
     
-    // Handle transcript section for video/audio
-    const transcriptSection = document.getElementById('metaTranscriptSection');
+    // Reset to first tab
+    switchMetadataTab('details');
+    
+    // Setup tab handlers
+    document.querySelectorAll('.metadata-tab').forEach(tab => {
+        tab.onclick = () => switchMetadataTab(tab.dataset.tab);
+    });
+    
+    // Setup close button
+    document.getElementById('metadataCloseBtn').onclick = hideMetadataModal;
+    
+    // Handle transcript tab for video/audio
+    const transcriptTab = document.getElementById('transcriptTab');
     const transcriptTextarea = document.getElementById('metaTranscript');
     const transcriptInfo = document.getElementById('metaTranscriptInfo');
-    const transcriptContent = document.getElementById('transcriptContent');
-    const transcriptToggleIcon = document.getElementById('transcriptToggleIcon');
-    const transcriptPreview = document.getElementById('transcriptPreview');
     const fetchTranscriptBtn = document.getElementById('fetchTranscriptBtn');
     const copyTranscriptBtn = document.getElementById('copyTranscriptBtn');
     
-    // Reset transcript section to collapsed state
-    if (transcriptContent) transcriptContent.style.display = 'none';
-    if (transcriptToggleIcon) transcriptToggleIcon.style.transform = 'rotate(0deg)';
-    if (transcriptPreview) transcriptPreview.style.display = 'inline';
-    
     // Check if this is a video/audio item
-    const historyItem = history.find(h => h.id === itemId);
-    const isMedia = historyItem && (
-        historyItem.fileCategory === 'video' || 
-        historyItem.fileCategory === 'audio' ||
-        historyItem.fileType?.startsWith('video/') ||
-        historyItem.fileType?.startsWith('audio/')
+    const isMedia = item && (
+        item.fileCategory === 'video' || 
+        item.fileCategory === 'audio' ||
+        item.fileType?.startsWith('video/') ||
+        item.fileType?.startsWith('audio/')
     );
     const isYouTube = metadata.source === 'youtube' || metadata.youtubeUrl;
     
-    if (isMedia) {
-        transcriptSection.style.display = 'block';
+    // Show/hide transcript tab
+    if (transcriptTab) {
+        transcriptTab.style.display = isMedia ? 'block' : 'none';
+    }
+    
+    if (isMedia && transcriptTextarea) {
         
         // Try to load transcript
         const transcriptResult = await window.clipboard.getTranscription(itemId);
@@ -2104,12 +2336,6 @@ async function showMetadataModal(itemId) {
             
             // Default to plain text
             transcriptTextarea.value = plainTranscript;
-            
-            // Set preview text for collapsed state (first 50 chars)
-            if (transcriptPreview) {
-                const previewText = plainTranscript.substring(0, 80).replace(/\n/g, ' ').trim();
-                transcriptPreview.textContent = previewText ? `"${previewText}..."` : '';
-            }
             
             // Show info about the transcript
             let infoText = `${transcriptResult.transcription.length.toLocaleString()} characters`;
@@ -2176,18 +2402,20 @@ async function showMetadataModal(itemId) {
         }
         
         // Copy button handler
-        copyTranscriptBtn.onclick = () => {
-            const text = transcriptTextarea.value;
-            if (text) {
-                navigator.clipboard.writeText(text);
-                copyTranscriptBtn.textContent = 'Copied!';
-                setTimeout(() => { copyTranscriptBtn.textContent = 'Copy'; }, 2000);
-            }
-        };
+        if (copyTranscriptBtn) {
+            copyTranscriptBtn.onclick = () => {
+                const text = transcriptTextarea.value;
+                if (text) {
+                    navigator.clipboard.writeText(text);
+                    copyTranscriptBtn.textContent = '✓ Copied!';
+                    setTimeout(() => { copyTranscriptBtn.textContent = '📋 Copy'; }, 2000);
+                }
+            };
+        }
         
         // Extract Audio button - show for video files
         const extractAudioBtn = document.getElementById('extractAudioBtn');
-        const isVideo = historyItem?.fileCategory === 'video' || historyItem?.fileType?.startsWith('video/');
+        const isVideo = item?.fileCategory === 'video' || item?.fileType?.startsWith('video/');
         if (isVideo && extractAudioBtn) {
             // Check if audio already extracted
             if (metadata.audioPath) {
@@ -2372,11 +2600,9 @@ async function showMetadataModal(itemId) {
                     identifySpeakersBtn.disabled = false;
                 }
             };
-        } else {
+        } else if (identifySpeakersBtn) {
             identifySpeakersBtn.style.display = 'none';
         }
-    } else {
-        transcriptSection.style.display = 'none';
     }
     
     // AI fields
@@ -2393,36 +2619,49 @@ async function showMetadataModal(itemId) {
     document.getElementById('metaVersion').textContent = metadata.version || '1.0.0';
     document.getElementById('metaId').textContent = metadata.id || itemId;
     
-    // Set context if available
+    // Set source/context fields
+    const sourceEl = document.getElementById('metaSource');
     const contextEl = document.getElementById('metaContext');
-    if (metadata.context && metadata.context.contextDisplay) {
-      contextEl.textContent = metadata.context.contextDisplay;
-    } else if (result.metadata && result.metadata.context && result.metadata.context.contextDisplay) {
-      // Check if context is in the result's metadata (for items without saved metadata)
-      contextEl.textContent = result.metadata.context.contextDisplay;
-    } else if (metadata.source) {
-      contextEl.textContent = `Source: ${metadata.source}`;
-    } else {
-      // Try to get the source from the item itself
-      const historyItem = history.find(h => h.id === itemId);
-      if (historyItem && historyItem.source) {
-        contextEl.textContent = `Source: ${historyItem.source}`;
-      } else {
-        contextEl.textContent = 'Unknown';
-      }
+    
+    if (sourceEl) {
+        sourceEl.value = metadata.source || item.source || '';
     }
     
-    // Store item ID for saving
-    modal.dataset.itemId = itemId;
+    if (contextEl) {
+        if (metadata.context && metadata.context.contextDisplay) {
+            contextEl.value = metadata.context.contextDisplay;
+        } else if (metadata.ai_context) {
+            contextEl.value = metadata.ai_context;
+        } else {
+            contextEl.value = '';
+        }
+    }
     
     // Show modal
     modal.style.display = 'flex';
-    document.getElementById('metaDescription').focus();
 }
 
 // Hide metadata modal
 function hideMetadataModal() {
     document.getElementById('metadataModal').style.display = 'none';
+}
+
+// Switch metadata modal tab
+function switchMetadataTab(tabName) {
+    // Update tab buttons
+    document.querySelectorAll('.metadata-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.tab === tabName);
+    });
+    
+    // Update tab panels
+    document.querySelectorAll('.metadata-tab-panel').forEach(panel => {
+        panel.classList.remove('active');
+    });
+    
+    const targetPanel = document.getElementById('tab' + tabName.charAt(0).toUpperCase() + tabName.slice(1));
+    if (targetPanel) {
+        targetPanel.classList.add('active');
+    }
 }
 
 // Toggle transcript section expanded/collapsed
@@ -2761,6 +3000,9 @@ function setupEventListeners() {
         });
     });
     
+    // Initialize tag filter
+    initTagFilter();
+    
     // Space selection
     document.getElementById('spacesList').addEventListener('click', async (e) => {
         const spaceItem = e.target.closest('.space-item');
@@ -2803,8 +3045,9 @@ function setupEventListeners() {
             item.classList.remove('active');
         });
         spaceItem.classList.add('active');
-        
+
         await loadHistory();
+        updateTagDropdown(); // Refresh available tags for this space
         filterItems();
     });
     
@@ -3135,6 +3378,7 @@ function setupEventListeners() {
     // Listen for updates
     window.clipboard.onHistoryUpdate(async (updatedHistory) => {
         history = updatedHistory;
+        updateTagDropdown(); // Refresh available tags
         filterItems();
         await updateItemCounts();
     });

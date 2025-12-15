@@ -28,6 +28,8 @@
     "test:idw": "electron test/run-idw-tests.js",
     "test:gsx-sync": "node test/test-gsx-sync.js",
     "test:blackhole": "node test-black-hole.js",
+    "test:metadata": "node test/test-metadata-generation.js",
+    "test:metadata-api": "node test/test-metadata-api-integration.js",
     "dist": "electron-builder",
     "build:signed": "./scripts/build-signed.sh",
     "build:signed:skip-notarize": "./scripts/build-signed.sh --skip-notarize",
@@ -46,8 +48,14 @@
       "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}",
       "!**/node_modules/*.d.ts",
       "!**/node_modules/.bin",
-      "!**/.{idea,git,github,vscode}/**",
-      "!**/{.DS_Store,.git,.gitignore,.npmignore}"
+      "!**/.{idea,git,github,vscode,cursor}/**",
+      "!**/{.DS_Store,.git,.gitignore,.npmignore}",
+      "!test/**/*",
+      "!test-*.js",
+      "!*.sh",
+      "!api-*.json",
+      "!example-module/**/*",
+      "!test-update-server/**/*"
     ],
     "mac": {
       "category": "public.app-category.productivity",
@@ -61,8 +69,9 @@
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
-      "notarize": false
+      "notarize": true
     },
+    "afterSign": "scripts/notarize.js",
     "win": {
       "icon": "assets/tray-icon.png",
       "target": [
@@ -111,7 +120,7 @@
     "onereach",
     "ai"
   ],
-  "author": "",
+  "author": "Onereach.ai",
   "license": "ISC",
   "repository": {
     "type": "git",

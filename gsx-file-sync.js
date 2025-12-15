@@ -26,6 +26,7 @@ class GSXFileSync {
   
   /**
    * Refresh the GSX token when it expires
+   * The refresh endpoint returns a new token: {"token": "[encoded token]"}
    * @returns {Promise<{success: boolean, token?: string, error?: string}>}
    */
   async refreshToken() {
@@ -39,32 +40,58 @@ class GSXFileSync {
     try {
       this.tokenRefreshInProgress = true;
       console.log('[GSX Sync] Attempting to refresh token...');
+      console.log('[GSX Sync] Refresh URL:', TOKEN_REFRESH_URL);
       
       const currentToken = this.settingsManager.get('gsxToken');
       if (!currentToken) {
         throw new Error('No current token to refresh');
       }
       
-      const response = await fetch(TOKEN_REFRESH_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${currentToken}`
-        },
-        body: JSON.stringify({ token: currentToken })
-      });
+      // Try GET request first (simpler endpoint format per docs)
+      let response;
+      let data;
       
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Token refresh failed: ${response.status} - ${errorText}`);
+      try {
+        console.log('[GSX Sync] Trying GET request...');
+        response = await fetch(TOKEN_REFRESH_URL, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${currentToken}`
+          }
+        });
+        
+        if (response.ok) {
+          data = await response.json();
+        }
+      } catch (getError) {
+        console.log('[GSX Sync] GET failed, trying POST...');
       }
       
-      const data = await response.json();
+      // If GET didn't work, try POST
+      if (!data) {
+        console.log('[GSX Sync] Trying POST request...');
+        response = await fetch(TOKEN_REFRESH_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${currentToken}`
+          },
+          body: JSON.stringify({ token: currentToken })
+        });
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Token refresh failed: ${response.status} - ${errorText}`);
+        }
+        
+        data = await response.json();
+      }
       
-      if (data.token) {
+      if (data && data.token) {
         // Save the new token
         this.settingsManager.set('gsxToken', data.token);
         console.log('[GSX Sync] ✓ Token refreshed successfully');
+        console.log('[GSX Sync] New token length:', data.token.length);
         
         // Reset initialization so next operation uses new token
         this.isInitialized = false;

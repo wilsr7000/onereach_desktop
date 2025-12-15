@@ -542,6 +542,169 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openExternal: (url) => ipcRenderer.invoke('open-external', url)
 });
 
+// Expose Resource Manager API for CPU/GPU throttling
+contextBridge.exposeInMainWorld('resourceManager', {
+  // Get current status
+  getStatus: () => ipcRenderer.invoke('resource-manager:get-status'),
+  
+  // Toggle resource monitoring
+  toggle: (enabled) => ipcRenderer.invoke('resource-manager:toggle', enabled),
+  
+  // Manual throttle controls
+  throttleWindow: (windowId) => ipcRenderer.invoke('resource-manager:throttle-window', windowId),
+  unthrottleWindow: (windowId) => ipcRenderer.invoke('resource-manager:unthrottle-window', windowId),
+  
+  // Update configuration
+  setConfig: (config) => ipcRenderer.invoke('resource-manager:set-config', config),
+  
+  // Listen for resource warnings
+  onWarning: (callback) => {
+    ipcRenderer.on('resource-warning', (event, data) => callback(data));
+  },
+  
+  // Remove warning listener
+  removeWarningListener: () => {
+    ipcRenderer.removeAllListeners('resource-warning');
+  }
+});
+
+// Expose Speech Recognition Bridge (Whisper-based) for web apps
+// Use this instead of Web Speech API which doesn't work in Electron
+contextBridge.exposeInMainWorld('speechBridge', {
+  // Check if speech bridge is available and has API key
+  isAvailable: () => ipcRenderer.invoke('speech:is-available'),
+  
+  // Transcribe audio data (base64 encoded)
+  // Usage: const result = await speechBridge.transcribe({ audioData: base64, language: 'en', format: 'webm' })
+  transcribe: (options) => ipcRenderer.invoke('speech:transcribe', options),
+  
+  // Transcribe from file path
+  transcribeFile: (options) => ipcRenderer.invoke('speech:transcribe-file', options),
+  
+  // Get API key (to check if configured)
+  getApiKey: () => ipcRenderer.invoke('speech:get-api-key'),
+  
+  // Helper: Convert Blob to base64 for transcription
+  // Call this from your web app before calling transcribe()
+  blobToBase64: async (blob) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64 = reader.result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  },
+  
+  // Request microphone permission from macOS
+  // Call this before using getUserMedia to ensure proper permission dialog
+  requestMicPermission: () => ipcRenderer.invoke('speech:request-mic-permission')
+});
+
+// Expose Realtime Speech API (OpenAI Realtime API for streaming transcription)
+// This provides low-latency real-time speech-to-text as you speak
+contextBridge.exposeInMainWorld('realtimeSpeech', {
+  // Connect to OpenAI Realtime API
+  connect: () => ipcRenderer.invoke('realtime-speech:connect'),
+  
+  // Disconnect from the API
+  disconnect: () => ipcRenderer.invoke('realtime-speech:disconnect'),
+  
+  // Check connection status
+  isConnected: () => ipcRenderer.invoke('realtime-speech:is-connected'),
+  
+  // Send audio chunk (base64 encoded PCM16, 24kHz, mono)
+  sendAudio: (base64Audio) => ipcRenderer.invoke('realtime-speech:send-audio', base64Audio),
+  
+  // Commit audio buffer (signal end of speech)
+  commit: () => ipcRenderer.invoke('realtime-speech:commit'),
+  
+  // Clear audio buffer
+  clear: () => ipcRenderer.invoke('realtime-speech:clear'),
+  
+  // Listen for transcription events
+  // Events: transcript_delta (partial), transcript (final), speech_started, speech_stopped, error
+  onEvent: (callback) => {
+    const handler = (event, data) => callback(data);
+    ipcRenderer.on('realtime-speech:event', handler);
+    return () => ipcRenderer.removeListener('realtime-speech:event', handler);
+  },
+  
+  // Helper: Start streaming from microphone with automatic audio processing
+  // Returns { stop: Function, onTranscript: Function }
+  startStreaming: async function(onTranscript, options = {}) {
+    // Request mic permission first
+    await ipcRenderer.invoke('speech:request-mic-permission');
+    
+    // Connect to Realtime API
+    const connectResult = await this.connect();
+    if (!connectResult.success) {
+      throw new Error(connectResult.error || 'Failed to connect');
+    }
+    
+    // Set up event listener
+    const removeListener = this.onEvent((event) => {
+      if (event.type === 'transcript' || event.type === 'transcript_delta') {
+        onTranscript(event.text, event.isFinal);
+      }
+    });
+    
+    // Set up audio capture with AudioContext for proper format
+    const stream = await navigator.mediaDevices.getUserMedia({ 
+      audio: {
+        channelCount: 1,
+        sampleRate: 24000,
+        echoCancellation: true,
+        noiseSuppression: true
+      }
+    });
+    
+    const audioContext = new AudioContext({ sampleRate: 24000 });
+    const source = audioContext.createMediaStreamSource(stream);
+    const processor = audioContext.createScriptProcessor(4096, 1, 1);
+    
+    const sendAudio = this.sendAudio.bind(this);
+    
+    processor.onaudioprocess = (e) => {
+      const inputData = e.inputBuffer.getChannelData(0);
+      // Convert Float32 to Int16
+      const int16Data = new Int16Array(inputData.length);
+      for (let i = 0; i < inputData.length; i++) {
+        const s = Math.max(-1, Math.min(1, inputData[i]));
+        int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      }
+      // Convert to base64
+      const uint8Array = new Uint8Array(int16Data.buffer);
+      let binary = '';
+      for (let i = 0; i < uint8Array.length; i++) {
+        binary += String.fromCharCode(uint8Array[i]);
+      }
+      const base64 = btoa(binary);
+      sendAudio(base64);
+    };
+    
+    source.connect(processor);
+    processor.connect(audioContext.destination);
+    
+    console.log('🎤 Realtime speech streaming started');
+    
+    // Return stop function
+    return {
+      stop: async () => {
+        processor.disconnect();
+        source.disconnect();
+        audioContext.close();
+        stream.getTracks().forEach(t => t.stop());
+        removeListener();
+        await this.disconnect();
+        console.log('🎤 Realtime speech streaming stopped');
+      }
+    };
+  }
+});
+
 // Expose Aider API for GSX Create
 contextBridge.exposeInMainWorld('aider', {
   start: () => ipcRenderer.invoke('aider:start'),

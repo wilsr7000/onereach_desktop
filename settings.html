@@ -427,6 +427,9 @@
                     <button class="btn-secondary" onclick="pasteGSXToken()" style="padding: 6px 12px; font-size: 12px;">
                         📋 Paste Token from Clipboard
                     </button>
+                    <button class="btn-secondary" onclick="refreshGSXToken()" style="padding: 6px 12px; font-size: 12px; margin-left: 10px;">
+                        🔄 Refresh Token
+                    </button>
                     <button class="btn-secondary" onclick="clearGSXToken()" style="padding: 6px 12px; font-size: 12px; margin-left: 10px;">
                         🗑️ Clear Token
                     </button>
@@ -1094,6 +1097,35 @@
             }
         }
         
+        async function refreshGSXToken() {
+            const statusEl = document.getElementById('gsxTokenStatus');
+            statusEl.textContent = '(Refreshing...)';
+            statusEl.className = 'api-key-status';
+            
+            try {
+                showStatus('Refreshing GSX token...', 'info');
+                const result = await window.electronAPI.refreshGSXToken();
+                
+                if (result.success) {
+                    // Update the token field with the new token
+                    if (result.token) {
+                        document.getElementById('gsxToken').value = result.token;
+                    }
+                    statusEl.textContent = '(Token refreshed!)';
+                    statusEl.className = 'api-key-status status-valid';
+                    showStatus('GSX token refreshed successfully!', 'success');
+                } else {
+                    statusEl.textContent = '(Refresh failed)';
+                    statusEl.className = 'api-key-status status-invalid';
+                    showStatus('Token refresh failed: ' + (result.error || 'Unknown error'), 'error');
+                }
+            } catch (error) {
+                statusEl.textContent = '(Refresh failed)';
+                statusEl.className = 'api-key-status status-invalid';
+                showStatus('Token refresh error: ' + error.message, 'error');
+            }
+        }
+
         function clearGSXToken() {
             if (confirm('Are you sure you want to clear the GSX token?')) {
                 document.getElementById('gsxToken').value = '';

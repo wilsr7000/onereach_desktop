@@ -443,9 +443,75 @@ class ModuleManager {
         nodeIntegration: false,
         contextIsolation: true,
         webSecurity: true,
-        preload: path.join(__dirname, 'preload.js')
+        preload: path.join(__dirname, 'preload.js'),
+        // Enable features needed for speech recognition and media
+        enableBlinkFeatures: 'MediaStreamAPI,WebRTC,AudioWorklet,WebAudio,MediaRecorder',
+        experimentalFeatures: true
       }
     });
+    
+    // Set up permission handlers for microphone, speech recognition, etc.
+    window.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
+      console.log(`[WebTool] Permission requested: ${permission} from ${webContents.getURL()}`);
+      
+      // Allow media permissions (microphone, camera, speech recognition)
+      const allowedPermissions = [
+        'media',
+        'audioCapture', 
+        'microphone',
+        'camera',
+        'geolocation',
+        'notifications',
+        'clipboard-read',
+        'clipboard-write',
+        'speech',           // For Web Speech API
+        'background-sync'
+      ];
+      
+      if (allowedPermissions.includes(permission)) {
+        console.log(`[WebTool] Allowing ${permission} permission`);
+        callback(true);
+      } else {
+        console.log(`[WebTool] Denying ${permission} permission`);
+        callback(false);
+      }
+    });
+    
+    // Also set permission check handler
+    window.webContents.session.setPermissionCheckHandler((webContents, permission) => {
+      const allowedPermissions = [
+        'media',
+        'audioCapture',
+        'microphone', 
+        'camera',
+        'geolocation',
+        'notifications',
+        'clipboard-read',
+        'clipboard-write',
+        'speech',
+        'background-sync'
+      ];
+      
+      return allowedPermissions.includes(permission);
+    });
+    
+    // Set Chrome user agent (important for Web Speech API - Google may reject Electron)
+    const chromeVersion = process.versions.chrome || '120.0.0.0';
+    const userAgent = `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
+    window.webContents.setUserAgent(userAgent);
+    
+    // Modify request headers to look like Chrome (not Electron)
+    window.webContents.session.webRequest.onBeforeSendHeaders((details, callback) => {
+      const headers = { ...details.requestHeaders };
+      headers['User-Agent'] = userAgent;
+      delete headers['X-Electron'];
+      if (!headers['Accept-Language']) {
+        headers['Accept-Language'] = 'en-US,en;q=0.9';
+      }
+      callback({ requestHeaders: headers });
+    });
+    
+    console.log(`[WebTool] Set Chrome user agent: ${chromeVersion}`);
     
     // Center the window for non-fullscreen sizes
     if (tool.windowSize !== 'fullscreen') {

@@ -2,9 +2,14 @@
  * Specialized Metadata Generation for Different Asset Types
  * Each asset type has its own prompt and processing logic
  * Incorporates Space metadata for better contextualization
+ * 
+ * MODEL ROUTING:
+ * - Claude Sonnet 4: Vision tasks (images, video thumbnails, PDF thumbnails)
+ * - GPT-5.2: Large context text tasks (code, text, data, HTML, URLs, audio transcripts)
  */
 
 const ClaudeAPI = require('./claude-api');
+const { getOpenAIAPI } = require('./openai-api');
 const fs = require('fs');
 const path = require('path');
 
@@ -12,6 +17,47 @@ class MetadataGenerator {
   constructor(clipboardManager) {
     this.clipboardManager = clipboardManager;
     this.claudeAPI = new ClaudeAPI();
+    this.openaiAPI = getOpenAIAPI();
+    
+    // Model configuration
+    this.models = {
+      vision: 'claude-sonnet-4-20250514',  // Claude for vision tasks
+      text: 'gpt-5.2'                       // GPT-5.2 for large context text
+    };
+  }
+  
+  /**
+   * Determine which model to use based on content type
+   * @param {string} contentType - Type of content
+   * @param {boolean} hasVisualContent - Whether visual analysis is needed
+   * @returns {Object} Model info { provider, model, reason }
+   */
+  selectModel(contentType, hasVisualContent = false) {
+    // Vision tasks always use Claude
+    if (hasVisualContent) {
+      return {
+        provider: 'claude',
+        model: this.models.vision,
+        reason: 'Visual content requires vision model'
+      };
+    }
+    
+    // Text-based tasks use GPT-5.2 for better context handling
+    const textTypes = ['code', 'text', 'data', 'html', 'url', 'audio', 'file'];
+    if (textTypes.includes(contentType)) {
+      return {
+        provider: 'openai',
+        model: this.models.text,
+        reason: `GPT-5.2 for ${contentType} analysis (256K context)`
+      };
+    }
+    
+    // Default to Claude for anything else
+    return {
+      provider: 'claude',
+      model: this.models.vision,
+      reason: 'Default handler'
+    };
   }
 
   /**
@@ -224,18 +270,42 @@ Respond with JSON only:
 
   /**
    * AUDIO METADATA - Specialized for audio files, podcasts, music
+   * Uses GPT-5.2 for transcript analysis (large context)
    */
   async generateAudioMetadata(item, apiKey, spaceContext) {
-    const prompt = this.buildAudioPrompt(item, spaceContext);
+    // Get API keys from settings
+    const settingsManager = global.settingsManager;
+    const openaiKey = settingsManager?.get('openaiApiKey') || process.env.OPENAI_API_KEY;
     
-    const messageContent = [
-      {
-        type: 'text',
-        text: prompt
+    // Use GPT-5.2 for audio analysis if OpenAI key available (good for long transcripts)
+    if (openaiKey) {
+      console.log('[MetadataGen] Using GPT-5.2 for audio analysis');
+      try {
+        const content = [
+          `Audio file: ${item.fileName || 'Unknown'}`,
+          `Duration: ${item.metadata?.duration || 'Unknown'}`,
+          item.metadata?.transcript ? `\nTranscript:\n${item.metadata.transcript}` : ''
+        ].join('\n');
+        
+        const metadata = await this.openaiAPI.generateMetadata(content, 'audio', openaiKey, {
+          fileName: item.fileName,
+          duration: item.metadata?.duration,
+          transcript: item.metadata?.transcript,
+          spaceContext
+        });
+        metadata._model_used = 'gpt-5.2';
+        return metadata;
+      } catch (error) {
+        console.warn('[MetadataGen] GPT-5.2 failed, falling back to Claude:', error.message);
       }
-    ];
-
-    return await this.callClaude(messageContent, apiKey);
+    }
+    
+    // Fallback to Claude
+    const prompt = this.buildAudioPrompt(item, spaceContext);
+    const messageContent = [{ type: 'text', text: prompt }];
+    const metadata = await this.callClaude(messageContent, apiKey);
+    metadata._model_used = 'claude-sonnet-4-20250514';
+    return metadata;
   }
 
   buildAudioPrompt(item, spaceContext) {
@@ -305,18 +375,38 @@ Respond with JSON only:
 
   /**
    * TEXT/CODE METADATA - Specialized for text documents and code
+   * Uses GPT-5.2 for large context handling
    */
   async generateTextMetadata(item, apiKey, spaceContext) {
-    const prompt = this.buildTextPrompt(item, spaceContext);
+    const content = item.content || item.text || item.preview || '';
+    const isCode = item.fileCategory === 'code' || item.source === 'code';
     
-    const messageContent = [
-      {
-        type: 'text',
-        text: prompt
+    // Get API keys from settings
+    const settingsManager = global.settingsManager;
+    const openaiKey = settingsManager?.get('openaiApiKey') || process.env.OPENAI_API_KEY;
+    
+    // Use GPT-5.2 for text analysis if OpenAI key available
+    if (openaiKey) {
+      console.log('[MetadataGen] Using GPT-5.2 for text/code analysis');
+      try {
+        const metadata = await this.openaiAPI.generateMetadata(content, isCode ? 'code' : 'text', openaiKey, {
+          fileName: item.fileName,
+          fileExt: item.fileExt,
+          spaceContext
+        });
+        metadata._model_used = 'gpt-5.2';
+        return metadata;
+      } catch (error) {
+        console.warn('[MetadataGen] GPT-5.2 failed, falling back to Claude:', error.message);
       }
-    ];
-
-    return await this.callClaude(messageContent, apiKey);
+    }
+    
+    // Fallback to Claude
+    const prompt = this.buildTextPrompt(item, spaceContext);
+    const messageContent = [{ type: 'text', text: prompt }];
+    const metadata = await this.callClaude(messageContent, apiKey);
+    metadata._model_used = 'claude-sonnet-4-20250514';
+    return metadata;
   }
 
   buildTextPrompt(item, spaceContext) {
@@ -410,7 +500,7 @@ Respond with JSON only:
 {
   "title": "Descriptive title (3-8 words)",
   "description": "What this text is about (2-3 sentences)",
-  "contentType": "notes|article|documentation|message|list|meeting-notes|other",
+  "contentType": "notes|article|documentation|message|list|meeting-notes|transcript|interview|other",
   "topics": ["main", "topics"],
   "keyPoints": ["important", "points"],
   "actionItems": ["any", "todos"],
@@ -422,18 +512,35 @@ Respond with JSON only:
 
   /**
    * HTML/RICH CONTENT METADATA - Specialized for web pages, documents
+   * Uses GPT-5.2 for large HTML documents
    */
   async generateHtmlMetadata(item, apiKey, spaceContext) {
-    const prompt = this.buildHtmlPrompt(item, spaceContext);
+    const plainText = item.plainText || this.stripHtml(item.content || item.html || '');
     
-    const messageContent = [
-      {
-        type: 'text',
-        text: prompt
+    // Get API keys from settings
+    const settingsManager = global.settingsManager;
+    const openaiKey = settingsManager?.get('openaiApiKey') || process.env.OPENAI_API_KEY;
+    
+    // Use GPT-5.2 for HTML analysis if OpenAI key available
+    if (openaiKey) {
+      console.log('[MetadataGen] Using GPT-5.2 for HTML analysis');
+      try {
+        const metadata = await this.openaiAPI.generateMetadata(plainText, 'html', openaiKey, {
+          spaceContext
+        });
+        metadata._model_used = 'gpt-5.2';
+        return metadata;
+      } catch (error) {
+        console.warn('[MetadataGen] GPT-5.2 failed, falling back to Claude:', error.message);
       }
-    ];
-
-    return await this.callClaude(messageContent, apiKey);
+    }
+    
+    // Fallback to Claude
+    const prompt = this.buildHtmlPrompt(item, spaceContext);
+    const messageContent = [{ type: 'text', text: prompt }];
+    const metadata = await this.callClaude(messageContent, apiKey);
+    metadata._model_used = 'claude-sonnet-4-20250514';
+    return metadata;
   }
 
   buildHtmlPrompt(item, spaceContext) {
@@ -578,18 +685,38 @@ Respond with JSON only:
 
   /**
    * DATA FILE METADATA - Specialized for JSON, CSV, YAML, etc.
+   * Uses GPT-5.2 for large data files
    */
   async generateDataMetadata(item, apiKey, spaceContext) {
-    const prompt = this.buildDataPrompt(item, spaceContext);
+    const content = item.content || item.text || item.preview || '';
     
-    const messageContent = [
-      {
-        type: 'text',
-        text: prompt
+    // Get API keys from settings
+    const settingsManager = global.settingsManager;
+    const openaiKey = settingsManager?.get('openaiApiKey') || process.env.OPENAI_API_KEY;
+    
+    // Use GPT-5.2 for data analysis if OpenAI key available
+    if (openaiKey) {
+      console.log('[MetadataGen] Using GPT-5.2 for data file analysis');
+      try {
+        const metadata = await this.openaiAPI.generateMetadata(content, 'data', openaiKey, {
+          fileName: item.fileName,
+          fileExt: item.fileExt,
+          fileSize: item.fileSize,
+          spaceContext
+        });
+        metadata._model_used = 'gpt-5.2';
+        return metadata;
+      } catch (error) {
+        console.warn('[MetadataGen] GPT-5.2 failed, falling back to Claude:', error.message);
       }
-    ];
-
-    return await this.callClaude(messageContent, apiKey);
+    }
+    
+    // Fallback to Claude
+    const prompt = this.buildDataPrompt(item, spaceContext);
+    const messageContent = [{ type: 'text', text: prompt }];
+    const metadata = await this.callClaude(messageContent, apiKey);
+    metadata._model_used = 'claude-sonnet-4-20250514';
+    return metadata;
   }
 
   buildDataPrompt(item, spaceContext) {
@@ -652,18 +779,37 @@ Respond with JSON only:
 
   /**
    * URL/WEB LINK METADATA - Specialized for web URLs
+   * Uses GPT-5.2 for URL analysis
    */
   async generateUrlMetadata(item, apiKey, spaceContext) {
-    const prompt = this.buildUrlPrompt(item, spaceContext);
+    const url = item.content || item.text || item.url || '';
     
-    const messageContent = [
-      {
-        type: 'text',
-        text: prompt
+    // Get API keys from settings
+    const settingsManager = global.settingsManager;
+    const openaiKey = settingsManager?.get('openaiApiKey') || process.env.OPENAI_API_KEY;
+    
+    // Use GPT-5.2 for URL analysis if OpenAI key available
+    if (openaiKey) {
+      console.log('[MetadataGen] Using GPT-5.2 for URL analysis');
+      try {
+        const metadata = await this.openaiAPI.generateMetadata(url, 'url', openaiKey, {
+          pageTitle: item.pageTitle,
+          pageDescription: item.pageDescription,
+          spaceContext
+        });
+        metadata._model_used = 'gpt-5.2';
+        return metadata;
+      } catch (error) {
+        console.warn('[MetadataGen] GPT-5.2 failed, falling back to Claude:', error.message);
       }
-    ];
-
-    return await this.callClaude(messageContent, apiKey);
+    }
+    
+    // Fallback to Claude
+    const prompt = this.buildUrlPrompt(item, spaceContext);
+    const messageContent = [{ type: 'text', text: prompt }];
+    const metadata = await this.callClaude(messageContent, apiKey);
+    metadata._model_used = 'claude-sonnet-4-20250514';
+    return metadata;
   }
 
   buildUrlPrompt(item, spaceContext) {
@@ -735,18 +881,37 @@ Respond with JSON only:
 
   /**
    * FILE METADATA - Generic file handler with Space context
+   * Uses GPT-5.2 for file analysis
    */
   async generateFileMetadata(item, apiKey, spaceContext) {
-    const prompt = this.buildFilePrompt(item, spaceContext);
+    // Get API keys from settings
+    const settingsManager = global.settingsManager;
+    const openaiKey = settingsManager?.get('openaiApiKey') || process.env.OPENAI_API_KEY;
     
-    const messageContent = [
-      {
-        type: 'text',
-        text: prompt
+    // Use GPT-5.2 for file analysis if OpenAI key available
+    if (openaiKey) {
+      console.log('[MetadataGen] Using GPT-5.2 for generic file analysis');
+      try {
+        const content = `File: ${item.fileName || 'Unknown'}`;
+        const metadata = await this.openaiAPI.generateMetadata(content, 'file', openaiKey, {
+          fileName: item.fileName,
+          fileExt: item.fileExt,
+          fileSize: item.fileSize,
+          spaceContext
+        });
+        metadata._model_used = 'gpt-5.2';
+        return metadata;
+      } catch (error) {
+        console.warn('[MetadataGen] GPT-5.2 failed, falling back to Claude:', error.message);
       }
-    ];
-
-    return await this.callClaude(messageContent, apiKey);
+    }
+    
+    // Fallback to Claude
+    const prompt = this.buildFilePrompt(item, spaceContext);
+    const messageContent = [{ type: 'text', text: prompt }];
+    const metadata = await this.callClaude(messageContent, apiKey);
+    metadata._model_used = 'claude-sonnet-4-20250514';
+    return metadata;
   }
 
   buildFilePrompt(item, spaceContext) {
@@ -879,7 +1044,8 @@ Respond with JSON only:
         space_context_used: !!spaceContext
       };
 
-      this.clipboardManager.storage.updateItemMetadata(itemId, updatedMetadata);
+      // Update the item's metadata using the clipboardManager method
+      await this.clipboardManager.updateItemMetadata(itemId, updatedMetadata);
 
       return {
         success: true,
