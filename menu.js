@@ -2032,11 +2032,20 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
               webPreferences: {
                 nodeIntegration: false,
                 contextIsolation: true,
+                devTools: true,
                 preload: path.join(__dirname, 'preload-video-editor.js')
               }
             });
 
             videoEditorWindow.loadFile('video-editor.html');
+
+            // Enable dev tools keyboard shortcut (Cmd+Option+I / Ctrl+Shift+I)
+            videoEditorWindow.webContents.on('before-input-event', (event, input) => {
+              if ((input.meta && input.alt && input.key === 'i') || 
+                  (input.control && input.shift && input.key === 'I')) {
+                videoEditorWindow.webContents.toggleDevTools();
+              }
+            });
 
             // Setup video editor IPC for this window
             if (global.videoEditor) {

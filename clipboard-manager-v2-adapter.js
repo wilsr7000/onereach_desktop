@@ -4478,12 +4478,21 @@ ${chunks[i]}`;
           webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
+            devTools: true,
             preload: path.join(__dirname, 'preload-video-editor.js')
           }
         });
 
         // Load the video editor HTML
         videoEditorWindow.loadFile('video-editor.html');
+
+        // Enable dev tools keyboard shortcut (Cmd+Option+I / Ctrl+Shift+I)
+        videoEditorWindow.webContents.on('before-input-event', (event, input) => {
+          if ((input.meta && input.alt && input.key === 'i') || 
+              (input.control && input.shift && input.key === 'I')) {
+            videoEditorWindow.webContents.toggleDevTools();
+          }
+        });
 
         // Once loaded, send the file path to open
         videoEditorWindow.webContents.on('did-finish-load', () => {
