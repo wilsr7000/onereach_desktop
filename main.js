@@ -14,12 +14,16 @@ const { createConsoleInterceptor } = require('./console-interceptor');
 const { getGSXFileSync } = require('./gsx-file-sync');
 const { AiderBridgeClient } = require('./aider-bridge-client');
 const VideoEditor = require('./video-editor');
+const { getRecorder } = require('./recorder');
 
 // Global Aider Bridge instance
 let aiderBridge = null;
 
 // Global Video Editor instance
 let videoEditor = null;
+
+// Global Recorder instance
+let recorder = null;
 
 // autoUpdater - loaded lazily after app is ready
 let autoUpdater = null;
@@ -567,6 +571,12 @@ app.whenReady().then(() => {
     videoEditor = new VideoEditor();
     global.videoEditor = videoEditor;
     console.log('Video editor initialized');
+
+    // Initialize recorder
+    recorder = getRecorder();
+    recorder.setupIPC();
+    global.recorder = recorder;
+    console.log('Recorder initialized');
     
     // Initialize module manager
     moduleManager = new ModuleManager();
@@ -3538,6 +3548,23 @@ function setupIPC() {
     }
   });
   
+  // Handle opening recorder window
+  ipcMain.on('open-recorder', (event, options = {}) => {
+    console.log('Received request to open recorder');
+    if (global.recorder) {
+      global.recorder.open(options);
+    }
+  });
+
+  ipcMain.handle('recorder:open', async (event, options = {}) => {
+    console.log('Opening recorder with options:', options);
+    if (global.recorder) {
+      global.recorder.open(options);
+      return { success: true };
+    }
+    return { success: false, error: 'Recorder not initialized' };
+  });
+
   // Handle opening clipboard viewer from widgets
   ipcMain.on('open-clipboard-viewer', async () => {
     console.log('Received request to open clipboard viewer');

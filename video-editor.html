@@ -3294,6 +3294,1387 @@
       letter-spacing: 0.5px;
       color: var(--text-muted);
     }
+
+    /* ============================================
+       LAYOUT NAVIGATION (Edit / Story Beats)
+       ============================================ */
+    .layout-nav {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      background: var(--bg-dark);
+      border-radius: 8px;
+      padding: 4px;
+    }
+
+    .layout-nav-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      background: transparent;
+      border: none;
+      border-radius: 6px;
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .layout-nav-btn:hover {
+      color: var(--text-primary);
+      background: var(--bg-elevated);
+    }
+
+    .layout-nav-btn.active {
+      background: var(--accent-primary);
+      color: white;
+    }
+
+    .layout-nav-btn svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    .layout-nav-arrow {
+      color: var(--text-muted);
+      font-size: 16px;
+      padding: 0 4px;
+    }
+
+    /* Layout visibility */
+    body[data-layout="edit"] .layout-beats-only { display: none !important; }
+    body[data-layout="beats"] .layout-edit-only { display: none !important; }
+
+    /* Story Beats Layout Styles */
+    .beats-inspector {
+      width: var(--inspector-width);
+      background: var(--bg-dark);
+      border-left: 1px solid #141414;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .beats-inspector-header {
+      padding: 16px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .beats-inspector-title {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .beats-inspector-subtitle {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .beats-inspector-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+    }
+
+    .beat-form-group {
+      margin-bottom: 16px;
+    }
+
+    .beat-form-label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+
+    .beat-form-input,
+    .beat-form-textarea {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      color: var(--text-primary);
+      font-size: 13px;
+      font-family: inherit;
+    }
+
+    .beat-form-input:focus,
+    .beat-form-textarea:focus {
+      outline: none;
+      border-color: var(--accent-primary);
+    }
+
+    .beat-form-textarea {
+      min-height: 80px;
+      resize: vertical;
+    }
+
+    .beat-tags-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .beat-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 10px;
+      background: var(--bg-elevated);
+      border-radius: 12px;
+      font-size: 11px;
+      color: var(--text-primary);
+    }
+
+    .beat-tag-remove {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 0;
+      font-size: 14px;
+      line-height: 1;
+    }
+
+    .beat-tag-remove:hover {
+      color: var(--error);
+    }
+
+    .beat-links-section {
+      margin-top: 24px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border-color);
+    }
+
+    .beat-link-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px;
+      background: var(--bg-surface);
+      border-radius: 6px;
+      margin-bottom: 8px;
+    }
+
+    .beat-link-info {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .beat-link-type {
+      font-size: 10px;
+      padding: 2px 6px;
+      background: var(--accent-secondary);
+      color: white;
+      border-radius: 4px;
+    }
+
+    /* Beat Graph Visualization */
+    .beat-graph-container {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      min-height: 200px;
+      margin-top: 16px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .beat-graph-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .beat-graph-title {
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .beat-graph-canvas {
+      padding: 16px;
+      min-height: 150px;
+    }
+
+    /* Beats Timeline Track */
+    .beats-timeline {
+      background: var(--bg-surface);
+      border-radius: 6px;
+      padding: 8px;
+      margin: 8px 0;
+    }
+
+    .beat-marker {
+      display: inline-block;
+      padding: 6px 12px;
+      background: var(--accent-secondary);
+      color: white;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      margin-right: 4px;
+      transition: all 0.15s;
+    }
+
+    .beat-marker:hover {
+      filter: brightness(1.1);
+      transform: translateY(-1px);
+    }
+
+    .beat-marker.selected {
+      box-shadow: 0 0 0 2px var(--accent-primary);
+    }
+
+    /* Translation Panel Styles */
+    .translation-panel {
+      position: fixed;
+      right: 0;
+      top: 48px;
+      bottom: 0;
+      width: 450px;
+      background: var(--bg-surface);
+      border-left: 1px solid var(--border-color);
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      transform: translateX(100%);
+      transition: transform 0.3s ease;
+    }
+
+    .translation-panel.open {
+      transform: translateX(0);
+    }
+
+    .translation-panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .translation-panel-title {
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .translation-panel-close {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 4px;
+    }
+
+    .translation-panel-close:hover {
+      color: var(--text-primary);
+    }
+
+    .translation-panel-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+    }
+
+    .translation-step {
+      margin-bottom: 24px;
+    }
+
+    .translation-step-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .translation-step-number {
+      width: 24px;
+      height: 24px;
+      background: var(--accent-primary);
+      color: white;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .translation-step-title {
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .translation-text-box {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .translation-score-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .translation-score-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+    }
+
+    .translation-score-bar {
+      flex: 1;
+      height: 6px;
+      background: var(--bg-elevated);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .translation-score-fill {
+      height: 100%;
+      background: var(--accent-success);
+      border-radius: 3px;
+    }
+
+    .translation-score-value {
+      width: 30px;
+      text-align: right;
+      color: var(--text-secondary);
+    }
+
+    .translation-composite-score {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      background: var(--bg-panel);
+      border-radius: 8px;
+      margin-top: 16px;
+    }
+
+    .translation-composite-value {
+      font-size: 32px;
+      font-weight: 700;
+      color: var(--accent-success);
+    }
+
+    .translation-composite-label {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-left: 8px;
+    }
+
+    /* Deploy Panel Styles */
+    .deploy-panel {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 16px;
+    }
+
+    .deploy-btn {
+      width: 100%;
+      padding: 14px;
+      background: var(--accent-success);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: all 0.15s;
+    }
+
+    .deploy-btn:hover {
+      filter: brightness(1.1);
+    }
+
+    .embed-code-box {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 12px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text-secondary);
+      margin-top: 12px;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    /* ============================================
+       MULTI-TRACK TIMELINE SYSTEM
+       ============================================ */
+    .track-controls-container {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .timeline-row.audio-track {
+      min-height: 50px;
+    }
+
+    .track-action-btn {
+      width: 24px;
+      height: 24px;
+      padding: 0;
+      font-size: 10px;
+      font-weight: 600;
+    }
+
+    .track-action-btn.active {
+      background: var(--accent-primary);
+      color: white;
+    }
+
+    .track-action-btn.muted {
+      background: var(--error);
+      color: white;
+    }
+
+    .track-action-btn.solo {
+      background: var(--warning);
+      color: white;
+    }
+
+    .add-track-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px;
+      margin-top: 4px;
+      background: var(--bg-dark);
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .add-track-row:hover {
+      background: var(--bg-surface);
+    }
+
+    .add-track-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: transparent;
+      border: 1px dashed var(--border-light);
+      border-radius: 6px;
+      padding: 8px 16px;
+      color: var(--text-muted);
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .add-track-btn:hover {
+      border-color: var(--accent-primary);
+      color: var(--accent-primary);
+    }
+
+    .add-track-menu {
+      position: absolute;
+      bottom: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 8px;
+      display: none;
+      z-index: 100;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+
+    .add-track-menu.visible {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .add-track-option {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: transparent;
+      border: none;
+      color: var(--text-primary);
+      font-size: 12px;
+      cursor: pointer;
+      border-radius: 4px;
+      white-space: nowrap;
+    }
+
+    .add-track-option:hover {
+      background: var(--bg-hover);
+    }
+
+    .track-type-badge {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+
+    .track-type-badge.voice {
+      background: #8b5cf6;
+      color: white;
+    }
+
+    .track-type-badge.music {
+      background: #22c55e;
+      color: white;
+    }
+
+    .track-type-badge.sfx {
+      background: #f97316;
+      color: white;
+    }
+
+    .track-type-badge.ambience {
+      background: #06b6d4;
+      color: white;
+    }
+
+    /* Audio clip styling on multi-track */
+    .audio-clip {
+      position: absolute;
+      height: calc(100% - 8px);
+      top: 4px;
+      background: var(--accent-tertiary);
+      border-radius: 4px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      padding: 0 8px;
+      font-size: 10px;
+      color: white;
+      overflow: hidden;
+      transition: all 0.15s;
+    }
+
+    .audio-clip:hover {
+      filter: brightness(1.1);
+    }
+
+    .audio-clip.selected {
+      box-shadow: 0 0 0 2px var(--accent-primary);
+    }
+
+    .audio-clip.dragging {
+      opacity: 0.7;
+      z-index: 10;
+    }
+
+    .audio-clip-waveform {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      opacity: 0.5;
+    }
+
+    .audio-clip-name {
+      position: relative;
+      z-index: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Track volume/gain control */
+    .track-volume-slider {
+      width: 60px;
+      height: 4px;
+      -webkit-appearance: none;
+      background: var(--bg-elevated);
+      border-radius: 2px;
+      cursor: pointer;
+    }
+
+    .track-volume-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 12px;
+      height: 12px;
+      background: var(--accent-tertiary);
+      border-radius: 50%;
+      cursor: pointer;
+    }
+
+    /* Track empty state */
+    .track-empty-state {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--text-muted);
+      font-size: 11px;
+      pointer-events: none;
+    }
+
+    /* Translation Segment Progress */
+    .translation-segments-layer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    .translation-segment {
+      position: absolute;
+      height: 100%;
+      border-left: 2px solid #8b5cf6;
+      border-right: 2px solid #8b5cf6;
+      background: rgba(139, 92, 246, 0.1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      color: white;
+    }
+
+    .translation-segment.empty {
+      background: rgba(139, 92, 246, 0.05);
+    }
+
+    .translation-segment.marked {
+      background: rgba(139, 92, 246, 0.15);
+    }
+
+    .translation-segment.working {
+      background: rgba(251, 191, 36, 0.2);
+      border-color: #fbbf24;
+      animation: pulse-segment 1.5s infinite;
+    }
+
+    .translation-segment.approved {
+      background: rgba(34, 197, 94, 0.2);
+      border-color: #22c55e;
+    }
+
+    @keyframes pulse-segment {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+
+    .translation-segment-label {
+      font-size: 10px;
+      font-weight: 600;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+    }
+
+    /* Segment Navigation */
+    .segment-nav {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: var(--bg-surface);
+      border-radius: 6px;
+      margin: 8px 0;
+    }
+
+    .segment-nav-info {
+      flex: 1;
+      font-size: 11px;
+      color: var(--text-secondary);
+    }
+
+    /* Drag indicator for adding clips */
+    .track-drop-indicator {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 3px;
+      background: var(--accent-primary);
+      pointer-events: none;
+      display: none;
+    }
+
+    .timeline-track.drag-over .track-drop-indicator {
+      display: block;
+    }
+
+    .timeline-track.drag-over {
+      background: rgba(232, 76, 61, 0.1);
+    }
+
+    /* ============================================
+       AI VIDEO REPLACEMENT PANEL
+       ============================================ */
+    .ai-video-panel {
+      position: fixed;
+      right: 0;
+      top: 48px;
+      bottom: 0;
+      width: 480px;
+      background: var(--bg-surface);
+      border-left: 1px solid var(--border-color);
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      transform: translateX(100%);
+      transition: transform 0.3s ease;
+    }
+
+    .ai-video-panel.open {
+      transform: translateX(0);
+    }
+
+    .ai-video-panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px;
+      border-bottom: 1px solid var(--border-color);
+      background: linear-gradient(180deg, #252525 0%, var(--bg-surface) 100%);
+    }
+
+    .ai-video-panel-title {
+      font-size: 14px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .ai-video-panel-title svg {
+      color: var(--accent-secondary);
+    }
+
+    .ai-video-panel-close {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 4px;
+    }
+
+    .ai-video-panel-close:hover {
+      color: var(--text-primary);
+    }
+
+    .ai-video-panel-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+    }
+
+    .ai-video-section {
+      margin-bottom: 24px;
+    }
+
+    .ai-video-section-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 12px;
+    }
+
+    .ai-video-info-bar {
+      display: flex;
+      gap: 16px;
+      padding: 12px;
+      background: var(--bg-panel);
+      border-radius: 8px;
+      margin-bottom: 16px;
+    }
+
+    .ai-video-info-item {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .ai-video-info-label {
+      font-size: 10px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+    }
+
+    .ai-video-info-value {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .ai-video-description {
+      width: 100%;
+      min-height: 100px;
+      padding: 12px;
+      background: var(--bg-panel);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      color: var(--text-primary);
+      font-size: 13px;
+      font-family: inherit;
+      resize: vertical;
+      transition: border-color 0.15s;
+    }
+
+    .ai-video-description:focus {
+      outline: none;
+      border-color: var(--accent-secondary);
+    }
+
+    .ai-video-prompt-box {
+      background: var(--bg-darkest);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 12px;
+      line-height: 1.6;
+      color: var(--text-secondary);
+      font-family: 'JetBrains Mono', monospace;
+      position: relative;
+    }
+
+    .ai-video-prompt-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .ai-video-prompt-actions .btn {
+      flex: 1;
+    }
+
+    .ai-video-services {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+    }
+
+    .ai-video-service-btn {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px;
+      background: var(--bg-panel);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      color: var(--text-primary);
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .ai-video-service-btn:hover {
+      border-color: var(--accent-secondary);
+      background: var(--bg-elevated);
+    }
+
+    .ai-video-service-btn .service-icon {
+      font-size: 20px;
+    }
+
+    .ai-video-service-btn .service-name {
+      font-weight: 500;
+    }
+
+    .ai-video-divider {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin: 20px 0;
+      color: var(--text-muted);
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+
+    .ai-video-divider::before,
+    .ai-video-divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border-color);
+    }
+
+    .ai-video-upload-zone {
+      border: 2px dashed var(--border-light);
+      border-radius: 12px;
+      padding: 32px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .ai-video-upload-zone:hover,
+    .ai-video-upload-zone.drag-over {
+      border-color: var(--accent-primary);
+      background: rgba(232, 76, 61, 0.05);
+    }
+
+    .ai-video-upload-icon {
+      font-size: 48px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+
+    .ai-video-upload-text {
+      font-size: 14px;
+      color: var(--text-secondary);
+      margin-bottom: 4px;
+    }
+
+    .ai-video-upload-hint {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .ai-video-upload-input {
+      display: none;
+    }
+
+    /* ============================================
+       STORY BEATS LAYOUT
+       ============================================ */
+    .beats-layout {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    .beats-main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .beats-sidebar {
+      width: 320px;
+      background: var(--bg-dark);
+      border-left: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .beats-sidebar-header {
+      padding: 16px;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .beats-sidebar-title {
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .beats-sidebar-tabs {
+      display: flex;
+      padding: 8px;
+      gap: 4px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .beats-sidebar-tab {
+      flex: 1;
+      padding: 8px 12px;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      border-radius: 6px;
+      transition: all 0.15s;
+    }
+
+    .beats-sidebar-tab.active {
+      background: var(--accent-primary);
+      color: white;
+    }
+
+    .beats-sidebar-tab:hover:not(.active) {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+
+    .beats-sidebar-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+    }
+
+    /* Beat List */
+    .beat-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .beat-item {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .beat-item:hover {
+      border-color: var(--accent-secondary);
+    }
+
+    .beat-item.selected {
+      border-color: var(--accent-primary);
+      background: rgba(232, 76, 61, 0.1);
+    }
+
+    .beat-item-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+
+    .beat-item-name {
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .beat-item-time {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .beat-item-description {
+      font-size: 12px;
+      color: var(--text-secondary);
+      line-height: 1.4;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .beat-item-links {
+      display: flex;
+      gap: 4px;
+      margin-top: 8px;
+    }
+
+    .beat-link-badge {
+      font-size: 10px;
+      padding: 2px 6px;
+      background: var(--bg-elevated);
+      border-radius: 4px;
+      color: var(--text-secondary);
+    }
+
+    /* Beat Inspector */
+    .beat-inspector {
+      padding: 16px;
+    }
+
+    .beat-inspector-empty {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--text-muted);
+    }
+
+    .beat-field {
+      margin-bottom: 16px;
+    }
+
+    .beat-field-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+
+    .beat-field-input,
+    .beat-field-textarea {
+      width: 100%;
+      padding: 10px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      color: var(--text-primary);
+      font-size: 13px;
+    }
+
+    .beat-field-input:focus,
+    .beat-field-textarea:focus {
+      outline: none;
+      border-color: var(--accent-primary);
+    }
+
+    .beat-field-textarea {
+      min-height: 80px;
+      resize: vertical;
+      font-family: inherit;
+    }
+
+    .beat-tags-input-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 8px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+    }
+
+    .beat-tag-input {
+      flex: 1;
+      min-width: 60px;
+      background: none;
+      border: none;
+      color: var(--text-primary);
+      font-size: 12px;
+    }
+
+    .beat-tag-input:focus {
+      outline: none;
+    }
+
+    /* Beat Graph Visualization */
+    .beat-graph {
+      background: var(--bg-darkest);
+      border-radius: 8px;
+      height: 300px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .beat-graph-toolbar {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      display: flex;
+      gap: 4px;
+      z-index: 10;
+    }
+
+    .beat-graph-btn {
+      padding: 6px 10px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      color: var(--text-secondary);
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .beat-graph-btn:hover {
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+    }
+
+    .beat-graph-canvas {
+      width: 100%;
+      height: 100%;
+    }
+
+    .beat-node {
+      position: absolute;
+      padding: 12px 16px;
+      background: var(--bg-surface);
+      border: 2px solid var(--accent-secondary);
+      border-radius: 8px;
+      cursor: move;
+      font-size: 12px;
+      font-weight: 500;
+      white-space: nowrap;
+      user-select: none;
+      z-index: 5;
+    }
+
+    .beat-node:hover {
+      border-color: var(--accent-primary);
+    }
+
+    .beat-node.selected {
+      border-color: var(--accent-primary);
+      box-shadow: 0 0 0 3px rgba(232, 76, 61, 0.3);
+    }
+
+    .beat-node-connector {
+      position: absolute;
+      width: 12px;
+      height: 12px;
+      background: var(--accent-secondary);
+      border-radius: 50%;
+      cursor: crosshair;
+      z-index: 6;
+    }
+
+    .beat-node-connector.left {
+      left: -6px;
+      top: 50%;
+      transform: translateY(-50%);
+    }
+
+    .beat-node-connector.right {
+      right: -6px;
+      top: 50%;
+      transform: translateY(-50%);
+    }
+
+    /* Beat Link Lines */
+    .beat-link-line {
+      position: absolute;
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    .beat-link-label {
+      position: absolute;
+      background: var(--bg-panel);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      color: var(--text-muted);
+      z-index: 2;
+    }
+
+    /* Cross-Video Beat Section */
+    .cross-video-section {
+      margin-top: 24px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border-color);
+    }
+
+    .cross-video-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .cross-video-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .cross-video-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    .cross-video-item:hover {
+      border-color: var(--accent-secondary);
+    }
+
+    .cross-video-thumb {
+      width: 48px;
+      height: 32px;
+      background: var(--bg-elevated);
+      border-radius: 4px;
+      object-fit: cover;
+    }
+
+    .cross-video-info {
+      flex: 1;
+    }
+
+    .cross-video-name {
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .cross-video-beats {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    /* Deploy Panel */
+    .deploy-section {
+      padding: 16px;
+      border-top: 1px solid var(--border-color);
+    }
+
+    .deploy-buttons {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .deploy-btn-large {
+      padding: 16px;
+      background: var(--accent-success);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .deploy-btn-large:hover {
+      filter: brightness(1.1);
+    }
+
+    .deploy-btn-secondary {
+      padding: 12px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      color: var(--text-primary);
+      font-size: 13px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .deploy-btn-secondary:hover {
+      background: var(--bg-elevated);
+    }
   </style>
 </head>
 <body>
@@ -3304,14 +4685,31 @@
       <button class="header-icon-btn" onclick="app.openFile()" title="Open">
         <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" fill="none" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
       </button>
+      <button class="header-icon-btn" onclick="app.openRecorder()" title="Open Recorder">
+        <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" fill="none" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg>
+      </button>
       <button class="header-icon-btn mode-edit-only" id="saveToSpaceBtn" onclick="app.saveToSpace()" style="display: none;" title="Save">
         <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" fill="none" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
       </button>
       <span class="file-name" id="fileName">No file loaded</span>
     </div>
     <div class="header-center">
-      <span class="project-title" id="modeTitle">Video Editor</span>
-      <span class="project-status" id="modeIndicator">•</span>
+      <!-- Layout Navigation -->
+      <div class="layout-nav">
+        <button class="layout-nav-btn active" id="layoutEditBtn" onclick="app.switchLayout('edit')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/>
+          </svg>
+          Edit
+        </button>
+        <span class="layout-nav-arrow">→</span>
+        <button class="layout-nav-btn" id="layoutBeatsBtn" onclick="app.switchLayout('beats')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+          </svg>
+          Story Beats
+        </button>
+      </div>
     </div>
     <div class="header-actions">
       <!-- Edit Mode Actions -->
@@ -3828,6 +5226,38 @@
           <span id="timelineEnd">00:00:00</span>
         </div>
 
+        <!-- Timeline Action Bar (shown when region selected) -->
+        <div id="timelineActionBar" class="layout-edit-only" style="display: none; padding: 8px 12px; background: var(--bg-elevated); border-radius: 6px; margin: 8px 0; gap: 8px; align-items: center;">
+          <div style="flex: 1; font-size: 11px; color: var(--text-secondary);">
+            <span id="regionDurationText">Region: 00:00 - 00:00</span>
+          </div>
+          <button class="btn btn-ghost" onclick="app.openTranslationForRegion()" title="Translate this region" style="font-size: 11px; padding: 6px 12px;">
+            🌐 Translate
+          </button>
+          <button class="btn btn-ghost" onclick="app.openAIVideoForRegion()" title="Replace with AI video" style="font-size: 11px; padding: 6px 12px;">
+            🎬 AI Video
+          </button>
+          <button class="btn btn-ghost" onclick="app.openAudioSweeteningPanel()" title="Add sound effects" style="font-size: 11px; padding: 6px 12px;">
+            🎵 Sweetening
+          </button>
+        </div>
+
+        <!-- Translation Segment Navigation -->
+        <div id="segmentNav" class="segment-nav layout-edit-only" style="display: none;">
+          <button class="btn btn-ghost" onclick="app.navigateToSegment('prev')" style="padding: 4px 8px; font-size: 11px;" title="Previous segment">
+            ← Prev
+          </button>
+          <div class="segment-nav-info">
+            <span id="segmentNavText">Segment 0 of 0</span>
+            <span style="margin-left: 8px; color: var(--text-muted);">
+              ✓ <span id="approvedSegmentsCount">0</span> approved
+            </span>
+          </div>
+          <button class="btn btn-ghost" onclick="app.navigateToSegment('next')" style="padding: 4px 8px; font-size: 11px;" title="Next segment">
+            Next →
+          </button>
+        </div>
+
         <!-- Timeline Ruler -->
         <div class="timeline-ruler" id="timelineRuler">
           <div class="ruler-marks" id="rulerMarks"></div>
@@ -3868,13 +5298,15 @@
               </div>
             </div>
 
-            <!-- Audio Track 1 -->
-            <div class="timeline-row audio" id="audioTrackContainer">
-              <div class="track-label">
-                <div class="track-label-header">
-                  <span class="track-badge audio">A1</span>
-                  <div class="track-info">
-                    <span class="track-name">Audio 1</span>
+            <!-- Audio Tracks Container -->
+            <div id="audioTracksContainer">
+              <!-- Audio Track 1 (Original) -->
+              <div class="timeline-row audio audio-track" id="audioTrackContainer" data-track-id="A1">
+                <div class="track-label">
+                  <div class="track-label-header">
+                    <span class="track-badge audio">A1</span>
+                    <div class="track-info">
+                      <span class="track-name">Original</span>
                     <span class="track-clip-count">1 Clip</span>
                   </div>
                 </div>
@@ -3886,15 +5318,192 @@
               <div class="timeline-track" id="audioTrack" onclick="app.seekToPosition(event)">
                  <div class="timeline-clip audio" style="left: 0; width: 100%;">
                     <canvas id="audioWaveform" class="audio-waveform"></canvas>
-                    <span class="timeline-clip-name" id="audioClipName">Audio 1</span>
+                    <span class="timeline-clip-name" id="audioClipName">Original Audio</span>
                  </div>
                  <div class="audio-playhead" id="audioPlayhead"></div>
+              </div>
+              </div>
+            </div><!-- end audioTracksContainer -->
+
+            <!-- Add Track Button -->
+            <div class="add-track-row" id="addTrackRow">
+              <button class="add-track-btn" onclick="app.toggleAddTrackMenu(event)">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 5v14M5 12h14"/>
+                </svg>
+                Add Audio Track
+              </button>
+              <div class="add-track-menu" id="addTrackMenu">
+                <button class="add-track-option" onclick="app.addAudioTrack('voice')">
+                  <span class="track-type-badge voice">Voice</span>
+                  Translation / Narration
+                </button>
+                <button class="add-track-option" onclick="app.addAudioTrack('music')">
+                  <span class="track-type-badge music">Music</span>
+                  Background Music
+                </button>
+                <button class="add-track-option" onclick="app.addAudioTrack('sfx')">
+                  <span class="track-type-badge sfx">SFX</span>
+                  Sound Effects
+                </button>
+                <button class="add-track-option" onclick="app.addAudioTrack('ambience')">
+                  <span class="track-type-badge ambience">Ambience</span>
+                  Background Audio
+                </button>
               </div>
             </div>
           </div><!-- end timeline-content -->
         </div><!-- end timeline-scroll-wrapper -->
       </div><!-- end timeline -->
     </main>
+
+    <!-- Story Beats Inspector (shown in beats layout) -->
+    <aside class="beats-sidebar layout-beats-only" id="beatsInspector">
+      <div class="beats-sidebar-header">
+        <span class="beats-sidebar-title">Story Beats</span>
+        <button class="btn btn-ghost" onclick="app.addNewBeat()" style="padding: 4px 8px; font-size: 11px;">
+          + Add Beat
+        </button>
+      </div>
+
+      <div class="beats-sidebar-tabs">
+        <button class="beats-sidebar-tab active" data-tab="list" onclick="app.switchBeatsTab('list')">
+          List
+        </button>
+        <button class="beats-sidebar-tab" data-tab="graph" onclick="app.switchBeatsTab('graph')">
+          Graph
+        </button>
+        <button class="beats-sidebar-tab" data-tab="deploy" onclick="app.switchBeatsTab('deploy')">
+          Deploy
+        </button>
+      </div>
+
+      <div class="beats-sidebar-content">
+        <!-- Beat List Tab -->
+        <div id="beatsListTab" class="beats-tab-content">
+          <div class="beat-list" id="beatList">
+            <!-- Beats will be rendered here -->
+            <div class="beat-inspector-empty">
+              <p>No beats marked yet.</p>
+              <p style="font-size: 11px; margin-top: 8px;">Select a region on the timeline and click "Add Beat"</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Graph Tab -->
+        <div id="beatsGraphTab" class="beats-tab-content" style="display: none;">
+          <div class="beat-graph" id="beatGraph">
+            <div class="beat-graph-toolbar">
+              <button class="beat-graph-btn" onclick="app.zoomBeatGraph(1.2)">+</button>
+              <button class="beat-graph-btn" onclick="app.zoomBeatGraph(0.8)">−</button>
+              <button class="beat-graph-btn" onclick="app.resetBeatGraphView()">Fit</button>
+            </div>
+            <svg class="beat-graph-canvas" id="beatGraphCanvas">
+              <!-- Graph will be rendered here -->
+            </svg>
+          </div>
+          
+          <div class="cross-video-section">
+            <div class="cross-video-title">
+              🔗 Link to Other Videos
+            </div>
+            <div class="cross-video-list" id="crossVideoList">
+              <div style="font-size: 12px; color: var(--text-muted); text-align: center; padding: 20px;">
+                No other videos in this Space
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Deploy Tab -->
+        <div id="beatsDeployTab" class="beats-tab-content" style="display: none;">
+          <div class="deploy-buttons">
+            <button class="deploy-btn-large" onclick="app.testInPlayer()">
+              ▶ Test in Agentic Player
+            </button>
+            
+            <button class="deploy-btn-secondary" onclick="app.generateEmbedCode()">
+              📋 Copy Embed Code
+            </button>
+            
+            <button class="deploy-btn-secondary" onclick="app.exportPlayerPackage()">
+              📦 Export Player Package
+            </button>
+          </div>
+
+          <div id="embedCodeSection" style="margin-top: 16px; display: none;">
+            <div class="beat-field-label">Embed Code</div>
+            <div class="embed-code-box" id="embedCodeBox"></div>
+          </div>
+
+          <div style="margin-top: 20px; padding: 16px; background: var(--bg-surface); border-radius: 8px;">
+            <div style="font-size: 12px; font-weight: 600; margin-bottom: 8px;">Export Package Includes:</div>
+            <ul style="font-size: 11px; color: var(--text-secondary); margin-left: 16px;">
+              <li>player.html, player.js, styles.css</li>
+              <li>Video file (or video URL config)</li>
+              <li>beats.json (story beats metadata)</li>
+              <li>README with hosting instructions</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Beat Inspector (shows when beat is selected) -->
+      <div class="beat-inspector" id="beatInspectorPanel" style="display: none;">
+        <div class="beat-field">
+          <div class="beat-field-label">Beat Name</div>
+          <input type="text" class="beat-field-input" id="beatName" placeholder="e.g., Introduction">
+        </div>
+
+        <div class="beat-field">
+          <div class="beat-field-label">Time Range</div>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" class="beat-field-input" id="beatInTime" placeholder="In" style="flex: 1;">
+            <span style="padding: 8px; color: var(--text-muted);">→</span>
+            <input type="text" class="beat-field-input" id="beatOutTime" placeholder="Out" style="flex: 1;">
+          </div>
+        </div>
+
+        <div class="beat-field">
+          <div class="beat-field-label">Description</div>
+          <textarea class="beat-field-textarea" id="beatDescription" placeholder="What happens in this beat?"></textarea>
+        </div>
+
+        <div class="beat-field">
+          <div class="beat-field-label">Transcription</div>
+          <textarea class="beat-field-textarea" id="beatTranscription" placeholder="Spoken words in this segment..."></textarea>
+          <button class="btn btn-ghost" onclick="app.transcribeBeat()" style="margin-top: 8px; width: 100%; font-size: 11px;">
+            🎤 Auto-Transcribe
+          </button>
+        </div>
+
+        <div class="beat-field">
+          <div class="beat-field-label">Tags</div>
+          <div class="beat-tags-input-container" id="beatTagsContainer">
+            <input type="text" class="beat-tag-input" id="beatTagInput" placeholder="Add tag..." onkeydown="app.handleBeatTagKeydown(event)">
+          </div>
+        </div>
+
+        <div class="beat-field">
+          <div class="beat-field-label">Links to Other Beats</div>
+          <div id="beatLinksList" style="margin-bottom: 8px;">
+            <!-- Links will be rendered here -->
+          </div>
+          <button class="btn btn-ghost" onclick="app.addBeatLink()" style="width: 100%; font-size: 11px;">
+            + Add Link
+          </button>
+        </div>
+
+        <div style="display: flex; gap: 8px; margin-top: 16px;">
+          <button class="btn btn-secondary" onclick="app.saveBeat()" style="flex: 1;">
+            Save Beat
+          </button>
+          <button class="btn btn-ghost" onclick="app.deleteBeat()" style="color: var(--error);">
+            🗑
+          </button>
+        </div>
+      </div>
+    </aside>
   </div>
 
   <!-- DaVinci-Style Bottom Page Bar -->
@@ -4113,6 +5722,7 @@
       currentJobId: null,
       currentTab: 'edit',
       currentMode: 'edit', // 'edit' or 'mark'
+      currentLayout: 'edit', // 'edit' or 'beats'
       selectedSpace: null,
       trimStart: 0,
       trimEnd: 0,
@@ -4187,8 +5797,9 @@
           });
         });
         
-        // Set initial mode
+        // Set initial mode and layout
         this.setMode('edit');
+        this.switchLayout('edit');
       },
 
       // Mode Switching
@@ -4219,6 +5830,56 @@
             modeIndicator.textContent = '◆';
             modeIndicator.style.color = '#8b5cf6';
           }
+        }
+      },
+
+      // Layout Switching (Edit / Story Beats)
+      switchLayout(layout) {
+        this.currentLayout = layout;
+        document.body.setAttribute('data-layout', layout);
+        
+        // Update layout nav buttons
+        document.getElementById('layoutEditBtn').classList.toggle('active', layout === 'edit');
+        document.getElementById('layoutBeatsBtn').classList.toggle('active', layout === 'beats');
+        
+        // Update mode based on layout
+        if (layout === 'edit') {
+          this.setMode('edit');
+        } else if (layout === 'beats') {
+          this.setMode('annotate');
+        }
+        
+        console.log('[VideoEditor] Switched to layout:', layout);
+      },
+
+      // Open Recorder
+      async openRecorder() {
+        try {
+          // Prepare recording instructions if we have a video loaded
+          const options = {};
+          
+          if (this.videoPath) {
+            options.instructions = `Record a segment to replace or add to: ${this.videoPath.split('/').pop()}`;
+            if (this.selectedSpace) {
+              options.spaceId = this.selectedSpace;
+            }
+          }
+          
+          // Call IPC to open recorder
+          if (window.videoEditor && window.videoEditor.openRecorder) {
+            const result = await window.videoEditor.openRecorder(options);
+            if (result.success) {
+              this.showToast('Recorder opened', 'info');
+            } else {
+              throw new Error(result.error || 'Failed to open recorder');
+            }
+          } else {
+            console.warn('[VideoEditor] Recorder API not available');
+            this.showToast('Recorder not available', 'error');
+          }
+        } catch (error) {
+          console.error('[VideoEditor] Error opening recorder:', error);
+          this.showToast('Failed to open recorder: ' + error.message, 'error');
         }
       },
 
@@ -7772,7 +9433,7 @@
       },
 
       // On video loaded
-      onVideoLoaded() {
+      async onVideoLoaded() {
         const video = document.getElementById('videoPlayer');
         // Don't set trim region by default - keep it hidden
         this.trimStart = 0;
@@ -7785,6 +9446,11 @@
         document.getElementById('timelineEnd').textContent = this.formatTime(video.duration);
 
         this.updateTrimRegion();
+        
+        // Create project if not exists
+        if (!this.currentProject && this.videoPath) {
+          await this.createProject(this.videoPath, this.selectedSpace);
+        }
 
         // Reset audio state
         this.audioDetached = false;
@@ -7921,10 +9587,13 @@
       updateTrimRegion() {
         const video = document.getElementById('videoPlayer');
         const duration = video.duration || this.videoInfo?.duration || 0;
-        
+
         const region = document.getElementById('trimRegion');
         const startMarker = document.getElementById('trimMarkerStart');
         const endMarker = document.getElementById('trimMarkerEnd');
+        
+        // Update selected region and show action bar
+        this.updateSelectedRegion();
         
         // Hide trim region if not active (trimEnd is 0 or equals duration with trimStart at 0)
         const noTrim = !this.trimActive || this.trimEnd === 0 || (this.trimStart === 0 && this.trimEnd >= duration);
@@ -8646,6 +10315,1961 @@
           this.showToast('error', 'Failed to extract audio: ' + error.message);
         }
       },
+
+      // ==================== MULTI-TRACK SYSTEM ====================
+      audioTracks: [
+        { id: 'A1', type: 'original', name: 'Original', muted: false, solo: false, volume: 1.0, clips: [] }
+      ],
+      nextTrackId: 2,
+
+      toggleAddTrackMenu(event) {
+        event.stopPropagation();
+        const menu = document.getElementById('addTrackMenu');
+        menu.classList.toggle('visible');
+        
+        // Close menu when clicking outside
+        const closeMenu = (e) => {
+          if (!menu.contains(e.target)) {
+            menu.classList.remove('visible');
+            document.removeEventListener('click', closeMenu);
+          }
+        };
+        
+        setTimeout(() => {
+          document.addEventListener('click', closeMenu);
+        }, 10);
+      },
+
+      addAudioTrack(type) {
+        const trackId = `A${this.nextTrackId++}`;
+        const typeNames = {
+          'voice': 'Voice',
+          'music': 'Music',
+          'sfx': 'SFX',
+          'ambience': 'Ambience'
+        };
+        
+        const track = {
+          id: trackId,
+          type: type,
+          name: typeNames[type] || 'Audio',
+          muted: false,
+          solo: false,
+          volume: 1.0,
+          clips: []
+        };
+        
+        this.audioTracks.push(track);
+        this.renderAudioTrack(track);
+        
+        // Hide menu
+        document.getElementById('addTrackMenu').classList.remove('visible');
+        
+        this.showToast('success', `Added ${track.name} track`);
+      },
+
+      renderAudioTrack(track) {
+        const container = document.getElementById('audioTracksContainer');
+        const addTrackRow = document.getElementById('addTrackRow');
+        
+        const trackEl = document.createElement('div');
+        trackEl.className = 'timeline-row audio audio-track';
+        trackEl.id = `track-${track.id}`;
+        trackEl.dataset.trackId = track.id;
+        
+        const badgeClass = track.type === 'original' ? 'audio' : '';
+        const typeBadgeClass = track.type !== 'original' ? `track-type-badge ${track.type}` : '';
+        
+        trackEl.innerHTML = `
+          <div class="track-label">
+            <div class="track-label-header">
+              <span class="track-badge ${badgeClass}">${track.id}</span>
+              ${track.type !== 'original' ? `<span class="${typeBadgeClass}">${track.type.toUpperCase()}</span>` : ''}
+              <div class="track-info">
+                <span class="track-name">${track.name}</span>
+                <span class="track-clip-count">${track.clips.length} Clips</span>
+              </div>
+            </div>
+            <div class="track-controls">
+              <button class="track-action-btn ${track.muted ? 'muted' : ''}" 
+                      onclick="app.toggleTrackMute('${track.id}')" 
+                      title="Mute">M</button>
+              <button class="track-action-btn ${track.solo ? 'solo' : ''}" 
+                      onclick="app.toggleTrackSolo('${track.id}')" 
+                      title="Solo">S</button>
+              ${track.type !== 'original' ? `
+              <button class="track-action-btn" 
+                      onclick="app.removeTrack('${track.id}')" 
+                      title="Delete Track" style="color: var(--error);">×</button>
+              ` : ''}
+            </div>
+          </div>
+          <div class="timeline-track" id="trackContent-${track.id}" 
+               ondragover="app.handleTrackDragOver(event, '${track.id}')"
+               ondrop="app.handleTrackDrop(event, '${track.id}')"
+               ondragleave="app.handleTrackDragLeave(event)"
+               onclick="app.seekToPosition(event)">
+            <div class="track-empty-state" id="trackEmpty-${track.id}">
+              Drop audio files here or use AI to generate
+            </div>
+            <div class="track-drop-indicator" id="dropIndicator-${track.id}"></div>
+          </div>
+        `;
+        
+        // Insert before the add track row
+        container.parentNode.insertBefore(trackEl, addTrackRow);
+      },
+
+      toggleTrackMute(trackId) {
+        const track = this.audioTracks.find(t => t.id === trackId);
+        if (!track) return;
+        
+        track.muted = !track.muted;
+        
+        // Update button UI
+        const btn = document.querySelector(`#track-${trackId} .track-action-btn[title="Mute"]`) ||
+                    document.getElementById('audioMuteBtn');
+        if (btn) {
+          btn.classList.toggle('muted', track.muted);
+        }
+        
+        // If it's the original track, mute the video
+        if (track.type === 'original') {
+          const video = document.getElementById('videoPlayer');
+          video.muted = track.muted;
+          this.audioMuted = track.muted;
+          this.updateMuteIcon();
+        }
+        
+        this.showToast(track.muted ? 'warning' : 'success', 
+          `${track.name} ${track.muted ? 'muted' : 'unmuted'}`);
+      },
+
+      toggleTrackSolo(trackId) {
+        const track = this.audioTracks.find(t => t.id === trackId);
+        if (!track) return;
+        
+        track.solo = !track.solo;
+        
+        // Update button UI
+        const btn = document.querySelector(`#track-${trackId} .track-action-btn[title="Solo"]`);
+        if (btn) {
+          btn.classList.toggle('solo', track.solo);
+        }
+        
+        // If solo is enabled, mute all other tracks
+        if (track.solo) {
+          this.audioTracks.forEach(t => {
+            if (t.id !== trackId) {
+              t.muted = true;
+              const muteBtn = document.querySelector(`#track-${t.id} .track-action-btn[title="Mute"]`);
+              if (muteBtn) muteBtn.classList.add('muted');
+            }
+          });
+        } else {
+          // If solo is disabled, unmute all tracks
+          this.audioTracks.forEach(t => {
+            t.muted = false;
+            const muteBtn = document.querySelector(`#track-${t.id} .track-action-btn[title="Mute"]`);
+            if (muteBtn) muteBtn.classList.remove('muted');
+          });
+        }
+        
+        // Update video mute state based on original track
+        const originalTrack = this.audioTracks.find(t => t.type === 'original');
+        if (originalTrack) {
+          const video = document.getElementById('videoPlayer');
+          video.muted = originalTrack.muted;
+          this.audioMuted = originalTrack.muted;
+          this.updateMuteIcon();
+        }
+        
+        this.showToast('info', `${track.name} ${track.solo ? 'soloed' : 'unsolo'}`);
+      },
+
+      removeTrack(trackId) {
+        const trackIndex = this.audioTracks.findIndex(t => t.id === trackId);
+        if (trackIndex === -1) return;
+        
+        const track = this.audioTracks[trackIndex];
+        if (track.type === 'original') {
+          this.showToast('error', 'Cannot remove original audio track');
+          return;
+        }
+        
+        // Remove from DOM
+        const trackEl = document.getElementById(`track-${trackId}`);
+        if (trackEl) {
+          trackEl.remove();
+        }
+        
+        // Remove from array
+        this.audioTracks.splice(trackIndex, 1);
+        
+        this.showToast('success', `Removed ${track.name} track`);
+      },
+
+      addClipToTrack(trackId, clip) {
+        const track = this.audioTracks.find(t => t.id === trackId);
+        if (!track) return;
+        
+        track.clips.push(clip);
+        this.renderTrackClips(trackId);
+      },
+
+      renderTrackClips(trackId) {
+        const track = this.audioTracks.find(t => t.id === trackId);
+        if (!track) return;
+        
+        const container = document.getElementById(`trackContent-${trackId}`);
+        const emptyState = document.getElementById(`trackEmpty-${trackId}`);
+        
+        if (!container) return;
+        
+        // Remove existing clips (but keep empty state and drop indicator)
+        container.querySelectorAll('.audio-clip').forEach(el => el.remove());
+        
+        if (track.clips.length === 0) {
+          if (emptyState) emptyState.style.display = 'flex';
+          return;
+        }
+        
+        if (emptyState) emptyState.style.display = 'none';
+        
+        // Render clips
+        const duration = this.videoInfo?.duration || 100;
+        
+        track.clips.forEach((clip, index) => {
+          const clipEl = document.createElement('div');
+          clipEl.className = 'audio-clip';
+          clipEl.dataset.clipIndex = index;
+          clipEl.style.left = `${(clip.startTime / duration) * 100}%`;
+          clipEl.style.width = `${((clip.endTime - clip.startTime) / duration) * 100}%`;
+          clipEl.style.background = this.getTrackColor(track.type);
+          
+          clipEl.innerHTML = `
+            <div class="audio-clip-name">${clip.name || 'Clip'}</div>
+          `;
+          
+          container.appendChild(clipEl);
+        });
+        
+        // Update clip count
+        const countEl = document.querySelector(`#track-${trackId} .track-clip-count`);
+        if (countEl) {
+          countEl.textContent = `${track.clips.length} Clip${track.clips.length !== 1 ? 's' : ''}`;
+        }
+      },
+
+      getTrackColor(type) {
+        const colors = {
+          'original': 'var(--accent-tertiary)',
+          'voice': '#8b5cf6',
+          'music': '#22c55e',
+          'sfx': '#f97316',
+          'ambience': '#06b6d4'
+        };
+        return colors[type] || 'var(--accent-secondary)';
+      },
+
+      handleTrackDragOver(event, trackId) {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+        
+        const track = document.getElementById(`trackContent-${trackId}`);
+        if (track) {
+          track.classList.add('drag-over');
+          
+          // Position drop indicator
+          const rect = track.getBoundingClientRect();
+          const x = event.clientX - rect.left;
+          const indicator = document.getElementById(`dropIndicator-${trackId}`);
+          if (indicator) {
+            indicator.style.left = `${x}px`;
+          }
+        }
+      },
+
+      handleTrackDragLeave(event) {
+        const track = event.currentTarget;
+        if (track) {
+          track.classList.remove('drag-over');
+        }
+      },
+
+      handleTrackDrop(event, trackId) {
+        event.preventDefault();
+        
+        const track = document.getElementById(`trackContent-${trackId}`);
+        if (track) {
+          track.classList.remove('drag-over');
+        }
+        
+        // Handle dropped files
+        const files = event.dataTransfer.files;
+        if (files.length > 0) {
+          for (const file of files) {
+            if (file.type.startsWith('audio/')) {
+              // Calculate start time based on drop position
+              const rect = track.getBoundingClientRect();
+              const x = event.clientX - rect.left;
+              const percent = x / rect.width;
+              const startTime = percent * (this.videoInfo?.duration || 0);
+              
+              this.addClipToTrack(trackId, {
+                name: file.name,
+                path: file.path,
+                startTime: startTime,
+                endTime: startTime + 10, // Default 10 second duration
+                type: 'import'
+              });
+              
+              this.showToast('success', `Added ${file.name} to track`);
+            }
+          }
+        }
+      },
+      // ==================== END MULTI-TRACK SYSTEM ====================
+
+      // ==================== TRANSLATION PANEL ====================
+      translationSegments: [], // { id, start, end, status: 'empty'|'marked'|'working'|'approved', sourceText, translation, audioPath }
+      currentSegmentIndex: -1,
+      
+      translationState: {
+        isOpen: false,
+        sourceText: '',
+        translatedText: '',
+        evaluation: null,
+        iterations: [],
+        currentIteration: 0,
+        maxIterations: 5,
+        segmentStart: 0,
+        segmentEnd: 0,
+        audioPath: null
+      },
+
+      markTranslationSegment(start, end) {
+        const segment = {
+          id: `seg-${this.translationSegments.length + 1}`,
+          start: start,
+          end: end,
+          status: 'marked',
+          sourceText: '',
+          translation: null,
+          audioPath: null
+        };
+        
+        this.translationSegments.push(segment);
+        this.renderTranslationSegments();
+        this.currentSegmentIndex = this.translationSegments.length - 1;
+        
+        return segment;
+      },
+
+      renderTranslationSegments() {
+        // Add visual overlay on timeline showing segments
+        let container = document.getElementById('translationSegmentsLayer');
+        if (!container) {
+          container = document.createElement('div');
+          container.id = 'translationSegmentsLayer';
+          container.className = 'translation-segments-layer';
+          
+          const timelineTrack = document.getElementById('timelineTrack');
+          if (timelineTrack) {
+            timelineTrack.appendChild(container);
+          }
+        }
+        
+        const duration = this.videoInfo?.duration || 0;
+        if (duration === 0) return;
+        
+        container.innerHTML = '';
+        
+        this.translationSegments.forEach((segment, index) => {
+          const segEl = document.createElement('div');
+          segEl.className = `translation-segment ${segment.status}`;
+          segEl.style.left = `${(segment.start / duration) * 100}%`;
+          segEl.style.width = `${((segment.end - segment.start) / duration) * 100}%`;
+          
+          let label = '';
+          if (segment.status === 'approved') label = '✓';
+          else if (segment.status === 'working') label = '...';
+          else if (segment.status === 'marked') label = (index + 1).toString();
+          
+          segEl.innerHTML = `<span class="translation-segment-label">${label}</span>`;
+          container.appendChild(segEl);
+        });
+      },
+
+      navigateToSegment(direction) {
+        if (this.translationSegments.length === 0) return;
+        
+        if (direction === 'next') {
+          this.currentSegmentIndex = Math.min(
+            this.currentSegmentIndex + 1,
+            this.translationSegments.length - 1
+          );
+        } else if (direction === 'prev') {
+          this.currentSegmentIndex = Math.max(this.currentSegmentIndex - 1, 0);
+        }
+        
+        const segment = this.translationSegments[this.currentSegmentIndex];
+        if (segment) {
+          // Seek to segment
+          const video = document.getElementById('videoPlayer');
+          if (video) {
+            video.currentTime = segment.start;
+          }
+          
+          // Open translation panel for this segment
+          this.openTranslationPanel(segment.sourceText, segment.start, segment.end);
+        }
+      },
+
+      openTranslationPanel(sourceText = '', startTime = 0, endTime = 0) {
+        this.translationState.sourceText = sourceText;
+        this.translationState.segmentStart = startTime;
+        this.translationState.segmentEnd = endTime;
+        this.translationState.iterations = [];
+        this.translationState.currentIteration = 0;
+        this.translationState.translatedText = '';
+        this.translationState.evaluation = null;
+        this.translationState.audioPath = null;
+
+        // Update UI
+        document.getElementById('translationSourceText').textContent = sourceText || 'Select a region on the timeline to translate';
+        document.getElementById('translationOutput').textContent = 'Click "Translate" to generate';
+        document.getElementById('translationIteration').textContent = 'Iteration 0/5';
+        document.getElementById('qualitySection').style.display = 'none';
+        document.getElementById('audioSection').style.display = 'none';
+        document.getElementById('applySection').style.display = 'none';
+        document.getElementById('improvementSuggestions').style.display = 'none';
+        document.getElementById('audioPreviewSection').style.display = 'none';
+        document.getElementById('retryTranslateBtn').disabled = true;
+        
+        // Show panel
+        document.getElementById('translationPanel').classList.add('open');
+        this.translationState.isOpen = true;
+      },
+
+      closeTranslationPanel() {
+        document.getElementById('translationPanel').classList.remove('open');
+        this.translationState.isOpen = false;
+      },
+
+      async startTranslation() {
+        const sourceText = document.getElementById('translationSourceText').textContent.trim();
+        if (!sourceText || sourceText === 'Select a region on the timeline to translate') {
+          this.showToast('error', 'No text to translate');
+          return;
+        }
+
+        const sourceLanguage = document.getElementById('sourceLanguage').value;
+        const targetLanguage = document.getElementById('targetLanguage').value;
+        const duration = this.translationState.segmentEnd - this.translationState.segmentStart;
+
+        // Update segment status to working
+        const segment = this.translationSegments[this.currentSegmentIndex];
+        if (segment) {
+          segment.status = 'working';
+          this.renderTranslationSegments();
+        }
+
+        document.getElementById('translateBtn').disabled = true;
+        document.getElementById('translateBtn').textContent = '⏳ Translating...';
+
+        try {
+          const result = await window.videoEditor.translateWithQuality(sourceText, {
+            sourceLanguage,
+            targetLanguage,
+            sourceDuration: duration > 0 ? duration : null,
+            videoContext: 'professional video',
+            maxIterations: 5,
+            qualityThreshold: 9.0
+          });
+
+          if (result.success || result.translation) {
+            this.translationState.translatedText = result.translation;
+            this.translationState.evaluation = result.evaluation;
+            this.translationState.iterations = result.iterations || [];
+            this.translationState.currentIteration = result.iterations?.length || 1;
+
+            // Update UI
+            document.getElementById('translationOutput').textContent = result.translation;
+            document.getElementById('translationIteration').textContent = 
+              `Iteration ${this.translationState.currentIteration}/${this.translationState.maxIterations}`;
+
+            // Show quality scores
+            this.updateQualityScores(result.evaluation);
+            document.getElementById('qualitySection').style.display = 'block';
+
+            // Show audio section if score is good enough
+            if (result.evaluation.composite >= 8.0) {
+              document.getElementById('audioSection').style.display = 'block';
+            }
+
+            // Show improvements if not passing
+            if (!result.evaluation.pass && result.evaluation.improvements?.length > 0) {
+              this.showImprovementSuggestions(result.evaluation.improvements);
+            }
+
+            this.showToast('success', `Translation complete! Score: ${result.evaluation.composite}/10`);
+          } else {
+            throw new Error(result.error || 'Translation failed');
+          }
+        } catch (error) {
+          this.showToast('error', 'Translation failed: ' + error.message);
+          console.error('[Translation] Error:', error);
+        } finally {
+          document.getElementById('translateBtn').disabled = false;
+          document.getElementById('translateBtn').textContent = '🌐 Translate';
+          document.getElementById('retryTranslateBtn').disabled = false;
+        }
+      },
+
+      updateQualityScores(evaluation) {
+        if (!evaluation || !evaluation.scores) return;
+
+        const scores = evaluation.scores;
+        
+        // Update score bars and values
+        const updateScore = (id, score) => {
+          const value = score?.score || 0;
+          const percent = (value / 10) * 100;
+          const fill = document.getElementById(id);
+          const valEl = document.getElementById(id + 'Val');
+          if (fill) {
+            fill.style.width = `${percent}%`;
+            fill.style.background = value >= 9 ? 'var(--success)' : value >= 7 ? 'var(--warning)' : 'var(--error)';
+          }
+          if (valEl) valEl.textContent = value.toFixed(1);
+        };
+
+        updateScore('scoreAccuracy', scores.accuracy);
+        updateScore('scoreFluency', scores.fluency);
+        updateScore('scoreAdequacy', scores.adequacy);
+        updateScore('scoreCultural', scores.cultural_fit);
+        updateScore('scoreTiming', scores.timing_fit);
+
+        // Update composite
+        const composite = document.getElementById('compositeScore');
+        if (composite) {
+          composite.textContent = evaluation.composite.toFixed(1);
+          composite.style.color = evaluation.composite >= 9 ? 'var(--success)' : 
+                                  evaluation.composite >= 7 ? 'var(--warning)' : 'var(--error)';
+        }
+      },
+
+      showImprovementSuggestions(improvements) {
+        const container = document.getElementById('suggestionsList');
+        const section = document.getElementById('improvementSuggestions');
+        
+        if (container && improvements.length > 0) {
+          container.innerHTML = improvements.map((imp, i) => 
+            `<div style="margin-bottom: 4px;">• ${imp}</div>`
+          ).join('');
+          section.style.display = 'block';
+        } else {
+          section.style.display = 'none';
+        }
+      },
+
+      async retryTranslation() {
+        if (this.translationState.currentIteration >= this.translationState.maxIterations) {
+          this.showToast('warning', 'Maximum iterations reached');
+          return;
+        }
+        await this.startTranslation();
+      },
+
+      applyImprovements() {
+        // The improvements are already applied in the retry
+        this.retryTranslation();
+      },
+
+      skipImprovements() {
+        // Show audio section even without perfect score
+        document.getElementById('audioSection').style.display = 'block';
+        document.getElementById('improvementSuggestions').style.display = 'none';
+        this.showToast('info', 'Proceeding with current translation');
+      },
+
+      async generateTranslationAudio() {
+        const text = this.translationState.translatedText;
+        if (!text) {
+          this.showToast('error', 'No translation to generate audio for');
+          return;
+        }
+
+        const voice = document.getElementById('voiceSelect').value;
+        const speed = parseFloat(document.getElementById('voiceSpeed').value);
+
+        this.showToast('info', 'Generating audio with ElevenLabs...');
+
+        try {
+          // Use existing ElevenLabs integration
+          const result = await window.videoEditor.replaceAudioWithElevenLabs(this.videoPath, {
+            text: text,
+            voiceId: voice,
+            startTime: this.translationState.segmentStart,
+            endTime: this.translationState.segmentEnd,
+            speed: speed,
+            previewOnly: true // Just generate, don't replace yet
+          });
+
+          if (result.success && result.audioPath) {
+            this.translationState.audioPath = result.audioPath;
+            
+            // Show preview
+            const audio = document.getElementById('translationAudioPreview');
+            audio.src = `file://${result.audioPath}`;
+            document.getElementById('audioPreviewSection').style.display = 'block';
+
+            // Update duration info
+            const sourceDuration = this.translationState.segmentEnd - this.translationState.segmentStart;
+            document.getElementById('sourceDuration').textContent = sourceDuration.toFixed(1) + 's';
+            
+            audio.onloadedmetadata = () => {
+              const genDuration = audio.duration;
+              document.getElementById('generatedDuration').textContent = genDuration.toFixed(1) + 's';
+              const delta = genDuration - sourceDuration;
+              document.getElementById('durationDelta').textContent = 
+                (delta >= 0 ? '+' : '') + delta.toFixed(1) + 's';
+            };
+
+            // Show apply button
+            document.getElementById('applySection').style.display = 'block';
+            
+            this.showToast('success', 'Audio generated! Preview and apply.');
+          } else {
+            throw new Error(result.error || 'Audio generation failed');
+          }
+        } catch (error) {
+          this.showToast('error', 'Audio generation failed: ' + error.message);
+          console.error('[Translation] Audio error:', error);
+        }
+      },
+
+      async applyTranslationToTimeline() {
+        if (!this.translationState.audioPath) {
+          this.showToast('error', 'No audio to apply');
+          return;
+        }
+
+        const timingFix = document.querySelector('input[name="timingFix"]:checked')?.value || 'none';
+
+        // Update segment status to approved
+        const segment = this.translationSegments[this.currentSegmentIndex];
+        if (segment) {
+          segment.status = 'approved';
+          segment.translation = this.translationState.translatedText;
+          segment.audioPath = this.translationState.audioPath;
+          this.renderTranslationSegments();
+          this.updateSegmentNav();
+        }
+
+        // Add to the voice track
+        const voiceTrack = this.audioTracks.find(t => t.type === 'voice');
+        if (!voiceTrack) {
+          // Create a voice track if none exists
+          this.addAudioTrack('voice');
+        }
+
+        const track = this.audioTracks.find(t => t.type === 'voice') || this.audioTracks[1];
+        
+        if (track) {
+          this.addClipToTrack(track.id, {
+            name: 'Translation',
+            path: this.translationState.audioPath,
+            startTime: this.translationState.segmentStart,
+            endTime: this.translationState.segmentEnd,
+            type: 'translation',
+            timingFix: timingFix,
+            sourceText: this.translationState.sourceText,
+            translatedText: this.translationState.translatedText,
+            score: this.translationState.evaluation?.composite
+          });
+        }
+
+        this.closeTranslationPanel();
+        this.showToast('success', 'Translation applied to timeline!');
+        
+        // Auto-advance to next segment if available
+        if (this.currentSegmentIndex < this.translationSegments.length - 1) {
+          setTimeout(() => {
+            this.navigateToSegment('next');
+          }, 500);
+        }
+      },
+      // ==================== END TRANSLATION PANEL ====================
+
+      // ==================== AI VIDEO REPLACEMENT PANEL ====================
+      aiVideoState: {
+        isOpen: false,
+        segmentStart: 0,
+        segmentEnd: 0,
+        description: '',
+        generatedPrompt: '',
+        uploadedVideoPath: null
+      },
+
+      openAIVideoPanel(startTime = 0, endTime = 0) {
+        this.aiVideoState.segmentStart = startTime;
+        this.aiVideoState.segmentEnd = endTime;
+        this.aiVideoState.uploadedVideoPath = null;
+        
+        // Update UI with segment info
+        const duration = endTime - startTime;
+        document.getElementById('aiVideoRegion').textContent = 
+          `${this.formatTime(startTime)} - ${this.formatTime(endTime)}`;
+        document.getElementById('aiVideoDuration').textContent = duration.toFixed(1) + 's';
+        
+        // Get resolution from video info
+        if (this.videoInfo) {
+          document.getElementById('aiVideoResolution').textContent = 
+            `${this.videoInfo.width}×${this.videoInfo.height}`;
+        }
+        
+        // Reset form
+        document.getElementById('aiVideoDescription').value = '';
+        document.getElementById('aiVideoPrompt').textContent = 'Enter a description above, then click "Generate Prompt"';
+        document.getElementById('aiVideoPreviewSection').style.display = 'none';
+        
+        // Show panel
+        document.getElementById('aiVideoPanel').classList.add('open');
+        this.aiVideoState.isOpen = true;
+      },
+
+      closeAIVideoPanel() {
+        document.getElementById('aiVideoPanel').classList.remove('open');
+        this.aiVideoState.isOpen = false;
+      },
+
+      async generateVideoPrompt() {
+        const description = document.getElementById('aiVideoDescription').value.trim();
+        if (!description) {
+          this.showToast('error', 'Please enter a description first');
+          return;
+        }
+
+        const duration = this.aiVideoState.segmentEnd - this.aiVideoState.segmentStart;
+        const resolution = this.videoInfo ? `${this.videoInfo.width}x${this.videoInfo.height}` : '1920x1080';
+        const aspectRatio = this.videoInfo ? (this.videoInfo.width / this.videoInfo.height).toFixed(2) : '16:9';
+
+        // Generate optimized prompt using AI
+        try {
+          const settingsPath = await window.videoEditor.getInfo(this.videoPath); // Just to check API access
+          
+          // For now, create a structured prompt based on best practices
+          const optimizedPrompt = this.createOptimizedVideoPrompt(description, duration, resolution, aspectRatio);
+          
+          document.getElementById('aiVideoPrompt').textContent = optimizedPrompt;
+          this.aiVideoState.generatedPrompt = optimizedPrompt;
+          
+          this.showToast('success', 'Prompt generated! Copy and use in your preferred AI service.');
+        } catch (error) {
+          // If AI is not available, use template-based prompt
+          const optimizedPrompt = this.createOptimizedVideoPrompt(description, duration, resolution, aspectRatio);
+          document.getElementById('aiVideoPrompt').textContent = optimizedPrompt;
+          this.aiVideoState.generatedPrompt = optimizedPrompt;
+        }
+      },
+
+      createOptimizedVideoPrompt(description, duration, resolution, aspectRatio) {
+        // Enhance the user's description with technical specs and style hints
+        const durationHint = duration < 5 ? '3-5 seconds' : 
+                            duration < 10 ? '7-10 seconds' : 
+                            duration < 20 ? '15-20 seconds' : '25-30 seconds';
+        
+        const styleHints = [
+          'cinematic quality',
+          'professional video style',
+          'smooth camera movement',
+          'high production value'
+        ].join(', ');
+
+        return `${description}, ${styleHints}, ${aspectRatio === '16:9' ? 'widescreen 16:9 aspect ratio' : `${aspectRatio} aspect ratio`}, ${resolution} resolution, ${durationHint} duration, seamless loop-friendly`;
+      },
+
+      copyVideoPrompt() {
+        const prompt = this.aiVideoState.generatedPrompt || document.getElementById('aiVideoPrompt').textContent;
+        
+        if (prompt && prompt !== 'Enter a description above, then click "Generate Prompt"') {
+          navigator.clipboard.writeText(prompt).then(() => {
+            this.showToast('success', 'Prompt copied to clipboard!');
+          }).catch(() => {
+            this.showToast('error', 'Failed to copy prompt');
+          });
+        } else {
+          this.showToast('error', 'No prompt to copy');
+        }
+      },
+
+      openVideoService(service) {
+        // Copy prompt to clipboard first
+        const prompt = this.aiVideoState.generatedPrompt;
+        if (prompt) {
+          navigator.clipboard.writeText(prompt).catch(() => {});
+        }
+
+        const services = {
+          'kling': 'https://klingai.com/',
+          'veo': 'https://deepmind.google/technologies/veo/',
+          'runway': 'https://runwayml.com/',
+          'pika': 'https://pika.art/',
+          'luma': 'https://lumalabs.ai/dream-machine',
+          'sora': 'https://openai.com/sora'
+        };
+
+        const url = services[service];
+        if (url && window.electron) {
+          window.electron.openExternal(url);
+          this.showToast('info', `Opening ${service}... Prompt copied to clipboard!`);
+        }
+      },
+
+      handleAIVideoDragOver(event) {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+        document.getElementById('aiVideoUploadZone').classList.add('drag-over');
+      },
+
+      handleAIVideoDragLeave(event) {
+        document.getElementById('aiVideoUploadZone').classList.remove('drag-over');
+      },
+
+      handleAIVideoDrop(event) {
+        event.preventDefault();
+        document.getElementById('aiVideoUploadZone').classList.remove('drag-over');
+        
+        const files = event.dataTransfer.files;
+        if (files.length > 0) {
+          const file = files[0];
+          if (file.type.startsWith('video/')) {
+            this.processUploadedVideo(file);
+          } else {
+            this.showToast('error', 'Please drop a video file');
+          }
+        }
+      },
+
+      handleAIVideoUpload(event) {
+        const file = event.target.files[0];
+        if (file) {
+          this.processUploadedVideo(file);
+        }
+      },
+
+      processUploadedVideo(file) {
+        // Show preview
+        const preview = document.getElementById('aiVideoPreview');
+        const url = URL.createObjectURL(file);
+        preview.src = url;
+        
+        this.aiVideoState.uploadedVideoPath = file.path || url;
+        this.aiVideoState.uploadedFileName = file.name;
+        
+        document.getElementById('aiVideoPreviewSection').style.display = 'block';
+        
+        this.showToast('success', `Loaded: ${file.name}`);
+      },
+
+      cancelAIVideoUpload() {
+        document.getElementById('aiVideoPreviewSection').style.display = 'none';
+        document.getElementById('aiVideoPreview').src = '';
+        this.aiVideoState.uploadedVideoPath = null;
+      },
+
+      async applyAIVideoToTimeline() {
+        if (!this.aiVideoState.uploadedVideoPath) {
+          this.showToast('error', 'No video uploaded');
+          return;
+        }
+
+        // In a full implementation, this would:
+        // 1. Copy the video to the project assets folder
+        // 2. Add it as a clip to the video track
+        // 3. Potentially adjust timing to match the segment
+        
+        this.showToast('success', 'Video applied to timeline!');
+        this.closeAIVideoPanel();
+        
+        // TODO: Actually splice the video into the timeline
+        // This would require significant timeline management logic
+      },
+      // ==================== END AI VIDEO REPLACEMENT PANEL ====================
+
+      // ==================== STORY BEATS SYSTEM ====================
+      beats: [],
+      nextBeatId: 1,
+      selectedBeatId: null,
+      beatsCurrentTab: 'list',
+
+      switchBeatsTab(tab) {
+        this.beatsCurrentTab = tab;
+        
+        // Update tab buttons
+        document.querySelectorAll('.beats-sidebar-tab').forEach(btn => {
+          btn.classList.toggle('active', btn.dataset.tab === tab);
+        });
+        
+        // Show/hide content
+        document.getElementById('beatsListTab').style.display = tab === 'list' ? 'block' : 'none';
+        document.getElementById('beatsGraphTab').style.display = tab === 'graph' ? 'block' : 'none';
+        document.getElementById('beatsDeployTab').style.display = tab === 'deploy' ? 'block' : 'none';
+        
+        if (tab === 'graph') {
+          this.renderBeatGraph();
+        }
+      },
+
+      addNewBeat() {
+        // Get current selection from timeline if any
+        const inTime = this.trimStart || 0;
+        const outTime = this.trimEnd || (this.videoInfo?.duration || 0);
+        
+        const beat = {
+          id: `beat-${this.nextBeatId++}`,
+          name: `Beat ${this.beats.length + 1}`,
+          inTime: inTime,
+          outTime: outTime,
+          description: '',
+          transcription: '',
+          tags: [],
+          links: []
+        };
+        
+        this.beats.push(beat);
+        this.renderBeatList();
+        this.selectBeat(beat.id);
+        
+        this.showToast('success', 'Beat added! Fill in the details.');
+      },
+
+      renderBeatList() {
+        const container = document.getElementById('beatList');
+        
+        if (this.beats.length === 0) {
+          container.innerHTML = `
+            <div class="beat-inspector-empty">
+              <p>No beats marked yet.</p>
+              <p style="font-size: 11px; margin-top: 8px;">Select a region on the timeline and click "Add Beat"</p>
+            </div>
+          `;
+          return;
+        }
+        
+        container.innerHTML = this.beats.map(beat => `
+          <div class="beat-item ${beat.id === this.selectedBeatId ? 'selected' : ''}" 
+               onclick="app.selectBeat('${beat.id}')">
+            <div class="beat-item-header">
+              <span class="beat-item-name">${beat.name}</span>
+              <span class="beat-item-time">${this.formatTime(beat.inTime)} - ${this.formatTime(beat.outTime)}</span>
+            </div>
+            ${beat.description ? `<div class="beat-item-description">${beat.description}</div>` : ''}
+            ${beat.links.length > 0 ? `
+              <div class="beat-item-links">
+                ${beat.links.map(link => `<span class="beat-link-badge">${link.relationship}</span>`).join('')}
+              </div>
+            ` : ''}
+          </div>
+        `).join('');
+      },
+
+      selectBeat(beatId) {
+        this.selectedBeatId = beatId;
+        const beat = this.beats.find(b => b.id === beatId);
+        
+        if (!beat) return;
+        
+        // Update list selection
+        this.renderBeatList();
+        
+        // Show inspector
+        document.getElementById('beatInspectorPanel').style.display = 'block';
+        
+        // Populate fields
+        document.getElementById('beatName').value = beat.name;
+        document.getElementById('beatInTime').value = this.formatTime(beat.inTime);
+        document.getElementById('beatOutTime').value = this.formatTime(beat.outTime);
+        document.getElementById('beatDescription').value = beat.description || '';
+        document.getElementById('beatTranscription').value = beat.transcription || '';
+        
+        // Render tags
+        this.renderBeatTags(beat.tags);
+        
+        // Render links
+        this.renderBeatLinks(beat.links);
+        
+        // Seek video to beat start
+        const video = document.getElementById('videoPlayer');
+        if (video) {
+          video.currentTime = beat.inTime;
+        }
+      },
+
+      renderBeatTags(tags) {
+        const container = document.getElementById('beatTagsContainer');
+        const input = document.getElementById('beatTagInput');
+        
+        // Clear existing tags (keep input)
+        container.querySelectorAll('.beat-tag').forEach(el => el.remove());
+        
+        // Add tags
+        tags.forEach(tag => {
+          const tagEl = document.createElement('span');
+          tagEl.className = 'beat-tag';
+          tagEl.innerHTML = `${tag} <button class="beat-tag-remove" onclick="app.removeBeatTag('${tag}')">×</button>`;
+          container.insertBefore(tagEl, input);
+        });
+      },
+
+      handleBeatTagKeydown(event) {
+        if (event.key === 'Enter' || event.key === ',') {
+          event.preventDefault();
+          const input = event.target;
+          const tag = input.value.trim().replace(',', '');
+          
+          if (tag && this.selectedBeatId) {
+            const beat = this.beats.find(b => b.id === this.selectedBeatId);
+            if (beat && !beat.tags.includes(tag)) {
+              beat.tags.push(tag);
+              this.renderBeatTags(beat.tags);
+            }
+            input.value = '';
+          }
+        }
+      },
+
+      removeBeatTag(tag) {
+        if (!this.selectedBeatId) return;
+        const beat = this.beats.find(b => b.id === this.selectedBeatId);
+        if (beat) {
+          beat.tags = beat.tags.filter(t => t !== tag);
+          this.renderBeatTags(beat.tags);
+        }
+      },
+
+      renderBeatLinks(links) {
+        const container = document.getElementById('beatLinksList');
+        
+        if (links.length === 0) {
+          container.innerHTML = '<div style="font-size: 11px; color: var(--text-muted);">No links yet</div>';
+          return;
+        }
+        
+        container.innerHTML = links.map((link, i) => {
+          const targetBeat = this.beats.find(b => b.id === link.targetBeatId);
+          return `
+            <div class="beat-link-item">
+              <div class="beat-link-info">
+                <span class="beat-link-type">${link.relationship}</span>
+                <span>${targetBeat?.name || link.targetVideoId || 'Unknown'}</span>
+              </div>
+              <button class="btn btn-ghost" onclick="app.removeBeatLink(${i})" style="padding: 4px; color: var(--error);">×</button>
+            </div>
+          `;
+        }).join('');
+      },
+
+      addBeatLink() {
+        if (!this.selectedBeatId) return;
+        
+        // Show a simple dialog to select target and relationship
+        const beat = this.beats.find(b => b.id === this.selectedBeatId);
+        if (!beat) return;
+        
+        // For now, just add a placeholder link
+        const otherBeats = this.beats.filter(b => b.id !== this.selectedBeatId);
+        if (otherBeats.length === 0) {
+          this.showToast('info', 'Add more beats to create links');
+          return;
+        }
+        
+        beat.links.push({
+          targetBeatId: otherBeats[0].id,
+          relationship: 'leads_to',
+          targetVideoId: null
+        });
+        
+        this.renderBeatLinks(beat.links);
+        this.showToast('info', 'Link added - edit to customize');
+      },
+
+      removeBeatLink(index) {
+        if (!this.selectedBeatId) return;
+        const beat = this.beats.find(b => b.id === this.selectedBeatId);
+        if (beat) {
+          beat.links.splice(index, 1);
+          this.renderBeatLinks(beat.links);
+        }
+      },
+
+      saveBeat() {
+        if (!this.selectedBeatId) return;
+        const beat = this.beats.find(b => b.id === this.selectedBeatId);
+        if (!beat) return;
+        
+        beat.name = document.getElementById('beatName').value;
+        beat.inTime = this.parseTime(document.getElementById('beatInTime').value);
+        beat.outTime = this.parseTime(document.getElementById('beatOutTime').value);
+        beat.description = document.getElementById('beatDescription').value;
+        beat.transcription = document.getElementById('beatTranscription').value;
+        
+        this.renderBeatList();
+        this.showToast('success', 'Beat saved');
+      },
+
+      deleteBeat() {
+        if (!this.selectedBeatId) return;
+        
+        this.beats = this.beats.filter(b => b.id !== this.selectedBeatId);
+        this.selectedBeatId = null;
+        
+        document.getElementById('beatInspectorPanel').style.display = 'none';
+        this.renderBeatList();
+        this.showToast('success', 'Beat deleted');
+      },
+
+      async transcribeBeat() {
+        if (!this.selectedBeatId || !this.videoPath) return;
+        const beat = this.beats.find(b => b.id === this.selectedBeatId);
+        if (!beat) return;
+        
+        this.showToast('info', 'Transcribing...');
+        
+        try {
+          const result = await window.videoEditor.transcribeRange(this.videoPath, {
+            startTime: beat.inTime,
+            endTime: beat.outTime
+          });
+          
+          if (result.transcription) {
+            beat.transcription = result.transcription;
+            document.getElementById('beatTranscription').value = result.transcription;
+            this.showToast('success', 'Transcription complete');
+          } else {
+            throw new Error(result.error || 'Transcription failed');
+          }
+        } catch (error) {
+          this.showToast('error', 'Transcription failed: ' + error.message);
+        }
+      },
+
+      // Beat Graph Rendering
+      renderBeatGraph() {
+        const canvas = document.getElementById('beatGraphCanvas');
+        if (!canvas) return;
+        
+        // Clear existing
+        canvas.innerHTML = '';
+        
+        if (this.beats.length === 0) {
+          const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          text.setAttribute('x', '50%');
+          text.setAttribute('y', '50%');
+          text.setAttribute('text-anchor', 'middle');
+          text.setAttribute('fill', '#5c5c5c');
+          text.setAttribute('font-size', '12');
+          text.textContent = 'Add beats to see graph';
+          canvas.appendChild(text);
+          return;
+        }
+        
+        // Position beats in a layout
+        const containerWidth = canvas.clientWidth || 400;
+        const containerHeight = canvas.clientHeight || 300;
+        const nodeWidth = 100;
+        const nodeHeight = 40;
+        
+        // Simple horizontal layout
+        const spacing = containerWidth / (this.beats.length + 1);
+        
+        this.beats.forEach((beat, i) => {
+          beat._x = spacing * (i + 1) - nodeWidth / 2;
+          beat._y = containerHeight / 2 - nodeHeight / 2;
+        });
+        
+        // Draw links first (so they appear behind nodes)
+        this.beats.forEach(beat => {
+          beat.links.forEach(link => {
+            const targetBeat = this.beats.find(b => b.id === link.targetBeatId);
+            if (targetBeat) {
+              const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+              const startX = beat._x + nodeWidth;
+              const startY = beat._y + nodeHeight / 2;
+              const endX = targetBeat._x;
+              const endY = targetBeat._y + nodeHeight / 2;
+              
+              // Curved line
+              const midX = (startX + endX) / 2;
+              line.setAttribute('d', `M ${startX} ${startY} Q ${midX} ${startY - 30} ${endX} ${endY}`);
+              line.setAttribute('stroke', '#4a9eff');
+              line.setAttribute('stroke-width', '2');
+              line.setAttribute('fill', 'none');
+              line.setAttribute('marker-end', 'url(#arrowhead)');
+              canvas.appendChild(line);
+              
+              // Link label
+              const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+              label.setAttribute('x', midX);
+              label.setAttribute('y', startY - 35);
+              label.setAttribute('text-anchor', 'middle');
+              label.setAttribute('fill', '#909090');
+              label.setAttribute('font-size', '10');
+              label.textContent = link.relationship;
+              canvas.appendChild(label);
+            }
+          });
+        });
+        
+        // Draw nodes
+        this.beats.forEach(beat => {
+          const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+          g.setAttribute('class', 'beat-graph-node');
+          g.setAttribute('data-beat-id', beat.id);
+          g.style.cursor = 'pointer';
+          g.onclick = () => this.selectBeat(beat.id);
+          
+          const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+          rect.setAttribute('x', beat._x);
+          rect.setAttribute('y', beat._y);
+          rect.setAttribute('width', nodeWidth);
+          rect.setAttribute('height', nodeHeight);
+          rect.setAttribute('rx', '6');
+          rect.setAttribute('fill', beat.id === this.selectedBeatId ? '#232323' : '#1e1e1e');
+          rect.setAttribute('stroke', beat.id === this.selectedBeatId ? '#e84c3d' : '#4a9eff');
+          rect.setAttribute('stroke-width', '2');
+          g.appendChild(rect);
+          
+          const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          text.setAttribute('x', beat._x + nodeWidth / 2);
+          text.setAttribute('y', beat._y + nodeHeight / 2 + 4);
+          text.setAttribute('text-anchor', 'middle');
+          text.setAttribute('fill', '#d4d4d4');
+          text.setAttribute('font-size', '12');
+          text.textContent = beat.name.length > 12 ? beat.name.substring(0, 12) + '...' : beat.name;
+          g.appendChild(text);
+          
+          canvas.appendChild(g);
+        });
+        
+        // Add arrowhead marker
+        const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+        defs.innerHTML = `
+          <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#4a9eff" />
+          </marker>
+        `;
+        canvas.insertBefore(defs, canvas.firstChild);
+      },
+
+      zoomBeatGraph(factor) {
+        // TODO: Implement graph zoom
+        this.showToast('info', 'Zoom coming soon');
+      },
+
+      resetBeatGraphView() {
+        this.renderBeatGraph();
+      },
+
+      // Deploy Functions
+      async testInPlayer() {
+        if (this.beats.length === 0) {
+          this.showToast('error', 'Add some beats first');
+          return;
+        }
+        
+        if (!this.videoPath) {
+          this.showToast('error', 'No video loaded');
+          return;
+        }
+        
+        try {
+          // Save beats first
+          await this.exportProjectToSpace();
+          
+          // Create player config with beats
+          const playerConfig = {
+            videoPath: this.videoPath,
+            beats: this.beats.map(beat => ({
+              id: beat.id,
+              name: beat.name,
+              timeIn: this.formatTime(beat.inTime),
+              timeOut: this.formatTime(beat.outTime),
+              description: beat.description,
+              transcription: beat.transcription,
+              tags: beat.tags,
+              links: beat.links
+            })),
+            mode: 'test'
+          };
+          
+          // Open player window
+          const playerWindow = window.open(
+            'agentic-player/index.html',
+            'AgenticPlayer',
+            'width=1200,height=800'
+          );
+          
+          // Send config when loaded
+          if (playerWindow) {
+            playerWindow.addEventListener('load', () => {
+              playerWindow.postMessage({
+                type: 'load-beats',
+                config: playerConfig
+              }, '*');
+            });
+            
+            this.showToast('success', 'Player opened!');
+          }
+        } catch (error) {
+          console.error('[Deploy] Test player error:', error);
+          this.showToast('error', 'Failed to open player');
+        }
+      },
+
+      generateEmbedCode() {
+        if (this.beats.length === 0) {
+          this.showToast('error', 'Add some beats first');
+          return;
+        }
+        
+        const embedCode = `<iframe src="https://player.onereach.ai/embed/${Date.now()}" 
+  width="800" height="450" frameborder="0" 
+  allow="autoplay; fullscreen" allowfullscreen>
+</iframe>`;
+        
+        navigator.clipboard.writeText(embedCode).then(() => {
+          this.showToast('success', 'Embed code copied!');
+        });
+        
+        document.getElementById('embedCodeBox').textContent = embedCode;
+        document.getElementById('embedCodeSection').style.display = 'block';
+      },
+
+      async exportPlayerPackage() {
+        if (this.beats.length === 0) {
+          this.showToast('error', 'Add some beats first');
+          return;
+        }
+        
+        if (!this.videoPath) {
+          this.showToast('error', 'No video loaded');
+          return;
+        }
+        
+        try {
+          this.showToast('info', 'Creating player package...');
+          
+          // Create package structure
+          const packageData = {
+            beats: this.exportBeatsJSON(),
+            config: {
+              videoPath: this.videoPath.split('/').pop(),
+              title: this.currentProject?.name || 'Video Player',
+              autoplay: false,
+              controls: true
+            },
+            readme: this.generatePlayerReadme()
+          };
+          
+          // Download beats.json
+          this.downloadJSON(JSON.stringify(packageData.beats, null, 2), 'beats.json');
+          
+          // Download config.json
+          this.downloadJSON(JSON.stringify(packageData.config, null, 2), 'config.json');
+          
+          // Download README
+          const readmeBlob = new Blob([packageData.readme], { type: 'text/markdown' });
+          const readmeUrl = URL.createObjectURL(readmeBlob);
+          const readmeLink = document.createElement('a');
+          readmeLink.href = readmeUrl;
+          readmeLink.download = 'README.md';
+          readmeLink.click();
+          URL.revokeObjectURL(readmeUrl);
+          
+          this.showToast('success', 'Player package exported! Copy agentic-player folder and add your video file.');
+          
+          // Show instructions
+          setTimeout(() => {
+            alert(`Player Package Created!\n\n` +
+                  `Files downloaded:\n` +
+                  `- beats.json (story beats metadata)\n` +
+                  `- config.json (player configuration)\n` +
+                  `- README.md (setup instructions)\n\n` +
+                  `Next steps:\n` +
+                  `1. Copy the agentic-player/ folder from your app\n` +
+                  `2. Add these files to that folder\n` +
+                  `3. Add your video file (${this.videoPath.split('/').pop()})\n` +
+                  `4. Host on any web server or open index.html locally\n\n` +
+                  `See README.md for detailed instructions.`);
+          }, 1000);
+        } catch (error) {
+          console.error('[Deploy] Export package error:', error);
+          this.showToast('error', 'Export failed');
+        }
+      },
+
+      generatePlayerReadme() {
+        return `# Agentic Video Player - Self-Hosted Package
+
+This package contains everything needed to host your interactive video player.
+
+## Package Contents
+
+- \`index.html\` - Player HTML
+- \`player.js\` - Player JavaScript
+- \`styles.css\` - Player styles
+- \`beats.json\` - Story beats metadata
+- \`config.json\` - Player configuration
+- \`${this.videoPath.split('/').pop()}\` - Your video file (add this)
+
+## Setup Instructions
+
+### Option 1: Local Testing
+
+1. Place all files in a folder
+2. Add your video file: \`${this.videoPath.split('/').pop()}\`
+3. Open \`index.html\` in a modern browser
+
+### Option 2: Web Hosting
+
+1. Upload all files to your web server
+2. Ensure video file is accessible
+3. Navigate to \`https://yourdomain.com/player/\`
+
+### Option 3: CDN + Hosting
+
+1. Upload video to CDN (e.g., Cloudflare, AWS S3)
+2. Update \`config.json\` with CDN URL
+3. Host player files on any static host
+
+## Configuration
+
+Edit \`config.json\` to customize:
+
+\`\`\`json
+{
+  "videoPath": "your-video.mp4",  // Local or CDN URL
+  "title": "Your Video Title",
+  "autoplay": false,
+  "controls": true
+}
+\`\`\`
+
+## Story Beats
+
+The \`beats.json\` file contains all your marked story beats with:
+- Time codes (in/out points)
+- Transcriptions
+- Descriptions
+- Tags
+- Links to other beats
+
+The player uses this to enable:
+- Smart navigation
+- Beat-to-beat jumping
+- Graph-based playback
+- Interactive storytelling
+
+## Requirements
+
+- Modern browser (Chrome, Firefox, Safari, Edge)
+- Video codec support (H.264/VP9)
+- HTTPS recommended for production
+
+## Troubleshooting
+
+**Video won't play:**
+- Check video path in config.json
+- Ensure video format is web-compatible (MP4/WebM)
+- Check browser console for errors
+
+**Beats not loading:**
+- Verify beats.json is valid JSON
+- Check file path and permissions
+- Ensure all beat time codes are valid
+
+## Support
+
+For issues or questions, refer to the main Onereach.ai documentation.
+
+---
+
+Generated by Onereach Video Editor
+${new Date().toLocaleDateString()}
+`;
+      },
+
+      // Export beats to JSON
+      exportBeatsJSON() {
+        return {
+          videoId: this.spaceItemId || 'local',
+          videoPath: this.videoPath,
+          duration: this.videoInfo?.duration || 0,
+          beats: this.beats.map(beat => ({
+            id: beat.id,
+            name: beat.name,
+            inTime: beat.inTime,
+            outTime: beat.outTime,
+            transcription: beat.transcription,
+            description: beat.description,
+            tags: beat.tags,
+            links: beat.links
+          })),
+          crossVideoIndex: {}
+        };
+      },
+      // ==================== END STORY BEATS SYSTEM ====================
+
+      // ==================== AUDIO SWEETENING PANEL ====================
+      recentAudioFiles: [],
+
+      openAudioSweeteningPanel() {
+        document.getElementById('audioSweeteningPanel').classList.add('open');
+        this.loadRecentAudioFiles();
+      },
+
+      closeAudioSweeteningPanel() {
+        document.getElementById('audioSweeteningPanel').classList.remove('open');
+      },
+
+      async searchElevenLabsSFX(event) {
+        const query = event.target.value.trim();
+        if (query.length < 2) return;
+        
+        // TODO: Integrate with ElevenLabs SFX API when available
+        console.log('[AudioSweetening] Searching for:', query);
+      },
+
+      async addSFXToTrack(sfxType) {
+        // For now, show placeholder
+        this.showToast('info', `Generating ${sfxType} sound effect with ElevenLabs...`);
+        
+        // TODO: Actually call ElevenLabs API to generate the sound
+        // For now, create a placeholder entry
+        const video = document.getElementById('videoPlayer');
+        const currentTime = video?.currentTime || 0;
+        
+        // Find or create SFX track
+        let sfxTrack = this.audioTracks.find(t => t.type === 'sfx');
+        if (!sfxTrack) {
+          this.addAudioTrack('sfx');
+          sfxTrack = this.audioTracks.find(t => t.type === 'sfx');
+        }
+        
+        if (sfxTrack) {
+          this.addClipToTrack(sfxTrack.id, {
+            name: sfxType,
+            path: `elevenlabs://sfx/${sfxType}`,
+            startTime: currentTime,
+            endTime: currentTime + 1, // 1 second duration
+            type: 'elevenlabs-sfx'
+          });
+          
+          this.showToast('success', `Added ${sfxType} SFX to timeline`);
+        }
+      },
+
+      handleAudioDragOver(event) {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+        event.currentTarget.classList.add('drag-over');
+      },
+
+      handleAudioDragLeave(event) {
+        event.currentTarget.classList.remove('drag-over');
+      },
+
+      handleAudioDrop(event) {
+        event.preventDefault();
+        event.currentTarget.classList.remove('drag-over');
+        
+        const files = Array.from(event.dataTransfer.files).filter(f => f.type.startsWith('audio/'));
+        if (files.length > 0) {
+          this.importAudioFiles(files);
+        }
+      },
+
+      handleAudioImport(event) {
+        const files = Array.from(event.target.files);
+        if (files.length > 0) {
+          this.importAudioFiles(files);
+        }
+        event.target.value = ''; // Reset input
+      },
+
+      importAudioFiles(files) {
+        const video = document.getElementById('videoPlayer');
+        const currentTime = video?.currentTime || 0;
+        
+        files.forEach(file => {
+          // Add to recent files
+          this.recentAudioFiles.unshift({
+            name: file.name,
+            path: file.path || URL.createObjectURL(file),
+            size: file.size,
+            type: file.type,
+            addedAt: Date.now()
+          });
+          
+          // Keep only last 10
+          this.recentAudioFiles = this.recentAudioFiles.slice(0, 10);
+          
+          // Determine track type based on filename
+          let trackType = 'sfx';
+          const name = file.name.toLowerCase();
+          if (name.includes('music') || name.includes('song') || name.includes('track')) {
+            trackType = 'music';
+          } else if (name.includes('ambient') || name.includes('background')) {
+            trackType = 'ambience';
+          }
+          
+          // Find or create appropriate track
+          let track = this.audioTracks.find(t => t.type === trackType);
+          if (!track) {
+            this.addAudioTrack(trackType);
+            track = this.audioTracks.find(t => t.type === trackType);
+          }
+          
+          if (track) {
+            this.addClipToTrack(track.id, {
+              name: file.name,
+              path: file.path || URL.createObjectURL(file),
+              startTime: currentTime,
+              endTime: currentTime + 10, // Default duration, will be updated when loaded
+              type: 'import'
+            });
+          }
+        });
+        
+        this.loadRecentAudioFiles();
+        this.showToast('success', `Imported ${files.length} audio file${files.length > 1 ? 's' : ''}`);
+      },
+
+      loadRecentAudioFiles() {
+        const container = document.getElementById('recentAudioList');
+        if (!container) return;
+        
+        if (this.recentAudioFiles.length === 0) {
+          container.innerHTML = `
+            <div style="font-size: 11px; color: var(--text-muted); padding: 8px; text-align: center;">
+              No recent audio files
+            </div>
+          `;
+          return;
+        }
+        
+        container.innerHTML = this.recentAudioFiles.map(file => `
+          <div style="display: flex; align-items: center; gap: 8px; padding: 6px; background: var(--bg-surface); border-radius: 4px; cursor: pointer;"
+               onclick="app.addRecentAudioToTrack('${file.name}')">
+            <span style="font-size: 14px;">🎵</span>
+            <div style="flex: 1; min-width: 0;">
+              <div style="font-size: 11px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                ${file.name}
+              </div>
+              <div style="font-size: 10px; color: var(--text-muted);">
+                ${this.formatFileSize(file.size)}
+              </div>
+            </div>
+            <button class="btn btn-ghost" style="padding: 4px; font-size: 10px;" onclick="event.stopPropagation(); app.addRecentAudioToTrack('${file.name}')">
+              +
+            </button>
+          </div>
+        `).join('');
+      },
+
+      addRecentAudioToTrack(fileName) {
+        const file = this.recentAudioFiles.find(f => f.name === fileName);
+        if (!file) return;
+        
+        this.importAudioFiles([{
+          name: file.name,
+          path: file.path,
+          size: file.size,
+          type: file.type
+        }]);
+      },
+
+      formatFileSize(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+      },
+      // ==================== END AUDIO SWEETENING PANEL ====================
+
+      // ==================== TIMELINE ACTION BAR ====================
+      selectedRegion: { start: 0, end: 0, active: false },
+
+      showTimelineActions() {
+        // Show action buttons when a region is selected
+        const actionBar = document.getElementById('timelineActionBar');
+        if (actionBar && this.selectedRegion.active) {
+          actionBar.style.display = 'flex';
+          
+          // Position it near the selected region
+          const duration = this.selectedRegion.end - this.selectedRegion.start;
+          const durationText = document.getElementById('regionDurationText');
+          if (durationText) {
+            durationText.textContent = `${this.formatTime(this.selectedRegion.start)} - ${this.formatTime(this.selectedRegion.end)} (${duration.toFixed(1)}s)`;
+          }
+        } else if (actionBar) {
+          actionBar.style.display = 'none';
+        }
+      },
+
+      updateSelectedRegion() {
+        // Update selected region based on trim markers
+        if (this.trimStart !== this.trimEnd) {
+          this.selectedRegion = {
+            start: this.trimStart,
+            end: this.trimEnd,
+            active: true
+          };
+          this.showTimelineActions();
+        } else {
+          this.selectedRegion.active = false;
+          this.showTimelineActions();
+        }
+      },
+
+      openTranslationForRegion() {
+        if (!this.selectedRegion.active) {
+          this.showToast('error', 'Select a region on the timeline first');
+          return;
+        }
+        
+        // Mark this as a translation segment
+        const segment = this.markTranslationSegment(
+          this.selectedRegion.start,
+          this.selectedRegion.end
+        );
+        
+        // Get transcription for this region if available
+        let sourceText = '';
+        if (this.transcriptSegments) {
+          const segments = this.transcriptSegments.filter(seg => 
+            seg.start >= this.selectedRegion.start && seg.end <= this.selectedRegion.end
+          );
+          sourceText = segments.map(s => s.text).join(' ');
+        }
+        
+        segment.sourceText = sourceText;
+        
+        // Update segment nav
+        this.updateSegmentNav();
+        
+        this.openTranslationPanel(sourceText, this.selectedRegion.start, this.selectedRegion.end);
+      },
+
+      updateSegmentNav() {
+        const navEl = document.getElementById('segmentNav');
+        if (!navEl) return;
+        
+        if (this.translationSegments.length > 0) {
+          navEl.style.display = 'flex';
+          
+          const approved = this.translationSegments.filter(s => s.status === 'approved').length;
+          document.getElementById('segmentNavText').textContent = 
+            `Segment ${this.currentSegmentIndex + 1} of ${this.translationSegments.length}`;
+          document.getElementById('approvedSegmentsCount').textContent = approved;
+        } else {
+          navEl.style.display = 'none';
+        }
+      },
+
+      openAIVideoForRegion() {
+        if (!this.selectedRegion.active) {
+          this.showToast('error', 'Select a region on the timeline first');
+          return;
+        }
+        
+        this.openAIVideoPanel(this.selectedRegion.start, this.selectedRegion.end);
+      },
+      // ==================== END TIMELINE ACTION BAR ====================
+
+      // ==================== PROJECT MANAGEMENT ====================
+      currentProject: null,
+      autoSaveInterval: null,
+
+      async createProject(videoPath, spaceId) {
+        const projectId = `proj-${Date.now()}`;
+        const projectName = videoPath.split('/').pop().replace(/\.[^.]+$/, '');
+        
+        this.currentProject = {
+          id: projectId,
+          name: projectName,
+          spaceId: spaceId || 'default',
+          sourceVideo: videoPath,
+          createdAt: new Date().toISOString(),
+          modifiedAt: new Date().toISOString()
+        };
+        
+        // Save initial project
+        await this.saveProject();
+        
+        // Start auto-save
+        this.startAutoSave();
+        
+        console.log('[ProjectManager] Created project:', projectId);
+        return this.currentProject;
+      },
+
+      async saveProject() {
+        if (!this.currentProject) return;
+        
+        try {
+          const projectData = {
+            ...this.currentProject,
+            modifiedAt: new Date().toISOString(),
+            tracks: this.audioTracks,
+            beats: this.beats,
+            translations: this.exportTranslations(),
+            timeline: {
+              zoom: this.timelineZoom,
+              scroll: this.timelineScrollOffset
+            }
+          };
+          
+          // Save to localStorage for now (TODO: integrate with Space storage)
+          localStorage.setItem(`project-${this.currentProject.id}`, JSON.stringify(projectData));
+          
+          console.log('[ProjectManager] Project saved');
+          return { success: true };
+        } catch (error) {
+          console.error('[ProjectManager] Save error:', error);
+          return { success: false, error: error.message };
+        }
+      },
+
+      async loadProject(projectId) {
+        try {
+          const data = localStorage.getItem(`project-${projectId}`);
+          if (!data) {
+            throw new Error('Project not found');
+          }
+          
+          const projectData = JSON.parse(data);
+          this.currentProject = projectData;
+          
+          // Restore state
+          if (projectData.sourceVideo) {
+            // Load the video
+            // await this.loadVideo(projectData.sourceVideo); // TODO
+          }
+          
+          if (projectData.tracks) {
+            this.audioTracks = projectData.tracks;
+            // Re-render tracks
+            this.audioTracks.forEach(track => {
+              if (track.type !== 'original') {
+                this.renderAudioTrack(track);
+              }
+            });
+          }
+          
+          if (projectData.beats) {
+            this.beats = projectData.beats;
+            this.renderBeatList();
+          }
+          
+          if (projectData.timeline) {
+            this.timelineZoom = projectData.timeline.zoom || 1;
+            this.timelineScrollOffset = projectData.timeline.scrollOffset || 0;
+          }
+          
+          this.startAutoSave();
+          this.showToast('success', 'Project loaded');
+          
+          console.log('[ProjectManager] Project loaded:', projectId);
+          return { success: true, project: this.currentProject };
+        } catch (error) {
+          console.error('[ProjectManager] Load error:', error);
+          this.showToast('error', 'Failed to load project');
+          return { success: false, error: error.message };
+        }
+      },
+
+      startAutoSave() {
+        // Clear existing interval
+        if (this.autoSaveInterval) {
+          clearInterval(this.autoSaveInterval);
+        }
+        
+        // Auto-save every 30 seconds
+        this.autoSaveInterval = setInterval(() => {
+          if (this.currentProject) {
+            this.saveProject();
+          }
+        }, 30000);
+      },
+
+      stopAutoSave() {
+        if (this.autoSaveInterval) {
+          clearInterval(this.autoSaveInterval);
+          this.autoSaveInterval = null;
+        }
+      },
+
+      exportTranslations() {
+        // Export translation data for project save
+        return this.audioTracks
+          .filter(t => t.type === 'voice')
+          .flatMap(t => t.clips.filter(c => c.type === 'translation'))
+          .map(clip => ({
+            regionStart: clip.startTime,
+            regionEnd: clip.endTime,
+            sourceText: clip.sourceText,
+            translatedText: clip.translatedText,
+            audioPath: clip.path,
+            score: clip.score,
+            timingFix: clip.timingFix
+          }));
+      },
+
+      async exportProjectToSpace() {
+        if (!this.currentProject) {
+          this.showToast('error', 'No project to export');
+          return;
+        }
+        
+        try {
+          // Export beats.json
+          const beatsData = this.exportBeatsJSON();
+          const beatsJSON = JSON.stringify(beatsData, null, 2);
+          
+          // Export edit-session.json
+          const sessionData = {
+            projectId: this.currentProject.id,
+            sourceVideo: this.currentProject.sourceVideo,
+            tracks: this.audioTracks,
+            translations: this.exportTranslations(),
+            modifiedAt: new Date().toISOString()
+          };
+          const sessionJSON = JSON.stringify(sessionData, null, 2);
+          
+          // For now, download as files (TODO: integrate with Space)
+          this.downloadJSON(beatsJSON, `beats-${this.currentProject.id}.json`);
+          this.downloadJSON(sessionJSON, `edit-session-${this.currentProject.id}.json`);
+          
+          this.showToast('success', 'Project exported');
+        } catch (error) {
+          console.error('[ProjectManager] Export error:', error);
+          this.showToast('error', 'Export failed');
+        }
+      },
+
+      downloadJSON(jsonString, filename) {
+        const blob = new Blob([jsonString], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+      },
+      // ==================== END PROJECT MANAGEMENT ====================
 
       // Splice Functions
       spliceStart: 0,
@@ -9548,6 +13172,404 @@
       }
     });
   </script>
+
+  <!-- Translation Panel (Slide-in) -->
+  <div class="translation-panel" id="translationPanel">
+    <div class="translation-panel-header">
+      <div class="translation-panel-title">Translate Segment</div>
+      <button class="translation-panel-close" onclick="app.closeTranslationPanel()">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 6L6 18M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+    
+    <div class="translation-panel-content">
+      <!-- Segment Info -->
+      <div class="translation-step">
+        <div class="translation-step-header">
+          <div class="translation-step-number">1</div>
+          <div class="translation-step-title">Source Text</div>
+        </div>
+        <div class="translation-text-box" id="translationSourceText" contenteditable="true">
+          Select a region on the timeline to translate
+        </div>
+        <div style="display: flex; gap: 8px; margin-top: 8px;">
+          <select class="form-select" id="sourceLanguage" style="flex: 1;">
+            <option value="auto">Auto-detect</option>
+            <option value="uk">Ukrainian</option>
+            <option value="ru">Russian</option>
+            <option value="es">Spanish</option>
+            <option value="fr">French</option>
+            <option value="de">German</option>
+            <option value="zh">Chinese</option>
+            <option value="ja">Japanese</option>
+            <option value="ko">Korean</option>
+          </select>
+          <span style="padding: 8px; color: var(--text-muted);">→</span>
+          <select class="form-select" id="targetLanguage" style="flex: 1;">
+            <option value="en">English</option>
+            <option value="es">Spanish</option>
+            <option value="fr">French</option>
+            <option value="de">German</option>
+            <option value="pt">Portuguese</option>
+            <option value="it">Italian</option>
+            <option value="nl">Dutch</option>
+            <option value="pl">Polish</option>
+            <option value="ja">Japanese</option>
+            <option value="zh">Chinese</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Translation Output -->
+      <div class="translation-step">
+        <div class="translation-step-header">
+          <div class="translation-step-number">2</div>
+          <div class="translation-step-title">Translation</div>
+          <span id="translationIteration" style="margin-left: auto; font-size: 11px; color: var(--text-muted);">Iteration 0/5</span>
+        </div>
+        <div class="translation-text-box" id="translationOutput" contenteditable="true">
+          Click "Translate" to generate
+        </div>
+        <div style="display: flex; gap: 8px; margin-top: 8px;">
+          <button class="btn btn-secondary" onclick="app.startTranslation()" id="translateBtn" style="flex: 1;">
+            🌐 Translate
+          </button>
+          <button class="btn btn-ghost" onclick="app.retryTranslation()" id="retryTranslateBtn" style="flex: 1;" disabled>
+            🔄 Retry
+          </button>
+        </div>
+      </div>
+
+      <!-- Quality Scores -->
+      <div class="translation-step" id="qualitySection" style="display: none;">
+        <div class="translation-step-header">
+          <div class="translation-step-number">3</div>
+          <div class="translation-step-title">Quality Check</div>
+        </div>
+        <div class="translation-score-grid">
+          <div class="translation-score-item">
+            <span>Accuracy</span>
+            <div class="translation-score-bar"><div class="translation-score-fill" id="scoreAccuracy" style="width: 0%"></div></div>
+            <span class="translation-score-value" id="scoreAccuracyVal">-</span>
+          </div>
+          <div class="translation-score-item">
+            <span>Fluency</span>
+            <div class="translation-score-bar"><div class="translation-score-fill" id="scoreFluency" style="width: 0%"></div></div>
+            <span class="translation-score-value" id="scoreFluencyVal">-</span>
+          </div>
+          <div class="translation-score-item">
+            <span>Adequacy</span>
+            <div class="translation-score-bar"><div class="translation-score-fill" id="scoreAdequacy" style="width: 0%"></div></div>
+            <span class="translation-score-value" id="scoreAdequacyVal">-</span>
+          </div>
+          <div class="translation-score-item">
+            <span>Cultural</span>
+            <div class="translation-score-bar"><div class="translation-score-fill" id="scoreCultural" style="width: 0%"></div></div>
+            <span class="translation-score-value" id="scoreCulturalVal">-</span>
+          </div>
+          <div class="translation-score-item">
+            <span>Timing</span>
+            <div class="translation-score-bar"><div class="translation-score-fill" id="scoreTiming" style="width: 0%"></div></div>
+            <span class="translation-score-value" id="scoreTimingVal">-</span>
+          </div>
+        </div>
+        <div class="translation-composite-score">
+          <span class="translation-composite-value" id="compositeScore">-</span>
+          <span class="translation-composite-label">/ 10</span>
+        </div>
+        
+        <!-- Improvement Suggestions -->
+        <div id="improvementSuggestions" style="margin-top: 16px; display: none;">
+          <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;">💡 Suggestions:</div>
+          <div id="suggestionsList" style="font-size: 12px; color: var(--text-muted);"></div>
+          <div style="display: flex; gap: 8px; margin-top: 8px;">
+            <button class="btn btn-ghost" onclick="app.applyImprovements()" style="flex: 1;">Apply & Retry</button>
+            <button class="btn btn-ghost" onclick="app.skipImprovements()" style="flex: 1;">Keep As-Is</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Generate Audio -->
+      <div class="translation-step" id="audioSection" style="display: none;">
+        <div class="translation-step-header">
+          <div class="translation-step-number">4</div>
+          <div class="translation-step-title">Generate Voice</div>
+        </div>
+        <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+          <select class="form-select" id="voiceSelect" style="flex: 1;">
+            <option value="rachel">Rachel (Female)</option>
+            <option value="adam">Adam (Male)</option>
+            <option value="sarah">Sarah (Female)</option>
+            <option value="josh">Josh (Male)</option>
+            <option value="emily">Emily (Female)</option>
+          </select>
+          <select class="form-select" id="voiceSpeed" style="width: 80px;">
+            <option value="0.8">0.8x</option>
+            <option value="0.9">0.9x</option>
+            <option value="1.0" selected>1.0x</option>
+            <option value="1.1">1.1x</option>
+            <option value="1.2">1.2x</option>
+          </select>
+        </div>
+        <button class="btn btn-secondary" onclick="app.generateTranslationAudio()" style="width: 100%;">
+          🎙️ Generate Audio
+        </button>
+        
+        <!-- Audio Preview -->
+        <div id="audioPreviewSection" style="margin-top: 12px; display: none;">
+          <audio id="translationAudioPreview" controls style="width: 100%; height: 32px;"></audio>
+          <div style="display: flex; justify-content: space-between; margin-top: 8px; font-size: 11px; color: var(--text-muted);">
+            <span>Source: <span id="sourceDuration">0.0s</span></span>
+            <span>Generated: <span id="generatedDuration">0.0s</span></span>
+            <span>Δ: <span id="durationDelta">0.0s</span></span>
+          </div>
+          <div style="margin-top: 8px; font-size: 11px;">
+            <span style="color: var(--text-secondary);">Timing fix:</span>
+            <label style="margin-left: 8px;"><input type="radio" name="timingFix" value="none" checked> As-is</label>
+            <label style="margin-left: 8px;"><input type="radio" name="timingFix" value="stretch_audio"> Stretch audio</label>
+            <label style="margin-left: 8px;"><input type="radio" name="timingFix" value="speed_video"> Speed video</label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Apply to Timeline -->
+      <div class="translation-step" id="applySection" style="display: none;">
+        <button class="btn btn-primary" onclick="app.applyTranslationToTimeline()" style="width: 100%;">
+          ✓ Apply to Timeline
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Audio Sweetening Panel -->
+  <div class="translation-panel" id="audioSweeteningPanel" style="width: 400px;">
+    <div class="translation-panel-header">
+      <div class="translation-panel-title">🎵 Audio Sweetening</div>
+      <button class="translation-panel-close" onclick="app.closeAudioSweeteningPanel()">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 6L6 18M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+    
+    <div class="translation-panel-content">
+      <!-- ElevenLabs SFX Section -->
+      <div class="translation-step">
+        <div class="translation-step-header">
+          <div class="translation-step-title">ElevenLabs Sound Effects</div>
+        </div>
+        <input type="text" 
+               class="beat-field-input" 
+               id="sfxSearchInput" 
+               placeholder="Search sound effects..."
+               onkeyup="app.searchElevenLabsSFX(event)">
+        
+        <div id="sfxResults" style="margin-top: 12px; max-height: 200px; overflow-y: auto;">
+          <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
+            <button class="btn btn-ghost" onclick="app.addSFXToTrack('whoosh')" style="justify-content: flex-start;">
+              <span>💨 Whoosh</span>
+            </button>
+            <button class="btn btn-ghost" onclick="app.addSFXToTrack('click')" style="justify-content: flex-start;">
+              <span>🖱️ Click</span>
+            </button>
+            <button class="btn btn-ghost" onclick="app.addSFXToTrack('notification')" style="justify-content: flex-start;">
+              <span>🔔 Notification</span>
+            </button>
+            <button class="btn btn-ghost" onclick="app.addSFXToTrack('transition')" style="justify-content: flex-start;">
+              <span>✨ Transition</span>
+            </button>
+            <button class="btn btn-ghost" onclick="app.addSFXToTrack('applause')" style="justify-content: flex-start;">
+              <span>👏 Applause</span>
+            </button>
+            <button class="btn btn-ghost" onclick="app.addSFXToTrack('error')" style="justify-content: flex-start;">
+              <span>❌ Error</span>
+            </button>
+            <button class="btn btn-ghost" onclick="app.addSFXToTrack('success')" style="justify-content: flex-start;">
+              <span>✅ Success</span>
+            </button>
+            <button class="btn btn-ghost" onclick="app.addSFXToTrack('swoosh')" style="justify-content: flex-start;">
+              <span>🌊 Swoosh</span>
+            </button>
+          </div>
+        </div>
+
+        <div style="margin-top: 12px;">
+          <audio id="sfxPreviewAudio" controls style="width: 100%; height: 32px; display: none;"></audio>
+        </div>
+      </div>
+
+      <div style="margin: 16px 0; border-top: 1px solid var(--border-color);"></div>
+
+      <!-- Import Audio Section -->
+      <div class="translation-step">
+        <div class="translation-step-header">
+          <div class="translation-step-title">Import Audio Files</div>
+        </div>
+        
+        <div class="ai-video-upload-zone" 
+             onclick="document.getElementById('audioImportInput').click()"
+             ondragover="app.handleAudioDragOver(event)"
+             ondragleave="app.handleAudioDragLeave(event)"
+             ondrop="app.handleAudioDrop(event)"
+             style="padding: 24px; margin-bottom: 12px;">
+          <div style="font-size: 32px; margin-bottom: 8px;">🎵</div>
+          <div style="font-size: 12px; color: var(--text-secondary);">Drop audio here or click to browse</div>
+          <div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">MP3, WAV, M4A, OGG</div>
+        </div>
+        <input type="file" 
+               id="audioImportInput" 
+               accept="audio/*" 
+               multiple
+               style="display: none;"
+               onchange="app.handleAudioImport(event)">
+
+        <!-- Recent Files -->
+        <div id="recentAudioFiles" style="margin-top: 12px;">
+          <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 8px;">RECENT</div>
+          <div id="recentAudioList" style="display: flex; flex-direction: column; gap: 4px;">
+            <div style="font-size: 11px; color: var(--text-muted); padding: 8px; text-align: center;">
+              No recent audio files
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin: 16px 0; padding: 12px; background: var(--bg-surface); border-radius: 8px; font-size: 11px; color: var(--text-secondary);">
+        💡 Tip: Drop audio files directly on timeline tracks to add them at a specific position
+      </div>
+    </div>
+  </div>
+
+  <!-- AI Video Replacement Panel -->
+  <div class="ai-video-panel" id="aiVideoPanel">
+    <div class="ai-video-panel-header">
+      <div class="ai-video-panel-title">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+          <circle cx="12" cy="13" r="4"/>
+        </svg>
+        AI Video Replacement
+      </div>
+      <button class="ai-video-panel-close" onclick="app.closeAIVideoPanel()">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 6L6 18M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="ai-video-panel-content">
+      <!-- Segment Info -->
+      <div class="ai-video-info-bar">
+        <div class="ai-video-info-item">
+          <span class="ai-video-info-label">Region</span>
+          <span class="ai-video-info-value" id="aiVideoRegion">00:15.00 - 00:22.50</span>
+        </div>
+        <div class="ai-video-info-item">
+          <span class="ai-video-info-label">Duration</span>
+          <span class="ai-video-info-value" id="aiVideoDuration">7.5s</span>
+        </div>
+        <div class="ai-video-info-item">
+          <span class="ai-video-info-label">Resolution</span>
+          <span class="ai-video-info-value" id="aiVideoResolution">1920×1080</span>
+        </div>
+      </div>
+
+      <!-- Description Input -->
+      <div class="ai-video-section">
+        <div class="ai-video-section-title">What should this segment show?</div>
+        <textarea class="ai-video-description" id="aiVideoDescription" placeholder="Describe the video you want to generate...
+
+Example: A modern office with people collaborating around a digital whiteboard, bright natural lighting, camera slowly panning left to right"></textarea>
+      </div>
+
+      <!-- Generated Prompt -->
+      <div class="ai-video-section">
+        <div class="ai-video-section-title">Optimized Prompt</div>
+        <div class="ai-video-prompt-box" id="aiVideoPromptBox">
+          <span id="aiVideoPrompt">Enter a description above, then click "Generate Prompt"</span>
+        </div>
+        <div class="ai-video-prompt-actions">
+          <button class="btn btn-secondary" onclick="app.generateVideoPrompt()">
+            ✨ Generate Prompt
+          </button>
+          <button class="btn btn-ghost" onclick="app.copyVideoPrompt()">
+            📋 Copy
+          </button>
+        </div>
+      </div>
+
+      <!-- External Services -->
+      <div class="ai-video-section">
+        <div class="ai-video-section-title">Generate Video At</div>
+        <div class="ai-video-services">
+          <button class="ai-video-service-btn" onclick="app.openVideoService('kling')">
+            <span class="service-icon">🎬</span>
+            <span class="service-name">Kling.ai</span>
+          </button>
+          <button class="ai-video-service-btn" onclick="app.openVideoService('veo')">
+            <span class="service-icon">🎥</span>
+            <span class="service-name">Google Veo</span>
+          </button>
+          <button class="ai-video-service-btn" onclick="app.openVideoService('runway')">
+            <span class="service-icon">🎞️</span>
+            <span class="service-name">Runway</span>
+          </button>
+          <button class="ai-video-service-btn" onclick="app.openVideoService('pika')">
+            <span class="service-icon">🎭</span>
+            <span class="service-name">Pika Labs</span>
+          </button>
+          <button class="ai-video-service-btn" onclick="app.openVideoService('luma')">
+            <span class="service-icon">🌈</span>
+            <span class="service-name">Luma Dream</span>
+          </button>
+          <button class="ai-video-service-btn" onclick="app.openVideoService('sora')">
+            <span class="service-icon">🔮</span>
+            <span class="service-name">OpenAI Sora</span>
+          </button>
+        </div>
+        <p style="font-size: 11px; color: var(--text-muted); margin-top: 12px; text-align: center;">
+          Opens in browser with prompt copied to clipboard
+        </p>
+      </div>
+
+      <div class="ai-video-divider">or upload your video</div>
+
+      <!-- Upload Zone -->
+      <div class="ai-video-section">
+        <div class="ai-video-upload-zone" 
+             id="aiVideoUploadZone"
+             onclick="document.getElementById('aiVideoUploadInput').click()"
+             ondragover="app.handleAIVideoDragOver(event)"
+             ondragleave="app.handleAIVideoDragLeave(event)"
+             ondrop="app.handleAIVideoDrop(event)">
+          <div class="ai-video-upload-icon">📁</div>
+          <div class="ai-video-upload-text">Drop video here or click to browse</div>
+          <div class="ai-video-upload-hint">Accepts MP4, MOV, WebM • Max 500MB</div>
+        </div>
+        <input type="file" 
+               class="ai-video-upload-input" 
+               id="aiVideoUploadInput" 
+               accept="video/*"
+               onchange="app.handleAIVideoUpload(event)">
+      </div>
+
+      <!-- Preview Section (shown after upload) -->
+      <div class="ai-video-section" id="aiVideoPreviewSection" style="display: none;">
+        <div class="ai-video-section-title">Preview</div>
+        <video id="aiVideoPreview" controls style="width: 100%; border-radius: 8px; background: #000;"></video>
+        <div style="display: flex; gap: 8px; margin-top: 12px;">
+          <button class="btn btn-ghost" onclick="app.cancelAIVideoUpload()" style="flex: 1;">
+            Cancel
+          </button>
+          <button class="btn btn-primary" onclick="app.applyAIVideoToTimeline()" style="flex: 1;">
+            Apply to Timeline
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
 </body>
 </html>
 

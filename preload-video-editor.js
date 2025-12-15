@@ -48,6 +48,20 @@ contextBridge.exposeInMainWorld('videoEditor', {
   // Auto-detect scene boundaries
   detectScenes: (videoPath, options) => 
     ipcRenderer.invoke('video-editor:detect-scenes', videoPath, options),
+
+  // ==================== TRANSLATION PIPELINE ====================
+  
+  // Full translation with quality loop (TEaR)
+  translateWithQuality: (sourceText, options) =>
+    ipcRenderer.invoke('video-editor:translate-with-quality', sourceText, options),
+  
+  // Single translation (no quality loop)
+  translateText: (sourceText, options) =>
+    ipcRenderer.invoke('video-editor:translate-text', sourceText, options),
+  
+  // Evaluate translation quality
+  evaluateTranslation: (sourceText, translatedText, options) =>
+    ipcRenderer.invoke('video-editor:evaluate-translation', sourceText, translatedText, options),
   
   // Get video from space with existing scenes
   getSpaceVideo: (itemId) => 
@@ -99,7 +113,10 @@ contextBridge.exposeInMainWorld('videoEditor', {
       { name: 'MOV', extensions: ['mov'] },
       { name: 'AVI', extensions: ['avi'] }
     ]
-  })
+  }),
+  
+  // Open the standalone recorder
+  openRecorder: (options) => ipcRenderer.invoke('recorder:open', options)
 });
 
 // Expose spaces integration

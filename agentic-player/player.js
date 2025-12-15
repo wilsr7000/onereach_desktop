@@ -18,7 +18,10 @@ const player = {
     apiHeaders: {},
     context: {},
     prefetchWhenRemaining: 2,  // Fetch more when this many clips left
-    prefetchThreshold: 5       // Seconds before clip end to check queue
+    prefetchThreshold: 5,      // Seconds before clip end to check queue
+    mode: 'api',               // 'api' or 'beats' mode
+    beats: [],                 // Story beats for beats mode
+    videoPath: null            // Local video path for beats mode
   },
 
   // Session state
@@ -53,19 +56,133 @@ const player = {
     this.loadConfig();
     this.cacheUI();
     this.setupVideoEvents();
+    this.setupMessageListener();
     
     console.log('[Player] Ready. API:', this.config.apiEndpoint || '(not configured)');
   },
 
+  setupMessageListener() {
+    // Listen for beats data from editor
+    window.addEventListener('message', (event) => {
+      if (event.data.type === 'load-beats') {
+        console.log('[Player] Received beats data:', event.data.config);
+        this.loadBeatsMode(event.data.config);
+      }
+    });
+  },
+
+  loadBeatsMode(config) {
+    this.config.mode = 'beats';
+    this.config.beats = config.beats || [];
+    this.config.videoPath = config.videoPath;
+    
+    // Load video if provided
+    if (config.videoPath && this.video) {
+      this.video.src = config.videoPath;
+    }
+    
+    // Show beats in UI
+    this.displayBeatsNavigation();
+  },
+
+  displayBeatsNavigation() {
+    // Remove existing beats navigation if present (prevent duplicates)
+    const existingNav = document.getElementById('beatsNavigation');
+    if (existingNav) {
+      existingNav.remove();
+    }
+    
+    // Add beats navigation to UI
+    const beatsNav = document.createElement('div');
+    beatsNav.id = 'beatsNavigation';
+    beatsNav.style.cssText = `
+      position: fixed;
+      right: 20px;
+      top: 80px;
+      width: 250px;
+      background: rgba(0, 0, 0, 0.9);
+      border-radius: 12px;
+      padding: 16px;
+      max-height: calc(100vh - 120px);
+      overflow-y: auto;
+      z-index: 100;
+    `;
+    
+    beatsNav.innerHTML = `
+      <h3 style="margin: 0 0 12px 0; font-size: 14px; color: #fff;">Story Beats</h3>
+      <div id="beatsList" style="display: flex; flex-direction: column; gap: 8px;"></div>
+    `;
+    
+    document.body.appendChild(beatsNav);
+    
+    const beatsList = document.getElementById('beatsList');
+    this.config.beats.forEach((beat, index) => {
+      const beatEl = document.createElement('div');
+      beatEl.style.cssText = `
+        padding: 10px;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 6px;
+        cursor: pointer;
+        transition: background 0.2s;
+      `;
+      beatEl.innerHTML = `
+        <div style="font-size: 12px; font-weight: 600; margin-bottom: 4px;">${beat.name}</div>
+        <div style="font-size: 10px; color: #aaa;">${beat.timeIn} - ${beat.timeOut}</div>
+        ${beat.description ? `<div style="font-size: 10px; color: #888; margin-top: 4px;">${beat.description}</div>` : ''}
+      `;
+      
+      beatEl.addEventListener('mouseenter', () => {
+        beatEl.style.background = 'rgba(232, 76, 61, 0.3)';
+      });
+      
+      beatEl.addEventListener('mouseleave', () => {
+        beatEl.style.background = 'rgba(255, 255, 255, 0.1)';
+      });
+      
+      beatEl.addEventListener('click', () => {
+        this.seekToBeat(beat);
+      });
+      
+      beatsList.appendChild(beatEl);
+    });
+  },
+
+  seekToBeat(beat) {
+    if (!this.video) return;
+    
+    // Parse time string (HH:MM:SS or MM:SS)
+    const timeStr = beat.timeIn;
+    const parts = timeStr.split(':').reverse();
+    let seconds = 0;
+    
+    if (parts[0]) seconds += parseFloat(parts[0]);
+    if (parts[1]) seconds += parseFloat(parts[1]) * 60;
+    if (parts[2]) seconds += parseFloat(parts[2]) * 3600;
+    
+    this.video.currentTime = seconds;
+    this.video.play();
+    
+    console.log('[Player] Seeking to beat:', beat.name, 'at', seconds);
+  },
+
   loadConfig() {
     const cfg = window.AGENTIC_PLAYER_CONFIG || {};
+    // Preserve existing mode/beats settings when loading API config
+    const existingMode = this.config.mode;
+    const existingBeats = this.config.beats;
+    const existingVideoPath = this.config.videoPath;
+    
     this.config = {
       apiEndpoint: cfg.apiEndpoint || null,
       apiKey: cfg.apiKey || null,
       apiHeaders: cfg.apiHeaders || {},
       context: cfg.context || {},
       prefetchWhenRemaining: cfg.prefetchWhenRemaining || 2,
-      prefetchThreshold: cfg.prefetchThreshold || 5
+      prefetchThreshold: cfg.prefetchThreshold || 5,
+      // Preserve beats mode settings
+      mode: existingMode || 'api',
+      beats: existingBeats || [],
+      videoPath: existingVideoPath || null
     };
   },
 

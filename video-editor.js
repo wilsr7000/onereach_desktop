@@ -2198,6 +2198,448 @@ Select the appropriate scenes and return JSON.`;
     return false;
   }
 
+  // ==================== TRANSLATION PIPELINE (TEaR) ====================
+  
+  /**
+   * TEaR Translation Pipeline - Translate, Evaluate, Refine
+   * Uses multi-LLM approach for high-quality translations
+   * 
+   * @param {string} sourceText - Text to translate
+   * @param {Object} options - Translation options
+   * @returns {Promise} - Translation result with scores
+   */
+  async translateWithQualityLoop(sourceText, options = {}) {
+    const {
+      sourceLanguage = 'auto',
+      targetLanguage = 'en',
+      sourceDuration = null,
+      videoContext = 'general',
+      tone = 'professional',
+      maxIterations = 5,
+      qualityThreshold = 9.0
+    } = options;
+
+    // Get API keys
+    const settingsPath = path.join(app.getPath('userData'), 'settings.json');
+    let openaiKey = null;
+    let anthropicKey = null;
+    
+    if (fs.existsSync(settingsPath)) {
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      openaiKey = settings.openaiApiKey;
+      anthropicKey = settings.anthropicApiKey || settings.claudeApiKey;
+    }
+
+    if (!openaiKey) {
+      return { success: false, error: 'OpenAI API key not configured for translation.' };
+    }
+
+    const iterations = [];
+    let currentTranslation = null;
+    let currentEvaluation = null;
+
+    for (let i = 1; i <= maxIterations; i++) {
+      console.log(`[Translation] Iteration ${i}/${maxIterations}`);
+
+      // Step 1: Translate (or refine)
+      if (i === 1) {
+        currentTranslation = await this.translateText(sourceText, {
+          sourceLanguage,
+          targetLanguage,
+          sourceDuration,
+          videoContext,
+          tone
+        }, openaiKey);
+      } else {
+        // Refine based on previous feedback
+        currentTranslation = await this.refineTranslation(
+          sourceText,
+          currentTranslation,
+          currentEvaluation.improvements,
+          { sourceLanguage, targetLanguage, sourceDuration },
+          openaiKey
+        );
+      }
+
+      // Step 2: Evaluate
+      currentEvaluation = await this.evaluateTranslation(
+        sourceText,
+        currentTranslation,
+        { sourceLanguage, targetLanguage, sourceDuration, videoContext },
+        anthropicKey || openaiKey // Use Claude if available, fallback to GPT
+      );
+
+      iterations.push({
+        iteration: i,
+        translation: currentTranslation,
+        evaluation: currentEvaluation
+      });
+
+      // Check if we've reached quality threshold
+      if (currentEvaluation.composite >= qualityThreshold) {
+        console.log(`[Translation] Quality threshold met at iteration ${i}: ${currentEvaluation.composite}`);
+        return {
+          success: true,
+          translation: currentTranslation,
+          finalScore: currentEvaluation.composite,
+          iterations: iterations,
+          evaluation: currentEvaluation
+        };
+      }
+
+      // If we've exhausted iterations
+      if (i === maxIterations) {
+        console.log(`[Translation] Max iterations reached. Final score: ${currentEvaluation.composite}`);
+        return {
+          success: false,
+          translation: currentTranslation,
+          finalScore: currentEvaluation.composite,
+          iterations: iterations,
+          evaluation: currentEvaluation,
+          warning: `Quality threshold (${qualityThreshold}) not met after ${maxIterations} iterations`
+        };
+      }
+    }
+  }
+
+  /**
+   * Translate text using LLM
+   */
+  async translateText(sourceText, options, apiKey) {
+    const { sourceLanguage, targetLanguage, sourceDuration, videoContext, tone } = options;
+
+    const systemPrompt = `You are a professional video translator specializing in high-quality dubbing translations.
+
+INSTRUCTIONS:
+1. Preserve the EXACT meaning - no additions, omissions, or hallucinations
+2. Use natural, fluent ${targetLanguage} phrasing that sounds native
+3. Adapt idioms and cultural references appropriately for the target audience
+4. Consider timing - the translation should be speakable in approximately ${sourceDuration ? sourceDuration + ' seconds' : 'the same duration as the source'}
+5. Maintain the speaker's tone (${tone}) and style
+6. If the source is significantly longer when translated, find more concise phrasing WITHOUT losing meaning
+
+Return ONLY the translated text, no explanations or notes.`;
+
+    const userPrompt = `Translate the following text from ${sourceLanguage === 'auto' ? 'the detected language' : sourceLanguage} to ${targetLanguage}.
+
+Context: This is from a ${videoContext} video.
+${sourceDuration ? `Source duration: ${sourceDuration} seconds` : ''}
+
+TEXT TO TRANSLATE:
+"${sourceText}"
+
+TRANSLATION:`;
+
+    return new Promise((resolve, reject) => {
+      const postData = JSON.stringify({
+        model: 'gpt-4o',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        temperature: 0.3,
+        max_tokens: 2000
+      });
+
+      const req = https.request({
+        hostname: 'api.openai.com',
+        path: '/v1/chat/completions',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        }
+      }, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          if (res.statusCode !== 200) {
+            try {
+              const errorJson = JSON.parse(data);
+              reject(new Error(errorJson.error?.message || `HTTP ${res.statusCode}`));
+            } catch {
+              reject(new Error(`HTTP ${res.statusCode}: ${data}`));
+            }
+            return;
+          }
+          
+          const response = JSON.parse(data);
+          const translation = response.choices[0].message.content.trim();
+          // Remove quotes if the model added them
+          resolve(translation.replace(/^["']|["']$/g, ''));
+        });
+      });
+
+      req.on('error', reject);
+      req.write(postData);
+      req.end();
+    });
+  }
+
+  /**
+   * Evaluate translation quality using multi-dimensional rubric
+   */
+  async evaluateTranslation(sourceText, translatedText, options, apiKey) {
+    const { sourceLanguage, targetLanguage, sourceDuration, videoContext } = options;
+
+    const systemPrompt = `You are a professional translation quality evaluator. Rate the translation on 5 dimensions using a 1-10 scale.
+
+EVALUATION CRITERIA:
+1. ACCURACY (25% weight): Does it preserve the exact meaning? Any distortions, additions, or omissions?
+2. FLUENCY (25% weight): Does it read naturally in ${targetLanguage}? Is grammar correct? Does it flow well?
+3. ADEQUACY (20% weight): Is everything from the source translated? Nothing missing or added?
+4. CULTURAL_FIT (15% weight): Are idioms and cultural references adapted appropriately?
+5. TIMING_FIT (15% weight): Can this be spoken in a similar duration to the source? Is it concise enough?
+
+SCORING GUIDELINES:
+- 9-10: Excellent, professional quality
+- 7-8: Good, minor issues only
+- 5-6: Acceptable but needs improvement
+- 3-4: Poor, significant issues
+- 1-2: Unacceptable, major problems
+
+For any score below 9, provide a SPECIFIC, actionable improvement suggestion.
+
+RESPOND IN JSON FORMAT ONLY:
+{
+  "scores": {
+    "accuracy": { "score": 8.5, "feedback": "specific feedback here" },
+    "fluency": { "score": 9.0, "feedback": "specific feedback here" },
+    "adequacy": { "score": 9.0, "feedback": "specific feedback here" },
+    "cultural_fit": { "score": 8.0, "feedback": "specific feedback here" },
+    "timing_fit": { "score": 8.5, "feedback": "specific feedback here" }
+  },
+  "composite": 8.6,
+  "improvements": ["specific improvement 1", "specific improvement 2"],
+  "pass": false
+}`;
+
+    const userPrompt = `Evaluate this translation:
+
+SOURCE (${sourceLanguage}): "${sourceText}"
+TRANSLATION (${targetLanguage}): "${translatedText}"
+
+Context: ${videoContext} video
+${sourceDuration ? `Source duration: ${sourceDuration}s` : ''}
+
+Evaluate and return JSON:`;
+
+    return new Promise((resolve, reject) => {
+      // Determine if using Claude or GPT
+      const isAnthropic = apiKey && apiKey.startsWith('sk-ant-');
+      
+      if (isAnthropic) {
+        // Use Anthropic API
+        const postData = JSON.stringify({
+          model: 'claude-3-5-sonnet-20241022',
+          max_tokens: 1500,
+          messages: [
+            { role: 'user', content: `${systemPrompt}\n\n${userPrompt}` }
+          ]
+        });
+
+        const req = https.request({
+          hostname: 'api.anthropic.com',
+          path: '/v1/messages',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01'
+          }
+        }, (res) => {
+          let data = '';
+          res.on('data', chunk => data += chunk);
+          res.on('end', () => {
+            if (res.statusCode !== 200) {
+              console.error('[Translation] Anthropic API error:', data);
+              // Fallback to default evaluation
+              resolve(this.getDefaultEvaluation());
+              return;
+            }
+            
+            try {
+              const response = JSON.parse(data);
+              const content = response.content[0].text;
+              const evaluation = JSON.parse(content);
+              
+              // Calculate composite if not provided
+              if (!evaluation.composite) {
+                const weights = { accuracy: 0.25, fluency: 0.25, adequacy: 0.20, cultural_fit: 0.15, timing_fit: 0.15 };
+                let composite = 0;
+                for (const [key, weight] of Object.entries(weights)) {
+                  composite += (evaluation.scores[key]?.score || 7) * weight;
+                }
+                evaluation.composite = Math.round(composite * 10) / 10;
+              }
+              
+              evaluation.pass = evaluation.composite >= 9.0;
+              resolve(evaluation);
+            } catch (e) {
+              console.error('[Translation] Failed to parse evaluation:', e);
+              resolve(this.getDefaultEvaluation());
+            }
+          });
+        });
+
+        req.on('error', (e) => {
+          console.error('[Translation] Evaluation request error:', e);
+          resolve(this.getDefaultEvaluation());
+        });
+        req.write(postData);
+        req.end();
+      } else {
+        // Use OpenAI API
+        const postData = JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt }
+          ],
+          temperature: 0.3,
+          response_format: { type: 'json_object' }
+        });
+
+        const req = https.request({
+          hostname: 'api.openai.com',
+          path: '/v1/chat/completions',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          }
+        }, (res) => {
+          let data = '';
+          res.on('data', chunk => data += chunk);
+          res.on('end', () => {
+            if (res.statusCode !== 200) {
+              console.error('[Translation] OpenAI evaluation error:', data);
+              resolve(this.getDefaultEvaluation());
+              return;
+            }
+            
+            try {
+              const response = JSON.parse(data);
+              const content = response.choices[0].message.content;
+              const evaluation = JSON.parse(content);
+              
+              // Calculate composite if not provided
+              if (!evaluation.composite) {
+                const weights = { accuracy: 0.25, fluency: 0.25, adequacy: 0.20, cultural_fit: 0.15, timing_fit: 0.15 };
+                let composite = 0;
+                for (const [key, weight] of Object.entries(weights)) {
+                  composite += (evaluation.scores[key]?.score || 7) * weight;
+                }
+                evaluation.composite = Math.round(composite * 10) / 10;
+              }
+              
+              evaluation.pass = evaluation.composite >= 9.0;
+              resolve(evaluation);
+            } catch (e) {
+              console.error('[Translation] Failed to parse evaluation:', e);
+              resolve(this.getDefaultEvaluation());
+            }
+          });
+        });
+
+        req.on('error', (e) => {
+          console.error('[Translation] Evaluation request error:', e);
+          resolve(this.getDefaultEvaluation());
+        });
+        req.write(postData);
+        req.end();
+      }
+    });
+  }
+
+  /**
+   * Refine translation based on feedback
+   */
+  async refineTranslation(sourceText, currentTranslation, improvements, options, apiKey) {
+    const { sourceLanguage, targetLanguage, sourceDuration } = options;
+
+    const systemPrompt = `You are a professional translation editor. Your task is to improve an existing translation based on specific feedback.
+
+RULES:
+1. Apply the suggested improvements carefully
+2. Maintain the original meaning
+3. Keep the same tone and style
+4. Ensure the result sounds natural in ${targetLanguage}
+
+Return ONLY the improved translation, no explanations.`;
+
+    const userPrompt = `Improve this translation based on the feedback:
+
+ORIGINAL TEXT (${sourceLanguage}): "${sourceText}"
+
+CURRENT TRANSLATION: "${currentTranslation}"
+
+IMPROVEMENTS NEEDED:
+${improvements.map((imp, i) => `${i + 1}. ${imp}`).join('\n')}
+
+${sourceDuration ? `Note: Translation should be speakable in ~${sourceDuration} seconds` : ''}
+
+IMPROVED TRANSLATION:`;
+
+    return new Promise((resolve, reject) => {
+      const postData = JSON.stringify({
+        model: 'gpt-4o',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        temperature: 0.3,
+        max_tokens: 2000
+      });
+
+      const req = https.request({
+        hostname: 'api.openai.com',
+        path: '/v1/chat/completions',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        }
+      }, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          if (res.statusCode !== 200) {
+            // Return current translation if refinement fails
+            resolve(currentTranslation);
+            return;
+          }
+          
+          const response = JSON.parse(data);
+          const refined = response.choices[0].message.content.trim();
+          resolve(refined.replace(/^["']|["']$/g, ''));
+        });
+      });
+
+      req.on('error', () => resolve(currentTranslation));
+      req.write(postData);
+      req.end();
+    });
+  }
+
+  /**
+   * Get default evaluation when API fails
+   */
+  getDefaultEvaluation() {
+    return {
+      scores: {
+        accuracy: { score: 7.5, feedback: 'Unable to evaluate - please review manually' },
+        fluency: { score: 7.5, feedback: 'Unable to evaluate - please review manually' },
+        adequacy: { score: 7.5, feedback: 'Unable to evaluate - please review manually' },
+        cultural_fit: { score: 7.5, feedback: 'Unable to evaluate - please review manually' },
+        timing_fit: { score: 7.5, feedback: 'Unable to evaluate - please review manually' }
+      },
+      composite: 7.5,
+      improvements: ['Manual review recommended'],
+      pass: false
+    };
+  }
+
   // ==================== TWO-STEP VIDEO WORKFLOW ====================
   
   /**
@@ -2929,6 +3371,65 @@ Select the appropriate scenes and return JSON.`;
         return await this.detectScenes(videoPath, options);
       } catch (error) {
         console.error('[VideoEditor] Detect scenes error:', error);
+        return { success: false, error: error.message };
+      }
+    });
+
+    // ==================== TRANSLATION PIPELINE IPC HANDLERS ====================
+    
+    // Full translation with quality loop
+    ipcMain.handle('video-editor:translate-with-quality', async (event, sourceText, options) => {
+      try {
+        console.log('[VideoEditor] Starting translation pipeline:', sourceText.substring(0, 50) + '...');
+        return await this.translateWithQualityLoop(sourceText, options);
+      } catch (error) {
+        console.error('[VideoEditor] Translation pipeline error:', error);
+        return { success: false, error: error.message };
+      }
+    });
+
+    // Single translation step (no quality loop)
+    ipcMain.handle('video-editor:translate-text', async (event, sourceText, options) => {
+      try {
+        const settingsPath = path.join(app.getPath('userData'), 'settings.json');
+        let openaiKey = null;
+        
+        if (fs.existsSync(settingsPath)) {
+          const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+          openaiKey = settings.openaiApiKey;
+        }
+
+        if (!openaiKey) {
+          return { success: false, error: 'OpenAI API key not configured' };
+        }
+
+        const translation = await this.translateText(sourceText, options, openaiKey);
+        return { success: true, translation };
+      } catch (error) {
+        console.error('[VideoEditor] Translate text error:', error);
+        return { success: false, error: error.message };
+      }
+    });
+
+    // Evaluate a translation
+    ipcMain.handle('video-editor:evaluate-translation', async (event, sourceText, translatedText, options) => {
+      try {
+        const settingsPath = path.join(app.getPath('userData'), 'settings.json');
+        let apiKey = null;
+        
+        if (fs.existsSync(settingsPath)) {
+          const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+          apiKey = settings.anthropicApiKey || settings.claudeApiKey || settings.openaiApiKey;
+        }
+
+        if (!apiKey) {
+          return { success: false, error: 'API key not configured' };
+        }
+
+        const evaluation = await this.evaluateTranslation(sourceText, translatedText, options, apiKey);
+        return { success: true, evaluation };
+      } catch (error) {
+        console.error('[VideoEditor] Evaluate translation error:', error);
         return { success: false, error: error.message };
       }
     });
