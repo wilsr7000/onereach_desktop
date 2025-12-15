@@ -2035,9 +2035,9 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
                 preload: path.join(__dirname, 'preload-video-editor.js')
               }
             });
-            
+
             videoEditorWindow.loadFile('video-editor.html');
-            
+
             // Setup video editor IPC for this window
             if (global.videoEditor) {
               global.videoEditor.setupIPC(videoEditorWindow);

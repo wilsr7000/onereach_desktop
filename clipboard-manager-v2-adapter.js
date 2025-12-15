@@ -590,6 +590,9 @@ class ClipboardManagerV2 {
   // Space management
   
   getSpaces() {
+    // Ensure history/spaces are loaded before returning
+    // This was causing null to be returned if Video Editor opened before Clipboard Viewer
+    this.ensureHistoryLoaded();
     return this.spaces;
   }
   
@@ -4460,14 +4463,14 @@ ${chunks[i]}`;
       try {
         const { BrowserWindow } = require('electron');
         const path = require('path');
-        
+
         console.log('[ClipboardManager] Opening Video Editor with file:', filePath);
-        
+
         if (!filePath || !fs.existsSync(filePath)) {
           console.error('[ClipboardManager] Video file not found:', filePath);
           return { success: false, error: 'Video file not found: ' + filePath };
         }
-        
+
         const videoEditorWindow = new BrowserWindow({
           width: 1400,
           height: 900,
@@ -4478,21 +4481,21 @@ ${chunks[i]}`;
             preload: path.join(__dirname, 'preload-video-editor.js')
           }
         });
-        
+
         // Load the video editor HTML
         videoEditorWindow.loadFile('video-editor.html');
-        
+
         // Once loaded, send the file path to open
         videoEditorWindow.webContents.on('did-finish-load', () => {
           console.log('[ClipboardManager] Video Editor loaded, sending file path:', filePath);
           videoEditorWindow.webContents.send('video-editor:load-file', filePath);
         });
-        
+
         // Setup video editor IPC for this window
         if (global.videoEditor) {
           global.videoEditor.setupIPC(videoEditorWindow);
         }
-        
+
         return { success: true };
       } catch (error) {
         console.error('[ClipboardManager] Error opening Video Editor:', error);

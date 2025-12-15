@@ -27,6 +27,7 @@ class VideoEditor {
     this.activeJobs = new Map();
     this.outputDir = path.join(app.getPath('userData'), 'video-exports');
     this.thumbnailDir = path.join(app.getPath('userData'), 'video-thumbnails');
+    this.ipcHandlersRegistered = false; // Track if IPC handlers have been registered
     
     // Ensure directories exist
     this.ensureDirectories();
@@ -2646,6 +2647,13 @@ Select the appropriate scenes and return JSON.`;
    * Setup IPC handlers for renderer communication
    */
   setupIPC(mainWindow) {
+    // Prevent duplicate handler registration
+    if (this.ipcHandlersRegistered) {
+      console.log('[VideoEditor] IPC handlers already registered, skipping');
+      return;
+    }
+    this.ipcHandlersRegistered = true;
+
     // Get video info
     ipcMain.handle('video-editor:get-info', async (event, videoPath) => {
       try {

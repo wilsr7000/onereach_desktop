@@ -9248,15 +9248,15 @@
             document.getElementById('spacesList').innerHTML = '<p style="color: var(--text-muted); font-size: 13px;">Spaces not available</p>';
             return;
           }
-          
+
           const spaces = await window.spaces.getAll();
           const list = document.getElementById('spacesList');
-          
+
           if (!spaces || spaces.length === 0) {
             list.innerHTML = '<p style="color: var(--text-muted); font-size: 13px;">No spaces found</p>';
             return;
           }
-          
+
           list.innerHTML = spaces.map(space => `
             <div class="space-item" onclick="app.selectSpace('${space.id}', '${space.name}')" data-space-id="${space.id}">
               <div class="space-icon">📁</div>
