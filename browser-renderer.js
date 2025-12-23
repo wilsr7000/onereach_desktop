@@ -854,6 +854,59 @@ document.addEventListener('DOMContentLoaded', () => {
     const customContextMenu = document.getElementById('custom-context-menu');
     const pasteToBlackHoleItem = document.getElementById('paste-to-black-hole');
     
+    // Smart positioning function to prevent menu from being cut off
+    function positionContextMenu(menu, x, y) {
+        const padding = 8;
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        
+        // Show off-screen to measure
+        menu.style.left = '-9999px';
+        menu.style.top = '-9999px';
+        menu.style.display = 'block';
+        
+        // Get menu dimensions
+        const rect = menu.getBoundingClientRect();
+        const mw = rect.width;
+        const mh = rect.height;
+        
+        // Calculate available space
+        const spaceRight = vw - x - padding;
+        const spaceLeft = x - padding;
+        const spaceBelow = vh - y - padding;
+        const spaceAbove = y - padding;
+        
+        let finalX, finalY;
+        
+        // Horizontal: prefer right, flip to left if needed
+        if (mw <= spaceRight) {
+            finalX = x;
+        } else if (mw <= spaceLeft) {
+            finalX = x - mw;
+        } else {
+            // Not enough space either side - fit to widest side
+            finalX = spaceRight >= spaceLeft ? vw - mw - padding : padding;
+        }
+        
+        // Vertical: prefer below, flip above if needed
+        if (mh <= spaceBelow) {
+            finalY = y;
+        } else if (mh <= spaceAbove) {
+            finalY = y - mh;
+        } else {
+            // Menu taller than available space - position at top with padding
+            finalY = padding;
+        }
+        
+        // Clamp to viewport bounds
+        finalX = Math.max(padding, Math.min(finalX, vw - mw - padding));
+        finalY = Math.max(padding, Math.min(finalY, vh - mh - padding));
+        
+        // Apply position
+        menu.style.left = `${Math.round(finalX)}px`;
+        menu.style.top = `${Math.round(finalY)}px`;
+    }
+
     // Handle right-click to show custom context menu
     document.addEventListener('contextmenu', (e) => {
         e.preventDefault();
@@ -865,10 +918,8 @@ document.addEventListener('DOMContentLoaded', () => {
         
         console.log('Showing custom context menu at:', e.clientX, e.clientY);
         
-        // Position and show the menu
-        customContextMenu.style.left = `${e.clientX}px`;
-        customContextMenu.style.top = `${e.clientY}px`;
-        customContextMenu.style.display = 'block';
+        // Position menu smartly to avoid cut-off
+        positionContextMenu(customContextMenu, e.clientX, e.clientY);
     });
     
     // Hide context menu on click elsewhere

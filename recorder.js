@@ -13,6 +13,25 @@ const { BrowserWindow, ipcMain, systemPreferences, app } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
+// Helper to get storage root for saving recordings
+function getStorageRoot() {
+  // Try global clipboard manager first
+  if (global.clipboardManager && global.clipboardManager.storage && global.clipboardManager.storage.storageRoot) {
+    return global.clipboardManager.storage.storageRoot;
+  }
+  
+  // Fallback: create our own ClipboardStorage instance
+  try {
+    const ClipboardStorage = require('./clipboard-storage-v2');
+    const storage = new ClipboardStorage();
+    return storage.storageRoot;
+  } catch (err) {
+    console.warn('[Recorder] Could not load ClipboardStorage:', err.message);
+    // Final fallback: use app's userData
+    return path.join(app.getPath('userData'), 'clipboard-data');
+  }
+}
+
 class Recorder {
   constructor() {
     this.window = null;
@@ -49,7 +68,7 @@ class Recorder {
       height: 700,
       minWidth: 600,
       minHeight: 500,
-      title: 'Onereach Recorder',
+      title: 'GSX Capture',
       backgroundColor: '#0d0d0d',
       titleBarStyle: 'hiddenInset',
       trafficLightPosition: { x: 12, y: 12 },
@@ -149,16 +168,14 @@ class Recorder {
       try {
         const { blob, filename, spaceId, projectId, metadata } = data;
         
-        if (!global.clipboardManager) {
-          throw new Error('Clipboard manager not available');
-        }
-
         // Determine save path
         let savePath;
+        const storageRoot = getStorageRoot();
+        
         if (projectId) {
           // Save to project folder
           const projectDir = path.join(
-            global.clipboardManager.storage.storageRoot,
+            storageRoot,
             'spaces',
             spaceId || 'default',
             'projects',
@@ -174,7 +191,7 @@ class Recorder {
         } else if (spaceId) {
           // Save to space root
           const spaceDir = path.join(
-            global.clipboardManager.storage.storageRoot,
+            storageRoot,
             'spaces',
             spaceId
           );
@@ -218,12 +235,10 @@ class Recorder {
 
     // Get project folder
     ipcMain.handle('recorder:get-project-folder', async (event, spaceId) => {
-      if (!global.clipboardManager) {
-        return { success: false, error: 'Clipboard manager not available' };
-      }
-
+      const storageRoot = getStorageRoot();
+      
       const projectsDir = path.join(
-        global.clipboardManager.storage.storageRoot,
+        storageRoot,
         'spaces',
         spaceId,
         'projects'

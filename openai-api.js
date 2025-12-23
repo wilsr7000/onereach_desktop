@@ -9,6 +9,7 @@
  */
 
 const https = require('https');
+const { getBudgetManager } = require('./budget-manager');
 
 class OpenAIAPI {
   constructor() {
@@ -25,6 +26,7 @@ class OpenAIAPI {
    * @param {string} contentType - Type of content
    * @param {string} apiKey - OpenAI API key
    * @param {Object} options - Additional options
+   * @param {string} options.projectId - Project ID for budget tracking
    * @returns {Promise<Object>} Generated metadata
    */
   async generateMetadata(content, contentType, apiKey, options = {}) {
@@ -37,7 +39,10 @@ class OpenAIAPI {
     console.log(`[OpenAI API] Using GPT-5.2 for ${contentType} analysis`);
     console.log(`[OpenAI API] Content length: ${content.length} chars`);
 
-    return this.callAPI(prompt, apiKey);
+    return this.callAPI(prompt, apiKey, {
+      operation: `generateMetadata:${contentType}`,
+      projectId: options.projectId
+    });
   }
 
   /**
@@ -264,8 +269,13 @@ Respond with valid JSON only.`;
 
   /**
    * Call OpenAI API
+   * @param {string} prompt - The prompt to send
+   * @param {string} apiKey - OpenAI API key
+   * @param {Object} trackingOptions - Options for budget tracking
+   * @param {string} trackingOptions.operation - Operation name for tracking
+   * @param {string} trackingOptions.projectId - Project ID for tracking
    */
-  async callAPI(prompt, apiKey) {
+  async callAPI(prompt, apiKey, trackingOptions = {}) {
     return new Promise((resolve, reject) => {
       const postData = JSON.stringify({
         model: this.defaultModel,
@@ -327,6 +337,29 @@ Respond with valid JSON only.`;
             metadata._model = this.defaultModel;
             metadata._provider = 'openai';
             
+            // Track usage if available in response
+            const usage = response.usage;
+            if (usage) {
+              try {
+                const budgetManager = getBudgetManager();
+                budgetManager.trackUsage('openai', trackingOptions.projectId || null, {
+                  operation: trackingOptions.operation || 'api_call',
+                  inputTokens: usage.prompt_tokens || 0,
+                  outputTokens: usage.completion_tokens || 0
+                });
+                console.log(`[OpenAI API] Tracked usage: ${usage.prompt_tokens} input, ${usage.completion_tokens} output tokens`);
+                
+                // Add usage info to metadata
+                metadata._usage = {
+                  inputTokens: usage.prompt_tokens,
+                  outputTokens: usage.completion_tokens,
+                  totalTokens: usage.total_tokens
+                };
+              } catch (trackingError) {
+                console.error('[OpenAI API] Error tracking usage:', trackingError.message);
+              }
+            }
+            
             console.log('[OpenAI API] Successfully generated metadata');
             resolve(metadata);
             
@@ -345,6 +378,127 @@ Respond with valid JSON only.`;
       req.write(postData);
       req.end();
     });
+  }
+
+  /**
+   * Generate audio suggestions for a video marker/scene
+   * @param {Object} marker - Marker data with description, transcription, tags
+   * @param {string} type - 'music' or 'sfx' (sound effects)
+   * @param {string} apiKey - OpenAI API key
+   * @param {Object} options - Additional options
+   * @returns {Promise<Array>} Array of 5 audio prompt suggestions
+   */
+  async generateAudioSuggestions(marker, type, apiKey, options = {}) {
+    if (!apiKey) {
+      throw new Error('OpenAI API key is required');
+    }
+
+    const prompt = this.buildAudioSuggestionPrompt(marker, type, options);
+    
+    console.log(`[OpenAI API] Generating ${type} suggestions for marker:`, marker.name);
+
+    const result = await this.callAPI(prompt, apiKey, {
+      operation: `audioSuggestions:${type}`,
+      projectId: options.projectId
+    });
+
+    return result.suggestions || [];
+  }
+
+  /**
+   * Build prompt for audio suggestions based on marker context
+   * @param {Object} marker - Marker with description, transcription, tags, duration
+   * @param {string} type - 'music' or 'sfx'
+   * @param {Object} options - Additional context
+   * @returns {string} The prompt for OpenAI
+   */
+  buildAudioSuggestionPrompt(marker, type, options = {}) {
+    const duration = marker.duration || (marker.outTime - marker.inTime) || 10;
+    const durationStr = duration.toFixed(1);
+    
+    const context = {
+      name: marker.name || 'Untitled Scene',
+      description: marker.description || '',
+      transcription: marker.transcription || '',
+      tags: (marker.tags || []).join(', '),
+      duration: durationStr
+    };
+
+    if (type === 'music') {
+      return this._buildMusicPrompt(context);
+    } else {
+      return this._buildSFXPrompt(context);
+    }
+  }
+
+  /**
+   * Build music suggestion prompt
+   */
+  _buildMusicPrompt(context) {
+    return `You are a professional music supervisor for film and video. Based on the scene context below, suggest 5 different music options that would work well as background music.
+
+SCENE CONTEXT:
+- Scene Name: ${context.name}
+- Description: ${context.description || 'No description provided'}
+- Transcript/Dialogue: ${context.transcription || 'No dialogue'}
+- Tags: ${context.tags || 'None'}
+- Duration: ${context.duration} seconds
+
+Generate 5 diverse music suggestions. Each suggestion should be distinctly different in style, mood, or genre. Consider the emotional tone, pacing, and content of the scene.
+
+Respond with valid JSON only:
+
+{
+  "suggestions": [
+    {
+      "id": 1,
+      "title": "Short descriptive title (3-5 words)",
+      "prompt": "Detailed prompt for AI music generation (include genre, mood, tempo, instruments, style)",
+      "description": "Brief explanation of why this works for the scene",
+      "genre": "Primary genre",
+      "mood": "Primary mood/emotion",
+      "tempo": "slow|medium|fast",
+      "instrumental": true
+    },
+    ... (4 more suggestions)
+  ]
+}
+
+Make the prompts detailed and specific for best AI music generation results. Vary the suggestions across different genres (cinematic, electronic, acoustic, orchestral, ambient, etc.) and moods.`;
+  }
+
+  /**
+   * Build sound effect suggestion prompt
+   */
+  _buildSFXPrompt(context) {
+    return `You are a professional sound designer for film and video. Based on the scene context below, suggest 5 different sound effect options that would enhance the scene.
+
+SCENE CONTEXT:
+- Scene Name: ${context.name}
+- Description: ${context.description || 'No description provided'}
+- Transcript/Dialogue: ${context.transcription || 'No dialogue'}
+- Tags: ${context.tags || 'None'}
+- Duration: ${context.duration} seconds
+
+Generate 5 diverse sound effect suggestions. Consider what sounds would naturally occur in this scene, what ambient sounds would set the mood, and what sound design elements could enhance the emotional impact.
+
+Respond with valid JSON only:
+
+{
+  "suggestions": [
+    {
+      "id": 1,
+      "title": "Short descriptive title (3-5 words)",
+      "prompt": "Detailed prompt for AI sound effect generation (be specific about the sounds, layers, intensity)",
+      "description": "Brief explanation of why this works for the scene",
+      "category": "ambient|action|foley|atmosphere|transition|impact",
+      "intensity": "subtle|moderate|intense"
+    },
+    ... (4 more suggestions)
+  ]
+}
+
+Make the prompts detailed and specific. Include layered sounds where appropriate (e.g., "city ambience with distant traffic, occasional car horns, and light wind"). Vary between ambient backgrounds, specific sound effects, and atmospheric design.`;
   }
 
   /**
@@ -390,4 +544,41 @@ function getOpenAIAPI() {
 }
 
 module.exports = { OpenAIAPI, getOpenAIAPI };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

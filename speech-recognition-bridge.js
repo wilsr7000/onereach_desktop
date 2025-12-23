@@ -4,7 +4,7 @@
  * Provides speech-to-text functionality for web apps running in Electron
  * since the Web Speech API doesn't work reliably in Electron.
  * 
- * Uses OpenAI Whisper API for transcription.
+ * Uses ElevenLabs Scribe API for transcription (unified TranscriptionService).
  * 
  * Usage from web app:
  *   // Check if running in Electron
@@ -18,16 +18,15 @@
  */
 
 const { ipcMain } = require('electron');
-const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
 class SpeechRecognitionBridge {
   constructor() {
-    this.apiKey = null;
     this.isRecording = false;
     this.tempDir = path.join(os.tmpdir(), 'onereach-speech');
+    this.transcriptionService = null;
     
     // Ensure temp directory exists
     if (!fs.existsSync(this.tempDir)) {
@@ -36,42 +35,24 @@ class SpeechRecognitionBridge {
   }
   
   /**
-   * Initialize with API key
+   * Get the TranscriptionService (lazy load)
    */
-  initialize(apiKey) {
-    this.apiKey = apiKey;
-    console.log('[SpeechBridge] Initialized with API key');
+  async getTranscriptionService() {
+    if (!this.transcriptionService) {
+      const { getTranscriptionService } = await import('./src/transcription/index.js');
+      this.transcriptionService = getTranscriptionService();
+    }
+    return this.transcriptionService;
   }
   
   /**
    * Set up IPC handlers
    */
   setupIPC() {
-    // Get API key from settings
-    ipcMain.handle('speech:get-api-key', async () => {
-      if (global.settingsManager) {
-        return global.settingsManager.get('openaiApiKey') || null;
-      }
-      return null;
-    });
-    
-    // Transcribe audio using Whisper
+    // Transcribe audio using ElevenLabs Scribe
     ipcMain.handle('speech:transcribe', async (event, options) => {
       try {
         const { audioData, language, format } = options;
-        
-        // Get API key
-        let apiKey = this.apiKey;
-        if (!apiKey && global.settingsManager) {
-          apiKey = global.settingsManager.get('openaiApiKey');
-        }
-        
-        if (!apiKey) {
-          return {
-            success: false,
-            error: 'OpenAI API key not configured. Please set it in Settings.'
-          };
-        }
         
         // Decode base64 audio data
         const audioBuffer = Buffer.from(audioData, 'base64');
@@ -80,8 +61,24 @@ class SpeechRecognitionBridge {
         const tempFile = path.join(this.tempDir, `audio_${Date.now()}.${format || 'webm'}`);
         fs.writeFileSync(tempFile, audioBuffer);
         
-        // Transcribe using Whisper
-        const result = await this.transcribeWithWhisper(tempFile, apiKey, language);
+        // Get transcription service
+        const service = await this.getTranscriptionService();
+        
+        // Check if service is available
+        const isAvailable = await service.isAvailable();
+        if (!isAvailable) {
+          fs.unlinkSync(tempFile);
+          return {
+            success: false,
+            error: 'ElevenLabs API key not configured. Please set it in Settings.'
+          };
+        }
+        
+        // Transcribe using unified service
+        const result = await service.transcribe(tempFile, {
+          language: language || null,
+          diarize: true  // Enable speaker identification
+        });
         
         // Clean up temp file
         try {
@@ -104,21 +101,25 @@ class SpeechRecognitionBridge {
     // Transcribe from file path
     ipcMain.handle('speech:transcribe-file', async (event, options) => {
       try {
-        const { filePath, language } = options;
+        const { filePath, language, diarize = true } = options;
         
-        let apiKey = this.apiKey;
-        if (!apiKey && global.settingsManager) {
-          apiKey = global.settingsManager.get('openaiApiKey');
-        }
+        // Get transcription service
+        const service = await this.getTranscriptionService();
         
-        if (!apiKey) {
+        // Check if service is available
+        const isAvailable = await service.isAvailable();
+        if (!isAvailable) {
           return {
             success: false,
-            error: 'OpenAI API key not configured'
+            error: 'ElevenLabs API key not configured'
           };
         }
         
-        return await this.transcribeWithWhisper(filePath, apiKey, language);
+        // Transcribe using unified service
+        return await service.transcribe(filePath, {
+          language: language || null,
+          diarize
+        });
         
       } catch (error) {
         console.error('[SpeechBridge] File transcription error:', error);
@@ -130,16 +131,26 @@ class SpeechRecognitionBridge {
     });
     
     // Check if speech bridge is available
-    ipcMain.handle('speech:is-available', () => {
-      let apiKey = this.apiKey;
-      if (!apiKey && global.settingsManager) {
-        apiKey = global.settingsManager.get('openaiApiKey');
+    ipcMain.handle('speech:is-available', async () => {
+      try {
+        const service = await this.getTranscriptionService();
+        const isAvailable = await service.isAvailable();
+        const info = service.getServiceInfo();
+        
+        return {
+          available: true,
+          hasApiKey: isAvailable,
+          method: 'elevenlabs-scribe',
+          features: info.features
+        };
+      } catch (e) {
+        return {
+          available: false,
+          hasApiKey: false,
+          method: 'elevenlabs-scribe',
+          error: e.message
+        };
       }
-      return {
-        available: true,
-        hasApiKey: !!apiKey,
-        method: 'whisper'
-      };
     });
     
     // Request microphone permission from macOS
@@ -169,137 +180,17 @@ class SpeechRecognitionBridge {
       }
     });
     
-    console.log('[SpeechBridge] IPC handlers registered');
-  }
-  
-  /**
-   * Transcribe audio file using OpenAI Whisper API
-   */
-  async transcribeWithWhisper(filePath, apiKey, language = 'en') {
-    return new Promise((resolve, reject) => {
-      const fileBuffer = fs.readFileSync(filePath);
-      const fileName = path.basename(filePath);
-      
-      // Create multipart form data boundary
-      const boundary = '----WebKitFormBoundary' + Math.random().toString(36).substring(2);
-      
-      // Build multipart form data
-      const formParts = [];
-      
-      // Add file part
-      formParts.push(
-        `--${boundary}\r\n`,
-        `Content-Disposition: form-data; name="file"; filename="${fileName}"\r\n`,
-        `Content-Type: audio/${path.extname(filePath).slice(1) || 'webm'}\r\n\r\n`
-      );
-      
-      const filePartHeader = Buffer.from(formParts.join(''));
-      const filePartFooter = Buffer.from('\r\n');
-      
-      // Add model part
-      const modelPart = Buffer.from(
-        `--${boundary}\r\n` +
-        `Content-Disposition: form-data; name="model"\r\n\r\n` +
-        `whisper-1\r\n`
-      );
-      
-      // Add language part (optional)
-      const languagePart = language ? Buffer.from(
-        `--${boundary}\r\n` +
-        `Content-Disposition: form-data; name="language"\r\n\r\n` +
-        `${language}\r\n`
-      ) : Buffer.alloc(0);
-      
-      // Add response format part
-      const formatPart = Buffer.from(
-        `--${boundary}\r\n` +
-        `Content-Disposition: form-data; name="response_format"\r\n\r\n` +
-        `json\r\n`
-      );
-      
-      // End boundary
-      const endBoundary = Buffer.from(`--${boundary}--\r\n`);
-      
-      // Combine all parts
-      const requestBody = Buffer.concat([
-        filePartHeader,
-        fileBuffer,
-        filePartFooter,
-        modelPart,
-        languagePart,
-        formatPart,
-        endBoundary
-      ]);
-      
-      const options = {
-        hostname: 'api.openai.com',
-        port: 443,
-        path: '/v1/audio/transcriptions',
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': `multipart/form-data; boundary=${boundary}`,
-          'Content-Length': requestBody.length
-        }
-      };
-      
-      console.log('[SpeechBridge] Sending to Whisper API...');
-      
-      const req = https.request(options, (res) => {
-        let data = '';
-        
-        res.on('data', (chunk) => {
-          data += chunk;
-        });
-        
-        res.on('end', () => {
-          try {
-            const response = JSON.parse(data);
-            
-            if (res.statusCode === 200) {
-              console.log('[SpeechBridge] Transcription successful');
-              resolve({
-                success: true,
-                text: response.text,
-                language: language
-              });
-            } else {
-              console.error('[SpeechBridge] API error:', response);
-              resolve({
-                success: false,
-                error: response.error?.message || 'Transcription failed'
-              });
-            }
-          } catch (e) {
-            console.error('[SpeechBridge] Parse error:', e);
-            resolve({
-              success: false,
-              error: 'Failed to parse response'
-            });
-          }
-        });
-      });
-      
-      req.on('error', (error) => {
-        console.error('[SpeechBridge] Request error:', error);
-        resolve({
-          success: false,
-          error: error.message
-        });
-      });
-      
-      req.on('timeout', () => {
-        req.destroy();
-        resolve({
-          success: false,
-          error: 'Request timed out'
-        });
-      });
-      
-      req.setTimeout(60000); // 60 second timeout
-      req.write(requestBody);
-      req.end();
+    // Get transcription service info
+    ipcMain.handle('speech:get-service-info', async () => {
+      try {
+        const service = await this.getTranscriptionService();
+        return service.getServiceInfo();
+      } catch (e) {
+        return { error: e.message };
+      }
     });
+    
+    console.log('[SpeechBridge] IPC handlers registered (using ElevenLabs Scribe)');
   }
   
   /**
@@ -307,27 +198,26 @@ class SpeechRecognitionBridge {
    */
   cleanup() {
     try {
-      const files = fs.readdirSync(this.tempDir);
-      for (const file of files) {
-        fs.unlinkSync(path.join(this.tempDir, file));
+      if (fs.existsSync(this.tempDir)) {
+        const files = fs.readdirSync(this.tempDir);
+        for (const file of files) {
+          fs.unlinkSync(path.join(this.tempDir, file));
+        }
       }
     } catch (e) {
-      // Ignore cleanup errors
+      console.error('[SpeechBridge] Cleanup error:', e);
     }
   }
 }
 
 // Singleton instance
-let speechBridge = null;
+let instance = null;
 
 function getSpeechBridge() {
-  if (!speechBridge) {
-    speechBridge = new SpeechRecognitionBridge();
+  if (!instance) {
+    instance = new SpeechRecognitionBridge();
   }
-  return speechBridge;
+  return instance;
 }
 
-module.exports = {
-  SpeechRecognitionBridge,
-  getSpeechBridge
-};
+module.exports = { SpeechRecognitionBridge, getSpeechBridge };

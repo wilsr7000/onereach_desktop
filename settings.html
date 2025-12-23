@@ -345,6 +345,102 @@
             
             <div class="divider"></div>
             
+            <h3 style="font-size: 16px; margin-bottom: 16px;">AI Voice Generation (ElevenLabs)</h3>
+            
+            <div class="form-group api-key-group">
+                <label for="elevenLabsApiKey">
+                    ElevenLabs API Key
+                    <span id="elevenLabsKeyStatus" class="api-key-status"></span>
+                </label>
+                <div style="position: relative;">
+                    <input type="password" id="elevenLabsApiKey" placeholder="(required for AI voice generation)">
+                    <button class="toggle-visibility" onclick="toggleElevenLabsKeyVisibility()">👁</button>
+                </div>
+                <div class="info-text">Required for AI voice generation and audio replacement in video editor. Get your key at <a href="https://elevenlabs.io/app/settings/api-keys" style="color: #8b5cf6;">elevenlabs.io</a></div>
+            </div>
+            
+            <div class="divider"></div>
+            
+            <h3 style="font-size: 16px; margin-bottom: 16px;">Video Release - YouTube Integration</h3>
+            
+            <div class="form-group api-key-group">
+                <label for="youtubeClientId">
+                    YouTube Client ID
+                    <span id="youtubeClientIdStatus" class="api-key-status"></span>
+                </label>
+                <div style="position: relative;">
+                    <input type="text" id="youtubeClientId" placeholder="(OAuth 2.0 Client ID from Google Cloud Console)">
+                </div>
+            </div>
+            
+            <div class="form-group api-key-group">
+                <label for="youtubeClientSecret">
+                    YouTube Client Secret
+                    <span id="youtubeClientSecretStatus" class="api-key-status"></span>
+                </label>
+                <div style="position: relative;">
+                    <input type="password" id="youtubeClientSecret" placeholder="(OAuth 2.0 Client Secret)">
+                    <button class="toggle-visibility" onclick="toggleYouTubeSecretVisibility()">👁</button>
+                </div>
+            </div>
+            
+            <div class="form-group" style="display: flex; align-items: center; gap: 12px;">
+                <button class="btn" id="youtubeConnectBtn" onclick="connectYouTube()" style="background: #ff0000; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer;">
+                    ▶️ Connect YouTube Account
+                </button>
+                <span id="youtubeConnectionStatus" style="font-size: 13px; color: #b0b0b0;"></span>
+            </div>
+            
+            <div class="info-text">
+                To enable direct YouTube uploads: 
+                1. Go to <a href="https://console.cloud.google.com/apis/credentials" style="color: #8b5cf6;">Google Cloud Console</a>
+                2. Create OAuth 2.0 credentials
+                3. Add <code style="background: #1e1e1e; padding: 2px 6px; border-radius: 4px;">http://localhost:8089/oauth/callback</code> as redirect URI
+                4. Enable YouTube Data API v3
+            </div>
+            
+            <div class="divider"></div>
+            
+            <h3 style="font-size: 16px; margin-bottom: 16px;">Video Release - Vimeo Integration</h3>
+            
+            <div class="form-group api-key-group">
+                <label for="vimeoClientId">
+                    Vimeo Client ID
+                    <span id="vimeoClientIdStatus" class="api-key-status"></span>
+                </label>
+                <div style="position: relative;">
+                    <input type="text" id="vimeoClientId" placeholder="(OAuth Client ID from Vimeo Developer)">
+                </div>
+            </div>
+            
+            <div class="form-group api-key-group">
+                <label for="vimeoClientSecret">
+                    Vimeo Client Secret
+                    <span id="vimeoClientSecretStatus" class="api-key-status"></span>
+                </label>
+                <div style="position: relative;">
+                    <input type="password" id="vimeoClientSecret" placeholder="(OAuth Client Secret)">
+                    <button class="toggle-visibility" onclick="toggleVimeoSecretVisibility()">👁</button>
+                </div>
+            </div>
+            
+            <div class="form-group" style="display: flex; align-items: center; gap: 12px;">
+                <button class="btn" id="vimeoConnectBtn" onclick="connectVimeo()" style="background: #1ab7ea; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer;">
+                    🎬 Connect Vimeo Account
+                </button>
+                <span id="vimeoConnectionStatus" style="font-size: 13px; color: #b0b0b0;"></span>
+            </div>
+            
+            <div class="info-text">
+                To enable direct Vimeo uploads:
+                1. Go to <a href="https://developer.vimeo.com/apps" style="color: #8b5cf6;">Vimeo Developer Apps</a>
+                2. Create a new app
+                3. Add <code style="background: #1e1e1e; padding: 2px 6px; border-radius: 4px;">http://localhost:8090/oauth/callback</code> as redirect URI
+                4. Request upload scope
+            </div>
+            
+            <div class="divider"></div>
+            
             <h3 style="font-size: 16px; margin-bottom: 16px;">AI Features</h3>
             
             <div class="form-group">
@@ -550,7 +646,10 @@
         let apiKeyVisible = false;
         let openaiKeyVisible = false;
         let assemblyaiKeyVisible = false;
+        let elevenLabsKeyVisible = false;
         let gsxTokenVisible = false;
+        let youtubeSecretVisible = false;
+        let vimeoSecretVisible = false;
         
         // Load settings when window opens
         window.addEventListener('DOMContentLoaded', async () => {
@@ -650,6 +749,36 @@
                     document.getElementById('assemblyaiKeyStatus').textContent = '(Key saved)';
                     document.getElementById('assemblyaiKeyStatus').className = 'api-key-status status-valid';
                 }
+                
+                // Load ElevenLabs API key
+                document.getElementById('elevenLabsApiKey').value = settings.elevenLabsApiKey || '';
+
+                // Check if ElevenLabs API key exists
+                if (settings.elevenLabsApiKey) {
+                    document.getElementById('elevenLabsKeyStatus').textContent = '(Key saved)';
+                    document.getElementById('elevenLabsKeyStatus').className = 'api-key-status status-valid';
+                }
+                
+                // Load YouTube credentials
+                document.getElementById('youtubeClientId').value = settings.youtubeClientId || '';
+                document.getElementById('youtubeClientSecret').value = settings.youtubeClientSecret || '';
+                
+                if (settings.youtubeClientId) {
+                    document.getElementById('youtubeClientIdStatus').textContent = '(Saved)';
+                    document.getElementById('youtubeClientIdStatus').className = 'api-key-status status-valid';
+                }
+                
+                // Load Vimeo credentials
+                document.getElementById('vimeoClientId').value = settings.vimeoClientId || '';
+                document.getElementById('vimeoClientSecret').value = settings.vimeoClientSecret || '';
+                
+                if (settings.vimeoClientId) {
+                    document.getElementById('vimeoClientIdStatus').textContent = '(Saved)';
+                    document.getElementById('vimeoClientIdStatus').className = 'api-key-status status-valid';
+                }
+                
+                // Check video release connections
+                checkVideoReleaseConnections();
             } catch (error) {
                 console.error('Error loading settings:', error);
                 showStatus('Error loading settings', 'error');
@@ -676,6 +805,11 @@
                 llmApiKey: document.getElementById('llmApiKey').value,
                 openaiApiKey: document.getElementById('openaiApiKey').value,
                 assemblyaiApiKey: document.getElementById('assemblyaiApiKey').value,
+                elevenLabsApiKey: document.getElementById('elevenLabsApiKey').value,
+                youtubeClientId: document.getElementById('youtubeClientId').value,
+                youtubeClientSecret: document.getElementById('youtubeClientSecret').value,
+                vimeoClientId: document.getElementById('vimeoClientId').value,
+                vimeoClientSecret: document.getElementById('vimeoClientSecret').value,
                 theme: document.getElementById('theme').value,
                 autoSave: document.getElementById('autoSave').checked,
                 claude4ThinkingMode: document.getElementById('claude4ThinkingMode').value,
@@ -800,6 +934,149 @@
                 button.textContent = '🙈';
                 assemblyaiKeyVisible = true;
             }
+        }
+        
+        function toggleElevenLabsKeyVisibility() {
+            const input = document.getElementById('elevenLabsApiKey');
+            const button = input.parentElement.querySelector('.toggle-visibility');
+            
+            if (elevenLabsKeyVisible) {
+                input.type = 'password';
+                button.textContent = '👁';
+                elevenLabsKeyVisible = false;
+            } else {
+                input.type = 'text';
+                button.textContent = '🙈';
+                elevenLabsKeyVisible = true;
+            }
+        }
+        
+        function toggleYouTubeSecretVisibility() {
+            const input = document.getElementById('youtubeClientSecret');
+            const button = input.parentElement.querySelector('.toggle-visibility');
+            
+            if (youtubeSecretVisible) {
+                input.type = 'password';
+                button.textContent = '👁';
+                youtubeSecretVisible = false;
+            } else {
+                input.type = 'text';
+                button.textContent = '🙈';
+                youtubeSecretVisible = true;
+            }
+        }
+        
+        function toggleVimeoSecretVisibility() {
+            const input = document.getElementById('vimeoClientSecret');
+            const button = input.parentElement.querySelector('.toggle-visibility');
+            
+            if (vimeoSecretVisible) {
+                input.type = 'password';
+                button.textContent = '👁';
+                vimeoSecretVisible = false;
+            } else {
+                input.type = 'text';
+                button.textContent = '🙈';
+                vimeoSecretVisible = true;
+            }
+        }
+        
+        async function connectYouTube() {
+            const clientId = document.getElementById('youtubeClientId').value;
+            const clientSecret = document.getElementById('youtubeClientSecret').value;
+            
+            if (!clientId || !clientSecret) {
+                showStatus('Please enter YouTube Client ID and Secret first', 'error');
+                return;
+            }
+            
+            document.getElementById('youtubeConnectionStatus').textContent = 'Connecting...';
+            
+            try {
+                // First save the credentials
+                await window.api.saveSettings({
+                    youtubeClientId: clientId,
+                    youtubeClientSecret: clientSecret
+                });
+                
+                // Then initiate OAuth
+                const result = await window.api.authenticateYouTube();
+                
+                if (result.success) {
+                    const channelName = result.channel?.title || 'Connected';
+                    document.getElementById('youtubeConnectionStatus').innerHTML = 
+                        `<span style="color: #22c55e;">✓ Connected as ${channelName}</span>`;
+                    showStatus('YouTube connected successfully!', 'success');
+                } else {
+                    document.getElementById('youtubeConnectionStatus').innerHTML = 
+                        `<span style="color: #ef4444;">✗ ${result.error || 'Connection failed'}</span>`;
+                }
+            } catch (error) {
+                document.getElementById('youtubeConnectionStatus').innerHTML = 
+                    `<span style="color: #ef4444;">✗ ${error.message}</span>`;
+                showStatus('YouTube connection failed: ' + error.message, 'error');
+            }
+        }
+        
+        async function connectVimeo() {
+            const clientId = document.getElementById('vimeoClientId').value;
+            const clientSecret = document.getElementById('vimeoClientSecret').value;
+            
+            if (!clientId || !clientSecret) {
+                showStatus('Please enter Vimeo Client ID and Secret first', 'error');
+                return;
+            }
+            
+            document.getElementById('vimeoConnectionStatus').textContent = 'Connecting...';
+            
+            try {
+                // First save the credentials
+                await window.api.saveSettings({
+                    vimeoClientId: clientId,
+                    vimeoClientSecret: clientSecret
+                });
+                
+                // Then initiate OAuth
+                const result = await window.api.authenticateVimeo();
+                
+                if (result.success) {
+                    const userName = result.user?.name || 'Connected';
+                    document.getElementById('vimeoConnectionStatus').innerHTML = 
+                        `<span style="color: #22c55e;">✓ Connected as ${userName}</span>`;
+                    showStatus('Vimeo connected successfully!', 'success');
+                } else {
+                    document.getElementById('vimeoConnectionStatus').innerHTML = 
+                        `<span style="color: #ef4444;">✗ ${result.error || 'Connection failed'}</span>`;
+                }
+            } catch (error) {
+                document.getElementById('vimeoConnectionStatus').innerHTML = 
+                    `<span style="color: #ef4444;">✗ ${error.message}</span>`;
+                showStatus('Vimeo connection failed: ' + error.message, 'error');
+            }
+        }
+        
+        async function checkVideoReleaseConnections() {
+            // Check YouTube connection
+            try {
+                const ytStatus = await window.api.getYouTubeStatus();
+                if (ytStatus.authenticated) {
+                    document.getElementById('youtubeConnectionStatus').innerHTML = 
+                        `<span style="color: #22c55e;">✓ Connected as ${ytStatus.channel?.title || 'Unknown'}</span>`;
+                } else if (ytStatus.configured) {
+                    document.getElementById('youtubeConnectionStatus').textContent = 'Not connected';
+                }
+            } catch (e) { /* ignore */ }
+            
+            // Check Vimeo connection
+            try {
+                const vimeoStatus = await window.api.getVimeoStatus();
+                if (vimeoStatus.authenticated) {
+                    document.getElementById('vimeoConnectionStatus').innerHTML = 
+                        `<span style="color: #22c55e;">✓ Connected as ${vimeoStatus.user?.name || 'Unknown'}</span>`;
+                } else if (vimeoStatus.configured) {
+                    document.getElementById('vimeoConnectionStatus').textContent = 'Not connected';
+                }
+            } catch (e) { /* ignore */ }
         }
         
         function updateModelOptions() {

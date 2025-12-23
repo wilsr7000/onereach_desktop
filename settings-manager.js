@@ -96,12 +96,23 @@ class SettingsManager {
       claude4ThinkingLevel: 'default',
       autoAIMetadata: true, // Auto-generate AI metadata for all clipboard items
       autoAIMetadataTypes: ['all'], // Types to auto-generate metadata for (default: all)
+      elevenLabsApiKey: '', // ElevenLabs API key for AI voice generation
+      // Video release - YouTube integration
+      youtubeClientId: '',
+      youtubeClientSecret: '',
+      // Video release - Vimeo integration
+      vimeoClientId: '',
+      vimeoClientSecret: '',
       gsxToken: '',
       gsxEnvironment: 'production',
       gsxAccountId: '',
       gsxAutoSync: false,
       gsxSyncInterval: 'daily',
-      gsxSyncPaths: null
+      gsxSyncPaths: null,
+      // Budget settings
+      budgetEnabled: true, // Enable budget tracking and warnings
+      budgetShowEstimates: true, // Show cost estimates before AI operations
+      budgetConfirmThreshold: 0.05 // Ask confirmation for costs above this amount ($)
     };
   }
 
@@ -171,7 +182,12 @@ class SettingsManager {
       gsxAutoSync: false,
       gsxSyncInterval: 'daily',
       gsxSyncPaths: null,
-      openaiApiKey: ''
+      openaiApiKey: '',
+      elevenLabsApiKey: '',
+      // Budget settings
+      budgetEnabled: true,
+      budgetShowEstimates: true,
+      budgetConfirmThreshold: 0.05
     };
     
     return defaults[key];
@@ -277,6 +293,31 @@ class SettingsManager {
   
   setGSXSyncInterval(interval) {
     return this.set('gsxSyncInterval', interval);
+  }
+
+  // Budget settings methods
+  isBudgetEnabled() {
+    return this.get('budgetEnabled') !== false;
+  }
+  
+  setBudgetEnabled(enabled) {
+    return this.set('budgetEnabled', enabled);
+  }
+  
+  shouldShowBudgetEstimates() {
+    return this.get('budgetShowEstimates') !== false;
+  }
+  
+  setShowBudgetEstimates(show) {
+    return this.set('budgetShowEstimates', show);
+  }
+  
+  getBudgetConfirmThreshold() {
+    return this.get('budgetConfirmThreshold') || 0.05;
+  }
+  
+  setBudgetConfirmThreshold(threshold) {
+    return this.set('budgetConfirmThreshold', threshold);
   }
 }
 

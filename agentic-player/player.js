@@ -77,7 +77,8 @@ const player = {
   loadConfig() {
     const cfg = window.AGENTIC_PLAYER_CONFIG || {};
     this.config = {
-      apiEndpoint: cfg.apiEndpoint || null,
+      // Default to local server if no endpoint configured
+      apiEndpoint: cfg.apiEndpoint || 'http://localhost:3456/playlist',
       apiKey: cfg.apiKey || null,
       apiHeaders: cfg.apiHeaders || {},
       context: cfg.context || {},
@@ -190,7 +191,7 @@ const player = {
   endSession(reason = 'Session ended') {
     this.session.active = false;
     this.video.pause();
-
+    
     this.playback.queue = [];
     this.playback.endSignaled = false;
 
@@ -199,7 +200,7 @@ const player = {
 
     // Reset retry count
     this.apiRetryCount = 0;
-
+    
     this.ui.status.textContent = 'Ended';
     this.ui.status.classList.remove('active');
     
@@ -314,7 +315,7 @@ const player = {
     } finally {
       // Only set isFetching false if not retrying
       if (this.apiRetryCount === 0) {
-        this.playback.isFetching = false;
+      this.playback.isFetching = false;
       }
     }
   },
@@ -341,6 +342,13 @@ const player = {
     // Get next clip from queue
     const clip = this.playback.queue.shift();
     this.playback.currentClip = clip;
+
+    // Check if this clip is a quiz/checkpoint
+    if (this.checkForQuiz(clip)) {
+      console.log('[Player] Quiz marker detected:', clip.name);
+      this.showQuiz(clip);
+      return; // Don't play video yet
+    }
     this.playback.currentEndTime = clip.outTime;
 
     // Track as watched
@@ -385,7 +393,7 @@ const player = {
     } else {
       // No preloaded video available, use normal loading
       console.log('[Player] Loading video normally (no preload available)');
-      this.loadVideo(clip);
+    this.loadVideo(clip);
       
       // Clear stale preloaded video if exists
       this.clearPreloadedVideo();
@@ -423,10 +431,11 @@ const player = {
 
   checkPrefetch() {
     const remaining = this.playback.queue.length;
-
+    this.debug('checkPrefetch called:', { remaining, isFetching: this.playback.isFetching, endSignaled: this.playback.endSignaled, hasPreload: !!this.preloadedVideo });
+    
     // Fetch more clips from API
-    if (remaining <= this.config.prefetchWhenRemaining &&
-        !this.playback.isFetching &&
+    if (remaining <= this.config.prefetchWhenRemaining && 
+        !this.playback.isFetching && 
         !this.playback.endSignaled) {
       console.log(`[Player] Queue low (${remaining}), pre-fetching clips from API...`);
       this.fetchClips();
@@ -434,6 +443,7 @@ const player = {
 
     // Preload next video element for instant transition
     if (remaining > 0 && !this.preloadedVideo) {
+      this.debug('Triggering video preload for next clip');
       this.preloadNextVideo();
     }
   },
@@ -488,6 +498,268 @@ const player = {
     }
   },
 
+  // ==================== QUIZ/CHECKPOINT SYSTEM ====================
+
+  // Quiz state
+  quiz: {
+    active: false,
+    currentQuiz: null,
+    responses: [],
+    score: 0,
+    totalQuestions: 0
+  },
+
+  /**
+   * Check if current clip has a quiz marker
+   */
+  checkForQuiz(clip) {
+    if (!clip) return false;
+    
+    // Check if this is a quiz marker or has quiz data
+    const isQuizMarker = clip.markerType === 'quiz' || clip.type === 'quiz';
+    const hasQuizData = clip.quizData && Object.keys(clip.quizData).length > 0;
+    
+    return isQuizMarker || hasQuizData;
+  },
+
+  /**
+   * Show quiz UI for a clip
+   */
+  showQuiz(clip) {
+    if (this.quiz.active) return;
+    
+    this.quiz.active = true;
+    this.quiz.currentQuiz = clip;
+    
+    // Pause video
+    this.video.pause();
+    
+    // Get quiz data
+    const quizData = clip.quizData || {
+      question: clip.description || clip.name || 'Knowledge Check',
+      type: 'continue', // Default to just a "continue" button if no real quiz
+      options: []
+    };
+    
+    // Create quiz overlay
+    const overlay = document.createElement('div');
+    overlay.id = 'quiz-overlay';
+    overlay.className = 'quiz-overlay';
+    
+    let quizContent = '';
+    
+    if (quizData.type === 'multiple-choice' && quizData.options) {
+      // Multiple choice quiz
+      quizContent = `
+        <div class="quiz-container">
+          <div class="quiz-header">
+            <span class="quiz-icon">❓</span>
+            <span class="quiz-title">Knowledge Check</span>
+          </div>
+          <div class="quiz-question">${this.escapeHtml(quizData.question)}</div>
+          <div class="quiz-options">
+            ${quizData.options.map((opt, i) => `
+              <button class="quiz-option" data-index="${i}" data-correct="${opt.correct || false}">
+                <span class="option-letter">${String.fromCharCode(65 + i)}</span>
+                <span class="option-text">${this.escapeHtml(opt.text || opt)}</span>
+              </button>
+            `).join('')}
+          </div>
+          <div class="quiz-feedback hidden"></div>
+        </div>
+      `;
+    } else if (quizData.type === 'true-false') {
+      // True/False quiz
+      quizContent = `
+        <div class="quiz-container">
+          <div class="quiz-header">
+            <span class="quiz-icon">❓</span>
+            <span class="quiz-title">True or False?</span>
+          </div>
+          <div class="quiz-question">${this.escapeHtml(quizData.question)}</div>
+          <div class="quiz-options">
+            <button class="quiz-option" data-index="0" data-correct="${quizData.answer === true}">
+              <span class="option-letter">✓</span>
+              <span class="option-text">True</span>
+            </button>
+            <button class="quiz-option" data-index="1" data-correct="${quizData.answer === false}">
+              <span class="option-letter">✗</span>
+              <span class="option-text">False</span>
+            </button>
+          </div>
+          <div class="quiz-feedback hidden"></div>
+        </div>
+      `;
+    } else {
+      // Checkpoint/continue prompt
+      quizContent = `
+        <div class="quiz-container checkpoint">
+          <div class="quiz-header">
+            <span class="quiz-icon">📍</span>
+            <span class="quiz-title">Checkpoint</span>
+          </div>
+          <div class="quiz-question">${this.escapeHtml(quizData.question || clip.name || 'Ready to continue?')}</div>
+          ${clip.description ? `<div class="quiz-description">${this.escapeHtml(clip.description)}</div>` : ''}
+          <button class="quiz-continue-btn">Continue Learning ▶</button>
+        </div>
+      `;
+    }
+    
+    overlay.innerHTML = quizContent;
+    
+    // Add to DOM
+    const playerContainer = this.video.closest('.video-container') || this.video.parentElement;
+    playerContainer.appendChild(overlay);
+    
+    // Add event listeners
+    this.attachQuizListeners(overlay, quizData);
+    
+    console.log('[Player] Quiz displayed:', quizData.question);
+  },
+
+  /**
+   * Attach event listeners to quiz UI
+   */
+  attachQuizListeners(overlay, quizData) {
+    // Multiple choice / True-False options
+    overlay.querySelectorAll('.quiz-option').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        this.handleQuizAnswer(btn, overlay, quizData);
+      });
+    });
+    
+    // Continue button for checkpoints
+    const continueBtn = overlay.querySelector('.quiz-continue-btn');
+    if (continueBtn) {
+      continueBtn.addEventListener('click', () => {
+        this.closeQuiz(overlay);
+      });
+    }
+  },
+
+  /**
+   * Handle quiz answer selection
+   */
+  handleQuizAnswer(selectedBtn, overlay, quizData) {
+    const isCorrect = selectedBtn.dataset.correct === 'true';
+    const feedbackEl = overlay.querySelector('.quiz-feedback');
+    
+    // Disable all options
+    overlay.querySelectorAll('.quiz-option').forEach(btn => {
+      btn.disabled = true;
+      btn.classList.add('disabled');
+      
+      // Highlight correct answer
+      if (btn.dataset.correct === 'true') {
+        btn.classList.add('correct');
+      }
+    });
+    
+    // Highlight selected answer
+    selectedBtn.classList.add(isCorrect ? 'correct' : 'incorrect');
+    
+    // Show feedback
+    if (feedbackEl) {
+      feedbackEl.classList.remove('hidden');
+      feedbackEl.className = `quiz-feedback ${isCorrect ? 'correct' : 'incorrect'}`;
+      feedbackEl.innerHTML = isCorrect 
+        ? '✅ Correct! Well done.'
+        : `❌ Not quite. ${quizData.explanation || ''}`;
+    }
+    
+    // Update score
+    if (isCorrect) {
+      this.quiz.score++;
+    }
+    this.quiz.totalQuestions++;
+    
+    // Record response
+    this.quiz.responses.push({
+      quizId: this.quiz.currentQuiz?.id,
+      question: quizData.question,
+      answerIndex: parseInt(selectedBtn.dataset.index),
+      correct: isCorrect,
+      timestamp: Date.now()
+    });
+    
+    // Send response to server
+    this.sendQuizResponse(this.quiz.currentQuiz?.id, selectedBtn.dataset.index, isCorrect);
+    
+    console.log(`[Player] Quiz answer: ${isCorrect ? 'CORRECT' : 'INCORRECT'} (Score: ${this.quiz.score}/${this.quiz.totalQuestions})`);
+    
+    // Auto-continue after delay
+    setTimeout(() => {
+      this.closeQuiz(overlay);
+    }, isCorrect ? 1500 : 2500);
+  },
+
+  /**
+   * Send quiz response to API server
+   */
+  async sendQuizResponse(quizId, answer, correct) {
+    try {
+      const serverUrl = this.config.apiEndpoint.replace('/playlist', '/quiz-response');
+      
+      await fetch(serverUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: this.session.id,
+          quizId,
+          answer,
+          correct
+        })
+      });
+    } catch (e) {
+      console.warn('[Player] Could not send quiz response:', e.message);
+    }
+  },
+
+  /**
+   * Close quiz overlay and resume playback
+   */
+  closeQuiz(overlay) {
+    if (overlay) {
+      overlay.classList.add('fade-out');
+      setTimeout(() => {
+        overlay.remove();
+      }, 300);
+    }
+    
+    this.quiz.active = false;
+    this.quiz.currentQuiz = null;
+    
+    // Resume playback or play next
+    if (this.playback.currentClip) {
+      this.video.play().catch(e => console.warn('[Player] Resume blocked:', e));
+    } else {
+      this.playNext();
+    }
+  },
+
+  /**
+   * Get quiz progress
+   */
+  getQuizProgress() {
+    return {
+      score: this.quiz.score,
+      total: this.quiz.totalQuestions,
+      percentage: this.quiz.totalQuestions > 0 
+        ? Math.round((this.quiz.score / this.quiz.totalQuestions) * 100) 
+        : 0,
+      responses: this.quiz.responses
+    };
+  },
+
+  /**
+   * Escape HTML for safe display
+   */
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text || '';
+    return div.innerHTML;
+  },
+
   // ==================== VIDEO EVENTS ====================
 
   onTimeUpdate() {
@@ -506,30 +778,38 @@ const player = {
       this.onClipEnded();
     }
 
-    // Enhanced buffer health monitoring with critical/warning thresholds
+      // Enhanced buffer health monitoring with critical/warning thresholds
     if (this.playback.currentEndTime) {
       const timeRemaining = this.playback.currentEndTime - currentTime;
-      const queueLength = this.playback.queue.length;
-      
-      // CRITICAL: Less than 3 seconds and no queue - emergency fetch
-      if (timeRemaining <= 3 && queueLength === 0 && !this.playback.isFetching && !this.playback.endSignaled) {
-        console.warn('[Player] CRITICAL: Buffer almost empty! Emergency fetch...');
-        this.ui.thinking.classList.remove('hidden'); // Show loading indicator
-        this.checkPrefetch();
-      }
-      // WARNING: Less than prefetch threshold - normal prefetch
-      else if (timeRemaining <= this.config.prefetchThreshold) {
-        this.checkPrefetch();
+        const queueLength = this.playback.queue.length;
         
-        // Hide loading indicator if we have clips in queue
-        if (queueLength > 0) {
-          this.ui.thinking.classList.add('hidden');
+        this.debug('Buffer health:', {
+          timeRemaining: timeRemaining.toFixed(1),
+          queueLength,
+          hasPreload: !!this.preloadedVideo,
+          isFetching: this.playback.isFetching
+        });
+        
+        // CRITICAL: Less than 3 seconds and no queue - emergency fetch
+        if (timeRemaining <= 3 && queueLength === 0 && !this.playback.isFetching && !this.playback.endSignaled) {
+          console.warn('[Player] CRITICAL: Buffer almost empty! Emergency fetch...');
+          this.ui.thinking.classList.remove('hidden'); // Show loading indicator
+          this.checkPrefetch();
         }
-      }
-      
-      // HEALTHY: More than 10 seconds remaining or queue has clips
-      if (timeRemaining > 10 || queueLength > 1) {
-        this.ui.thinking.classList.add('hidden');
+        // WARNING: Less than prefetch threshold - normal prefetch
+        else if (timeRemaining <= this.config.prefetchThreshold) {
+          this.debug('Prefetch threshold reached');
+        this.checkPrefetch();
+          
+          // Hide loading indicator if we have clips in queue
+          if (queueLength > 0) {
+            this.ui.thinking.classList.add('hidden');
+          }
+        }
+        
+        // HEALTHY: More than 10 seconds remaining or queue has clips
+        if (timeRemaining > 10 || queueLength > 1) {
+          this.ui.thinking.classList.add('hidden');
       }
     }
   },

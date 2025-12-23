@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' http://127.0.0.1:7242; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; media-src 'self' file: blob:; img-src 'self' file: data: blob:;">
+  <title>Video Player</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #0a0a0a;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    .video-container {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+
+    video {
+      max-width: 100%;
+      max-height: 100%;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #000;
+    }
+
+    /* Placeholder when no video is loaded */
+    .placeholder {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      color: #666;
+      font-size: 14px;
+    }
+
+    .placeholder-icon {
+      font-size: 48px;
+      margin-bottom: 12px;
+      opacity: 0.5;
+    }
+
+    /* Status indicator */
+    .status-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 24px;
+      background: rgba(0, 0, 0, 0.8);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      color: #888;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+
+    .video-container:hover .status-bar {
+      opacity: 1;
+    }
+
+    .status-bar .time {
+      color: #fff;
+      font-weight: 500;
+    }
+
+    .status-bar .separator {
+      margin: 0 8px;
+      color: #444;
+    }
+
+    /* Always on top indicator */
+    .pin-indicator {
+      position: fixed;
+      top: 8px;
+      right: 8px;
+      width: 24px;
+      height: 24px;
+      background: rgba(0, 0, 0, 0.6);
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      color: #888;
+      font-size: 12px;
+    }
+
+    .video-container:hover .pin-indicator {
+      opacity: 1;
+    }
+
+    .pin-indicator:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .pin-indicator.pinned {
+      color: #f59e0b;
+    }
+
+    /* Hidden class */
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+  <div class="video-container" id="videoContainer">
+    <!-- Placeholder -->
+    <div class="placeholder" id="placeholder">
+      <div class="placeholder-icon">🎬</div>
+      <div>Waiting for video...</div>
+    </div>
+
+    <!-- Video Player (remote-controlled; main window drives playback) -->
+    <video id="videoPlayer" class="hidden" controls playsinline></video>
+
+    <!-- Always on top toggle -->
+    <div class="pin-indicator" id="pinIndicator" title="Toggle always on top">
+      📌
+    </div>
+
+    <!-- Status bar -->
+    <div class="status-bar" id="statusBar">
+      <span class="time" id="currentTimeDisplay">0:00</span>
+      <span class="separator">/</span>
+      <span class="time" id="durationDisplay">0:00</span>
+    </div>
+  </div>
+
+  <script>
+    // Keep the detached player quiet by default; enable only when explicitly debugging.
+    // Use `detached-video-player.html?debug=1` to enable verbose logs.
+    const DEBUG = new URLSearchParams(window.location.search).get('debug') === '1';
+    function dlog(...args) {
+      if (!DEBUG) return;
+      console.log(...args);
+    }
+
+    // Video player state
+    const video = document.getElementById('videoPlayer');
+    const placeholder = document.getElementById('placeholder');
+    const pinIndicator = document.getElementById('pinIndicator');
+    const currentTimeDisplay = document.getElementById('currentTimeDisplay');
+    const durationDisplay = document.getElementById('durationDisplay');
+    
+    let isPinned = false;
+
+    // Detached window should be controlled by the main window (default).
+    // If you ever want to allow local control for debugging, open with `?localControl=1`.
+    const LOCAL_CONTROL = new URLSearchParams(window.location.search).get('localControl') === '1';
+
+    // Format time helper
+    function formatTime(seconds) {
+      if (isNaN(seconds) || !isFinite(seconds)) return '0:00';
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.floor(seconds % 60);
+      return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    // Update time display
+    function updateTimeDisplay() {
+      currentTimeDisplay.textContent = formatTime(video.currentTime);
+      durationDisplay.textContent = formatTime(video.duration);
+    }
+
+    // Video event listeners
+    video.addEventListener('timeupdate', () => {
+      updateTimeDisplay();
+      // Report time back to main window
+      if (window.detachedVideo && window.detachedVideo.reportTimeUpdate) {
+        window.detachedVideo.reportTimeUpdate(video.currentTime);
+      }
+    });
+
+    video.addEventListener('loadedmetadata', () => {
+      dlog('[DetachedVideo] Video metadata loaded');
+      dlog('[DetachedVideo] Video dimensions:', video.videoWidth, 'x', video.videoHeight);
+      updateTimeDisplay();
+      placeholder.classList.add('hidden');
+      video.classList.remove('hidden');
+      dlog('[DetachedVideo] Placeholder classes:', placeholder.className);
+      dlog('[DetachedVideo] Video classes:', video.className);
+      dlog('[DetachedVideo] Video display style:', getComputedStyle(video).display);
+
+      if (DEBUG) {
+        const rect = video.getBoundingClientRect();
+        dlog('[DetachedVideo DEBUG] loadedmetadata render check:', {
+        computedWidth: getComputedStyle(video).width,
+        computedHeight: getComputedStyle(video).height,
+        rectWidth: rect.width,
+        rectHeight: rect.height,
+        opacity: getComputedStyle(video).opacity,
+        visibility: getComputedStyle(video).visibility,
+        zIndex: getComputedStyle(video).zIndex
+        });
+      }
+    });
+
+    video.addEventListener('error', (e) => {
+      console.error('[DetachedVideo] Video error:', video.error);
+      console.error('[DetachedVideo DEBUG] Error details:', {
+        errorCode: video.error?.code,
+        errorMessage: video.error?.message,
+        videoSrc: video.src,
+        networkState: video.networkState,
+        readyState: video.readyState
+      });
+      placeholder.querySelector('.placeholder-icon').textContent = '❌';
+      placeholder.querySelector('div:last-child').textContent = 'Error loading video: ' + (video.error ? video.error.message : 'Unknown error');
+    });
+
+    video.addEventListener('canplay', () => {
+      dlog('[DetachedVideo] Video can play');
+      if (DEBUG) {
+        const rect = video.getBoundingClientRect();
+        const containerRect = document.getElementById('videoContainer').getBoundingClientRect();
+        dlog('[DetachedVideo DEBUG] canplay state:', {
+          readyState: video.readyState,
+          paused: video.paused,
+          currentTime: video.currentTime,
+          videoRect: { w: rect.width, h: rect.height },
+          containerRect: { w: containerRect.width, h: containerRect.height },
+          networkState: video.networkState
+        });
+      }
+      // Try to show the first frame immediately (keeps UI from looking "blank")
+      if (video.currentTime < 0.01) {
+        dlog('[DetachedVideo] Seeking to 0.001 to show first frame...');
+        video.currentTime = 0.001;
+      }
+    });
+
+    video.addEventListener('seeked', () => {
+      if (!DEBUG) return;
+      const rect = video.getBoundingClientRect();
+      dlog('[DetachedVideo DEBUG] seeked - first frame should now show:', {
+        currentTime: video.currentTime,
+        readyState: video.readyState,
+        videoWidth: video.videoWidth,
+        videoHeight: video.videoHeight,
+        paused: video.paused,
+        display: getComputedStyle(video).display,
+        rectWidth: rect.width,
+        rectHeight: rect.height
+      });
+    });
+
+    video.addEventListener('play', () => {
+      // Report play state to main window.
+      // Since we've disabled local controls (no controls attr, dblclick disabled, keyboard disabled),
+      // play can only be triggered by remote sync, so no need to fight it.
+      if (window.detachedVideo && window.detachedVideo.reportPlayState) {
+        window.detachedVideo.reportPlayState(true);
+      }
+    });
+
+    video.addEventListener('pause', () => {
+      // Report pause state to main window.
+      if (window.detachedVideo && window.detachedVideo.reportPlayState) {
+        window.detachedVideo.reportPlayState(false);
+      }
+    });
+
+    // Pin indicator click
+    pinIndicator.addEventListener('click', () => {
+      isPinned = !isPinned;
+      pinIndicator.classList.toggle('pinned', isPinned);
+      if (window.detachedVideo && window.detachedVideo.toggleAlwaysOnTop) {
+        window.detachedVideo.toggleAlwaysOnTop(isPinned);
+      }
+    });
+
+    // Double-click to toggle play/pause (only when local control is allowed)
+    video.addEventListener('dblclick', () => {
+      if (!LOCAL_CONTROL) return;
+      if (video.paused) video.play();
+      else video.pause();
+    });
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      if (!LOCAL_CONTROL) return;
+      switch (e.key) {
+        case ' ':
+          e.preventDefault();
+          if (video.paused) {
+            video.play();
+          } else {
+            video.pause();
+          }
+          break;
+        case 'ArrowLeft':
+          video.currentTime = Math.max(0, video.currentTime - 5);
+          break;
+        case 'ArrowRight':
+          video.currentTime = Math.min(video.duration, video.currentTime + 5);
+          break;
+        case 'p':
+          // Toggle pin
+          pinIndicator.click();
+          break;
+      }
+    });
+
+    // Expose API for preload script
+    window.detachedVideoAPI = {
+      setSource: (path) => {
+        dlog('[DetachedVideo] Setting source:', path);
+        video.src = path;
+        dlog('[DetachedVideo] Video src after set:', video.src);
+        video.load();
+        dlog('[DetachedVideo] Video load() called, readyState:', video.readyState);
+      },
+      
+      syncPlayback: (state) => {
+        dlog('[DetachedVideo] Sync playback:', state);
+        // Always apply time if provided (lower threshold for responsive seeking)
+        if (state.currentTime !== undefined && Math.abs(video.currentTime - state.currentTime) > 0.1) {
+          video.currentTime = state.currentTime;
+        }
+        if (state.playing !== undefined) {
+          if (state.playing && video.paused) {
+            video.play().catch(() => {});
+          } else if (!state.playing && !video.paused) {
+            video.pause();
+          }
+        }
+        if (state.playbackRate !== undefined) {
+          video.playbackRate = state.playbackRate;
+        }
+      },
+      
+      getState: () => ({
+        currentTime: video.currentTime,
+        duration: video.duration,
+        playing: !video.paused,
+        playbackRate: video.playbackRate
+      }),
+
+      setPinned: (pinned) => {
+        isPinned = pinned;
+        pinIndicator.classList.toggle('pinned', isPinned);
+      }
+    };
+
+    dlog('[DetachedVideo] Player initialized');
+    
+    // Signal to preload that we're ready and pass our API
+    if (window.detachedVideo && window.detachedVideo.signalReady) {
+      window.detachedVideo.signalReady(window.detachedVideoAPI);
+    }
+
+    if (DEBUG) {
+      // Log final state after 2 seconds to see video render state
+      setTimeout(() => {
+        const rect = video.getBoundingClientRect();
+        const containerRect = document.getElementById('videoContainer').getBoundingClientRect();
+        const computedStyle = getComputedStyle(video);
+        dlog('[DetachedVideo DEBUG] FINAL STATE after 2s:', {
+          videoSrc: video.src ? video.src.substring(0, 50) + '...' : 'EMPTY',
+          readyState: video.readyState,
+          networkState: video.networkState,
+          paused: video.paused,
+          currentTime: video.currentTime,
+          duration: video.duration,
+          videoWidth: video.videoWidth,
+          videoHeight: video.videoHeight,
+          rectWidth: rect.width,
+          rectHeight: rect.height,
+          containerWidth: containerRect.width,
+          containerHeight: containerRect.height,
+          display: computedStyle.display,
+          visibility: computedStyle.visibility,
+          opacity: computedStyle.opacity,
+          placeholderHidden: placeholder.classList.contains('hidden'),
+          videoHidden: video.classList.contains('hidden')
+        });
+      }, 2000);
+    }
+  </script>
+</body>
+</html>
+

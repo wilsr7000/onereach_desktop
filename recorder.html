@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; media-src 'self' blob: mediastream:; img-src 'self' blob: data:;">
-  <title>Onereach Recorder</title>
+  <title>GSX Capture</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
@@ -499,6 +499,100 @@
     .permission-btn:hover {
       filter: brightness(1.1);
     }
+
+    /* Screen Source Picker */
+    .screen-picker {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.9);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      opacity: 0;
+      visibility: hidden;
+      transition: all 0.2s;
+    }
+
+    .screen-picker.active {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .screen-picker-content {
+      background: var(--bg-surface);
+      border-radius: 12px;
+      padding: 24px;
+      width: 600px;
+      max-width: 90%;
+      max-height: 80vh;
+      overflow-y: auto;
+    }
+
+    .screen-picker-title {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .screen-picker-subtitle {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-bottom: 20px;
+    }
+
+    .screen-picker-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .screen-source-item {
+      background: var(--bg-panel);
+      border: 2px solid var(--border-color);
+      border-radius: 8px;
+      padding: 8px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .screen-source-item:hover {
+      border-color: var(--accent-primary);
+      background: var(--bg-elevated);
+    }
+
+    .screen-source-item.selected {
+      border-color: var(--accent-primary);
+      background: var(--bg-elevated);
+    }
+
+    .screen-source-thumbnail {
+      width: 100%;
+      aspect-ratio: 16/9;
+      object-fit: contain;
+      background: #000;
+      border-radius: 4px;
+      margin-bottom: 8px;
+    }
+
+    .screen-source-name {
+      font-size: 12px;
+      color: var(--text-primary);
+      text-align: center;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .screen-picker-actions {
+      display: flex;
+      gap: 12px;
+      justify-content: flex-end;
+    }
   </style>
 </head>
 <body>
@@ -509,7 +603,7 @@
         <circle cx="12" cy="12" r="10"/>
         <circle cx="12" cy="12" r="3" fill="currentColor"/>
       </svg>
-      Onereach Recorder
+      GSX Capture
     </div>
     <div class="header-actions">
       <button class="header-btn" onclick="app.minimize()" title="Minimize">
@@ -652,6 +746,21 @@
     </div>
   </div>
 
+  <!-- Screen Source Picker -->
+  <div class="screen-picker" id="screenPicker">
+    <div class="screen-picker-content">
+      <div class="screen-picker-title">Select Screen or Window</div>
+      <div class="screen-picker-subtitle">Choose what you want to record</div>
+      <div class="screen-picker-grid" id="screenSourcesGrid">
+        <!-- Sources will be populated here -->
+      </div>
+      <div class="screen-picker-actions">
+        <button class="control-btn secondary" onclick="app.hideScreenPicker()">Cancel</button>
+        <button class="control-btn primary" onclick="app.selectScreenSource()">Select</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Status Message -->
   <div class="status-message" id="statusMessage"></div>
 
@@ -668,6 +777,8 @@
       reviewBlobUrl: null,
       durationInterval: null,
       instructions: null,
+      screenSources: [],
+      selectedScreenSourceId: null,
 
       // DOM Elements
       elements: {},
@@ -717,7 +828,9 @@
           saveFilename: document.getElementById('saveFilename'),
           saveSpace: document.getElementById('saveSpace'),
           saveProject: document.getElementById('saveProject'),
-          statusMessage: document.getElementById('statusMessage')
+          statusMessage: document.getElementById('statusMessage'),
+          screenPicker: document.getElementById('screenPicker'),
+          screenSourcesGrid: document.getElementById('screenSourcesGrid')
         };
       },
 
@@ -744,30 +857,52 @@
       async loadDevices() {
         try {
           // Request permission first to get device labels
-          const tempStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-          tempStream.getTracks().forEach(t => t.stop());
+          let hasCamera = false;
+          try {
+            const tempStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            tempStream.getTracks().forEach(t => t.stop());
+            hasCamera = true;
+          } catch (e) {
+            // Camera not available, try audio only
+            try {
+              const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+              audioStream.getTracks().forEach(t => t.stop());
+            } catch (e2) {
+              console.warn('[Recorder] No camera or mic available');
+            }
+          }
 
           const devices = await navigator.mediaDevices.enumerateDevices();
           
           // Video devices
           const videoDevices = devices.filter(d => d.kind === 'videoinput');
-          this.elements.videoSource.innerHTML = '<option value="">Select camera...</option>';
-          videoDevices.forEach((device, i) => {
-            const option = document.createElement('option');
-            option.value = device.deviceId;
-            option.textContent = device.label || `Camera ${i + 1}`;
-            this.elements.videoSource.appendChild(option);
-          });
+          this.elements.videoSource.innerHTML = '<option value="">Select source...</option>';
+          
+          // Add camera options if available
+          if (videoDevices.length > 0) {
+            const cameraGroup = document.createElement('optgroup');
+            cameraGroup.label = '📹 Cameras';
+            videoDevices.forEach((device, i) => {
+              const option = document.createElement('option');
+              option.value = device.deviceId;
+              option.textContent = device.label || `Camera ${i + 1}`;
+              cameraGroup.appendChild(option);
+            });
+            this.elements.videoSource.appendChild(cameraGroup);
+          }
 
-          // Add screen capture option
+          // Add screen capture option group
+          const screenGroup = document.createElement('optgroup');
+          screenGroup.label = '🖥️ Screen Recording';
           const screenOption = document.createElement('option');
           screenOption.value = 'screen';
-          screenOption.textContent = '🖥️ Screen Capture';
-          this.elements.videoSource.appendChild(screenOption);
+          screenOption.textContent = 'Select Screen or Window...';
+          screenGroup.appendChild(screenOption);
+          this.elements.videoSource.appendChild(screenGroup);
 
           // Audio devices
           const audioDevices = devices.filter(d => d.kind === 'audioinput');
-          this.elements.audioSource.innerHTML = '<option value="">Select microphone...</option>';
+          this.elements.audioSource.innerHTML = '<option value="">No microphone</option>';
           audioDevices.forEach((device, i) => {
             const option = document.createElement('option');
             option.value = device.deviceId;
@@ -840,31 +975,149 @@
             this.stream.getTracks().forEach(t => t.stop());
           }
 
-          let videoConstraints;
           if (deviceId === 'screen') {
-            // Screen capture
-            this.stream = await navigator.mediaDevices.getDisplayMedia({
-              video: { cursor: 'always' },
-              audio: false
-            });
+            // Show screen picker for screen capture
+            await this.showScreenPicker();
+            return; // Stream will be set when user selects a source
+          } else if (deviceId.startsWith('screen:')) {
+            // Selected a specific screen source
+            const sourceId = deviceId.replace('screen:', '');
+            await this.startScreenCapture(sourceId);
           } else {
             // Camera
-            videoConstraints = { deviceId: { exact: deviceId } };
+            const videoConstraints = { deviceId: { exact: deviceId } };
             const audioDeviceId = this.elements.audioSource.value;
             
             this.stream = await navigator.mediaDevices.getUserMedia({
               video: videoConstraints,
               audio: audioDeviceId ? { deviceId: { exact: audioDeviceId } } : true
             });
+            
+            this.elements.previewVideo.srcObject = this.stream;
+            this.elements.previewPlaceholder.style.display = 'none';
+            this.elements.previewVideo.style.display = 'block';
+            this.elements.reviewVideo.style.display = 'none';
           }
+        } catch (error) {
+          console.error('[Recorder] Failed to get media:', error);
+          this.showStatus('Failed to access camera: ' + error.message, 'error');
+        }
+      },
+
+      // Show screen source picker
+      async showScreenPicker() {
+        if (!window.recorder || !window.recorder.getScreenSources) {
+          this.showStatus('Screen capture not available', 'error');
+          return;
+        }
+
+        try {
+          this.screenSources = await window.recorder.getScreenSources();
+          
+          if (this.screenSources.length === 0) {
+            this.showStatus('No screen sources found. Check screen recording permissions.', 'error');
+            return;
+          }
+
+          // Populate the grid
+          this.elements.screenSourcesGrid.innerHTML = '';
+          this.selectedScreenSourceId = null;
+          
+          this.screenSources.forEach((source, index) => {
+            const item = document.createElement('div');
+            item.className = 'screen-source-item';
+            item.dataset.sourceId = source.id;
+            item.onclick = () => this.selectScreenSourceItem(source.id);
+            
+            // Auto-select first item
+            if (index === 0) {
+              item.classList.add('selected');
+              this.selectedScreenSourceId = source.id;
+            }
+            
+            item.innerHTML = `
+              <img class="screen-source-thumbnail" src="${source.thumbnail}" alt="${source.name}">
+              <div class="screen-source-name">${source.name}</div>
+            `;
+            
+            this.elements.screenSourcesGrid.appendChild(item);
+          });
+
+          this.elements.screenPicker.classList.add('active');
+        } catch (error) {
+          console.error('[Recorder] Error loading screen sources:', error);
+          this.showStatus('Failed to load screen sources: ' + error.message, 'error');
+        }
+      },
+
+      // Select a screen source item in the picker
+      selectScreenSourceItem(sourceId) {
+        this.selectedScreenSourceId = sourceId;
+        
+        // Update visual selection
+        this.elements.screenSourcesGrid.querySelectorAll('.screen-source-item').forEach(item => {
+          item.classList.toggle('selected', item.dataset.sourceId === sourceId);
+        });
+      },
+
+      // Hide screen picker
+      hideScreenPicker() {
+        this.elements.screenPicker.classList.remove('active');
+        // Reset video source to empty if cancelled
+        if (!this.stream) {
+          this.elements.videoSource.value = '';
+        }
+      },
+
+      // Confirm screen source selection
+      async selectScreenSource() {
+        if (!this.selectedScreenSourceId) {
+          this.showStatus('Please select a screen or window', 'error');
+          return;
+        }
+
+        this.elements.screenPicker.classList.remove('active');
+        await this.startScreenCapture(this.selectedScreenSourceId);
+      },
+
+      // Start screen capture with a specific source
+      async startScreenCapture(sourceId) {
+        try {
+          const audioDeviceId = this.elements.audioSource.value;
+          
+          // Use Electron's chromeMediaSource constraint
+          this.stream = await navigator.mediaDevices.getUserMedia({
+            audio: audioDeviceId ? { deviceId: { exact: audioDeviceId } } : false,
+            video: {
+              mandatory: {
+                chromeMediaSource: 'desktop',
+                chromeMediaSourceId: sourceId
+              }
+            }
+          });
 
           this.elements.previewVideo.srcObject = this.stream;
           this.elements.previewPlaceholder.style.display = 'none';
           this.elements.previewVideo.style.display = 'block';
           this.elements.reviewVideo.style.display = 'none';
+          
+          // Update the source name in dropdown
+          const source = this.screenSources.find(s => s.id === sourceId);
+          if (source) {
+            // Update or add the option
+            let option = this.elements.videoSource.querySelector('option[value="screen"]');
+            if (option) {
+              option.textContent = `🖥️ ${source.name}`;
+              option.value = `screen:${sourceId}`;
+              this.elements.videoSource.value = `screen:${sourceId}`;
+            }
+          }
+          
+          console.log('[Recorder] Screen capture started:', sourceId);
         } catch (error) {
-          console.error('[Recorder] Failed to get media:', error);
-          this.showStatus('Failed to access camera: ' + error.message, 'error');
+          console.error('[Recorder] Screen capture error:', error);
+          this.showStatus('Failed to start screen capture: ' + error.message, 'error');
+          this.elements.videoSource.value = '';
         }
       },
 
@@ -1004,7 +1257,7 @@
         this.elements.previewVideo.style.display = 'block';
         this.elements.reviewVideo.style.display = 'none';
         this.elements.reviewVideo.src = '';
-
+        
         this.elements.controlsSection.style.display = 'flex';
         this.elements.reviewControls.style.display = 'none';
 

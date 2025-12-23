@@ -377,11 +377,21 @@ class ModuleManager {
   loadWebTools() {
     try {
       const webToolsPath = this.getWebToolsPath();
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'module-manager.js:loadWebTools',message:'loadWebTools called',data:{webToolsPath,fileExists:fs.existsSync(webToolsPath)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})}).catch(()=>{});
+      // #endregion
       if (fs.existsSync(webToolsPath)) {
-        return JSON.parse(fs.readFileSync(webToolsPath, 'utf8'));
+        const tools = JSON.parse(fs.readFileSync(webToolsPath, 'utf8'));
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'module-manager.js:loadWebTools-success',message:'Web tools loaded',data:{count:tools.length,names:tools.map(t=>t.name)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})}).catch(()=>{});
+        // #endregion
+        return tools;
       }
     } catch (error) {
       console.error('Error loading web tools:', error);
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'module-manager.js:loadWebTools-error',message:'Error loading web tools',data:{error:error.message},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})}).catch(()=>{});
+      // #endregion
     }
     return [];
   }

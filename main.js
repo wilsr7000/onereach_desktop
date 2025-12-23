@@ -155,6 +155,7 @@ function createWindow() {
 function createTray() {
   // Use properly sized template icon for macOS (22x22 with @2x variant for retina)
   // Template naming convention allows macOS to automatically adapt icon color for light/dark mode
+  const { nativeImage } = require('electron');
   const templateIconPath = path.join(__dirname, 'assets/tray-iconTemplate.png');
   const fallbackIconPath = path.join(__dirname, 'assets/tray-icon.png');
   
@@ -171,8 +172,16 @@ function createTray() {
   // Get main window reference
   const mainWindow = browserWindow.getMainWindow();
   
-  // Create the tray icon
-  tray = new Tray(trayIconPath);
+  // Create the tray icon using nativeImage and set as template for proper macOS rendering
+  let trayIcon = nativeImage.createFromPath(trayIconPath);
+  
+  // On macOS, explicitly mark as template image for proper menu bar rendering
+  if (process.platform === 'darwin') {
+    trayIcon.setTemplateImage(true);
+    console.log('Set tray icon as template image for macOS');
+  }
+  
+  tray = new Tray(trayIcon);
   const contextMenu = Menu.buildFromTemplate([
     { label: 'Show App', click: () => { 
       const mainWindow = browserWindow.getMainWindow();

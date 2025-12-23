@@ -1622,7 +1622,7 @@ async function searchItems(query) {
     renderHistory(filtered);
 }
 
-// Show context menu
+// Show context menu with smart positioning to prevent cut-off
 function showContextMenu(e, itemId) {
     e.preventDefault();
     e.stopPropagation();
@@ -1630,19 +1630,58 @@ function showContextMenu(e, itemId) {
     const contextMenu = document.getElementById('contextMenu');
     contextMenuItem = itemId;
     
-    // Position the menu
-    contextMenu.style.display = 'block';
-    contextMenu.style.left = `${e.pageX}px`;
-    contextMenu.style.top = `${e.pageY}px`;
+    const padding = 8;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    // Use clientX/clientY for fixed positioning (viewport-relative)
+    const x = e.clientX;
+    const y = e.clientY;
     
-    // Adjust position if menu goes off screen
+    // Show off-screen to measure
+    contextMenu.style.left = '-9999px';
+    contextMenu.style.top = '-9999px';
+    contextMenu.style.display = 'block';
+    
+    // Get menu dimensions
     const rect = contextMenu.getBoundingClientRect();
-    if (rect.right > window.innerWidth) {
-        contextMenu.style.left = `${e.pageX - rect.width}px`;
+    const mw = rect.width;
+    const mh = rect.height;
+    
+    // Calculate available space
+    const spaceRight = vw - x - padding;
+    const spaceLeft = x - padding;
+    const spaceBelow = vh - y - padding;
+    const spaceAbove = y - padding;
+    
+    let finalX, finalY;
+    
+    // Horizontal: prefer right, flip to left if needed
+    if (mw <= spaceRight) {
+        finalX = x;
+    } else if (mw <= spaceLeft) {
+        finalX = x - mw;
+    } else {
+        // Not enough space either side - fit to widest side
+        finalX = spaceRight >= spaceLeft ? vw - mw - padding : padding;
     }
-    if (rect.bottom > window.innerHeight) {
-        contextMenu.style.top = `${e.pageY - rect.height}px`;
+    
+    // Vertical: prefer below, flip above if needed
+    if (mh <= spaceBelow) {
+        finalY = y;
+    } else if (mh <= spaceAbove) {
+        finalY = y - mh;
+    } else {
+        // Menu taller than available space - position at top with padding
+        finalY = padding;
     }
+    
+    // Clamp to viewport bounds
+    finalX = Math.max(padding, Math.min(finalX, vw - mw - padding));
+    finalY = Math.max(padding, Math.min(finalY, vh - mh - padding));
+    
+    // Apply position
+    contextMenu.style.left = `${Math.round(finalX)}px`;
+    contextMenu.style.top = `${Math.round(finalY)}px`;
 }
 
 // Hide context menu
@@ -2199,9 +2238,10 @@ function getMetadataSchemaForType(item) {
 // Show metadata modal with DYNAMIC fields based on asset type
 async function showMetadataModal(itemId) {
     const modal = document.getElementById('metadataModal');
-    
+
     // Get current metadata AND item
     const result = await window.clipboard.getMetadata(itemId);
+    
     if (!result.success) {
         alert('Could not load metadata');
         return;
@@ -2248,11 +2288,16 @@ async function showMetadataModal(itemId) {
     
     const config = typeConfig[assetType] || typeConfig['file'];
     
-    // Update header
-    document.getElementById('metadataAssetIcon').textContent = config.icon;
-    document.getElementById('metadataTitle').textContent = metadata.title || item.fileName || 'Untitled';
-    document.getElementById('metadataTypeBadge').textContent = config.name;
-    document.getElementById('metadataFileName').textContent = item.fileName || '';
+    // Update header - with null checks
+    const assetIconEl = document.getElementById('metadataAssetIcon');
+    const titleEl = document.getElementById('metadataTitle');
+    const typeBadgeEl = document.getElementById('metadataTypeBadge');
+    const fileNameEl = document.getElementById('metadataFileName');
+    
+    if (assetIconEl) assetIconEl.textContent = config.icon;
+    if (titleEl) titleEl.textContent = metadata.title || item.fileName || 'Untitled';
+    if (typeBadgeEl) typeBadgeEl.textContent = config.name;
+    if (fileNameEl) fileNameEl.textContent = item.fileName || '';
     
     // Update tags display
     const tagsSection = document.getElementById('tagsDisplaySection');
@@ -2605,19 +2650,31 @@ async function showMetadataModal(itemId) {
         }
     }
     
-    // AI fields
-    document.getElementById('metaAiGenerated').checked = metadata.ai_generated || false;
-    document.getElementById('metaAiAssisted').checked = metadata.ai_assisted || false;
-    document.getElementById('metaAiModel').value = metadata.ai_model || '';
-    document.getElementById('metaAiProvider').value = metadata.ai_provider || '';
-    document.getElementById('metaAiPrompt').value = metadata.ai_prompt || '';
-    document.getElementById('metaAiContext').value = metadata.ai_context || '';
+    // AI fields - with null checks for missing elements
+    const aiGenerated = document.getElementById('metaAiGenerated');
+    const aiAssisted = document.getElementById('metaAiAssisted');
+    const aiModel = document.getElementById('metaAiModel');
+    const aiProvider = document.getElementById('metaAiProvider');
+    const aiPrompt = document.getElementById('metaAiPrompt');
+    const aiContext = document.getElementById('metaAiContext');
     
-    // Read-only fields
-    document.getElementById('metaDateCreated').textContent = metadata.dateCreated ? new Date(metadata.dateCreated).toLocaleString() : 'Unknown';
-    document.getElementById('metaAuthor').textContent = metadata.author || 'Unknown';
-    document.getElementById('metaVersion').textContent = metadata.version || '1.0.0';
-    document.getElementById('metaId').textContent = metadata.id || itemId;
+    if (aiGenerated) aiGenerated.checked = metadata.ai_generated || false;
+    if (aiAssisted) aiAssisted.checked = metadata.ai_assisted || false;
+    if (aiModel) aiModel.value = metadata.ai_model || '';
+    if (aiProvider) aiProvider.value = metadata.ai_provider || '';
+    if (aiPrompt) aiPrompt.value = metadata.ai_prompt || '';
+    if (aiContext) aiContext.value = metadata.ai_context || '';
+    
+    // Read-only fields - with null checks
+    const dateCreatedEl = document.getElementById('metaDateCreated');
+    const authorEl = document.getElementById('metaAuthor');
+    const versionEl = document.getElementById('metaVersion');
+    const idEl = document.getElementById('metaId');
+    
+    if (dateCreatedEl) dateCreatedEl.textContent = metadata.dateCreated ? new Date(metadata.dateCreated).toLocaleString() : 'Unknown';
+    if (authorEl) authorEl.textContent = metadata.author || 'Unknown';
+    if (versionEl) versionEl.textContent = metadata.version || '1.0.0';
+    if (idEl) idEl.textContent = metadata.id || itemId;
     
     // Set source/context fields
     const sourceEl = document.getElementById('metaSource');
@@ -2683,9 +2740,26 @@ function toggleTranscriptSection() {
 
 // Save metadata from DYNAMIC fields
 async function saveMetadata() {
+    // #region agent log
+    fetch('http://127.0.0.1:7246/ingest/135f91ed-6c73-4b7b-94fb-e5a12a4650b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:saveMetadata:start',message:'Starting metadata save',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'SAVE'})}).catch(()=>{});
+    // #endregion
+    
     const modal = document.getElementById('metadataModal');
     const itemId = modal.dataset.itemId;
-    const schema = JSON.parse(modal.dataset.schema || '{"fields":[]}');
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7246/ingest/135f91ed-6c73-4b7b-94fb-e5a12a4650b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:saveMetadata:itemId',message:'Got itemId',data:{itemId,hasModal:!!modal,datasetSchema:modal?.dataset?.schema?.substring(0,100)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'SAVE'})}).catch(()=>{});
+    // #endregion
+    
+    let schema;
+    try {
+        schema = JSON.parse(modal.dataset.schema || '{"fields":[]}');
+    } catch (parseError) {
+        // #region agent log
+        fetch('http://127.0.0.1:7246/ingest/135f91ed-6c73-4b7b-94fb-e5a12a4650b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:saveMetadata:schemaParseError',message:'Schema parse failed',data:{error:parseError.message,schemaString:modal?.dataset?.schema?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'SAVE'})}).catch(()=>{});
+        // #endregion
+        schema = {fields: []};
+    }
 
     // Collect all dynamic field values
     const updates = {};
@@ -2708,6 +2782,10 @@ async function saveMetadata() {
     });
 
     console.log('[SaveMetadata] Saving dynamic fields:', updates);
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7246/ingest/135f91ed-6c73-4b7b-94fb-e5a12a4650b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:saveMetadata:dynamicFields',message:'Collected dynamic fields',data:{fieldCount:Object.keys(updates).length,fields:Object.keys(updates)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'SAVE'})}).catch(()=>{});
+    // #endregion
 
     // Legacy field fallback (if no dynamic fields)
     if (Object.keys(updates).length === 0) {
@@ -2725,17 +2803,36 @@ async function saveMetadata() {
         updates.source = document.getElementById('metaSource')?.value || '';
         if (speakersInput.length > 0) updates.speakers = speakersInput;
         if (storyBeatsInput.length > 0) updates.storyBeats = storyBeatsInput;
+        
+        // #region agent log
+        fetch('http://127.0.0.1:7246/ingest/135f91ed-6c73-4b7b-94fb-e5a12a4650b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:saveMetadata:legacyFields',message:'Using legacy fields',data:{fieldCount:Object.keys(updates).length,fields:Object.keys(updates)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'SAVE'})}).catch(()=>{});
+        // #endregion
     }
     
-    // Save to backend
-    const result = await window.clipboard.updateMetadata(itemId, updates);
+    // #region agent log
+    fetch('http://127.0.0.1:7246/ingest/135f91ed-6c73-4b7b-94fb-e5a12a4650b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:saveMetadata:beforeSave',message:'About to call updateMetadata',data:{itemId,updateKeys:Object.keys(updates)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'SAVE'})}).catch(()=>{});
+    // #endregion
     
-    if (result.success) {
-        hideMetadataModal();
-        await loadHistory();
-        showNotification('✅ Metadata saved');
-    } else {
-        alert('Failed to save metadata: ' + (result.error || 'Unknown error'));
+    // Save to backend
+    try {
+        const result = await window.clipboard.updateMetadata(itemId, updates);
+        
+        // #region agent log
+        fetch('http://127.0.0.1:7246/ingest/135f91ed-6c73-4b7b-94fb-e5a12a4650b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:saveMetadata:result',message:'updateMetadata result',data:{success:result?.success,error:result?.error},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'SAVE'})}).catch(()=>{});
+        // #endregion
+        
+        if (result.success) {
+            hideMetadataModal();
+            await loadHistory();
+            showNotification('✅ Metadata saved');
+        } else {
+            alert('Failed to save metadata: ' + (result.error || 'Unknown error'));
+        }
+    } catch (saveError) {
+        // #region agent log
+        fetch('http://127.0.0.1:7246/ingest/135f91ed-6c73-4b7b-94fb-e5a12a4650b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:saveMetadata:exception',message:'Save threw exception',data:{error:saveError.message,stack:saveError.stack?.substring(0,500)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'SAVE'})}).catch(()=>{});
+        // #endregion
+        alert('Error saving metadata: ' + saveError.message);
     }
 }
 
@@ -3069,14 +3166,31 @@ function setupEventListeners() {
     
     // History item actions
     document.getElementById('historyList').addEventListener('click', async (e) => {
-        const item = e.target.closest('.history-item');
-        if (!item) return;
+        // #region agent log
+        fetch('http://127.0.0.1:7246/ingest/135f91ed-6c73-4b7b-94fb-e5a12a4650b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:historyList:click',message:'Click event fired',data:{targetTag:e.target.tagName,targetClass:e.target.className,targetDataAction:e.target.dataset?.action},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'CLICK'})}).catch(()=>{});
+        // #endregion
         
+        const item = e.target.closest('.history-item');
+        if (!item) {
+            // #region agent log
+            fetch('http://127.0.0.1:7246/ingest/135f91ed-6c73-4b7b-94fb-e5a12a4650b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:historyList:noItem',message:'No history-item found',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'CLICK'})}).catch(()=>{});
+            // #endregion
+            return;
+        }
+
         const action = e.target.closest('[data-action]');
+        // #region agent log
+        fetch('http://127.0.0.1:7246/ingest/135f91ed-6c73-4b7b-94fb-e5a12a4650b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:historyList:actionCheck',message:'Action button check',data:{hasAction:!!action,actionType:action?.dataset?.action,itemId:item.dataset.id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'CLICK'})}).catch(()=>{});
+        // #endregion
+        
         if (action) {
             e.stopPropagation();
             const actionType = action.dataset.action;
             const itemId = item.dataset.id;
+            
+            // #region agent log
+            fetch('http://127.0.0.1:7246/ingest/135f91ed-6c73-4b7b-94fb-e5a12a4650b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:historyList:actionDispatch',message:'Dispatching action',data:{actionType,itemId},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'CLICK'})}).catch(()=>{});
+            // #endregion
             
             if (actionType === 'preview') {
                 await showPreviewModal(itemId);
@@ -3126,7 +3240,20 @@ function setupEventListeners() {
                 // Show a brief notification that item was copied
                 showCopyNotification();
             } else if (actionType === 'edit-metadata') {
-                await showMetadataModal(itemId);
+                // #region agent log
+                fetch('http://127.0.0.1:7246/ingest/135f91ed-6c73-4b7b-94fb-e5a12a4650b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:edit-metadata:before',message:'About to call showMetadataModal',data:{itemId},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'META'})}).catch(()=>{});
+                // #endregion
+                try {
+                    await showMetadataModal(itemId);
+                    // #region agent log
+                    fetch('http://127.0.0.1:7246/ingest/135f91ed-6c73-4b7b-94fb-e5a12a4650b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:edit-metadata:after',message:'showMetadataModal completed',data:{itemId},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'META'})}).catch(()=>{});
+                    // #endregion
+                } catch (err) {
+                    // #region agent log
+                    fetch('http://127.0.0.1:7246/ingest/135f91ed-6c73-4b7b-94fb-e5a12a4650b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:edit-metadata:error',message:'showMetadataModal FAILED',data:{itemId,error:err.message,stack:err.stack?.substring(0,500)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'META'})}).catch(()=>{});
+                    // #endregion
+                    console.error('Metadata modal error:', err);
+                }
             } else if (actionType === 'menu') {
                 showContextMenu(e, itemId);
             } else if (actionType === 'delete') {

@@ -1,0 +1,1125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com;">
+  <title>Project Budget Estimator</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      min-height: 100vh;
+    }
+
+    /* Header */
+    .header {
+      background: #161b22;
+      border-bottom: 1px solid #30363d;
+      padding: 16px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .header h1 {
+      font-size: 18px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .header h1 svg {
+      width: 24px;
+      height: 24px;
+      color: #58a6ff;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn {
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: all 0.15s ease;
+    }
+
+    .btn-primary {
+      background: #238636;
+      color: #fff;
+      border-color: #238636;
+    }
+
+    .btn-primary:hover {
+      background: #2ea043;
+    }
+
+    .btn-secondary {
+      background: #21262d;
+      color: #c9d1d9;
+      border-color: #30363d;
+    }
+
+    .btn-secondary:hover {
+      background: #30363d;
+    }
+
+    /* Main Layout */
+    .main-container {
+      display: grid;
+      grid-template-columns: 1fr 380px;
+      height: calc(100vh - 65px);
+    }
+
+    /* Editor Panel */
+    .editor-panel {
+      padding: 24px;
+      overflow-y: auto;
+      border-right: 1px solid #30363d;
+    }
+
+    .editor-header {
+      margin-bottom: 20px;
+    }
+
+    .editor-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #e6edf3;
+      margin-bottom: 8px;
+    }
+
+    .editor-subtitle {
+      font-size: 12px;
+      color: #8b949e;
+    }
+
+    /* Markdown Editor */
+    .markdown-editor {
+      width: 100%;
+      min-height: 400px;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 16px;
+      color: #e6edf3;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      line-height: 1.6;
+      resize: vertical;
+    }
+
+    .markdown-editor:focus {
+      outline: none;
+      border-color: #58a6ff;
+    }
+
+    .markdown-editor::placeholder {
+      color: #484f58;
+    }
+
+    /* Template Buttons */
+    .template-actions {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
+    .template-btn {
+      padding: 6px 12px;
+      background: #21262d;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #8b949e;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .template-btn:hover {
+      background: #30363d;
+      color: #e6edf3;
+    }
+
+    /* Sidebar - Estimate Panel */
+    .estimate-panel {
+      padding: 24px;
+      overflow-y: auto;
+      background: #161b22;
+    }
+
+    .estimate-header {
+      margin-bottom: 24px;
+    }
+
+    .estimate-title {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .estimate-subtitle {
+      font-size: 12px;
+      color: #8b949e;
+    }
+
+    /* AI Features Section */
+    .features-section {
+      margin-bottom: 24px;
+    }
+
+    .section-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 12px;
+    }
+
+    .feature-card {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+
+    .feature-card.active {
+      border-color: #238636;
+    }
+
+    .feature-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .feature-checkbox {
+      width: 18px;
+      height: 18px;
+      accent-color: #238636;
+      cursor: pointer;
+    }
+
+    .feature-name {
+      font-weight: 500;
+      flex: 1;
+    }
+
+    .feature-badge {
+      padding: 2px 8px;
+      background: #21262d;
+      border-radius: 12px;
+      font-size: 11px;
+      color: #8b949e;
+    }
+
+    .feature-badge.openai { background: #238636; color: #fff; }
+    .feature-badge.elevenlabs { background: #8957e5; color: #fff; }
+    .feature-badge.anthropic { background: #d29922; color: #000; }
+
+    .feature-inputs {
+      display: grid;
+      gap: 12px;
+      padding-left: 30px;
+    }
+
+    .feature-inputs.hidden {
+      display: none;
+    }
+
+    .input-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .input-group label {
+      font-size: 11px;
+      color: #8b949e;
+    }
+
+    .input-group input,
+    .input-group select {
+      padding: 8px 10px;
+      background: #21262d;
+      border: 1px solid #30363d;
+      border-radius: 4px;
+      color: #e6edf3;
+      font-size: 13px;
+    }
+
+    .input-group input:focus,
+    .input-group select:focus {
+      outline: none;
+      border-color: #58a6ff;
+    }
+
+    .input-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    /* Cost Display */
+    .cost-summary {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 20px;
+      margin-top: 24px;
+    }
+
+    .cost-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    .cost-title {
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .total-cost {
+      font-size: 28px;
+      font-weight: 700;
+      color: #58a6ff;
+    }
+
+    .cost-breakdown {
+      border-top: 1px solid #21262d;
+      padding-top: 16px;
+    }
+
+    .cost-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      font-size: 13px;
+    }
+
+    .cost-item-name {
+      color: #8b949e;
+    }
+
+    .cost-item-value {
+      font-weight: 500;
+    }
+
+    .cost-item-value.zero {
+      color: #484f58;
+    }
+
+    /* Budget Check */
+    .budget-check {
+      margin-top: 16px;
+      padding: 12px;
+      border-radius: 6px;
+      font-size: 12px;
+    }
+
+    .budget-check.ok {
+      background: #23863626;
+      border: 1px solid #238636;
+      color: #3fb950;
+    }
+
+    .budget-check.warning {
+      background: #d2992226;
+      border: 1px solid #d29922;
+      color: #d29922;
+    }
+
+    .budget-check.error {
+      background: #da363326;
+      border: 1px solid #da3633;
+      color: #f85149;
+    }
+
+    /* Saved Estimates */
+    .saved-estimates {
+      margin-top: 24px;
+    }
+
+    .estimate-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .estimate-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .estimate-item:hover {
+      border-color: #58a6ff;
+    }
+
+    .estimate-item-name {
+      font-weight: 500;
+      font-size: 13px;
+    }
+
+    .estimate-item-cost {
+      font-size: 13px;
+      color: #58a6ff;
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      padding: 12px 20px;
+      background: #238636;
+      color: #fff;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: all 0.2s ease;
+      z-index: 1000;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .toast.error {
+      background: #da3633;
+    }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .main-container {
+        grid-template-columns: 1fr;
+      }
+      
+      .editor-panel {
+        border-right: none;
+        border-bottom: 1px solid #30363d;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <header class="header">
+    <h1>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M9 7H6a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-3"/>
+        <path d="M9 15h3l8.5-8.5a1.5 1.5 0 0 0-3-3L9 12v3"/>
+        <line x1="16" y1="5" x2="19" y2="8"/>
+      </svg>
+      Project Budget Estimator
+    </h1>
+    <div class="header-actions">
+      <button class="btn btn-secondary" onclick="openDashboard()">View Dashboard</button>
+      <button class="btn btn-primary" onclick="saveEstimate()">Save Estimate</button>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <div class="main-container">
+    <!-- Editor Panel -->
+    <div class="editor-panel">
+      <div class="editor-header">
+        <div class="editor-title">Project Description</div>
+        <div class="editor-subtitle">Describe your video project to help estimate costs accurately</div>
+      </div>
+
+      <div class="template-actions">
+        <button class="template-btn" onclick="insertTemplate('basic')">Basic Template</button>
+        <button class="template-btn" onclick="insertTemplate('voiceover')">Voiceover Project</button>
+        <button class="template-btn" onclick="insertTemplate('translation')">Translation Project</button>
+        <button class="template-btn" onclick="insertTemplate('full')">Full Production</button>
+        <button class="template-btn" onclick="clearEditor()">Clear</button>
+      </div>
+
+      <textarea 
+        class="markdown-editor" 
+        id="projectDescription"
+        placeholder="# Project Title
+
+## Overview
+Describe your video project here...
+
+## AI Features Needed
+- [ ] Voice Generation
+- [ ] Transcription
+- [ ] Translation
+
+## Timeline
+Expected completion: 
+
+## Notes
+Additional details..."
+        oninput="parseDescription()"
+      ></textarea>
+    </div>
+
+    <!-- Estimate Panel -->
+    <div class="estimate-panel">
+      <div class="estimate-header">
+        <div class="estimate-title">Cost Estimate</div>
+        <div class="estimate-subtitle">Configure AI features to calculate costs</div>
+      </div>
+
+      <!-- Voice Generation -->
+      <div class="features-section">
+        <div class="section-title">AI Features</div>
+
+        <div class="feature-card" id="voiceCard">
+          <div class="feature-header">
+            <input type="checkbox" class="feature-checkbox" id="useVoice" onchange="toggleFeature('voice')">
+            <span class="feature-name">AI Voice Generation</span>
+            <span class="feature-badge elevenlabs">ElevenLabs</span>
+          </div>
+          <div class="feature-inputs hidden" id="voiceInputs">
+            <div class="input-group">
+              <label>Estimated text length (characters)</label>
+              <input type="number" id="voiceChars" value="1000" min="0" oninput="calculateEstimate()">
+            </div>
+            <div class="input-row">
+              <div class="input-group">
+                <label>Number of segments</label>
+                <input type="number" id="voiceSegments" value="5" min="1" oninput="calculateEstimate()">
+              </div>
+              <div class="input-group">
+                <label>Voice</label>
+                <select id="voiceSelect" onchange="calculateEstimate()">
+                  <option value="standard">Standard Voice</option>
+                  <option value="premium">Premium Voice</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="feature-card" id="transcriptionCard">
+          <div class="feature-header">
+            <input type="checkbox" class="feature-checkbox" id="useTranscription" onchange="toggleFeature('transcription')">
+            <span class="feature-name">Audio Transcription</span>
+            <span class="feature-badge openai">OpenAI Whisper</span>
+          </div>
+          <div class="feature-inputs hidden" id="transcriptionInputs">
+            <div class="input-row">
+              <div class="input-group">
+                <label>Audio duration (minutes)</label>
+                <input type="number" id="transcriptionMinutes" value="10" min="0" step="0.5" oninput="calculateEstimate()">
+              </div>
+              <div class="input-group">
+                <label>Language</label>
+                <select id="transcriptionLang" onchange="calculateEstimate()">
+                  <option value="en">English</option>
+                  <option value="multi">Multi-language</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="feature-card" id="translationCard">
+          <div class="feature-header">
+            <input type="checkbox" class="feature-checkbox" id="useTranslation" onchange="toggleFeature('translation')">
+            <span class="feature-name">AI Translation</span>
+            <span class="feature-badge anthropic">Claude</span>
+          </div>
+          <div class="feature-inputs hidden" id="translationInputs">
+            <div class="input-group">
+              <label>Source text length (characters)</label>
+              <input type="number" id="translationChars" value="2000" min="0" oninput="calculateEstimate()">
+            </div>
+            <div class="input-row">
+              <div class="input-group">
+                <label>Target languages</label>
+                <input type="number" id="translationLangs" value="1" min="1" max="10" oninput="calculateEstimate()">
+              </div>
+              <div class="input-group">
+                <label>Quality iterations</label>
+                <select id="translationQuality" onchange="calculateEstimate()">
+                  <option value="1">Basic (1 pass)</option>
+                  <option value="3" selected>Standard (3 passes)</option>
+                  <option value="5">High Quality (5 passes)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="feature-card" id="descriptionCard">
+          <div class="feature-header">
+            <input type="checkbox" class="feature-checkbox" id="useDescription" onchange="toggleFeature('description')">
+            <span class="feature-name">Scene Descriptions</span>
+            <span class="feature-badge anthropic">Claude</span>
+          </div>
+          <div class="feature-inputs hidden" id="descriptionInputs">
+            <div class="input-row">
+              <div class="input-group">
+                <label>Number of scenes</label>
+                <input type="number" id="descriptionScenes" value="10" min="1" oninput="calculateEstimate()">
+              </div>
+              <div class="input-group">
+                <label>Detail level</label>
+                <select id="descriptionDetail" onchange="calculateEstimate()">
+                  <option value="brief">Brief</option>
+                  <option value="standard" selected>Standard</option>
+                  <option value="detailed">Detailed</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Cost Summary -->
+      <div class="cost-summary">
+        <div class="cost-header">
+          <span class="cost-title">Estimated Total</span>
+          <span class="total-cost" id="totalCost">$0.00</span>
+        </div>
+        
+        <div class="cost-breakdown">
+          <div class="cost-item">
+            <span class="cost-item-name">Voice Generation</span>
+            <span class="cost-item-value" id="voiceCost">$0.00</span>
+          </div>
+          <div class="cost-item">
+            <span class="cost-item-name">Transcription</span>
+            <span class="cost-item-value" id="transcriptionCost">$0.00</span>
+          </div>
+          <div class="cost-item">
+            <span class="cost-item-name">Translation</span>
+            <span class="cost-item-value" id="translationCost">$0.00</span>
+          </div>
+          <div class="cost-item">
+            <span class="cost-item-name">Scene Descriptions</span>
+            <span class="cost-item-value" id="descriptionCost">$0.00</span>
+          </div>
+        </div>
+
+        <div class="budget-check ok" id="budgetCheck">
+          Within budget - $50.00 remaining
+        </div>
+      </div>
+
+      <!-- Saved Estimates -->
+      <div class="saved-estimates">
+        <div class="section-title">Saved Estimates</div>
+        <div class="estimate-list" id="savedEstimatesList">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // Pricing constants
+    const PRICING = {
+      elevenlabs: {
+        costPer1KChars: 0.30
+      },
+      whisper: {
+        costPerMinute: 0.006
+      },
+      claude: {
+        inputCostPer1K: 0.015,
+        outputCostPer1K: 0.075
+      }
+    };
+
+    // State
+    let currentEstimate = {
+      voice: { enabled: false, chars: 1000, segments: 5 },
+      transcription: { enabled: false, minutes: 10 },
+      translation: { enabled: false, chars: 2000, langs: 1, iterations: 3 },
+      description: { enabled: false, scenes: 10, detail: 'standard' }
+    };
+
+    let savedEstimates = [];
+    let budgetLimit = 50.00;
+
+    // Templates
+    const TEMPLATES = {
+      basic: `# Project: Untitled Video
+
+## Overview
+Brief description of the video project.
+
+## AI Features Needed
+- [ ] Voice Generation - for narration
+- [ ] Transcription - convert existing audio to text
+
+## Video Details
+- Duration: ~5 minutes
+- Format: MP4
+- Resolution: 1080p
+
+## Timeline
+Expected completion: [Date]
+
+## Budget Notes
+Estimated budget: $[Amount]`,
+
+      voiceover: `# Voiceover Project
+
+## Overview
+Creating AI-generated voiceover for video narration.
+
+## AI Features Needed
+- [x] Voice Generation
+  - Voice style: Professional narrator
+  - Estimated script length: ~2000 characters
+  - Number of segments: 8-10
+
+## Script Outline
+1. Introduction (200 chars)
+2. Main content sections (1500 chars)
+3. Conclusion (300 chars)
+
+## Voice Preferences
+- Tone: Professional, warm
+- Pace: Moderate
+- Voice: Rachel (ElevenLabs)
+
+## Notes
+- Script finalization needed before voice generation
+- May need 2-3 iterations for timing adjustments`,
+
+      translation: `# Translation Project
+
+## Overview
+Translating video content to multiple languages.
+
+## AI Features Needed
+- [x] Transcription - extract original audio
+- [x] Translation - convert to target languages
+- [x] Voice Generation - create dubbed audio
+
+## Languages
+- Source: English
+- Target: Spanish, French, German
+
+## Content Details
+- Original duration: 10 minutes
+- Text length: ~3000 characters
+- Quality: High (5 iterations per language)
+
+## Workflow
+1. Transcribe original audio
+2. Translate to each target language
+3. Generate voice for each translation
+4. Sync with video timeline`,
+
+      full: `# Full Production Project
+
+## Overview
+Complete video production with all AI features.
+
+## AI Features Needed
+- [x] Transcription - convert all audio to text
+- [x] Scene Descriptions - generate detailed scene metadata
+- [x] Translation - multi-language support
+- [x] Voice Generation - AI narration and dubbing
+
+## Project Scope
+- Video duration: 15 minutes
+- Number of scenes: 20-25
+- Target languages: 3
+
+## Detailed Breakdown
+
+### Transcription
+- Source audio: 15 minutes
+- Language: English
+- Use: Subtitles and translation source
+
+### Scene Analysis
+- Scenes to analyze: 25
+- Detail level: Standard
+- Use: Metadata, chaptering
+
+### Translation
+- Source text: ~5000 characters
+- Languages: Spanish, French, Japanese
+- Quality: Standard (3 passes)
+
+### Voice Generation
+- Total voice content: ~5000 chars per language
+- Voices needed: 3 (one per language)
+- Segments: ~15 per language
+
+## Timeline
+- Week 1: Transcription and scene analysis
+- Week 2: Translation
+- Week 3: Voice generation and sync
+- Week 4: Review and adjustments
+
+## Budget Estimate
+See right panel for calculated estimate →`
+    };
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', async () => {
+      loadSavedEstimates();
+      await loadBudgetLimit();
+      calculateEstimate();
+    });
+
+    // Load budget limit from budget manager
+    async function loadBudgetLimit() {
+      try {
+        if (window.budgetAPI) {
+          const limits = await window.budgetAPI.getAllBudgetLimits();
+          budgetLimit = limits.global?.limit || 50.00;
+        }
+      } catch (error) {
+        console.error('Error loading budget limit:', error);
+      }
+    }
+
+    // Toggle feature
+    function toggleFeature(feature) {
+      const checkbox = document.getElementById(`use${capitalize(feature)}`);
+      const inputs = document.getElementById(`${feature}Inputs`);
+      const card = document.getElementById(`${feature}Card`);
+      
+      currentEstimate[feature].enabled = checkbox.checked;
+      
+      if (checkbox.checked) {
+        inputs.classList.remove('hidden');
+        card.classList.add('active');
+      } else {
+        inputs.classList.add('hidden');
+        card.classList.remove('active');
+      }
+      
+      calculateEstimate();
+    }
+
+    // Calculate cost estimate
+    function calculateEstimate() {
+      let costs = {
+        voice: 0,
+        transcription: 0,
+        translation: 0,
+        description: 0
+      };
+
+      // Voice generation cost
+      if (currentEstimate.voice.enabled) {
+        const chars = parseInt(document.getElementById('voiceChars').value) || 0;
+        const segments = parseInt(document.getElementById('voiceSegments').value) || 1;
+        costs.voice = (chars / 1000) * PRICING.elevenlabs.costPer1KChars;
+        currentEstimate.voice.chars = chars;
+        currentEstimate.voice.segments = segments;
+      }
+
+      // Transcription cost
+      if (currentEstimate.transcription.enabled) {
+        const minutes = parseFloat(document.getElementById('transcriptionMinutes').value) || 0;
+        costs.transcription = minutes * PRICING.whisper.costPerMinute;
+        currentEstimate.transcription.minutes = minutes;
+      }
+
+      // Translation cost (Claude)
+      if (currentEstimate.translation.enabled) {
+        const chars = parseInt(document.getElementById('translationChars').value) || 0;
+        const langs = parseInt(document.getElementById('translationLangs').value) || 1;
+        const iterations = parseInt(document.getElementById('translationQuality').value) || 3;
+        
+        // Estimate tokens (1 token ≈ 4 chars)
+        const inputTokens = Math.ceil(chars / 4);
+        const outputTokens = inputTokens * 1.2; // Output usually slightly longer
+        
+        const costPerLang = ((inputTokens / 1000) * PRICING.claude.inputCostPer1K + 
+                           (outputTokens / 1000) * PRICING.claude.outputCostPer1K) * iterations;
+        costs.translation = costPerLang * langs;
+        
+        currentEstimate.translation.chars = chars;
+        currentEstimate.translation.langs = langs;
+        currentEstimate.translation.iterations = iterations;
+      }
+
+      // Scene description cost (Claude)
+      if (currentEstimate.description.enabled) {
+        const scenes = parseInt(document.getElementById('descriptionScenes').value) || 0;
+        const detail = document.getElementById('descriptionDetail').value;
+        
+        // Estimate tokens per scene based on detail level
+        const tokensPerScene = { brief: 100, standard: 250, detailed: 500 }[detail];
+        const inputTokens = scenes * 50; // Prompt tokens
+        const outputTokens = scenes * tokensPerScene;
+        
+        costs.description = (inputTokens / 1000) * PRICING.claude.inputCostPer1K + 
+                           (outputTokens / 1000) * PRICING.claude.outputCostPer1K;
+        
+        currentEstimate.description.scenes = scenes;
+        currentEstimate.description.detail = detail;
+      }
+
+      // Update UI
+      document.getElementById('voiceCost').textContent = formatCost(costs.voice);
+      document.getElementById('voiceCost').classList.toggle('zero', costs.voice === 0);
+      
+      document.getElementById('transcriptionCost').textContent = formatCost(costs.transcription);
+      document.getElementById('transcriptionCost').classList.toggle('zero', costs.transcription === 0);
+      
+      document.getElementById('translationCost').textContent = formatCost(costs.translation);
+      document.getElementById('translationCost').classList.toggle('zero', costs.translation === 0);
+      
+      document.getElementById('descriptionCost').textContent = formatCost(costs.description);
+      document.getElementById('descriptionCost').classList.toggle('zero', costs.description === 0);
+
+      const total = costs.voice + costs.transcription + costs.translation + costs.description;
+      document.getElementById('totalCost').textContent = formatCost(total);
+
+      // Update budget check
+      updateBudgetCheck(total);
+
+      return total;
+    }
+
+    // Update budget status
+    function updateBudgetCheck(total) {
+      const check = document.getElementById('budgetCheck');
+      const remaining = budgetLimit - total;
+      const percentUsed = (total / budgetLimit) * 100;
+
+      if (total > budgetLimit) {
+        check.className = 'budget-check error';
+        check.textContent = `Over budget by ${formatCost(total - budgetLimit)}`;
+      } else if (percentUsed > 75) {
+        check.className = 'budget-check warning';
+        check.textContent = `${formatCost(remaining)} remaining (${percentUsed.toFixed(0)}% of budget)`;
+      } else {
+        check.className = 'budget-check ok';
+        check.textContent = `Within budget - ${formatCost(remaining)} remaining`;
+      }
+    }
+
+    // Format cost
+    function formatCost(amount) {
+      return '$' + amount.toFixed(2);
+    }
+
+    // Capitalize first letter
+    function capitalize(str) {
+      return str.charAt(0).toUpperCase() + str.slice(1);
+    }
+
+    // Insert template
+    function insertTemplate(type) {
+      const template = TEMPLATES[type];
+      if (template) {
+        document.getElementById('projectDescription').value = template;
+        parseDescription();
+      }
+    }
+
+    // Clear editor
+    function clearEditor() {
+      document.getElementById('projectDescription').value = '';
+    }
+
+    // Parse description for checkboxes
+    function parseDescription() {
+      const text = document.getElementById('projectDescription').value.toLowerCase();
+      
+      // Auto-detect features from description
+      if (text.includes('[x] voice') || text.includes('voice generation')) {
+        document.getElementById('useVoice').checked = true;
+        toggleFeature('voice');
+      }
+      if (text.includes('[x] transcription') || text.includes('transcribe')) {
+        document.getElementById('useTranscription').checked = true;
+        toggleFeature('transcription');
+      }
+      if (text.includes('[x] translation') || text.includes('translate')) {
+        document.getElementById('useTranslation').checked = true;
+        toggleFeature('translation');
+      }
+      if (text.includes('[x] scene') || text.includes('scene description')) {
+        document.getElementById('useDescription').checked = true;
+        toggleFeature('description');
+      }
+
+      // Try to extract numbers
+      const durationMatch = text.match(/duration[:\s]+~?(\d+)\s*min/i);
+      if (durationMatch) {
+        document.getElementById('transcriptionMinutes').value = durationMatch[1];
+      }
+
+      const charsMatch = text.match(/(\d+)\s*char/i);
+      if (charsMatch) {
+        document.getElementById('voiceChars').value = charsMatch[1];
+        document.getElementById('translationChars').value = charsMatch[1];
+      }
+
+      const scenesMatch = text.match(/(\d+)[\s-]*(?:\d+)?\s*scenes?/i);
+      if (scenesMatch) {
+        document.getElementById('descriptionScenes').value = scenesMatch[1];
+      }
+
+      calculateEstimate();
+    }
+
+    // Save estimate
+    async function saveEstimate() {
+      const description = document.getElementById('projectDescription').value;
+      const titleMatch = description.match(/^#\s*(.+)$/m);
+      const title = titleMatch ? titleMatch[1].replace('Project:', '').trim() : 'Untitled Estimate';
+      
+      const estimate = {
+        id: `est-${Date.now()}`,
+        title: title,
+        description: description,
+        features: { ...currentEstimate },
+        totalCost: calculateEstimate(),
+        createdAt: new Date().toISOString()
+      };
+
+      savedEstimates.unshift(estimate);
+      localStorage.setItem('budget-estimates', JSON.stringify(savedEstimates));
+      
+      // Also register as a project for tracking
+      if (window.budgetAPI) {
+        try {
+          await window.budgetAPI.registerProject(estimate.id, estimate.title);
+        } catch (e) {
+          console.error('Error registering project:', e);
+        }
+      }
+
+      renderSavedEstimates();
+      showToast('Estimate saved');
+    }
+
+    // Load saved estimates
+    function loadSavedEstimates() {
+      try {
+        const saved = localStorage.getItem('budget-estimates');
+        if (saved) {
+          savedEstimates = JSON.parse(saved);
+          renderSavedEstimates();
+        }
+      } catch (e) {
+        console.error('Error loading estimates:', e);
+      }
+    }
+
+    // Render saved estimates
+    function renderSavedEstimates() {
+      const list = document.getElementById('savedEstimatesList');
+      
+      if (savedEstimates.length === 0) {
+        list.innerHTML = '<div style="color: #8b949e; font-size: 13px; text-align: center; padding: 20px;">No saved estimates yet</div>';
+        return;
+      }
+
+      list.innerHTML = savedEstimates.slice(0, 5).map(est => `
+        <div class="estimate-item" onclick="loadEstimate('${est.id}')">
+          <span class="estimate-item-name">${est.title}</span>
+          <span class="estimate-item-cost">${formatCost(est.totalCost)}</span>
+        </div>
+      `).join('');
+    }
+
+    // Load a saved estimate
+    function loadEstimate(id) {
+      const estimate = savedEstimates.find(e => e.id === id);
+      if (!estimate) return;
+
+      document.getElementById('projectDescription').value = estimate.description;
+      
+      // Restore feature states
+      Object.keys(estimate.features).forEach(feature => {
+        const featureData = estimate.features[feature];
+        currentEstimate[feature] = { ...featureData };
+        
+        if (featureData.enabled) {
+          document.getElementById(`use${capitalize(feature)}`).checked = true;
+          document.getElementById(`${feature}Inputs`).classList.remove('hidden');
+          document.getElementById(`${feature}Card`).classList.add('active');
+        }
+      });
+
+      // Restore input values
+      if (estimate.features.voice) {
+        document.getElementById('voiceChars').value = estimate.features.voice.chars || 1000;
+        document.getElementById('voiceSegments').value = estimate.features.voice.segments || 5;
+      }
+      if (estimate.features.transcription) {
+        document.getElementById('transcriptionMinutes').value = estimate.features.transcription.minutes || 10;
+      }
+      if (estimate.features.translation) {
+        document.getElementById('translationChars').value = estimate.features.translation.chars || 2000;
+        document.getElementById('translationLangs').value = estimate.features.translation.langs || 1;
+        document.getElementById('translationQuality').value = estimate.features.translation.iterations || 3;
+      }
+      if (estimate.features.description) {
+        document.getElementById('descriptionScenes').value = estimate.features.description.scenes || 10;
+        document.getElementById('descriptionDetail').value = estimate.features.description.detail || 'standard';
+      }
+
+      calculateEstimate();
+      showToast('Estimate loaded');
+    }
+
+    // Open dashboard
+    function openDashboard() {
+      if (window.budgetAPI) {
+        window.budgetAPI.openDashboard();
+      }
+    }
+
+    // Show toast
+    function showToast(message, isError = false) {
+      const toast = document.getElementById('toast');
+      toast.textContent = message;
+      toast.className = 'toast' + (isError ? ' error' : '');
+      toast.classList.add('show');
+      
+      setTimeout(() => {
+        toast.classList.remove('show');
+      }, 3000);
+    }
+  </script>
+</body>
+</html>
+
+

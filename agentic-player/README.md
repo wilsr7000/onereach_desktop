@@ -1,6 +1,37 @@
 # 🤖 Agentic Video Player
 
-A seamless video player that fetches clips in batches from your API for continuous playback.
+A seamless video player that fetches clips in batches from an API for continuous playback.
+
+## Quick Start (Local Server)
+
+1. **Start the API server:**
+```bash
+node agentic-player/server.js
+```
+
+2. **Open the player:**
+```
+http://localhost:3456/
+```
+
+3. **Load clips for a session:**
+```bash
+curl -X POST http://localhost:3456/load-clips \
+  -H "Content-Type: application/json" \
+  -d '{"sessionId": "my-session", "clips": [
+    {"id": "1", "name": "Intro", "videoUrl": "/videos/intro.mp4", "inTime": 0, "outTime": 30},
+    {"id": "2", "name": "Chapter 1", "videoUrl": "/videos/ch1.mp4", "inTime": 0, "outTime": 120}
+  ]}'
+```
+
+4. **Request clips:**
+```bash
+curl -X POST http://localhost:3456/playlist \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "show me the intro", "sessionId": "my-session"}'
+```
+
+---
 
 ## Architecture
 

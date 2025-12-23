@@ -10,7 +10,8 @@ console.log('=== ElevenLabs Integration Test ===\n');
 
 const files = {
   'video-editor.html': '/Users/richardwilson/Onereach_app/video-editor.html',
-  'video-editor.js': '/Users/richardwilson/Onereach_app/video-editor.js',
+  'video-editor.js': '/Users/richardwilson/Onereach_app/src/video/index.js',  // NEW: Modular architecture
+  'elevenlabs-service.js': '/Users/richardwilson/Onereach_app/src/video/audio/ElevenLabsService.js',  // NEW: Dedicated service
   'preload-video-editor.js': '/Users/richardwilson/Onereach_app/preload-video-editor.js'
 };
 
@@ -55,28 +56,31 @@ const hasSegments = html.includes('transcript.segments') || html.includes('segme
 console.log(`  ${hasSpaceCheck ? '✓' : '✗'} Checks for existing transcription in Space`);
 console.log(`  ${hasSegments ? '✓' : '✗'} Filters segments by timecode`);
 
-// Test 5: Check backend implementation
-console.log('\nTest 5: Backend implementation in video-editor.js');
-const backendCode = fs.readFileSync(files['video-editor.js'], 'utf8');
+// Test 5: Check backend implementation (NEW MODULAR ARCHITECTURE)
+console.log('\nTest 5: Backend implementation in src/video/ (modular)');
+const mainVideoEditor = fs.readFileSync(files['video-editor.js'], 'utf8');
+const elevenLabsService = fs.readFileSync(files['elevenlabs-service.js'], 'utf8');
+const backendCode = mainVideoEditor + elevenLabsService; // Combined for checking
+
 const backendFunctions = [
-  'replaceAudioWithElevenLabs',
-  'generateElevenLabsAudio',
-  'replaceAudioSegment',
-  'buildReplacedAudioTrack'
+  { name: 'replaceAudioWithElevenLabs', file: 'index.js' },
+  { name: 'generateAudio', file: 'ElevenLabsService.js' },
+  { name: 'replaceAudioSegment', file: 'index.js' }
 ];
 for (const func of backendFunctions) {
-  const hasFn = backendCode.includes(`${func}(`);
-  console.log(`  ${hasFn ? '✓' : '✗'} ${func}()`);
+  const hasFn = backendCode.includes(`${func.name}(`);
+  console.log(`  ${hasFn ? '✓' : '✗'} ${func.name}() in ${func.file}`);
   if (!hasFn) {
-    console.error(`  ✗ Missing function: ${func}`);
+    console.error(`  ✗ Missing function: ${func.name}`);
     process.exit(1);
   }
 }
 
-// Test 6: Check IPC handler
+// Test 6: Check IPC handler (NEW: In dedicated IPC file)
 console.log('\nTest 6: IPC handlers');
-const hasIPCHandler = backendCode.includes('video-editor:replace-audio-elevenlabs');
-console.log(`  ${hasIPCHandler ? '✓' : '✗'} IPC handler registered`);
+const ipcCode = fs.readFileSync('/Users/richardwilson/Onereach_app/src/video/ipc/VideoEditorIPC.js', 'utf8');
+const hasIPCHandler = ipcCode.includes('video-editor:replace-audio-elevenlabs');
+console.log(`  ${hasIPCHandler ? '✓' : '✗'} IPC handler registered in VideoEditorIPC.js`);
 if (!hasIPCHandler) {
   console.error('  ✗ Missing IPC handler');
   process.exit(1);

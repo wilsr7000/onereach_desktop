@@ -3,7 +3,7 @@
  * Exposes safe IPC methods to the renderer process for video recording
  */
 
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, desktopCapturer } = require('electron');
 
 contextBridge.exposeInMainWorld('recorder', {
   // Get recording instructions from editor (if launched with params)
@@ -30,6 +30,24 @@ contextBridge.exposeInMainWorld('recorder', {
   // Minimize window
   minimize: () => ipcRenderer.invoke('recorder:minimize'),
   
+  // Get available screen sources for screen capture
+  getScreenSources: async () => {
+    try {
+      const sources = await desktopCapturer.getSources({ 
+        types: ['screen', 'window'],
+        thumbnailSize: { width: 150, height: 150 }
+      });
+      return sources.map(source => ({
+        id: source.id,
+        name: source.name,
+        thumbnail: source.thumbnail.toDataURL()
+      }));
+    } catch (error) {
+      console.error('[Recorder Preload] Error getting screen sources:', error);
+      return [];
+    }
+  },
+  
   // Events from main process
   onInstructionsReceived: (callback) => {
     ipcRenderer.on('recorder:instructions', (event, instructions) => callback(instructions));
@@ -42,3 +60,38 @@ contextBridge.exposeInMainWorld('electron', {
 });
 
 console.log('[Recorder Preload] APIs exposed');
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
