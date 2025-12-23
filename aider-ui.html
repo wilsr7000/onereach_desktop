@@ -2318,13 +2318,32 @@
             // Initialize
             async init() {
                 console.log('[GSX Create] Initializing...');
-                await this.checkApiConfig();
-                await this.loadSpaces();
-                this.setupEventListeners();
-                this.restoreSidebarState();
-                this.setupErrorAnalyzer();
-                this.setupBehaviorTracking();
-                this.trackBehavior('session_start', { timestamp: new Date().toISOString() });
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:init',message:'H1: GSX Create init started',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+                // #endregion
+                try {
+                    await this.checkApiConfig();
+                    // #region agent log
+                    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:init:afterApiConfig',message:'H1: checkApiConfig completed',data:{hasApiKey:this.apiConfig?.hasApiKey,provider:this.apiConfig?.provider},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+                    // #endregion
+                    await this.loadSpaces();
+                    // #region agent log
+                    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:init:afterLoadSpaces',message:'H1: loadSpaces completed',data:{spaceCount:this.spaces?.length||0},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+                    // #endregion
+                    this.setupEventListeners();
+                    this.restoreSidebarState();
+                    this.setupErrorAnalyzer();
+                    this.setupBehaviorTracking();
+                    this.trackBehavior('session_start', { timestamp: new Date().toISOString() });
+                    // #region agent log
+                    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:init:complete',message:'H1: GSX Create init completed successfully',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+                    // #endregion
+                } catch (error) {
+                    // #region agent log
+                    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:init:error',message:'H1: GSX Create init FAILED',data:{error:error.message},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+                    // #endregion
+                    console.error('[GSX Create] Init error:', error);
+                }
             },
             
             // Selected model (stored in settings)
@@ -2529,7 +2548,20 @@
                     console.log('[GSX Create] Creating new space:', spaceName);
                     this.trackBehavior('create_space_started', { name: spaceName });
                     
+                    // #region agent log
+                    // H5: Check if window.clipboard exists
+                    console.log('[GSX-DEBUG] H5: window.clipboard exists:', !!window.clipboard);
+                    console.log('[GSX-DEBUG] H5: window.clipboard.createSpace exists:', !!(window.clipboard && window.clipboard.createSpace));
+                    if (!window.clipboard) {
+                        throw new Error('H5: window.clipboard is undefined - preload not loaded correctly');
+                    }
+                    if (!window.clipboard.createSpace) {
+                        throw new Error('H5: window.clipboard.createSpace is undefined');
+                    }
+                    // #endregion
+                    
                     // Create the space via clipboard API
+                    console.log('[GSX-DEBUG] H6: About to call window.clipboard.createSpace');
                     const result = await window.clipboard.createSpace({
                         name: spaceName,
                         icon: '◆',
@@ -2541,6 +2573,7 @@
                             links: []
                         }
                     });
+                    console.log('[GSX-DEBUG] H6: createSpace returned:', JSON.stringify(result));
                     
                     if (result && result.success) {
                         console.log('[GSX Create] Space created:', result.space);
@@ -2561,6 +2594,12 @@
                         throw new Error(result?.error || 'Failed to create space');
                     }
                 } catch (error) {
+                    // #region agent log
+                    console.error('[GSX-DEBUG] ERROR: Create space failed');
+                    console.error('[GSX-DEBUG] Error name:', error.name);
+                    console.error('[GSX-DEBUG] Error message:', error.message);
+                    console.error('[GSX-DEBUG] Error stack:', error.stack);
+                    // #endregion
                     console.error('[GSX Create] Create space error:', error);
                     this.trackBehavior('create_space_error', { name: spaceName, error: error.message });
                     this.addMessage('error', 'Failed to create space: ' + error.message);
@@ -7096,6 +7135,70 @@ ${error.aiAnalysis || 'Not analyzed'}
                 this.updateCycleUI();
             },
             
+            // Render version timeline pills
+            renderVersionTimeline() {
+                const timeline = document.getElementById('versionTimeline');
+                if (!timeline) return;
+                
+                const versions = [];
+                for (let i = 1; i <= Math.max(this.cycleState.currentVersion, 1); i++) {
+                    versions.push(i);
+                }
+                
+                timeline.innerHTML = versions.map(v => `
+                    <div class="version-pill ${v === this.cycleState.currentVersion ? 'active' : ''}" 
+                         onclick="GSXCreate.goToVersion(${v})"
+                         title="Version ${v}">
+                        v${v}
+                    </div>
+                `).join('');
+            },
+            
+            // Update cycle UI state
+            updateCycleUI() {
+                // Update play/pause button
+                const playBtn = document.getElementById('cyclePlayBtn');
+                const pauseBtn = document.getElementById('cyclePauseBtn');
+                
+                if (playBtn && pauseBtn) {
+                    if (this.cycleState.active && !this.cycleState.paused) {
+                        playBtn.style.display = 'none';
+                        pauseBtn.style.display = 'inline-flex';
+                    } else {
+                        playBtn.style.display = 'inline-flex';
+                        pauseBtn.style.display = 'none';
+                    }
+                }
+                
+                // Update score display
+                const scoreEl = document.getElementById('cycleScore');
+                if (scoreEl) {
+                    scoreEl.textContent = `${this.cycleState.currentScore || 0}%`;
+                }
+                
+                // Update progress bar
+                const progressFill = document.getElementById('cycleProgressFill');
+                if (progressFill) {
+                    progressFill.style.width = `${this.cycleState.currentScore || 0}%`;
+                }
+                
+                // Update version display
+                const versionLabel = document.getElementById('versionLabel');
+                if (versionLabel) {
+                    versionLabel.textContent = `v${this.cycleState.currentVersion}`;
+                }
+                
+                // Re-render version timeline
+                this.renderVersionTimeline();
+            },
+            
+            // Go to specific version
+            goToVersion(version) {
+                this.cycleState.currentVersion = version;
+                this.updateCycleUI();
+                this.addMessage('system', `Switched to version ${version}`);
+            },
+            
             // Log cycle event to event database
             async logCycleEvent(action, details = {}) {
                 const eventData = {
@@ -10457,3 +10560,37 @@ Based on the objective and feedback, the recommended approach is:
                 
                 if (!this.currentPreviewFile) {
                     this.addMessage('system', '⚠️ No file selected for testing - skipping');
+                    return testResults;
+                }
+                
+                // Run basic tests
+                this.addMessage('system', '🧪 Running tests...');
+                return testResults;
+            }
+        };
+        
+        // Initialize on load - handle case where DOMContentLoaded already fired
+        // #region agent log
+        console.log('[GSX-DEBUG] H1: Script executing, readyState:', document.readyState);
+        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:script-start',message:'H1: Script executing',data:{readyState:document.readyState},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+        // #endregion
+        
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => {
+                // #region agent log
+                console.log('[GSX-DEBUG] H1: DOMContentLoaded fired, calling GSXCreate.init()');
+                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:DOMContentLoaded',message:'H1: DOMContentLoaded fired',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+                // #endregion
+                GSXCreate.init();
+            });
+        } else {
+            // DOM already loaded, call init immediately
+            // #region agent log
+            console.log('[GSX-DEBUG] H1: DOM already loaded, calling GSXCreate.init() immediately');
+            fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:immediate-init',message:'H1: DOM already loaded, calling init immediately',data:{readyState:document.readyState},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+            // #endregion
+            GSXCreate.init();
+        }
+    </script>
+</body>
+</html>

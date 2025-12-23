@@ -2007,6 +2007,9 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
           label: 'GSX Create',
           accelerator: 'CommandOrControl+Shift+A',
           click: () => {
+            // #region agent log
+            console.log('[GSX-DEBUG] H0: GSX Create menu item clicked - opening window');
+            // #endregion
             const aiderWindow = new BrowserWindow({
               width: 1400,
               height: 900,
@@ -2018,6 +2021,14 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
               }
             });
             
+            // #region agent log
+            aiderWindow.webContents.on('did-finish-load', () => {
+              console.log('[GSX-DEBUG] H0: GSX Create window finished loading');
+            });
+            aiderWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+              console.log('[GSX-DEBUG] H0: GSX Create window FAILED to load:', errorCode, errorDescription);
+            });
+            // #endregion
             aiderWindow.loadFile('aider-ui.html');
           }
         },
@@ -2036,7 +2047,7 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
                 preload: path.join(__dirname, 'preload-video-editor.js')
               }
             });
-
+            
             videoEditorWindow.loadFile('video-editor.html');
 
             // Enable dev tools keyboard shortcut (Cmd+Option+I / Ctrl+Shift+I)
@@ -2046,7 +2057,7 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
                 videoEditorWindow.webContents.toggleDevTools();
               }
             });
-
+            
             // Setup video editor IPC for this window
             if (global.videoEditor) {
               global.videoEditor.setupIPC(videoEditorWindow);
@@ -2122,6 +2133,95 @@ Right-click anywhere: Paste to Black Hole`;
           }
         },
         { type: 'separator' },
+        {
+          label: '🧪 Test ElevenLabs APIs',
+          click: async () => {
+            console.log('[Menu] Testing ElevenLabs APIs...');
+            const { dialog, BrowserWindow } = require('electron');
+            const focusedWindow = BrowserWindow.getFocusedWindow();
+            
+            try {
+              // Get the video editor service
+              const { VideoEditor } = require('./src/video/index.js');
+              const videoEditor = new VideoEditor();
+              
+              const results = { passed: [], failed: [] };
+              
+              // Test 1: List Models
+              try {
+                const models = await videoEditor.elevenLabsService.listModels();
+                results.passed.push(`List Models: Found ${models?.length || 0} models`);
+              } catch (e) {
+                results.failed.push(`List Models: ${e.message}`);
+              }
+              
+              // Test 2: List Voices
+              try {
+                const voices = await videoEditor.elevenLabsService.listVoices();
+                results.passed.push(`List Voices: Found ${voices.voices?.length || 0} voices`);
+              } catch (e) {
+                results.failed.push(`List Voices: ${e.message}`);
+              }
+              
+              // Test 3: List Studio Projects
+              try {
+                const projects = await videoEditor.elevenLabsService.listStudioProjects();
+                results.passed.push(`List Studio Projects: Found ${projects?.length || 0} projects`);
+              } catch (e) {
+                results.failed.push(`List Studio Projects: ${e.message}`);
+              }
+              
+              // Test 4: Get History
+              try {
+                const history = await videoEditor.elevenLabsService.getHistory({ pageSize: 5 });
+                results.passed.push(`Get History: Found ${history.history?.length || 0} items`);
+              } catch (e) {
+                results.failed.push(`Get History: ${e.message}`);
+              }
+              
+              // Test 5: Get User Info
+              try {
+                const user = await videoEditor.elevenLabsService.getUserInfo();
+                results.passed.push(`Get User Info: ${user.first_name || 'OK'}`);
+              } catch (e) {
+                results.failed.push(`Get User Info: ${e.message}`);
+              }
+              
+              // Test 6: Get Subscription
+              try {
+                const sub = await videoEditor.elevenLabsService.getUserSubscription();
+                results.passed.push(`Get Subscription: ${sub.tier || 'OK'}`);
+              } catch (e) {
+                results.failed.push(`Get Subscription: ${e.message}`);
+              }
+              
+              // Show results
+              const message = [
+                `✅ Passed: ${results.passed.length}`,
+                `❌ Failed: ${results.failed.length}`,
+                '',
+                '--- Passed ---',
+                ...results.passed,
+                '',
+                '--- Failed ---',
+                ...results.failed
+              ].join('\n');
+              
+              console.log('[Menu] ElevenLabs Test Results:\n' + message);
+              
+              dialog.showMessageBox(focusedWindow, {
+                type: results.failed.length > 0 ? 'warning' : 'info',
+                title: 'ElevenLabs API Test Results',
+                message: `Passed: ${results.passed.length} | Failed: ${results.failed.length}`,
+                detail: message,
+                buttons: ['OK']
+              });
+            } catch (error) {
+              console.error('[Menu] ElevenLabs test error:', error);
+              dialog.showErrorBox('ElevenLabs Test Error', error.message);
+            }
+          }
+        },
         {
           label: 'Debug: Open Setup Wizard',
           click: async () => {

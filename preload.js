@@ -328,6 +328,12 @@ contextBridge.exposeInMainWorld(
     saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
     testLLMConnection: (config) => ipcRenderer.invoke('settings:test-llm', config),
     
+    // Video Release - YouTube/Vimeo Authentication
+    authenticateYouTube: () => ipcRenderer.invoke('release:authenticate-youtube'),
+    authenticateVimeo: () => ipcRenderer.invoke('release:authenticate-vimeo'),
+    getYouTubeStatus: () => ipcRenderer.invoke('release:get-youtube-status'),
+    getVimeoStatus: () => ipcRenderer.invoke('release:get-vimeo-status'),
+
     // GSX File Sync API
     testGSXConnection: (config) => ipcRenderer.invoke('gsx:test-connection', config),
     syncGSXNow: () => ipcRenderer.invoke('gsx:sync-all'),

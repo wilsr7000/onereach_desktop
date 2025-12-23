@@ -7,17 +7,26 @@ const browserWindow = require('./browserWindow');
 const log = require('electron-log');
 const ClipboardManager = require('./clipboard-manager-v2-adapter');
 const rollbackManager = require('./rollback-manager');
+const { SnapshotStorage } = require('./src/state-manager/SnapshotStorage');
 const ModuleManager = require('./module-manager');
 const getLogger = require('./event-logger');
 let logger = getLogger(); // This might be a stub initially
 const { createConsoleInterceptor } = require('./console-interceptor');
 const { getGSXFileSync } = require('./gsx-file-sync');
 const { AiderBridgeClient } = require('./aider-bridge-client');
+// Use video editor module (note: src/video/ is the new modular architecture)
 const VideoEditor = require('./video-editor');
 const { getRecorder } = require('./recorder');
+const { getBudgetManager } = require('./budget-manager');
+
+// Global Budget Manager instance
+let budgetManager = null;
 
 // Global Aider Bridge instance
 let aiderBridge = null;
+
+// Global Snapshot Storage instance (for state manager)
+let snapshotStorage = null;
 
 // Global Video Editor instance
 let videoEditor = null;
@@ -96,6 +105,9 @@ global.openSetupWizardGlobal = () => {
 
 // Configure default session for better OAuth support
 app.whenReady().then(() => {
+  // Allow detached/remote-controlled media playback (Chromium blocks play() without a user gesture by default).
+  // This matters for the detached video window, which is driven via IPC.
+  app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
   // Set up shell.openExternal override
   setupShellOverride();
   
@@ -141,8 +153,20 @@ function createWindow() {
 }
 
 function createTray() {
-  // Use the tray icon PNG for all platforms
-  const trayIconPath = path.join(__dirname, 'assets/tray-icon.png');
+  // Use properly sized template icon for macOS (22x22 with @2x variant for retina)
+  // Template naming convention allows macOS to automatically adapt icon color for light/dark mode
+  const templateIconPath = path.join(__dirname, 'assets/tray-iconTemplate.png');
+  const fallbackIconPath = path.join(__dirname, 'assets/tray-icon.png');
+  
+  // Use template icon if it exists, otherwise fall back to regular icon
+  let trayIconPath;
+  if (fs.existsSync(templateIconPath)) {
+    trayIconPath = templateIconPath;
+    console.log('Using template tray icon:', templateIconPath);
+  } else {
+    trayIconPath = fallbackIconPath;
+    console.log('Template icon not found, using fallback:', fallbackIconPath);
+  }
   
   // Get main window reference
   const mainWindow = browserWindow.getMainWindow();
@@ -439,6 +463,23 @@ app.whenReady().then(() => {
   ipcMain.on('log-message', (event, message) => {
     console.log(message);
   });
+
+  // Debug-mode logger: renderer -> main -> append NDJSON
+  // (Used when CSP/network blocks HTTP ingest)
+  ipcMain.on('debug:log', (event, payload) => {
+    try {
+      const fs = require('fs');
+      const logPath = path.join(__dirname, '.cursor', 'debug.log');
+      const safePayload = {
+        ...payload,
+        timestamp: typeof payload?.timestamp === 'number' ? payload.timestamp : Date.now(),
+      };
+      fs.appendFileSync(logPath, JSON.stringify(safePayload) + '\n', 'utf8');
+    } catch (err) {
+      // Avoid crashing main process for debug logging
+      console.error('[debug:log] failed to write', err?.message || err);
+    }
+  });
   
   // Initialize AI log analyzer
   const getLogAIAnalyzer = require('./log-ai-analyzer');
@@ -556,52 +597,109 @@ app.whenReady().then(() => {
   // This makes the app feel snappier by showing the UI first
   setImmediate(() => {
     console.log('[Startup] Initializing deferred managers...');
+    // #region agent log
+    console.log('[DEBUG-H1] setImmediate callback starting - about to init clipboard manager');
+    // #endregion
     
     // Initialize clipboard manager
-    clipboardManager = new ClipboardManager();
-    clipboardManager.registerShortcut();
-    global.clipboardManager = clipboardManager;
-    console.log('Clipboard manager initialized');
-    logger.logFeatureUsed('clipboard-manager', {
-      status: 'initialized',
-      shortcutRegistered: true
-    });
+    try {
+      console.log('[DEBUG-H1] Creating new ClipboardManager instance...');
+      clipboardManager = new ClipboardManager();
+      console.log('[DEBUG-H1] ClipboardManager created, registering shortcut...');
+      clipboardManager.registerShortcut();
+      global.clipboardManager = clipboardManager;
+      console.log('Clipboard manager initialized');
+      // #region agent log
+      console.log('[DEBUG-H1] Clipboard manager fully initialized, global.clipboardManager set');
+      // #endregion
+      logger.logFeatureUsed('clipboard-manager', {
+        status: 'initialized',
+        shortcutRegistered: true
+      });
+    } catch (error) {
+      console.error('[Startup] Error initializing clipboard manager:', error);
+      // #region agent log
+      console.error('[DEBUG-H1] Clipboard manager init FAILED:', error.message, error.stack);
+      // #endregion
+    }
     
     // Initialize video editor
-    videoEditor = new VideoEditor();
-    global.videoEditor = videoEditor;
-    console.log('Video editor initialized');
+    try {
+      videoEditor = new VideoEditor();
+      global.videoEditor = videoEditor;
+      console.log('Video editor initialized');
+    } catch (error) {
+      console.error('[Startup] Error initializing video editor:', error);
+    }
 
     // Initialize recorder
-    recorder = getRecorder();
-    recorder.setupIPC();
-    global.recorder = recorder;
-    console.log('Recorder initialized');
+    try {
+      recorder = getRecorder();
+      recorder.setupIPC();
+      global.recorder = recorder;
+      console.log('Recorder initialized');
+    } catch (error) {
+      console.error('[Startup] Error initializing recorder:', error);
+    }
     
     // Initialize module manager
-    moduleManager = new ModuleManager();
-    global.moduleManager = moduleManager;
-    // Make updateApplicationMenu globally available for module manager
-    global.updateApplicationMenu = updateApplicationMenu;
-    console.log('Module manager initialized');
-    logger.logFeatureUsed('module-manager', {
-      status: 'initialized',
-      modulesPath: moduleManager.modulesPath
-    });
+    try {
+      moduleManager = new ModuleManager();
+      global.moduleManager = moduleManager;
+      // Make updateApplicationMenu globally available for module manager
+      global.updateApplicationMenu = updateApplicationMenu;
+      console.log('Module manager initialized');
+      // #region agent log
+      const webTools = moduleManager.getWebTools();
+      const moduleItems = moduleManager.getModuleMenuItems();
+      const webToolItems = moduleManager.getWebToolMenuItems();
+      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:moduleManager-init',message:'moduleManager initialized',data:{webToolsCount:webTools.length,moduleItemsCount:moduleItems.length,webToolItemsCount:webToolItems.length,webToolNames:webTools.map(t=>t.name)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
+      // #endregion
+      logger.logFeatureUsed('module-manager', {
+        status: 'initialized',
+        modulesPath: moduleManager.modulesPath
+      });
+      
+      // Refresh the menu now that moduleManager is available
+      // This ensures web tools appear in the Tools menu
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:before-menu-refresh',message:'About to refresh menu',data:{globalModuleManagerExists:!!global.moduleManager},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
+      // #endregion
+      const { setApplicationMenu } = require('./menu');
+      const idwEnvironments = global.settingsManager ? global.settingsManager.get('idwEnvironments') || [] : [];
+      setApplicationMenu(idwEnvironments);
+      console.log('[Startup] Menu refreshed with module manager');
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:after-menu-refresh',message:'Menu refresh completed',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
+      // #endregion
+    } catch (error) {
+      console.error('[Startup] Error initializing module manager:', error);
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:moduleManager-error',message:'moduleManager init failed',data:{error:error.message},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+      // #endregion
+    }
     
     // Initialize Speech Recognition Bridge (Whisper-based, for web apps)
-    const { getSpeechBridge } = require('./speech-recognition-bridge');
-    const speechBridge = getSpeechBridge();
-    speechBridge.setupIPC();
-    global.speechBridge = speechBridge;
-    console.log('[SpeechBridge] Speech recognition bridge initialized (Whisper API)');
+    try {
+      const { getSpeechBridge } = require('./speech-recognition-bridge');
+      const speechBridge = getSpeechBridge();
+      speechBridge.setupIPC();
+      global.speechBridge = speechBridge;
+      console.log('[SpeechBridge] Speech recognition bridge initialized (Whisper API)');
+    } catch (error) {
+      console.error('[Startup] Error initializing speech bridge:', error);
+    }
 
     // Initialize Realtime Speech (OpenAI Realtime API for streaming transcription)
-    const { getRealtimeSpeech } = require('./realtime-speech');
-    const realtimeSpeech = getRealtimeSpeech();
-    realtimeSpeech.setupIPC();
-    global.realtimeSpeech = realtimeSpeech;
-    console.log('[RealtimeSpeech] Realtime streaming speech initialized');
+    try {
+      const { getRealtimeSpeech } = require('./realtime-speech');
+      const realtimeSpeech = getRealtimeSpeech();
+      realtimeSpeech.setupIPC();
+      global.realtimeSpeech = realtimeSpeech;
+      console.log('[RealtimeSpeech] Realtime streaming speech initialized');
+    } catch (error) {
+      console.error('[Startup] Error initializing realtime speech:', error);
+    }
 
     console.log('[Startup] Deferred managers initialized');
   });
@@ -885,6 +983,86 @@ app.whenReady().then(() => {
   }).catch(err => {
     console.error('Failed to initialize rollback manager:', err);
   });
+
+  // Initialize snapshot storage for state manager
+  snapshotStorage = new SnapshotStorage(app.getPath('userData'));
+  global.snapshotStorage = snapshotStorage;
+  console.log('Snapshot storage initialized');
+
+  // ═══════════════════════════════════════════════════════════
+  // STATE MANAGER IPC HANDLERS
+  // ═══════════════════════════════════════════════════════════
+
+  // Save a snapshot
+  ipcMain.handle('stateManager:saveSnapshot', async (event, editorId, snapshot) => {
+    try {
+      return snapshotStorage.saveSnapshot(editorId, snapshot);
+    } catch (error) {
+      console.error('[StateManager] Error saving snapshot:', error);
+      throw error;
+    }
+  });
+
+  // List snapshots for an editor
+  ipcMain.handle('stateManager:listSnapshots', async (event, editorId) => {
+    try {
+      return snapshotStorage.listSnapshots(editorId);
+    } catch (error) {
+      console.error('[StateManager] Error listing snapshots:', error);
+      throw error;
+    }
+  });
+
+  // Get a specific snapshot
+  ipcMain.handle('stateManager:getSnapshot', async (event, editorId, snapshotId) => {
+    try {
+      return snapshotStorage.getSnapshot(editorId, snapshotId);
+    } catch (error) {
+      console.error('[StateManager] Error getting snapshot:', error);
+      throw error;
+    }
+  });
+
+  // Delete a snapshot
+  ipcMain.handle('stateManager:deleteSnapshot', async (event, editorId, snapshotId) => {
+    try {
+      return snapshotStorage.deleteSnapshot(editorId, snapshotId);
+    } catch (error) {
+      console.error('[StateManager] Error deleting snapshot:', error);
+      throw error;
+    }
+  });
+
+  // Rename a snapshot
+  ipcMain.handle('stateManager:renameSnapshot', async (event, editorId, snapshotId, newName) => {
+    try {
+      return snapshotStorage.renameSnapshot(editorId, snapshotId, newName);
+    } catch (error) {
+      console.error('[StateManager] Error renaming snapshot:', error);
+      throw error;
+    }
+  });
+
+  // Get storage stats
+  ipcMain.handle('stateManager:getStats', async (event, editorId) => {
+    try {
+      return snapshotStorage.getStats(editorId);
+    } catch (error) {
+      console.error('[StateManager] Error getting stats:', error);
+      throw error;
+    }
+  });
+
+  // Clear all snapshots for an editor
+  ipcMain.handle('stateManager:clearSnapshots', async (event, editorId) => {
+    try {
+      snapshotStorage.clearSnapshots(editorId);
+      return true;
+    } catch (error) {
+      console.error('[StateManager] Error clearing snapshots:', error);
+      throw error;
+    }
+  });
   
   // Set application menu (menu is already set in createWindow, so we can skip this duplicate call)
   // Commenting out duplicate menu setup that was overriding the Share menu
@@ -905,8 +1083,12 @@ app.whenReady().then(() => {
   
   // Register global shortcuts after menu is set up
   try {
-    registerGlobalShortcuts();
-    console.log('Global shortcuts registered');
+    if (typeof global.registerGlobalShortcuts === 'function') {
+      global.registerGlobalShortcuts();
+      console.log('Global shortcuts registered');
+    } else {
+      console.warn('[Shortcuts] registerGlobalShortcuts not initialized yet (setupIPC scope). Skipping initial registration.');
+    }
   } catch (error) {
     console.error('Error registering global shortcuts:', error);
   }
@@ -1058,12 +1240,18 @@ function setupModuleManagerIPC() {
   
   // Get installed modules
   ipcMain.handle('module:get-installed', async () => {
+    if (!global.moduleManager) {
+      return []; // Not yet initialized
+    }
     return global.moduleManager.getInstalledModules();
   });
   
   // Open module
   ipcMain.handle('module:open', async (event, moduleId) => {
     try {
+      if (!global.moduleManager) {
+        return { success: false, error: 'Module manager not yet initialized' };
+      }
       global.moduleManager.openModule(moduleId);
       return { success: true };
     } catch (error) {
@@ -1074,6 +1262,9 @@ function setupModuleManagerIPC() {
   // Uninstall module
   ipcMain.handle('module:uninstall', async (event, moduleId) => {
     try {
+      if (!global.moduleManager) {
+        return { success: false, error: 'Module manager not yet initialized' };
+      }
       global.moduleManager.removeModule(moduleId);
       return { success: true };
     } catch (error) {
@@ -1084,6 +1275,9 @@ function setupModuleManagerIPC() {
   // Install from URL
   ipcMain.handle('module:install-from-url', async (event, url) => {
     try {
+      if (!global.moduleManager) {
+        return { success: false, error: 'Module manager not yet initialized' };
+      }
       const manifest = await global.moduleManager.installModuleFromUrl(url);
       return { success: true, manifest };
     } catch (error) {
@@ -1094,6 +1288,9 @@ function setupModuleManagerIPC() {
   // Install from file
   ipcMain.handle('module:install-from-file', async (event, filePath) => {
     try {
+      if (!global.moduleManager) {
+        return { success: false, error: 'Module manager not yet initialized' };
+      }
       const manifest = await global.moduleManager.installModuleFromZip(filePath);
       return { success: true, manifest };
     } catch (error) {
@@ -1357,12 +1554,18 @@ function setupModuleManagerIPC() {
   
   // Get all web tools
   ipcMain.handle('module:get-web-tools', async () => {
+    if (!global.moduleManager) {
+      return []; // Not yet initialized
+    }
     return global.moduleManager.getWebTools();
   });
   
   // Add web tool
   ipcMain.handle('module:add-web-tool', async (event, tool) => {
     try {
+      if (!global.moduleManager) {
+        return { success: false, error: 'Module manager not yet initialized' };
+      }
       global.moduleManager.addWebTool(tool);
       return { success: true };
     } catch (error) {
@@ -1373,6 +1576,9 @@ function setupModuleManagerIPC() {
   // Open web tool
   ipcMain.handle('module:open-web-tool', async (event, toolId) => {
     try {
+      if (!global.moduleManager) {
+        return { success: false, error: 'Module manager not yet initialized' };
+      }
       global.moduleManager.openWebTool(toolId);
       return { success: true };
     } catch (error) {
@@ -1383,6 +1589,9 @@ function setupModuleManagerIPC() {
   // Delete web tool
   ipcMain.handle('module:delete-web-tool', async (event, toolId) => {
     try {
+      if (!global.moduleManager) {
+        return { success: false, error: 'Module manager not yet initialized' };
+      }
       global.moduleManager.deleteWebTool(toolId);
       return { success: true };
     } catch (error) {
@@ -1407,7 +1616,10 @@ function setupAiderIPC() {
         
         console.log(`[Aider] Starting with provider: ${provider}, API key present: ${!!apiKey}`);
         
-        aiderBridge = new AiderBridgeClient('python3', apiKey, provider);
+        // Use pipx-installed Python with aider-chat (Python 3.14 doesn't support aider's numpy dependency)
+        const aiderPythonPath = '/Users/richardwilson/.local/pipx/venvs/aider-chat/bin/python3';
+        console.log(`[Aider] Using Python path: ${aiderPythonPath}`);
+        aiderBridge = new AiderBridgeClient(aiderPythonPath, apiKey, provider);
         await aiderBridge.start();
         console.log('[Aider] Bridge started successfully');
       }
@@ -1602,14 +1814,93 @@ function setupAiderIPC() {
     return result;
   });
   
+  // ==================== VIDEO PROJECT PERSISTENCE ====================
+  // Save video project to file (alongside video file)
+  ipcMain.handle('save-video-project', async (event, { videoPath, projectData }) => {
+    try {
+      if (!videoPath) {
+        return { success: false, error: 'No video path provided' };
+      }
+      // Create project file path: video.mp4 -> video.onereach-project.json
+      const projectPath = videoPath.replace(/\.[^.]+$/, '.onereach-project.json');
+      await fs.promises.writeFile(projectPath, JSON.stringify(projectData, null, 2), 'utf-8');
+      console.log('[VideoProject] Saved project to:', projectPath);
+      return { success: true, path: projectPath };
+    } catch (error) {
+      console.error('[VideoProject] Save error:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Load video project from file
+  ipcMain.handle('load-video-project', async (event, { videoPath }) => {
+    try {
+      if (!videoPath) {
+        return { success: false, error: 'No video path provided' };
+      }
+      // Create project file path: video.mp4 -> video.onereach-project.json
+      const projectPath = videoPath.replace(/\.[^.]+$/, '.onereach-project.json');
+      
+      // Check if project file exists
+      try {
+        await fs.promises.access(projectPath);
+      } catch {
+        return { success: false, error: 'No project file found' };
+      }
+      
+      const data = await fs.promises.readFile(projectPath, 'utf-8');
+      const projectData = JSON.parse(data);
+      console.log('[VideoProject] Loaded project from:', projectPath);
+      return { success: true, data: projectData, path: projectPath };
+    } catch (error) {
+      console.error('[VideoProject] Load error:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Delete video project file
+  ipcMain.handle('delete-video-project', async (event, { videoPath }) => {
+    try {
+      if (!videoPath) {
+        return { success: false, error: 'No video path provided' };
+      }
+      const projectPath = videoPath.replace(/\.[^.]+$/, '.onereach-project.json');
+      await fs.promises.unlink(projectPath);
+      console.log('[VideoProject] Deleted project:', projectPath);
+      return { success: true };
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        return { success: true }; // File didn't exist, that's fine
+      }
+      console.error('[VideoProject] Delete error:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
   // Get API configuration for Aider UI
   ipcMain.handle('aider:get-api-config', async () => {
+    // #region agent log
+    console.log('[GSX-DEBUG] H3: aider:get-api-config handler invoked');
+    const http = require('http');
+    const logH3Start = JSON.stringify({location:'main.js:aider:get-api-config',message:'H3: Getting API config',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'});
+    const reqH3Start = http.request({hostname:'127.0.0.1',port:7242,path:'/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',method:'POST',headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(logH3Start)}},()=>{});
+    reqH3Start.on('error',()=>{});
+    reqH3Start.write(logH3Start);
+    reqH3Start.end();
+    // #endregion
     const { getSettingsManager } = require('./settings-manager');
     const settings = getSettingsManager();
     
     const apiKey = settings.getLLMApiKey();
     const provider = settings.getLLMProvider();
     
+    // #region agent log
+    const logH3Result = JSON.stringify({location:'main.js:aider:get-api-config:result',message:'H3: API config result',data:{hasApiKey:!!apiKey,provider:provider||'anthropic'},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'});
+    const reqH3Result = http.request({hostname:'127.0.0.1',port:7242,path:'/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',method:'POST',headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(logH3Result)}},()=>{});
+    reqH3Result.on('error',()=>{});
+    reqH3Result.write(logH3Result);
+    reqH3Result.end();
+    // #endregion
     return {
       hasApiKey: !!apiKey,
       provider: provider || 'anthropic',
@@ -1619,13 +1910,22 @@ function setupAiderIPC() {
   
   // Get spaces with folder paths for GSX Create
   ipcMain.handle('aider:get-spaces', async () => {
+    // #region agent log
+    console.log('[GSX-DEBUG] H2: aider:get-spaces handler invoked');
+    const http = require('http');
+    const logH2Start = JSON.stringify({location:'main.js:aider:get-spaces',message:'H2: Getting spaces for GSX Create',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'});
+    const reqH2Start = http.request({hostname:'127.0.0.1',port:7242,path:'/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',method:'POST',headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(logH2Start)}},()=>{});
+    reqH2Start.on('error',()=>{});
+    reqH2Start.write(logH2Start);
+    reqH2Start.end();
+    // #endregion
     try {
       const ClipboardStorage = require('./clipboard-storage-v2');
       const storage = new ClipboardStorage();
       const spaces = storage.index.spaces || [];
       
       // Map spaces to include their folder paths and item counts
-      return spaces.map(space => {
+      const result = spaces.map(space => {
         // Calculate item count for this space from index items
         const itemCount = (storage.index.items || []).filter(item => item.spaceId === space.id).length;
         
@@ -1638,7 +1938,22 @@ function setupAiderIPC() {
           itemCount: itemCount
         };
       });
+      // #region agent log
+      const logH2Result = JSON.stringify({location:'main.js:aider:get-spaces:result',message:'H2: Spaces loaded',data:{spaceCount:result.length,spaceNames:result.map(s=>s.name)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'});
+      const reqH2Result = http.request({hostname:'127.0.0.1',port:7242,path:'/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',method:'POST',headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(logH2Result)}},()=>{});
+      reqH2Result.on('error',()=>{});
+      reqH2Result.write(logH2Result);
+      reqH2Result.end();
+      // #endregion
+      return result;
     } catch (error) {
+      // #region agent log
+      const logH2Error = JSON.stringify({location:'main.js:aider:get-spaces:error',message:'H2: Failed to get spaces',data:{error:error.message},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'});
+      const reqH2Error = http.request({hostname:'127.0.0.1',port:7242,path:'/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',method:'POST',headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(logH2Error)}},()=>{});
+      reqH2Error.on('error',()=>{});
+      reqH2Error.write(logH2Error);
+      reqH2Error.end();
+      // #endregion
       console.error('[GSX Create] Failed to get spaces:', error);
       return [];
     }
@@ -1865,6 +2180,14 @@ function setupAiderIPC() {
   
   // Read a file
   ipcMain.handle('aider:read-file', async (event, filePath) => {
+    // #region agent log
+    const http = require('http');
+    const logH4Read = JSON.stringify({location:'main.js:aider:read-file',message:'H4: Reading file',data:{filePath:filePath},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'});
+    const reqH4Read = http.request({hostname:'127.0.0.1',port:7242,path:'/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',method:'POST',headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(logH4Read)}},()=>{});
+    reqH4Read.on('error',()=>{});
+    reqH4Read.write(logH4Read);
+    reqH4Read.end();
+    // #endregion
     try {
       if (!filePath || typeof filePath !== 'string') {
         console.error('[GSX Create] Invalid file path:', filePath);
@@ -1876,6 +2199,13 @@ function setupAiderIPC() {
         return null;
       }
       const content = fs.readFileSync(filePath, 'utf-8');
+      // #region agent log
+      const logH4ReadOk = JSON.stringify({location:'main.js:aider:read-file:success',message:'H4: File read OK',data:{filePath:filePath,contentLength:content.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'});
+      const reqH4ReadOk = http.request({hostname:'127.0.0.1',port:7242,path:'/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',method:'POST',headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(logH4ReadOk)}},()=>{});
+      reqH4ReadOk.on('error',()=>{});
+      reqH4ReadOk.write(logH4ReadOk);
+      reqH4ReadOk.end();
+      // #endregion
       return content;
     } catch (error) {
       console.error('[GSX Create] Failed to read file:', filePath, error.message || error);
@@ -2553,6 +2883,15 @@ function setupIPC() {
     console.error('[setupIPC] Failed to setup Video Editor:', error);
   }
   
+  // Initialize Project Manager handlers
+  try {
+    const { setupProjectManagerIPC } = require('./src/project-manager/ProjectManagerIPC');
+    setupProjectManagerIPC();
+    console.log('[setupIPC] Project Manager IPC handlers registered');
+  } catch (error) {
+    console.error('[setupIPC] Failed to setup Project Manager:', error);
+  }
+  
   // Settings IPC handlers
   console.log('[setupIPC] Setting up settings handlers');
   
@@ -2657,6 +2996,98 @@ function setupIPC() {
       return { success: false, error: error.message };
     }
   });
+  
+  // ==================== VIDEO RELEASE - YOUTUBE/VIMEO AUTH ====================
+  
+  ipcMain.handle('release:authenticate-youtube', async () => {
+    try {
+      const { YouTubeUploader } = await import('./src/video/release/YouTubeUploader.js');
+      const uploader = new YouTubeUploader();
+      
+      // Get credentials from settings
+      const settingsManager = global.settingsManager;
+      if (settingsManager) {
+        const clientId = settingsManager.get('youtubeClientId');
+        const clientSecret = settingsManager.get('youtubeClientSecret');
+        if (clientId && clientSecret) {
+          uploader.setClientCredentials(clientId, clientSecret);
+        }
+      }
+      
+      return await uploader.authenticate();
+    } catch (error) {
+      console.error('[Release] YouTube authentication error:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('release:authenticate-vimeo', async () => {
+    try {
+      const { VimeoUploader } = await import('./src/video/release/VimeoUploader.js');
+      const uploader = new VimeoUploader();
+      
+      // Get credentials from settings
+      const settingsManager = global.settingsManager;
+      if (settingsManager) {
+        const clientId = settingsManager.get('vimeoClientId');
+        const clientSecret = settingsManager.get('vimeoClientSecret');
+        if (clientId && clientSecret) {
+          uploader.setClientCredentials(clientId, clientSecret);
+        }
+      }
+      
+      return await uploader.authenticate();
+    } catch (error) {
+      console.error('[Release] Vimeo authentication error:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('release:get-youtube-status', async () => {
+    try {
+      const { YouTubeUploader } = await import('./src/video/release/YouTubeUploader.js');
+      const uploader = new YouTubeUploader();
+      
+      // Get credentials from settings
+      const settingsManager = global.settingsManager;
+      if (settingsManager) {
+        const clientId = settingsManager.get('youtubeClientId');
+        const clientSecret = settingsManager.get('youtubeClientSecret');
+        if (clientId && clientSecret) {
+          uploader.setClientCredentials(clientId, clientSecret);
+        }
+      }
+      
+      return await uploader.getConnectionStatus();
+    } catch (error) {
+      console.error('[Release] Get YouTube status error:', error);
+      return { configured: false, authenticated: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('release:get-vimeo-status', async () => {
+    try {
+      const { VimeoUploader } = await import('./src/video/release/VimeoUploader.js');
+      const uploader = new VimeoUploader();
+      
+      // Get credentials from settings
+      const settingsManager = global.settingsManager;
+      if (settingsManager) {
+        const clientId = settingsManager.get('vimeoClientId');
+        const clientSecret = settingsManager.get('vimeoClientSecret');
+        if (clientId && clientSecret) {
+          uploader.setClientCredentials(clientId, clientSecret);
+        }
+      }
+      
+      return await uploader.getConnectionStatus();
+    } catch (error) {
+      console.error('[Release] Get Vimeo status error:', error);
+      return { configured: false, authenticated: false, error: error.message };
+    }
+  });
+  
+  // ==================== END VIDEO RELEASE AUTH ====================
   
   // GSX sync-all handler (for sync now button)
   ipcMain.handle('gsx:sync-all', async () => {
@@ -2939,6 +3370,168 @@ function setupIPC() {
     } catch (error) {
       console.error('Error getting spaces:', error);
       return [];
+    }
+  });
+
+  // Alias for clipboard:get-spaces (consistent naming)
+  ipcMain.handle('clipboard:get-spaces', async (event) => {
+    try {
+      const ClipboardStorage = require('./clipboard-storage-v2');
+      const storage = new ClipboardStorage();
+      const spaces = storage.index.spaces || [];
+      return spaces;
+    } catch (error) {
+      console.error('[Clipboard] Error getting spaces:', error);
+      return [];
+    }
+  });
+
+  // Get all items from a space
+  ipcMain.handle('clipboard:get-space-items', async (event, spaceId) => {
+    try {
+      const ClipboardStorage = require('./clipboard-storage-v2');
+      const storage = new ClipboardStorage();
+      const items = storage.getSpaceItems(spaceId);
+      return items || [];
+    } catch (error) {
+      console.error('[Clipboard] Error getting space items:', error);
+      return [];
+    }
+  });
+
+  // Get audio items from a space
+  ipcMain.handle('clipboard:get-space-audio', async (event, spaceId) => {
+    try {
+      const ClipboardStorage = require('./clipboard-storage-v2');
+      const storage = new ClipboardStorage();
+      const items = storage.getSpaceItems(spaceId) || [];
+      return items.filter(item => 
+        item.fileType === 'audio' || 
+        /\.(mp3|wav|m4a|aac|ogg|flac|wma|aiff)$/i.test(item.content || '')
+      );
+    } catch (error) {
+      console.error('[Clipboard] Error getting space audio:', error);
+      return [];
+    }
+  });
+
+  // Get video items from a space
+  ipcMain.handle('clipboard:get-space-videos', async (event, spaceId) => {
+    try {
+      const ClipboardStorage = require('./clipboard-storage-v2');
+      const storage = new ClipboardStorage();
+      const items = storage.getSpaceItems(spaceId) || [];
+      return items.filter(item => 
+        item.fileType === 'video' || 
+        /\.(mp4|mov|avi|mkv|webm|m4v|wmv|flv)$/i.test(item.content || '')
+      );
+    } catch (error) {
+      console.error('[Clipboard] Error getting space videos:', error);
+      return [];
+    }
+  });
+
+  // Get file path for a clipboard item
+  ipcMain.handle('clipboard:get-item-path', async (event, itemId) => {
+    try {
+      const ClipboardStorage = require('./clipboard-storage-v2');
+      const storage = new ClipboardStorage();
+      const item = storage.loadItem(itemId);
+      if (item && item.content) {
+        // Check if it's an absolute path or needs to be resolved
+        if (path.isAbsolute(item.content)) {
+          return item.content;
+        }
+        // Resolve relative to storage root
+        return path.join(storage.storageRoot, item.content);
+      }
+      return null;
+    } catch (error) {
+      console.error('[Clipboard] Error getting item path:', error);
+      return null;
+    }
+  });
+
+  // Get video path for a clipboard item (alias for get-item-path)
+  // Returns { success: boolean, filePath?: string, fileName?: string, scenes?: array, error?: string }
+  ipcMain.handle('clipboard:get-video-path', async (event, itemId) => {
+    try {
+      const ClipboardStorage = require('./clipboard-storage-v2');
+      const storage = new ClipboardStorage();
+      const item = storage.loadItem(itemId);
+      
+      if (item && item.content) {
+        let filePath;
+        if (path.isAbsolute(item.content)) {
+          filePath = item.content;
+        } else {
+          filePath = path.join(storage.storageRoot, item.content);
+        }
+        
+        // Check if file exists
+        const fs = require('fs');
+        if (!fs.existsSync(filePath)) {
+          console.error('[Clipboard] Video file not found:', filePath);
+          return { success: false, error: 'Video file not found: ' + filePath };
+        }
+        
+        // Load scenes from metadata if available
+        let scenes = [];
+        try {
+          const metadataPath = path.join(storage.itemsDir, itemId, 'metadata.json');
+          if (fs.existsSync(metadataPath)) {
+            const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+            scenes = metadata.scenes || [];
+          }
+        } catch (e) {
+          // Ignore metadata errors
+        }
+        
+        return { 
+          success: true, 
+          filePath: filePath,
+          fileName: item.fileName || path.basename(filePath),
+          scenes: scenes
+        };
+      }
+      
+      return { success: false, error: 'Video item not found or has no content' };
+    } catch (error) {
+      console.error('[Clipboard] Error getting video path:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Get metadata for a clipboard item (fallback handler for video editor)
+  ipcMain.handle('clipboard:get-metadata', async (event, itemId) => {
+    console.log('[Clipboard] clipboard:get-metadata called with itemId:', itemId);
+    try {
+      const ClipboardStorage = require('./clipboard-storage-v2');
+      const storage = new ClipboardStorage();
+      const item = storage.loadItem(itemId);
+      if (!item) return { success: false, error: 'Item not found' };
+      
+      // Build complete metadata object with all properties
+      const metadata = {
+        ...(item.metadata || {}),
+        description: item.metadata?.description || '',
+        notes: item.metadata?.notes || '',
+        instructions: item.metadata?.instructions || '',
+        tags: item.metadata?.tags || [],
+        source: item.metadata?.source || item.source || '',
+        ai_generated: item.metadata?.ai_generated || false,
+        ai_assisted: item.metadata?.ai_assisted || false,
+        ai_model: item.metadata?.ai_model || '',
+        ai_provider: item.metadata?.ai_provider || '',
+        scenes: item.metadata?.scenes || [],
+        transcription: item.metadata?.transcription || null,
+        videoEditorProjectState: item.metadata?.videoEditorProjectState || null
+      };
+      
+      return { success: true, metadata };
+    } catch (error) {
+      console.error('[Clipboard] Error getting metadata:', error);
+      return { success: false, error: error.message };
     }
   });
   
@@ -3564,7 +4157,7 @@ function setupIPC() {
     }
     return { success: false, error: 'Recorder not initialized' };
   });
-
+  
   // Handle opening clipboard viewer from widgets
   ipcMain.on('open-clipboard-viewer', async () => {
     console.log('Received request to open clipboard viewer');
@@ -5420,6 +6013,10 @@ function setupIPC() {
       console.error('[Shortcuts] Error registering global shortcuts:', error);
     }
   }
+
+  // Expose shortcut registration to module-scope callers (e.g. app.whenReady)
+  // so we don't crash with "registerGlobalShortcuts is not defined".
+  global.registerGlobalShortcuts = registerGlobalShortcuts;
   
   // Handle refresh menu request
   ipcMain.on('refresh-menu', (event) => {
@@ -6788,6 +7385,118 @@ function openSettingsWindow() {
 // Make settings window globally accessible
 global.openSettingsWindowGlobal = openSettingsWindow;
 
+// Keep a reference to the budget dashboard window
+let budgetDashboardWindow = null;
+
+// Function to open the budget dashboard window
+function openBudgetDashboard() {
+  console.log('Opening budget dashboard window...');
+  
+  // Check if budget dashboard window already exists and is not destroyed
+  if (budgetDashboardWindow && !budgetDashboardWindow.isDestroyed()) {
+    console.log('Budget dashboard window exists, focusing it');
+    budgetDashboardWindow.show();
+    budgetDashboardWindow.focus();
+    return;
+  }
+  
+  console.log('Creating new budget dashboard window');
+  // Create the budget dashboard window
+  budgetDashboardWindow = new BrowserWindow({
+    width: 1100,
+    height: 800,
+    title: 'API Budget Dashboard',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload-budget.js'),
+      webSecurity: true,
+      enableRemoteModule: false,
+      sandbox: false
+    }
+  });
+  
+  // Clear the reference when the window is closed
+  budgetDashboardWindow.on('closed', () => {
+    console.log('Budget dashboard window closed');
+    budgetDashboardWindow = null;
+  });
+  
+  // Handle any load errors
+  budgetDashboardWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+    console.error('Failed to load budget dashboard window:', errorCode, errorDescription);
+  });
+  
+  // Log when the window successfully loads
+  budgetDashboardWindow.webContents.on('did-finish-load', () => {
+    console.log('Budget dashboard window loaded successfully');
+  });
+  
+  // Load the budget dashboard HTML file
+  budgetDashboardWindow.loadFile('budget-dashboard.html').catch(err => {
+    console.error('Error loading budget-dashboard.html:', err);
+  });
+}
+
+// Make budget dashboard globally accessible
+global.openBudgetDashboardGlobal = openBudgetDashboard;
+
+// Keep a reference to the budget estimator window
+let budgetEstimatorWindow = null;
+
+// Function to open the budget estimator window
+function openBudgetEstimator() {
+  console.log('Opening budget estimator window...');
+  
+  // Check if budget estimator window already exists and is not destroyed
+  if (budgetEstimatorWindow && !budgetEstimatorWindow.isDestroyed()) {
+    console.log('Budget estimator window exists, focusing it');
+    budgetEstimatorWindow.show();
+    budgetEstimatorWindow.focus();
+    return;
+  }
+  
+  console.log('Creating new budget estimator window');
+  // Create the budget estimator window
+  budgetEstimatorWindow = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    title: 'Project Budget Estimator',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload-budget-estimator.js'),
+      webSecurity: true,
+      enableRemoteModule: false,
+      sandbox: false
+    }
+  });
+  
+  // Clear the reference when the window is closed
+  budgetEstimatorWindow.on('closed', () => {
+    console.log('Budget estimator window closed');
+    budgetEstimatorWindow = null;
+  });
+  
+  // Handle any load errors
+  budgetEstimatorWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+    console.error('Failed to load budget estimator window:', errorCode, errorDescription);
+  });
+  
+  // Log when the window successfully loads
+  budgetEstimatorWindow.webContents.on('did-finish-load', () => {
+    console.log('Budget estimator window loaded successfully');
+  });
+  
+  // Load the budget estimator HTML file
+  budgetEstimatorWindow.loadFile('budget-estimator.html').catch(err => {
+    console.error('Error loading budget-estimator.html:', err);
+  });
+}
+
+// Make budget estimator globally accessible
+global.openBudgetEstimatorGlobal = openBudgetEstimator;
+
 // Function to open the setup wizard modal
 function openSetupWizard() {
   console.log('Opening setup wizard window...');
@@ -7735,9 +8444,108 @@ ipcMain.handle('test-agent:close', async () => {
   return { success: true };
 });
 
+// ==================== BUDGET MANAGER IPC HANDLERS ====================
+// Initialize budget manager
+budgetManager = getBudgetManager();
+console.log('[main.js] Budget manager initialized');
+
+// Get cost summary
+ipcMain.handle('budget:getCostSummary', async (event, period) => {
+  return budgetManager.getCostSummary(period);
+});
+
+// Get all budget limits
+ipcMain.handle('budget:getAllBudgetLimits', async () => {
+  return budgetManager.getAllBudgetLimits();
+});
+
+// Set budget limit
+ipcMain.handle('budget:setBudgetLimit', async (event, scope, limit, alertAt) => {
+  return budgetManager.setBudgetLimit(scope, limit, alertAt);
+});
+
+// Get usage history
+ipcMain.handle('budget:getUsageHistory', async (event, options) => {
+  return budgetManager.getUsageHistory(options);
+});
+
+// Get project costs
+ipcMain.handle('budget:getProjectCosts', async (event, projectId) => {
+  return budgetManager.getProjectCosts(projectId);
+});
+
+// Get all projects
+ipcMain.handle('budget:getAllProjects', async () => {
+  return budgetManager.getAllProjects();
+});
+
+// Clear usage history
+ipcMain.handle('budget:clearUsageHistory', async (event, options) => {
+  return budgetManager.clearUsageHistory(options);
+});
+
+// Export data
+ipcMain.handle('budget:exportData', async () => {
+  return budgetManager.exportData();
+});
+
+// Estimate cost
+ipcMain.handle('budget:estimateCost', async (event, provider, params) => {
+  return budgetManager.estimateCost(provider, params);
+});
+
+// Check budget
+ipcMain.handle('budget:checkBudget', async (event, provider, estimatedCost) => {
+  return budgetManager.checkBudget(provider, estimatedCost);
+});
+
+// Track usage (called from API services)
+ipcMain.handle('budget:trackUsage', async (event, provider, projectId, usage) => {
+  const entry = budgetManager.trackUsage(provider, projectId, usage);
+  // Notify budget dashboard if open
+  if (budgetDashboardWindow && !budgetDashboardWindow.isDestroyed()) {
+    budgetDashboardWindow.webContents.send('budget:updated', entry);
+  }
+  return entry;
+});
+
+// Register project
+ipcMain.handle('budget:registerProject', async (event, projectId, name) => {
+  return budgetManager.registerProject(projectId, name);
+});
+
+// Get pricing
+ipcMain.handle('budget:getPricing', async () => {
+  return budgetManager.getPricing();
+});
+
+// Update pricing
+ipcMain.handle('budget:updatePricing', async (event, provider, pricing) => {
+  return budgetManager.updatePricing(provider, pricing);
+});
+
+// Reset to defaults
+ipcMain.handle('budget:resetToDefaults', async () => {
+  return budgetManager.resetToDefaults();
+});
+
+// Open budget dashboard (can be called from other windows)
+ipcMain.on('open-budget-dashboard', () => {
+  console.log('Opening budget dashboard via IPC');
+  openBudgetDashboard();
+});
+
+// Open budget estimator (can be called from other windows)
+ipcMain.on('open-budget-estimator', () => {
+  console.log('Opening budget estimator via IPC');
+  openBudgetEstimator();
+});
+
 // Export functions for use in other modules
 module.exports = {
   openSetupWizard,
   updateIDWMenu,
-  updateGSXMenu
+  updateGSXMenu,
+  openBudgetDashboard,
+  openBudgetEstimator
 }; 

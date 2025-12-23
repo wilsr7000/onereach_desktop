@@ -597,13 +597,29 @@ class ClipboardManagerV2 {
   }
   
   createSpace(space) {
+    // #region agent log
+    console.log('[GSX-DEBUG] H7: createSpace method called');
+    console.log('[GSX-DEBUG] H7: this.storage exists:', !!this.storage);
+    console.log('[GSX-DEBUG] H7: space param:', JSON.stringify(space));
+    // #endregion
+    
     // Add lastUsed timestamp when creating a space
     const spaceWithTimestamp = {
       ...space,
       lastUsed: Date.now(),
       createdAt: Date.now()
     };
+    
+    // #region agent log
+    console.log('[GSX-DEBUG] H8: About to call this.storage.createSpace');
+    // #endregion
+    
     const newSpace = this.storage.createSpace(spaceWithTimestamp);
+    
+    // #region agent log
+    console.log('[GSX-DEBUG] H8: storage.createSpace returned:', JSON.stringify(newSpace));
+    // #endregion
+    
     // Reload spaces from storage to stay in sync
     this.spaces = [...(this.storage.index.spaces || [])];
     this.notifySpacesUpdate();
@@ -1803,6 +1819,9 @@ Respond ONLY with valid JSON, no other text.`;
   
   // IPC Setup - Complete set of handlers for compatibility
   setupIPC() {
+    // #region agent log
+    console.log('[DEBUG-H2] setupIPC called:', { hasIpcMain: !!ipcMain, alreadyRegistered: !!ClipboardManagerV2._ipcRegistered });
+    // #endregion
     if (!ipcMain) {
       console.log('IPC not available in non-Electron environment');
       return;
@@ -1811,9 +1830,30 @@ Respond ONLY with valid JSON, no other text.`;
     // Prevent duplicate IPC registration (memory leak prevention)
     if (ClipboardManagerV2._ipcRegistered) {
       console.warn('[ClipboardManager] IPC handlers already registered - skipping to prevent memory leak');
+      // #region agent log
+      console.log('[DEBUG-H2] setupIPC SKIPPED - _ipcRegistered flag was already true');
+      // #endregion
       return;
     }
     ClipboardManagerV2._ipcRegistered = true;
+    // #region agent log
+    console.log('[DEBUG-H2] setupIPC proceeding - flag set to true, will register handlers');
+    // #endregion
+    
+    // Helper to safely register IPC handlers - skips if handler already exists
+    // This prevents "Attempted to register a second handler" errors when handlers
+    // are registered elsewhere (e.g., main.js fallback handlers)
+    const safeHandle = (channel, handler) => {
+      try {
+        ipcMain.handle(channel, handler);
+      } catch (err) {
+        if (err.message && err.message.includes('second handler')) {
+          console.log(`[ClipboardManager] Handler for '${channel}' already exists, skipping`);
+        } else {
+          throw err; // Re-throw unexpected errors
+        }
+      }
+    };
     
     // Store handler references for cleanup
     this._ipcOnHandlers = [];
@@ -1884,25 +1924,25 @@ Respond ONLY with valid JSON, no other text.`;
     });
     
     // History management
-    ipcMain.handle('clipboard:get-history', () => {
+    safeHandle('clipboard:get-history', () => {
       return this.getHistory();
     });
     
-    ipcMain.handle('clipboard:clear-history', async () => {
+    safeHandle('clipboard:clear-history', async () => {
       await this.clearHistory();
       return { success: true };
     });
     
-    ipcMain.handle('clipboard:delete-item', async (event, id) => {
+    safeHandle('clipboard:delete-item', async (event, id) => {
       await this.deleteItem(id);
       return { success: true };
     });
     
-    ipcMain.handle('clipboard:toggle-pin', (event, id) => {
+    safeHandle('clipboard:toggle-pin', (event, id) => {
       return this.togglePin(id);
     });
     
-    ipcMain.handle('clipboard:paste-item', (event, id) => {
+    safeHandle('clipboard:paste-item', (event, id) => {
       const item = this.history.find(h => h.id === id);
       if (!item) return { success: false };
       
@@ -1939,11 +1979,11 @@ Respond ONLY with valid JSON, no other text.`;
       return { success: true };
     });
     
-    ipcMain.handle('clipboard:search', (event, query) => {
+    safeHandle('clipboard:search', (event, query) => {
       return this.searchHistory(query);
     });
     
-    ipcMain.handle('clipboard:get-stats', () => {
+    safeHandle('clipboard:get-stats', () => {
       return {
         totalItems: this.history.length,
         pinnedItems: this.pinnedItems.size,
@@ -1953,45 +1993,59 @@ Respond ONLY with valid JSON, no other text.`;
     });
     
     // Space management
-    ipcMain.handle('clipboard:get-spaces', () => {
+    safeHandle('clipboard:get-spaces', () => {
       return this.getSpaces();
     });
     
-    ipcMain.handle('clipboard:create-space', (event, space) => {
-      return this.createSpace(space);
+    safeHandle('clipboard:create-space', (event, space) => {
+      // #region agent log
+      console.log('[GSX-DEBUG] clipboard:create-space called with:', JSON.stringify(space));
+      // #endregion
+      try {
+        const result = this.createSpace(space);
+        // #region agent log
+        console.log('[GSX-DEBUG] clipboard:create-space success:', JSON.stringify(result));
+        // #endregion
+        return result;
+      } catch (error) {
+        // #region agent log
+        console.error('[GSX-DEBUG] clipboard:create-space error:', error.message, error.stack);
+        // #endregion
+        throw error;
+      }
     });
     
-    ipcMain.handle('clipboard:update-space', (event, id, updates) => {
+    safeHandle('clipboard:update-space', (event, id, updates) => {
       return this.updateSpace(id, updates);
     });
     
-    ipcMain.handle('clipboard:delete-space', (event, id) => {
+    safeHandle('clipboard:delete-space', (event, id) => {
       return this.deleteSpace(id);
     });
     
-    ipcMain.handle('clipboard:set-current-space', (event, spaceId) => {
+    safeHandle('clipboard:set-current-space', (event, spaceId) => {
       this.setActiveSpace(spaceId);
       return { success: true };
     });
     
-    ipcMain.handle('clipboard:move-to-space', (event, itemId, spaceId) => {
+    safeHandle('clipboard:move-to-space', (event, itemId, spaceId) => {
       return this.moveItemToSpace(itemId, spaceId);
     });
     
-    ipcMain.handle('clipboard:get-space-items', (event, spaceId) => {
+    safeHandle('clipboard:get-space-items', (event, spaceId) => {
       return this.getSpaceItems(spaceId);
     });
     
-    ipcMain.handle('clipboard:get-spaces-enabled', () => {
+    safeHandle('clipboard:get-spaces-enabled', () => {
       return this.spacesEnabled;
     });
     
-    ipcMain.handle('clipboard:toggle-spaces', (event, enabled) => {
+    safeHandle('clipboard:toggle-spaces', (event, enabled) => {
       this.toggleSpaces(enabled);
       return { success: true };
     });
     
-    ipcMain.handle('clipboard:get-active-space', () => {
+    safeHandle('clipboard:get-active-space', () => {
       return {
         spaceId: this.currentSpace,
         spaceName: this.getSpaceName(this.currentSpace)
@@ -1999,13 +2053,13 @@ Respond ONLY with valid JSON, no other text.`;
     });
     
     // File system operations
-    ipcMain.handle('clipboard:open-storage-directory', () => {
+    safeHandle('clipboard:open-storage-directory', () => {
       const { shell } = require('electron');
       shell.openPath(this.storage.storageRoot);
       return { success: true };
     });
     
-    ipcMain.handle('clipboard:open-space-directory', (event, spaceId) => {
+    safeHandle('clipboard:open-space-directory', (event, spaceId) => {
       const { shell } = require('electron');
       const spaceDir = path.join(this.storage.spacesDir, spaceId);
       if (fs.existsSync(spaceDir)) {
@@ -2015,7 +2069,7 @@ Respond ONLY with valid JSON, no other text.`;
     });
     
     // Metadata operations
-    ipcMain.handle('clipboard:update-metadata', (event, itemId, updates) => {
+    safeHandle('clipboard:update-metadata', (event, itemId, updates) => {
       try {
         const item = this.storage.loadItem(itemId);
         if (!item) return { success: false };
@@ -2068,7 +2122,13 @@ Respond ONLY with valid JSON, no other text.`;
       }
     });
     
-    ipcMain.handle('clipboard:get-metadata', (event, itemId) => {
+    // #region agent log
+    console.log('[DEBUG-H3] About to register clipboard:get-metadata handler');
+    // #endregion
+    safeHandle('clipboard:get-metadata', (event, itemId) => {
+      // #region agent log
+      console.log('[DEBUG-H4] clipboard:get-metadata handler INVOKED with itemId:', itemId);
+      // #endregion
       try {
         const item = this.storage.loadItem(itemId);
         if (!item) return { success: false, error: 'Item not found' };
@@ -2117,7 +2177,7 @@ Respond ONLY with valid JSON, no other text.`;
     // ==================== VIDEO SCENES FOR AGENTIC PLAYER ====================
     
     // Get scenes for a video item
-    ipcMain.handle('clipboard:get-video-scenes', (event, itemId) => {
+    safeHandle('clipboard:get-video-scenes', (event, itemId) => {
       try {
         const item = this.storage.loadItem(itemId);
         if (!item) return { success: false, error: 'Item not found' };
@@ -2148,7 +2208,7 @@ Respond ONLY with valid JSON, no other text.`;
     });
     
     // Update scenes for a video item
-    ipcMain.handle('clipboard:update-video-scenes', (event, itemId, scenes) => {
+    safeHandle('clipboard:update-video-scenes', (event, itemId, scenes) => {
       try {
         const item = this.storage.loadItem(itemId);
         if (!item) return { success: false, error: 'Item not found' };
@@ -2205,7 +2265,7 @@ Respond ONLY with valid JSON, no other text.`;
     });
     
     // Add a single scene to a video
-    ipcMain.handle('clipboard:add-video-scene', (event, itemId, scene) => {
+    safeHandle('clipboard:add-video-scene', (event, itemId, scene) => {
       try {
         const item = this.storage.loadItem(itemId);
         if (!item) return { success: false, error: 'Item not found' };
@@ -2242,7 +2302,7 @@ Respond ONLY with valid JSON, no other text.`;
     });
     
     // Delete a scene from a video
-    ipcMain.handle('clipboard:delete-video-scene', (event, itemId, sceneId) => {
+    safeHandle('clipboard:delete-video-scene', (event, itemId, sceneId) => {
       try {
         const item = this.storage.loadItem(itemId);
         if (!item) return { success: false, error: 'Item not found' };
@@ -2274,7 +2334,7 @@ Respond ONLY with valid JSON, no other text.`;
     });
     
     // Get all videos with scenes (for agentic player)
-    ipcMain.handle('clipboard:get-videos-with-scenes', (event, spaceId = null) => {
+    safeHandle('clipboard:get-videos-with-scenes', (event, spaceId = null) => {
       try {
         // Filter items to videos
         let items = this.storage.index.items.filter(item => 
@@ -2325,7 +2385,7 @@ Respond ONLY with valid JSON, no other text.`;
     // ==================== END VIDEO SCENES ====================
     
     // Get item content (for preview/edit)
-    ipcMain.handle('clipboard:get-item-content', (event, itemId) => {
+    safeHandle('clipboard:get-item-content', (event, itemId) => {
       try {
         const item = this.storage.loadItem(itemId);
         if (!item) return { success: false, error: 'Item not found' };
@@ -2370,7 +2430,7 @@ Respond ONLY with valid JSON, no other text.`;
     });
     
     // Update item content (for editing)
-    ipcMain.handle('clipboard:update-item-content', (event, itemId, newContent) => {
+    safeHandle('clipboard:update-item-content', (event, itemId, newContent) => {
       try {
         // Get the index entry to find the original content path
         const indexEntry = this.storage.index.items.find(i => i.id === itemId);
@@ -2462,7 +2522,7 @@ Respond ONLY with valid JSON, no other text.`;
     });
     
     // AI Image editing using OpenAI DALL-E
-    ipcMain.handle('clipboard:edit-image-ai', async (event, options) => {
+    safeHandle('clipboard:edit-image-ai', async (event, options) => {
       try {
         const { itemId, imageData, prompt } = options;
         
@@ -2671,7 +2731,7 @@ Respond in a helpful, conversational way.`
     });
     
     // Update item image (save edited image)
-    ipcMain.handle('clipboard:update-item-image', async (event, itemId, imageData) => {
+    safeHandle('clipboard:update-item-image', async (event, itemId, imageData) => {
       try {
         const item = this.storage.loadItem(itemId);
         if (!item) return { success: false, error: 'Item not found' };
@@ -2724,7 +2784,7 @@ Respond in a helpful, conversational way.`
     });
     
     // Save image as new clipboard item
-    ipcMain.handle('clipboard:save-image-as-new', async (event, imageData, options = {}) => {
+    safeHandle('clipboard:save-image-as-new', async (event, imageData, options = {}) => {
       try {
         // Extract base64 data
         let base64Data = imageData;
@@ -2775,7 +2835,7 @@ Respond in a helpful, conversational way.`
     });
     
     // Text-to-Speech using OpenAI TTS HD
-    ipcMain.handle('clipboard:generate-speech', async (event, options) => {
+    safeHandle('clipboard:generate-speech', async (event, options) => {
       try {
         const { text, voice = 'nova' } = options;
         
@@ -2894,7 +2954,7 @@ Respond in a helpful, conversational way.`
     });
     
     // Create audio script from article content using GPT
-    ipcMain.handle('clipboard:create-audio-script', async (event, options) => {
+    safeHandle('clipboard:create-audio-script', async (event, options) => {
       try {
         const { title, content } = options;
         
@@ -3008,7 +3068,7 @@ ${content}`
     });
     
     // Save TTS audio - attach to source item or create new
-    ipcMain.handle('clipboard:save-tts-audio', async (event, options) => {
+    safeHandle('clipboard:save-tts-audio', async (event, options) => {
       try {
         const { audioData, voice, sourceItemId, sourceText, attachToSource } = options;
         
@@ -3139,7 +3199,7 @@ ${content}`
     });
     
     // Get TTS audio for an item (if attached)
-    ipcMain.handle('clipboard:get-tts-audio', async (event, itemId) => {
+    safeHandle('clipboard:get-tts-audio', async (event, itemId) => {
       try {
         console.log(`[TTS] Getting audio for item: ${itemId}`);
         const itemDir = path.join(this.storage.itemsDir, itemId);
@@ -3181,7 +3241,7 @@ ${content}`
     });
     
     // Extract audio from video file
-    ipcMain.handle('clipboard:extract-audio', async (event, itemId) => {
+    safeHandle('clipboard:extract-audio', async (event, itemId) => {
       try {
         console.log('[AudioExtract] Extracting audio for item:', itemId);
         
@@ -3280,19 +3340,10 @@ ${content}`
       }
     });
     
-    // Audio/Video Transcription using OpenAI Whisper
-    ipcMain.handle('clipboard:transcribe-audio', async (event, options) => {
+    // Audio/Video Transcription using unified TranscriptionService (ElevenLabs Scribe)
+    safeHandle('clipboard:transcribe-audio', async (event, options) => {
       try {
-        const { itemId, language } = options;
-        
-        // Get OpenAI API key from settings
-        const { getSettingsManager } = require('./settings-manager');
-        const settingsManager = getSettingsManager();
-        const openaiKey = settingsManager.get('openaiApiKey');
-        
-        if (!openaiKey) {
-          return { success: false, error: 'OpenAI API key not configured. Please add it in Settings.' };
-        }
+        const { itemId, language, diarize = true } = options;
         
         // Load the audio item
         const item = this.storage.loadItem(itemId);
@@ -3323,8 +3374,7 @@ ${content}`
                        (item.fileType && item.fileType.startsWith('video/')) ||
                        item.fileCategory === 'video';
         
-        let audioBuffer;
-        let audioExtension = fileExt;
+        let transcribePath = audioPath;
         let tempAudioPath = null;
         
         if (isVideo) {
@@ -3344,7 +3394,7 @@ ${content}`
               ffmpeg(audioPath)
                 .noVideo()
                 .audioCodec('libmp3lame')
-                .audioBitrate('64k')  // Low bitrate to keep file small
+                .audioBitrate('128k')
                 .format('mp3')
                 .output(tempAudioPath)
                 .on('end', resolve)
@@ -3353,128 +3403,50 @@ ${content}`
             });
             
             console.log(`[Transcription] Audio extracted to: ${tempAudioPath}`);
-            audioBuffer = fs.readFileSync(tempAudioPath);
-            audioExtension = 'mp3';
+            transcribePath = tempAudioPath;
           } catch (ffmpegError) {
             console.error('[Transcription] FFmpeg error:', ffmpegError);
             return { success: false, error: 'Failed to extract audio from video. Make sure ffmpeg is installed.' };
           }
-        } else {
-          // Read the audio file directly
-          audioBuffer = fs.readFileSync(audioPath);
         }
         
-        // Check file size limit (25MB for Whisper)
-        const maxSize = 25 * 1024 * 1024; // 25MB
-        if (audioBuffer.length > maxSize) {
-          // Cleanup temp file if exists
+        // Use unified TranscriptionService (ElevenLabs Scribe)
+        const { getTranscriptionService } = await import('./src/transcription/index.js');
+        const service = getTranscriptionService();
+        
+        // Check if service is available
+        const isAvailable = await service.isAvailable();
+        if (!isAvailable) {
           if (tempAudioPath && fs.existsSync(tempAudioPath)) {
             fs.unlinkSync(tempAudioPath);
           }
-          const sizeMB = (audioBuffer.length / 1024 / 1024).toFixed(1);
-          return { 
-            success: false, 
-            error: `Audio file too large (${sizeMB}MB). Maximum is 25MB. Try using the Video Editor to transcribe in segments.`
-          };
+          return { success: false, error: 'ElevenLabs API key not configured. Please add it in Settings.' };
         }
         
-        console.log(`[Transcription] Audio size: ${(audioBuffer.length / 1024 / 1024).toFixed(2)}MB`);
-        
-        // OpenAI Whisper supports: flac, mp3, mp4, mpeg, mpga, m4a, ogg, wav, webm
-        const supportedFormats = ['flac', 'mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'ogg', 'wav', 'webm'];
-        if (!supportedFormats.includes(audioExtension)) {
-          // Cleanup temp file if exists
-          if (tempAudioPath && fs.existsSync(tempAudioPath)) {
-            fs.unlinkSync(tempAudioPath);
-          }
-          return { success: false, error: `Unsupported audio format: ${audioExtension}. Supported: ${supportedFormats.join(', ')}` };
-        }
-        
-        // Build multipart form data for Whisper API
-        const https = require('https');
-        const boundary = '----FormBoundary' + Math.random().toString(36).substr(2);
-        
-        const parts = [];
-        
-        // Add audio file
-        parts.push(Buffer.from(
-          `--${boundary}\r\n` +
-          `Content-Disposition: form-data; name="file"; filename="audio.${audioExtension}"\r\n` +
-          `Content-Type: audio/${audioExtension}\r\n\r\n`, 'utf-8'
-        ));
-        parts.push(audioBuffer);
-        parts.push(Buffer.from('\r\n', 'utf-8'));
-        
-        // Add model
-        parts.push(Buffer.from(
-          `--${boundary}\r\n` +
-          `Content-Disposition: form-data; name="model"\r\n\r\n` +
-          `whisper-1\r\n`, 'utf-8'
-        ));
-        
-        // Add language if specified
-        if (language) {
-          parts.push(Buffer.from(
-            `--${boundary}\r\n` +
-            `Content-Disposition: form-data; name="language"\r\n\r\n` +
-            `${language}\r\n`, 'utf-8'
-          ));
-        }
-        
-        // Add response format
-        parts.push(Buffer.from(
-          `--${boundary}\r\n` +
-          `Content-Disposition: form-data; name="response_format"\r\n\r\n` +
-          `text\r\n`, 'utf-8'
-        ));
-        
-        // Add closing boundary
-        parts.push(Buffer.from(`--${boundary}--\r\n`, 'utf-8'));
-        
-        const fullBody = Buffer.concat(parts);
-        
-        const transcription = await new Promise((resolve, reject) => {
-          const req = https.request({
-            hostname: 'api.openai.com',
-            path: '/v1/audio/transcriptions',
-            method: 'POST',
-            headers: {
-              'Content-Type': `multipart/form-data; boundary=${boundary}`,
-              'Content-Length': fullBody.length,
-              'Authorization': `Bearer ${openaiKey}`
-            }
-          }, (res) => {
-            let data = '';
-            res.on('data', chunk => data += chunk);
-            res.on('end', () => {
-              if (res.statusCode !== 200) {
-                try {
-                  const errorJson = JSON.parse(data);
-                  reject(new Error(errorJson.error?.message || `HTTP ${res.statusCode}`));
-                } catch {
-                  reject(new Error(`HTTP ${res.statusCode}: ${data}`));
-                }
-                return;
-              }
-              
-              // Response is plain text (we requested response_format: text)
-              resolve(data);
-            });
-          });
-          
-          req.on('error', reject);
-          req.write(fullBody);
-          req.end();
+        const result = await service.transcribe(transcribePath, {
+          language: language || null,
+          diarize  // Enable speaker identification
         });
         
-        console.log(`[Transcription] Successfully transcribed, length: ${transcription.length}`);
+        console.log(`[Transcription] Successfully transcribed: ${result.wordCount} words, ${result.speakerCount} speakers`);
         
         // Cleanup temp file if exists
         if (tempAudioPath && fs.existsSync(tempAudioPath)) {
           fs.unlinkSync(tempAudioPath);
         }
         
-        return { success: true, transcription };
+        // Return in compatible format
+        return { 
+          success: result.success, 
+          transcription: result.text,
+          text: result.text,
+          words: result.words,
+          speakers: result.speakers,
+          speakerCount: result.speakerCount,
+          language: result.language,
+          source: result.source,
+          error: result.error
+        };
         
       } catch (error) {
         console.error('[Transcription] Error:', error);
@@ -3487,7 +3459,7 @@ ${content}`
     });
     
     // Save transcription - attach to source item or create new
-    ipcMain.handle('clipboard:save-transcription', async (event, options) => {
+    safeHandle('clipboard:save-transcription', async (event, options) => {
       try {
         const { transcription, sourceItemId, sourceFileName, attachToSource } = options;
         
@@ -3606,20 +3578,38 @@ ${content}`
     };
 
     // Get transcription for an item (if attached)
-    ipcMain.handle('clipboard:get-transcription', async (event, itemId) => {
+    safeHandle('clipboard:get-transcription', async (event, itemId) => {
       try {
         const itemDir = path.join(this.storage.itemsDir, itemId);
+        const metadataPath = path.join(itemDir, 'metadata.json');
         
-        // Check multiple possible transcription file locations
-        const transcriptionFiles = [
-          { path: path.join(itemDir, 'transcription.txt'), source: 'whisper' },
-          { path: path.join(itemDir, 'transcript.txt'), source: 'transcript' },
-        ];
-        
-        // Check for transcription-speakers.txt (has timed segments from AssemblyAI)
+        // PRIORITY 1: Check metadata FIRST for Whisper transcription (user-generated, most accurate)
+        // This takes priority over YouTube/file transcripts because the user explicitly ran Whisper
+        if (fs.existsSync(metadataPath)) {
+          const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+          
+          // If metadata has Whisper transcription, use it (highest priority)
+          if (metadata.transcriptionSource === 'whisper' && metadata.transcriptSegments && metadata.transcriptSegments.length > 0) {
+            const transcriptText = typeof metadata.transcript === 'string' 
+              ? metadata.transcript 
+              : metadata.transcriptSegments.map(s => s.text).join(' ');
+            
+            console.log('[Transcription] Using Whisper transcription from metadata:', metadata.transcriptSegments.length, 'segments');
+            return {
+              success: true,
+              transcription: transcriptText,
+              hasTranscription: true,
+              source: 'whisper',
+              language: metadata.transcriptLanguage,
+              segments: metadata.transcriptSegments
+            };
+          }
+        }
+
+        // PRIORITY 2: Check for transcription-speakers.txt (has timed segments from AssemblyAI)
         const speakersPath = path.join(itemDir, 'transcription-speakers.txt');
         let segments = null;
-        
+
         if (fs.existsSync(speakersPath)) {
           try {
             const speakersContent = fs.readFileSync(speakersPath, 'utf8');
@@ -3631,7 +3621,12 @@ ${content}`
           }
         }
 
-        // Check for plain text transcription files
+        // PRIORITY 3: Check for plain text transcription files
+        const transcriptionFiles = [
+          { path: path.join(itemDir, 'transcription.txt'), source: 'whisper' },
+          { path: path.join(itemDir, 'transcript.txt'), source: 'transcript' },
+        ];
+
         for (const file of transcriptionFiles) {
           if (fs.existsSync(file.path)) {
             const transcription = fs.readFileSync(file.path, 'utf8');
@@ -3645,13 +3640,30 @@ ${content}`
           }
         }
 
-        // Also check metadata for YouTube transcript
-        const metadataPath = path.join(itemDir, 'metadata.json');
+        // PRIORITY 4: Check metadata for YouTube/other transcript segments
         if (fs.existsSync(metadataPath)) {
           const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
 
-          // Check for YouTube transcript in metadata
-          if (metadata.transcript && metadata.transcript.text) {
+          // Check for transcript segments directly in metadata (YouTube downloads)
+          if (metadata.transcriptSegments && metadata.transcriptSegments.length > 0) {
+            const transcriptText = typeof metadata.transcript === 'string' 
+              ? metadata.transcript 
+              : metadata.transcriptSegments.map(s => s.text).join(' ');
+            
+            const source = metadata.transcriptionSource || 'youtube';
+            console.log('[Transcription] Found', metadata.transcriptSegments.length, 'segments in metadata (source:', source + ')');
+            return {
+              success: true,
+              transcription: transcriptText,
+              hasTranscription: true,
+              source: source,
+              language: metadata.transcriptLanguage,
+              segments: metadata.transcriptSegments
+            };
+          }
+
+          // Check for YouTube transcript object format (legacy)
+          if (metadata.transcript && typeof metadata.transcript === 'object' && metadata.transcript.text) {
             return {
               success: true,
               transcription: metadata.transcript.text,
@@ -3663,14 +3675,14 @@ ${content}`
             };
           }
           
-          // Check for transcription segments directly in metadata
-          if (metadata.transcriptSegments) {
+          // Check for plain string transcript (no segments)
+          if (metadata.transcript && typeof metadata.transcript === 'string') {
             return {
               success: true,
-              transcription: metadata.transcriptSegments.map(s => s.text).join(' '),
+              transcription: metadata.transcript,
               hasTranscription: true,
               source: 'metadata',
-              segments: metadata.transcriptSegments
+              segments: segments  // May be null if no speakers file
             };
           }
         }
@@ -3683,7 +3695,7 @@ ${content}`
     });
     
     // AI Summary Generation - create a summary from transcript
-    ipcMain.handle('clipboard:generate-summary', async (event, options) => {
+    safeHandle('clipboard:generate-summary', async (event, options) => {
       console.log('[AISummary] ====== Handler called ======');
       try {
         const { itemId, transcript, title } = options;
@@ -3869,7 +3881,7 @@ Write the structured summary now:`
     });
     
     // AI Speaker Identification - analyze transcript and assign speakers
-    ipcMain.handle('clipboard:identify-speakers', async (event, options) => {
+    safeHandle('clipboard:identify-speakers', async (event, options) => {
       console.log('[SpeakerID] ====== Handler called ======');
       try {
         const { itemId, transcript, contextHint } = options;
@@ -4302,7 +4314,7 @@ ${chunks[i]}`;
     });
     
     // Advanced search
-    ipcMain.handle('clipboard:search-by-tags', (event, tags) => {
+    safeHandle('clipboard:search-by-tags', (event, tags) => {
       const results = this.history.filter(item => {
         if (item._needsContent) {
           const fullItem = this.storage.loadItem(item.id);
@@ -4313,7 +4325,7 @@ ${chunks[i]}`;
       return results;
     });
     
-    ipcMain.handle('clipboard:search-ai-content', (event, options = {}) => {
+    safeHandle('clipboard:search-ai-content', (event, options = {}) => {
       const results = this.history.filter(item => {
         if (item._needsContent) {
           const fullItem = this.storage.loadItem(item.id);
@@ -4332,7 +4344,7 @@ ${chunks[i]}`;
     });
     
     // Utility operations
-    ipcMain.handle('clipboard:diagnose', () => {
+    safeHandle('clipboard:diagnose', () => {
       return {
         historyCount: this.history.length,
         spacesCount: this.spaces.length,
@@ -4342,22 +4354,22 @@ ${chunks[i]}`;
       };
     });
     
-    ipcMain.handle('clipboard:force-resume', () => {
+    safeHandle('clipboard:force-resume', () => {
       // Not needed in V2
       return { success: true };
     });
     
-    ipcMain.handle('clipboard:manual-check', () => {
+    safeHandle('clipboard:manual-check', () => {
       // Not needed in V2
       return { success: true };
     });
     
-    ipcMain.handle('clipboard:show-item-in-finder', async (event, itemId) => {
+    safeHandle('clipboard:show-item-in-finder', async (event, itemId) => {
       return this.showItemInFinder(itemId);
     });
     
     // Get video file path from item ID (with optional scenes from metadata)
-    ipcMain.handle('clipboard:get-video-path', async (event, itemId) => {
+    safeHandle('clipboard:get-video-path', async (event, itemId) => {
       try {
         console.log('[ClipboardManager] Getting video path for item:', itemId);
         
@@ -4459,18 +4471,18 @@ ${chunks[i]}`;
     });
     
     // Open video in Video Editor
-    ipcMain.handle('clipboard:open-video-editor', async (event, filePath) => {
+    safeHandle('clipboard:open-video-editor', async (event, filePath) => {
       try {
         const { BrowserWindow } = require('electron');
         const path = require('path');
-
+        
         console.log('[ClipboardManager] Opening Video Editor with file:', filePath);
-
+        
         if (!filePath || !fs.existsSync(filePath)) {
           console.error('[ClipboardManager] Video file not found:', filePath);
           return { success: false, error: 'Video file not found: ' + filePath };
         }
-
+        
         const videoEditorWindow = new BrowserWindow({
           width: 1400,
           height: 900,
@@ -4482,7 +4494,7 @@ ${chunks[i]}`;
             preload: path.join(__dirname, 'preload-video-editor.js')
           }
         });
-
+        
         // Load the video editor HTML
         videoEditorWindow.loadFile('video-editor.html');
 
@@ -4493,18 +4505,18 @@ ${chunks[i]}`;
             videoEditorWindow.webContents.toggleDevTools();
           }
         });
-
+        
         // Once loaded, send the file path to open
         videoEditorWindow.webContents.on('did-finish-load', () => {
           console.log('[ClipboardManager] Video Editor loaded, sending file path:', filePath);
           videoEditorWindow.webContents.send('video-editor:load-file', filePath);
         });
-
+        
         // Setup video editor IPC for this window
         if (global.videoEditor) {
           global.videoEditor.setupIPC(videoEditorWindow);
         }
-
+        
         return { success: true };
       } catch (error) {
         console.error('[ClipboardManager] Error opening Video Editor:', error);
@@ -4512,12 +4524,12 @@ ${chunks[i]}`;
       }
     });
     
-    ipcMain.handle('clipboard:get-current-user', () => {
+    safeHandle('clipboard:get-current-user', () => {
       return os.userInfo().username || 'Unknown';
     });
     
     // AI metadata generation
-    ipcMain.handle('clipboard:generate-metadata-ai', async (event, { itemId, apiKey, customPrompt }) => {
+    safeHandle('clipboard:generate-metadata-ai', async (event, { itemId, apiKey, customPrompt }) => {
       // Use the NEW specialized metadata generator
       const MetadataGenerator = require('./metadata-generator');
       const metadataGen = new MetadataGenerator(this);
@@ -4538,7 +4550,7 @@ ${chunks[i]}`;
     });
     
     // Handle capture methods for external AI windows
-    ipcMain.handle('clipboard:capture-text', async (event, text) => {
+    safeHandle('clipboard:capture-text', async (event, text) => {
       console.log('[V2] Capturing text from external window:', text.substring(0, 100) + '...');
       
       const item = {
@@ -4555,7 +4567,7 @@ ${chunks[i]}`;
       return { success: true };
     });
     
-    ipcMain.handle('clipboard:capture-html', async (event, html) => {
+    safeHandle('clipboard:capture-html', async (event, html) => {
       console.log('[V2] Capturing HTML from external window');
       
       const plainText = this.stripHtml(html);
@@ -4576,7 +4588,7 @@ ${chunks[i]}`;
     });
     
     // Get audio/video file - returns file path for videos, base64 for audio
-    ipcMain.handle('clipboard:get-audio-data', (event, itemId) => {
+    safeHandle('clipboard:get-audio-data', (event, itemId) => {
       console.log('[Media] get-audio-data called for:', itemId);
       
       const item = this.history.find(h => h.id === itemId);
@@ -4643,12 +4655,12 @@ ${chunks[i]}`;
     });
     
     // Window operations
-    ipcMain.handle('clipboard:open-black-hole', () => {
+    safeHandle('clipboard:open-black-hole', () => {
       this.createBlackHoleWindow();
       return { success: true };
     });
     
-    ipcMain.handle('clipboard:open-space-notebook', (event, spaceId) => {
+    safeHandle('clipboard:open-space-notebook', (event, spaceId) => {
       const { shell } = require('electron');
       const notebookPath = path.join(this.storage.spacesDir, spaceId, 'README.ipynb');
       if (fs.existsSync(notebookPath)) {
@@ -4658,11 +4670,11 @@ ${chunks[i]}`;
     });
     
     // Screenshot capture
-    ipcMain.handle('clipboard:get-screenshot-capture-enabled', () => {
+    safeHandle('clipboard:get-screenshot-capture-enabled', () => {
       return this.screenshotCaptureEnabled;
     });
     
-    ipcMain.handle('clipboard:toggle-screenshot-capture', (event, enabled) => {
+    safeHandle('clipboard:toggle-screenshot-capture', (event, enabled) => {
       this.screenshotCaptureEnabled = enabled;
       this.savePreferences();
       
@@ -4685,7 +4697,7 @@ ${chunks[i]}`;
     });
     
     // PDF page thumbnails
-    ipcMain.handle('clipboard:get-pdf-page-thumbnail', async (event, itemId, pageNumber) => {
+    safeHandle('clipboard:get-pdf-page-thumbnail', async (event, itemId, pageNumber) => {
       console.log('[V2-PDF] Requested thumbnail for item:', itemId, 'page:', pageNumber);
       
       const item = this.history.find(h => h.id === itemId);
@@ -5156,7 +5168,7 @@ ${chunks[i]}`;
     });
     
     // Screenshot completion handler
-    ipcMain.handle('clipboard:complete-screenshot', (event, { screenshotPath, spaceId, stats, ext }) => {
+    safeHandle('clipboard:complete-screenshot', (event, { screenshotPath, spaceId, stats, ext }) => {
       if (fs.existsSync(screenshotPath)) {
         const previousSpace = this.currentSpace;
         this.currentSpace = spaceId;
@@ -5169,7 +5181,7 @@ ${chunks[i]}`;
     });
     
     // PDF generation handlers
-    ipcMain.handle('clipboard:generate-space-pdf', async (event, spaceId, options = {}) => {
+    safeHandle('clipboard:generate-space-pdf', async (event, spaceId, options = {}) => {
       try {
         const PDFGenerator = require('./pdf-generator');
         const generator = new PDFGenerator();
@@ -5236,7 +5248,7 @@ ${chunks[i]}`;
       }
     });
     
-    ipcMain.handle('clipboard:export-space-pdf', async (event, spaceId, options = {}) => {
+    safeHandle('clipboard:export-space-pdf', async (event, spaceId, options = {}) => {
       try {
         // Show save dialog
         const { dialog } = require('electron');
@@ -5309,7 +5321,7 @@ ${chunks[i]}`;
     });
     
     // Smart export handlers
-    ipcMain.handle('clipboard:smart-export-space', async (event, spaceId) => {
+    safeHandle('clipboard:smart-export-space', async (event, spaceId) => {
       console.log('[Clipboard] Opening smart export for space:', spaceId);
       
       try {
@@ -5367,7 +5379,7 @@ ${chunks[i]}`;
     });
     
     // Unified export preview handler
-    ipcMain.handle('clipboard:open-export-preview', async (event, spaceId, options = {}) => {
+    safeHandle('clipboard:open-export-preview', async (event, spaceId, options = {}) => {
       console.log('[Clipboard] Opening export preview for space:', spaceId, 'Options:', options);
       
       try {
@@ -5426,7 +5438,7 @@ ${chunks[i]}`;
     });
     
     // Website monitoring handlers
-    ipcMain.handle('clipboard:add-website-monitor', async (event, config) => {
+    safeHandle('clipboard:add-website-monitor', async (event, config) => {
       try {
         const WebsiteMonitor = require('./website-monitor');
         if (!this.websiteMonitor) {
@@ -5442,7 +5454,7 @@ ${chunks[i]}`;
       }
     });
     
-    ipcMain.handle('clipboard:check-website', async (event, monitorId) => {
+    safeHandle('clipboard:check-website', async (event, monitorId) => {
       try {
         if (!this.websiteMonitor) {
           const WebsiteMonitor = require('./website-monitor');
@@ -5477,7 +5489,7 @@ ${chunks[i]}`;
       }
     });
     
-    ipcMain.handle('clipboard:get-website-monitors', async () => {
+    safeHandle('clipboard:get-website-monitors', async () => {
       try {
         if (!this.websiteMonitor) {
           const WebsiteMonitor = require('./website-monitor');
@@ -5492,7 +5504,7 @@ ${chunks[i]}`;
       }
     });
     
-    ipcMain.handle('clipboard:get-monitor-history', async (event, monitorId) => {
+    safeHandle('clipboard:get-monitor-history', async (event, monitorId) => {
       try {
         if (!this.websiteMonitor) {
           const WebsiteMonitor = require('./website-monitor');
@@ -5508,7 +5520,7 @@ ${chunks[i]}`;
       }
     });
     
-    ipcMain.handle('clipboard:remove-website-monitor', async (event, monitorId) => {
+    safeHandle('clipboard:remove-website-monitor', async (event, monitorId) => {
       try {
         if (!this.websiteMonitor) {
           const WebsiteMonitor = require('./website-monitor');
@@ -5523,7 +5535,7 @@ ${chunks[i]}`;
       }
     });
     
-    ipcMain.handle('clipboard:pause-website-monitor', async (event, monitorId) => {
+    safeHandle('clipboard:pause-website-monitor', async (event, monitorId) => {
       try {
         if (!this.websiteMonitor) {
           const WebsiteMonitor = require('./website-monitor');
@@ -5539,7 +5551,7 @@ ${chunks[i]}`;
       }
     });
     
-    ipcMain.handle('clipboard:resume-website-monitor', async (event, monitorId) => {
+    safeHandle('clipboard:resume-website-monitor', async (event, monitorId) => {
       try {
         if (!this.websiteMonitor) {
           const WebsiteMonitor = require('./website-monitor');
@@ -5556,11 +5568,11 @@ ${chunks[i]}`;
     });
     
     // YouTube download handlers
-    this.setupYouTubeHandlers();
+    this.setupYouTubeHandlers(safeHandle);
   }
   
   // Setup YouTube download IPC handlers
-  setupYouTubeHandlers() {
+  setupYouTubeHandlers(safeHandle) {
     console.log('[ClipboardManager] Setting up YouTube handlers...');
     const { YouTubeDownloader, isYouTubeUrl, extractVideoId } = require('./youtube-downloader');
     console.log('[ClipboardManager] YouTube module loaded, isYouTubeUrl:', typeof isYouTubeUrl);
@@ -5595,7 +5607,7 @@ ${chunks[i]}`;
     });
     
     // Verify an item exists with file and metadata, returns checksum
-    ipcMain.handle('clipboard:verify-item', async (event, itemId) => {
+    safeHandle('clipboard:verify-item', async (event, itemId) => {
       try {
         console.log('[Verify] Verifying item:', itemId);
         const itemDir = path.join(this.storage.itemsDir, itemId);
@@ -5850,38 +5862,86 @@ ${chunks[i]}`;
       }
     });
 
-    // Get transcript using OpenAI Whisper (more accurate, with word-level timestamps)
+    // Transcribe YouTube video using unified TranscriptionService (ElevenLabs Scribe)
+    // Replaces legacy Whisper endpoint - now uses ElevenLabs with speaker diarization
     ipcMain.handle('youtube:get-transcript-whisper', async (event, url, lang = 'en') => {
-      console.log('[YouTube] get-transcript-whisper called for:', url, 'lang:', lang);
+      console.log('[YouTube] Transcription requested for:', url, 'lang:', lang);
       try {
         const dl = getDownloader();
-        const result = await dl.getTranscriptWithWhisper(url, lang, (percent, status) => {
-          console.log('[YouTube] Whisper progress:', percent, status);
-          if (event.sender && !event.sender.isDestroyed()) {
-            event.sender.send('youtube:transcribe-progress', { percent, status, url });
-          }
+        
+        // Download audio first
+        if (event.sender && !event.sender.isDestroyed()) {
+          event.sender.send('youtube:transcribe-progress', { percent: 10, status: 'Downloading audio...', url });
+        }
+        const audioPath = await dl.downloadAudio(url);
+        
+        // Use unified TranscriptionService
+        if (event.sender && !event.sender.isDestroyed()) {
+          event.sender.send('youtube:transcribe-progress', { percent: 50, status: 'Transcribing with AI...', url });
+        }
+        
+        const { getTranscriptionService } = await import('./src/transcription/index.js');
+        const service = getTranscriptionService();
+        const result = await service.transcribe(audioPath, {
+          language: lang,
+          diarize: true  // Enable speaker identification
         });
-        console.log('[YouTube] Whisper result:', result.success ? `${result.segmentCount} segments, ${result.wordCount} words` : result.error);
+        
+        // Clean up audio file
+        const fs = require('fs');
+        if (fs.existsSync(audioPath)) {
+          fs.unlinkSync(audioPath);
+        }
+        
+        if (event.sender && !event.sender.isDestroyed()) {
+          event.sender.send('youtube:transcribe-progress', { percent: 100, status: 'Complete', url });
+        }
+        
+        console.log('[YouTube] Transcription result:', result.success ? 
+          `${result.wordCount} words, ${result.speakerCount} speakers` : result.error);
         return result;
       } catch (error) {
-        console.error('[YouTube] Whisper error:', error);
+        console.error('[YouTube] Transcription error:', error);
         return { success: false, error: error.message };
       }
     });
 
-    // Process speaker recognition (transcription with speaker labels)
+    // Process speaker recognition - now uses unified TranscriptionService
+    // ElevenLabs Scribe includes speaker diarization by default
     ipcMain.handle('youtube:process-speaker-recognition', async (event, url) => {
-      console.log('[YouTube] process-speaker-recognition called for:', url);
+      console.log('[YouTube] Speaker recognition requested for:', url);
       try {
         const dl = getDownloader();
-        const result = await dl.processSpeakerRecognition(url, (percent, status) => {
-          console.log('[YouTube] Speaker recognition progress:', percent, status);
-          if (event.sender && !event.sender.isDestroyed()) {
-            event.sender.send('youtube:speaker-recognition-progress', { percent, status, url });
-          }
+        
+        // Download audio first
+        if (event.sender && !event.sender.isDestroyed()) {
+          event.sender.send('youtube:speaker-recognition-progress', { percent: 10, status: 'Downloading audio...', url });
+        }
+        const audioPath = await dl.downloadAudio(url);
+        
+        // Use unified TranscriptionService with diarization
+        if (event.sender && !event.sender.isDestroyed()) {
+          event.sender.send('youtube:speaker-recognition-progress', { percent: 50, status: 'Identifying speakers...', url });
+        }
+        
+        const { getTranscriptionService } = await import('./src/transcription/index.js');
+        const service = getTranscriptionService();
+        const result = await service.transcribe(audioPath, {
+          diarize: true  // Speaker diarization enabled
         });
+        
+        // Clean up audio file
+        const fs = require('fs');
+        if (fs.existsSync(audioPath)) {
+          fs.unlinkSync(audioPath);
+        }
+        
+        if (event.sender && !event.sender.isDestroyed()) {
+          event.sender.send('youtube:speaker-recognition-progress', { percent: 100, status: 'Complete', url });
+        }
+        
         console.log('[YouTube] Speaker recognition result:', result.success ? 
-          `${result.speakerCount} speakers, ${result.utterances?.length} utterances` : result.error);
+          `${result.speakerCount} speakers, ${result.wordCount} words` : result.error);
         return result;
       } catch (error) {
         console.error('[YouTube] Speaker recognition error:', error);
