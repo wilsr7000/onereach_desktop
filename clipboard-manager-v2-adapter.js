@@ -3136,8 +3136,8 @@ Respond in a helpful, conversational way.`
           }
         };
         
-        // Save using the storage system
-        const savedItem = await this.storage.saveItem(newItem);
+        // Save using the storage system (addItem is the correct method)
+        const savedItem = this.storage.addItem(newItem);
         
         // Add to history
         this.history.unshift({
