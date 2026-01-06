@@ -268,8 +268,8 @@
                     <option value="gpt-5.1">GPT-5.1</option>
                     <option value="gpt-4o">GPT-4o</option>
                     <option value="gpt-4o-mini">GPT-4o Mini</option>
-                    <option value="claude-sonnet-4-20250514">Claude Sonnet 4.5</option>
-                    <option value="claude-opus-4-20250514">Claude Opus 4</option>
+                    <option value="claude-opus-4-5-20251101">Claude Opus 4.5</option>
+                    <option value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5</option>
                     <option value="gemini-pro">Gemini Pro</option>
                     <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
                     <option value="mistral-large">Mistral Large</option>
@@ -725,7 +725,7 @@
                 }
                 
                 // Show Claude 4 options if Claude 4 Opus is selected
-                if (settings.llmModel === 'claude-opus-4-20250514') {
+                if (settings.llmModel === 'claude-opus-4-5-20251101') {
                     document.getElementById('claude4ThinkingGroup').style.display = 'block';
                     if (settings.claude4ThinkingMode === 'enabled') {
                         document.getElementById('claude4ThinkingLevelGroup').style.display = 'block';
@@ -1102,8 +1102,8 @@
                     break;
                 case 'anthropic':
                     options = [
-                        { value: 'claude-sonnet-4-20250514', text: 'Claude Sonnet 4.5' },
-                        { value: 'claude-opus-4-20250514', text: 'Claude Opus 4' }
+                        { value: 'claude-opus-4-5-20251101', text: 'Claude Opus 4.5' },
+                        { value: 'claude-sonnet-4-5-20250929', text: 'Claude Sonnet 4.5' }
                     ];
                     break;
                 case 'google':
@@ -1182,7 +1182,7 @@
         document.getElementById('llmModel').addEventListener('change', (e) => {
             const selectedModel = e.target.value;
             
-            if (selectedModel === 'claude-opus-4-20250514') {
+            if (selectedModel === 'claude-opus-4-5-20251101') {
                 document.getElementById('claude4ThinkingGroup').style.display = 'block';
                 const thinkingMode = document.getElementById('claude4ThinkingMode').value;
                 if (thinkingMode === 'enabled') {

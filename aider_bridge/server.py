@@ -31,6 +31,11 @@ except ImportError as e:
     InputOutput = None
 
 
+class SandboxViolationError(Exception):
+    """Raised when a file operation attempts to escape the sandbox"""
+    pass
+
+
 class AiderBridge:
     """Bridge between Electron and Aider via JSON-RPC"""
     
@@ -39,6 +44,100 @@ class AiderBridge:
         self.io: Optional[InputOutput] = None
         self.repo_path: Optional[Path] = None
         self.model: Optional[Model] = None
+        # Sandbox configuration
+        self.sandbox_root: Optional[Path] = None  # If set, restricts all file operations
+        self.read_only_files: List[str] = []  # Absolute paths that can be read but not written
+        self.branch_id: Optional[str] = None  # For logging purposes
+    
+    def set_sandbox(self, sandbox_root: str, read_only_files: List[str] = None, branch_id: str = None) -> Dict[str, Any]:
+        """
+        Configure sandbox restrictions for this Aider instance
+        
+        Args:
+            sandbox_root: Root directory - all write operations restricted to this path
+            read_only_files: List of absolute paths that can be read but not written
+            branch_id: Identifier for this branch (for logging)
+            
+        Returns:
+            Success status
+        """
+        try:
+            self.sandbox_root = Path(sandbox_root).resolve()
+            self.read_only_files = [str(Path(f).resolve()) for f in (read_only_files or [])]
+            self.branch_id = branch_id
+            
+            if not self.sandbox_root.exists():
+                return {
+                    "success": False,
+                    "error": f"Sandbox root does not exist: {sandbox_root}"
+                }
+            
+            print(f"[GSX-Python] Sandbox configured:", file=sys.stderr, flush=True)
+            print(f"[GSX-Python]   Root: {self.sandbox_root}", file=sys.stderr, flush=True)
+            print(f"[GSX-Python]   Read-only files: {len(self.read_only_files)}", file=sys.stderr, flush=True)
+            print(f"[GSX-Python]   Branch ID: {self.branch_id}", file=sys.stderr, flush=True)
+            
+            return {
+                "success": True,
+                "sandbox_root": str(self.sandbox_root),
+                "read_only_files": self.read_only_files,
+                "branch_id": self.branch_id
+            }
+            
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "traceback": traceback.format_exc()
+            }
+    
+    def _validate_path(self, file_path: str, for_write: bool = False) -> Path:
+        """
+        Validate that a path is within the sandbox and allowed
+        
+        Args:
+            file_path: Path to validate
+            for_write: If True, also check it's not in read-only list
+            
+        Returns:
+            Resolved absolute path
+            
+        Raises:
+            SandboxViolationError: If path escapes sandbox or write to read-only
+        """
+        resolved = Path(file_path).resolve()
+        
+        # If no sandbox, allow everything
+        if not self.sandbox_root:
+            return resolved
+        
+        # Check if within sandbox
+        try:
+            resolved.relative_to(self.sandbox_root)
+            # Path is within sandbox - allowed
+            return resolved
+        except ValueError:
+            # Path is outside sandbox
+            pass
+        
+        # Check if it's an allowed read-only file (only for read operations)
+        if not for_write and str(resolved) in self.read_only_files:
+            return resolved
+        
+        # Path escapes sandbox
+        if for_write:
+            raise SandboxViolationError(
+                f"Write operation blocked - path escapes sandbox: {file_path}\n"
+                f"Sandbox root: {self.sandbox_root}\n"
+                f"Branch: {self.branch_id or 'unknown'}"
+            )
+        else:
+            raise SandboxViolationError(
+                f"Read operation blocked - path escapes sandbox: {file_path}\n"
+                f"Sandbox root: {self.sandbox_root}\n"
+                f"Allowed read-only files: {self.read_only_files}\n"
+                f"Branch: {self.branch_id or 'unknown'}"
+            )
         
     def initialize(self, repo_path: str, model_name: str = "gpt-4") -> Dict[str, Any]:
         """
@@ -67,7 +166,21 @@ class AiderBridge:
             )
             
             # Initialize model
-            self.model = Model(model_name)
+            # Normalize model names for litellm/aider:
+            # Many aider installs route LLM calls via LiteLLM, which requires provider-qualified
+            # model names (e.g. "anthropic/claude-...") for Claude models.
+            normalized_model_name = model_name
+            if isinstance(normalized_model_name, str):
+                normalized_model_name = normalized_model_name.strip()
+                if normalized_model_name.startswith("claude-") and "/" not in normalized_model_name:
+                    normalized_model_name = f"anthropic/{normalized_model_name}"
+            if normalized_model_name != model_name:
+                print(
+                    f"[GSX-Python] Normalized model_name '{model_name}' -> '{normalized_model_name}'",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            self.model = Model(normalized_model_name)
             
             # Change to repo directory for git operations
             import os
@@ -104,7 +217,7 @@ class AiderBridge:
             return {
                 "success": True,
                 "repo_path": str(self.repo_path),
-                "model": model_name,
+                "model": normalized_model_name,
                 "files_in_context": []
             }
             
@@ -142,11 +255,18 @@ class AiderBridge:
             import os
             from pathlib import Path
             
+            # Use sandbox root if set for file tracking
+            scan_root = self.sandbox_root if self.sandbox_root else self.repo_path
+            
             print(f"[GSX-Python]     Scanning files before prompt...", file=sys.stderr, flush=True)
+            print(f"[GSX-Python]     Scan root: {scan_root}", file=sys.stderr, flush=True)
+            if self.sandbox_root:
+                print(f"[GSX-Python]     SANDBOXED MODE - Branch: {self.branch_id}", file=sys.stderr, flush=True)
+            
             # Track files before running prompt
             files_before = set()
-            if self.repo_path and self.repo_path.exists():
-                for f in self.repo_path.rglob('*'):
+            if scan_root and scan_root.exists():
+                for f in scan_root.rglob('*'):
                     if f.is_file() and not any(p in str(f) for p in ['.git', '__pycache__', 'node_modules', '.aider']):
                         files_before.add(str(f))
             print(f"[GSX-Python]     Files before: {len(files_before)}", file=sys.stderr, flush=True)
@@ -160,10 +280,10 @@ class AiderBridge:
             print(f"[GSX-Python]     Response length: {len(response) if response else 0} chars", file=sys.stderr, flush=True)
             
             print(f"[GSX-Python]     Scanning files after prompt...", file=sys.stderr, flush=True)
-            # Track files after running prompt
+            # Track files after running prompt (within sandbox if set)
             files_after = set()
-            if self.repo_path and self.repo_path.exists():
-                for f in self.repo_path.rglob('*'):
+            if scan_root and scan_root.exists():
+                for f in scan_root.rglob('*'):
                     if f.is_file() and not any(p in str(f) for p in ['.git', '__pycache__', 'node_modules', '.aider']):
                         files_after.add(str(f))
             print(f"[GSX-Python]     Files after: {len(files_after)}", file=sys.stderr, flush=True)
@@ -235,24 +355,38 @@ class AiderBridge:
             }
         
         try:
-            # Convert to absolute paths
+            # Convert to absolute paths with sandbox validation
             abs_paths = []
+            blocked_paths = []
+            
             for fp in file_paths:
-                abs_path = Path(fp).resolve()
-                if abs_path.exists():
-                    abs_paths.append(str(abs_path))
-                else:
-                    self._send_notification("warning", f"File not found: {fp}")
+                try:
+                    # Validate path is within sandbox (read access)
+                    abs_path = self._validate_path(fp, for_write=False)
+                    if abs_path.exists():
+                        abs_paths.append(str(abs_path))
+                    else:
+                        self._send_notification("warning", f"File not found: {fp}")
+                except SandboxViolationError as e:
+                    blocked_paths.append(fp)
+                    self._send_notification("error", f"Sandbox violation: {fp}")
+                    print(f"[GSX-Python] SANDBOX BLOCKED add_files: {fp}", file=sys.stderr, flush=True)
             
             # Add files to coder
             if abs_paths:
                 self.coder.abs_fnames.update(abs_paths)
             
-            return {
+            result = {
                 "success": True,
                 "files_added": abs_paths,
                 "files_in_context": self.get_context_files()
             }
+            
+            if blocked_paths:
+                result["blocked_by_sandbox"] = blocked_paths
+                result["warning"] = f"{len(blocked_paths)} files blocked by sandbox"
+            
+            return result
             
         except Exception as e:
             return {
@@ -353,8 +487,11 @@ class AiderBridge:
             }
         
         try:
-            # Build grep command
-            cmd = ['grep', '-rn', '--include=' + (file_glob or '*'), pattern, str(self.repo_path)]
+            # Use sandbox root if set, otherwise repo_path
+            search_root = self.sandbox_root if self.sandbox_root else self.repo_path
+            
+            # Build grep command - search only within sandbox
+            cmd = ['grep', '-rn', '--include=' + (file_glob or '*'), pattern, str(search_root)]
             
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             
@@ -364,7 +501,7 @@ class AiderBridge:
                     parts = line.split(':', 2)
                     if len(parts) >= 3:
                         matches.append({
-                            "file": parts[0].replace(str(self.repo_path) + '/', ''),
+                            "file": parts[0].replace(str(search_root) + '/', ''),
                             "line": int(parts[1]) if parts[1].isdigit() else 0,
                             "content": parts[2].strip()
                         })
@@ -373,7 +510,8 @@ class AiderBridge:
                 "success": True,
                 "pattern": pattern,
                 "matches": matches[:50],  # Limit to 50 matches
-                "total_matches": len(matches)
+                "total_matches": len(matches),
+                "search_root": str(search_root)
             }
             
         except subprocess.TimeoutExpired:
@@ -406,6 +544,9 @@ class AiderBridge:
             }
         
         try:
+            # Use sandbox root if set, otherwise repo_path
+            search_root = self.sandbox_root if self.sandbox_root else self.repo_path
+            
             # Search for common definition patterns
             patterns = [
                 f"def {symbol}",           # Python function
@@ -421,7 +562,7 @@ class AiderBridge:
             
             all_matches = []
             for pattern in patterns:
-                cmd = ['grep', '-rn', '-E', pattern, str(self.repo_path)]
+                cmd = ['grep', '-rn', '-E', pattern, str(search_root)]
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
                 
                 for line in result.stdout.strip().split('\n'):
@@ -429,7 +570,7 @@ class AiderBridge:
                         parts = line.split(':', 2)
                         if len(parts) >= 3:
                             all_matches.append({
-                                "file": parts[0].replace(str(self.repo_path) + '/', ''),
+                                "file": parts[0].replace(str(search_root) + '/', ''),
                                 "line": int(parts[1]) if parts[1].isdigit() else 0,
                                 "content": parts[2].strip(),
                                 "pattern": pattern
@@ -447,7 +588,8 @@ class AiderBridge:
             return {
                 "success": True,
                 "symbol": symbol,
-                "definitions": unique_matches[:20]
+                "definitions": unique_matches[:20],
+                "search_root": str(search_root)
             }
             
         except Exception as e:
@@ -492,13 +634,23 @@ class AiderBridge:
         try:
             full_path = os.path.join(str(self.repo_path), file_path)
             
-            if not os.path.exists(full_path):
+            # Validate path is within sandbox (read access)
+            try:
+                validated_path = self._validate_path(full_path, for_write=False)
+            except SandboxViolationError as e:
+                print(f"[GSX-Python] SANDBOX BLOCKED read_file_section: {file_path}", file=sys.stderr, flush=True)
+                return {
+                    "success": False,
+                    "error": f"Sandbox violation: {str(e)}"
+                }
+            
+            if not validated_path.exists():
                 return {
                     "success": False,
                     "error": f"File not found: {file_path}"
                 }
             
-            with open(full_path, 'r') as f:
+            with open(str(validated_path), 'r') as f:
                 lines = f.readlines()
             
             # Adjust for 1-indexed line numbers
@@ -520,6 +672,8 @@ class AiderBridge:
                 "lines": selected_lines
             }
             
+        except SandboxViolationError:
+            raise  # Re-raise sandbox errors
         except Exception as e:
             return {
                 "success": False,

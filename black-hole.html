@@ -190,33 +190,34 @@
             transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
         }
         
-        /* Modal header */
+        /* Modal header - FIXED */
         .modal-header {
-            padding: 20px 24px 16px;
+            padding: 16px 20px 12px;
             border-bottom: 1px solid rgba(255, 255, 255, 0.08);
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
+            flex-shrink: 0;
         }
         
         .modal-header h2 {
-            font-size: 18px;
+            font-size: 16px;
             font-weight: 600;
             color: #fff;
             margin: 0;
         }
         
         .modal-header p {
-            font-size: 13px;
+            font-size: 12px;
             color: rgba(255, 255, 255, 0.5);
-            margin: 4px 0 0;
+            margin: 2px 0 0;
         }
         
         .modal-close-btn {
             background: none;
             border: none;
             color: rgba(255, 255, 255, 0.4);
-            font-size: 24px;
+            font-size: 22px;
             cursor: pointer;
             padding: 0;
             line-height: 1;
@@ -227,103 +228,245 @@
             color: rgba(255, 255, 255, 0.8);
         }
         
-        /* Content preview */
+        /* Content preview - FIXED */
         .content-preview {
-            margin: 16px 24px;
+            margin: 12px 20px;
             background: rgba(0, 0, 0, 0.3);
-            border-radius: 10px;
-            padding: 14px 16px;
+            border-radius: 8px;
+            padding: 10px 12px;
             border: 1px solid rgba(255, 255, 255, 0.06);
+            flex-shrink: 0;
         }
         
         .content-preview-type {
-            font-size: 10px;
+            font-size: 9px;
             font-weight: 500;
             letter-spacing: 0.5px;
             text-transform: uppercase;
             color: rgba(99, 102, 241, 0.9);
             background: rgba(99, 102, 241, 0.1);
-            padding: 3px 8px;
+            padding: 2px 6px;
             border-radius: 4px;
             display: inline-block;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 6px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
+            margin-bottom: 4px;
         }
         
         .content-preview-text {
-            font-size: 13px;
+            font-size: 12px;
             color: rgba(255, 255, 255, 0.7);
-            line-height: 1.5;
-            max-height: 60px;
+            line-height: 1.4;
+            max-height: 40px;
             overflow: hidden;
             word-break: break-all;
         }
         
-        /* Space grid */
-        .space-grid-container {
-            flex: 1;
-            overflow-y: auto;
-            padding: 0 24px 16px;
-            min-height: 200px;
-            max-height: 320px;
+        /* Recent spaces section - FIXED */
+        .recent-spaces-section {
+            padding: 12px 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            flex-shrink: 0;
         }
         
-        .space-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 10px;
+        .recent-spaces-label {
+            font-size: 11px;
+            font-weight: 500;
+            color: rgba(255, 255, 255, 0.5);
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
         }
         
-        .space-item {
-            background: rgba(255, 255, 255, 0.04);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 12px;
-            padding: 16px 12px;
+        .recent-spaces-list {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        
+        .recent-space-chip {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 10px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
             cursor: pointer;
             transition: all 0.15s ease;
-            text-align: center;
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.8);
         }
         
-        .space-item:hover {
-            background: rgba(255, 255, 255, 0.08);
-            border-color: rgba(255, 255, 255, 0.15);
-            transform: translateY(-2px);
+        .recent-space-chip:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.2);
         }
         
-        .space-item.selected {
-            background: linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(139, 92, 246, 0.2));
-            border-color: rgba(99, 102, 241, 0.6);
-            box-shadow: 0 0 20px rgba(99, 102, 241, 0.15);
+        .recent-space-chip.selected {
+            background: rgba(99, 102, 241, 0.2);
+            border-color: rgba(99, 102, 241, 0.5);
+            color: #a5b4fc;
         }
         
-        .space-icon {
-            font-size: 28px;
-            display: block;
-            margin-bottom: 8px;
+        .recent-space-chip .chip-icon {
+            font-size: 14px;
         }
         
-        .space-name {
+        .recent-space-chip .chip-name {
+            max-width: 80px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        /* Search input - FIXED */
+        .space-search-container {
+            padding: 12px 20px;
+            flex-shrink: 0;
+        }
+        
+        .space-search {
+            width: 100%;
+            padding: 10px 12px 10px 34px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(0, 0, 0, 0.3);
+            color: #ffffff;
+            border-radius: 8px;
+            font-size: 13px;
+            transition: all 0.2s ease;
+        }
+        
+        .space-search:focus {
+            outline: none;
+            border-color: rgba(99, 102, 241, 0.5);
+            background: rgba(0, 0, 0, 0.4);
+        }
+        
+        .space-search::placeholder {
+            color: rgba(255, 255, 255, 0.4);
+        }
+        
+        .space-search-wrapper {
+            position: relative;
+        }
+        
+        .space-search-icon {
+            position: absolute;
+            left: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 13px;
+            opacity: 0.5;
+            pointer-events: none;
+        }
+        
+        /* All spaces header - FIXED */
+        .space-list-header {
+            padding: 8px 20px;
+            font-size: 11px;
+            font-weight: 500;
+            color: rgba(255, 255, 255, 0.5);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+        
+        /* Space list container - SCROLLS */
+        .space-list-container {
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
+            padding: 0 20px 12px;
+        }
+        
+        /* Compact list view */
+        .space-list {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        
+        .space-list-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid transparent;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        
+        .space-list-item:hover {
+            background: rgba(255, 255, 255, 0.06);
+            border-color: rgba(255, 255, 255, 0.1);
+        }
+        
+        .space-list-item.selected {
+            background: rgba(99, 102, 241, 0.15);
+            border-color: rgba(99, 102, 241, 0.4);
+        }
+        
+        .space-list-item .item-icon {
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+        
+        .space-list-item .item-info {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .space-list-item .item-name {
             font-size: 13px;
             font-weight: 500;
             color: rgba(255, 255, 255, 0.9);
-            display: block;
-            margin-bottom: 2px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         
-        .space-count {
+        .space-list-item .item-count {
             font-size: 11px;
             color: rgba(255, 255, 255, 0.4);
         }
         
-        /* Modal footer */
+        .space-list-item .item-check {
+            font-size: 16px;
+            color: #6366f1;
+            opacity: 0;
+            transition: opacity 0.15s;
+        }
+        
+        .space-list-item.selected .item-check {
+            opacity: 1;
+        }
+        
+        /* Empty state */
+        .space-empty-state {
+            text-align: center;
+            padding: 30px 20px;
+            color: rgba(255, 255, 255, 0.5);
+        }
+        
+        .space-empty-state .icon {
+            font-size: 32px;
+            margin-bottom: 8px;
+            opacity: 0.6;
+        }
+        
+        .space-empty-state .message {
+            font-size: 13px;
+        }
+        
+        /* Modal footer - FIXED */
         .modal-footer {
-            padding: 16px 24px 20px;
+            padding: 12px 20px 16px;
             border-top: 1px solid rgba(255, 255, 255, 0.08);
             background: rgba(0, 0, 0, 0.2);
+            flex-shrink: 0;
         }
         
         .modal-actions {
@@ -412,21 +555,28 @@
         }
         
         /* Scrollbar */
-        .space-grid-container::-webkit-scrollbar {
+        .space-list-container::-webkit-scrollbar {
             width: 6px;
         }
         
-        .space-grid-container::-webkit-scrollbar-track {
+        .space-list-container::-webkit-scrollbar-track {
             background: transparent;
         }
         
-        .space-grid-container::-webkit-scrollbar-thumb {
+        .space-list-container::-webkit-scrollbar-thumb {
             background: rgba(255, 255, 255, 0.15);
             border-radius: 3px;
         }
         
-        .space-grid-container::-webkit-scrollbar-thumb:hover {
+        .space-list-container::-webkit-scrollbar-thumb:hover {
             background: rgba(255, 255, 255, 0.25);
+        }
+        
+        /* No recent spaces */
+        .no-recent {
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.4);
+            font-style: italic;
         }
     </style>
 </head>
@@ -455,8 +605,31 @@
                 <div class="content-preview-text" id="contentPreviewText">Loading...</div>
             </div>
             
-            <div class="space-grid-container">
-                <div class="space-grid" id="spaceGrid"></div>
+            <!-- Recent Spaces -->
+            <div class="recent-spaces-section" id="recentSpacesSection">
+                <div class="recent-spaces-label">⭐ Recent</div>
+                <div class="recent-spaces-list" id="recentSpacesList">
+                    <span class="no-recent">No recent spaces</span>
+                </div>
+            </div>
+            
+            <!-- Search Input -->
+            <div class="space-search-container">
+                <div class="space-search-wrapper">
+                    <span class="space-search-icon">🔍</span>
+                    <input type="text" class="space-search" id="spaceSearchInput" placeholder="Search spaces..." autocomplete="off">
+                </div>
+            </div>
+            
+            <!-- All Spaces Header -->
+            <div class="space-list-header">
+                <span>All Spaces</span>
+                <span id="spaceCountBadge">0</span>
+            </div>
+            
+            <!-- Scrollable Space List -->
+            <div class="space-list-container">
+                <div class="space-list" id="spaceList"></div>
             </div>
             
             <div class="modal-footer">

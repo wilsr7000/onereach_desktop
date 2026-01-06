@@ -35,6 +35,7 @@ function createMainWindow(app) {
   mainWindow = new BrowserWindow({
     width: 1600,
     height: 1000,
+    show: true, // Explicitly show window
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -1327,6 +1328,10 @@ function handleDownloadWithSpaceOption(item, windowName = 'Main Window') {
     } else if (result.response === 1) {
       // Save to Space
       console.log(`[DOWNLOAD] User chose to save to Space`);
+      // #region agent log
+      const fs = require('fs');
+      try { fs.appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'browserWindow.js:saveToSpace',message:'User chose Save to Space',data:{fileName},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})+'\n'); } catch(e){}
+      // #endregion
       
       const tempPath = app.getPath('temp');
       const tempFilePath = path.join(tempPath, fileName);
@@ -1381,6 +1386,9 @@ function handleDownloadWithSpaceOption(item, windowName = 'Main Window') {
                     }
                     
                     // Send the file data
+                    // #region agent log
+                    try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'browserWindow.js:sendExternalFileDrop',message:'Sending external-file-drop',data:{fileName,fileSize:fileData.length,mimeType:item.getMimeType()||'application/octet-stream'},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})+'\n'); } catch(e){}
+                    // #endregion
                     clipboardManager.blackHoleWindow.webContents.send('external-file-drop', {
                       fileName: fileName,
                       fileData: base64Data,
@@ -1463,6 +1471,9 @@ function handleDownloadWithSpaceOption(item, windowName = 'Main Window') {
                           }
                           
                           // Send the file data
+                          // #region agent log
+                          try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'browserWindow.js:sendExternalFileDrop2',message:'Sending external-file-drop (new window)',data:{fileName,fileSize:fileData.length,mimeType:item.getMimeType()||'application/octet-stream'},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})+'\n'); } catch(e){}
+                          // #endregion
                           clipboardManager.blackHoleWindow.webContents.send('external-file-drop', {
                             fileName: fileName,
                             fileData: base64Data,

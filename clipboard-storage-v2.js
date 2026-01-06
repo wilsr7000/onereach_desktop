@@ -572,7 +572,9 @@ class ClipboardStorageV2 {
       this.createSpaceNotebook(spaceId, space);
     }
     
-    this.saveIndex();
+    // Use synchronous save to ensure data is persisted before returning
+    // This is critical for space creation as subsequent calls may need the new space immediately
+    this.saveIndexSync();
     
     return newSpace;
   }
@@ -786,7 +788,8 @@ class ClipboardStorageV2 {
       this.createSpaceNotebook(spaceId, { ...space, ...updates });
     }
     
-    this.saveIndex();
+    // Use synchronous save to ensure data is persisted before returning
+    this.saveIndexSync();
     
     return true;
   }
@@ -815,7 +818,8 @@ class ClipboardStorageV2 {
       fs.rmSync(spaceDir, { recursive: true, force: true });
     }
     
-    this.saveIndex();
+    // Use synchronous save to ensure data is persisted before returning
+    this.saveIndexSync();
     
     return true;
   }

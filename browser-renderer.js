@@ -466,6 +466,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Function to open the Black Hole Widget
     // forPaste: if true, opens in expanded mode with space chooser ready
     const openBlackHole = (forPaste = false) => {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'browser-renderer.js:openBlackHole',message:'openBlackHole called',data:{forPaste,isBlackHoleOpen,hasApi:!!window.api},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H8'})}).catch(()=>{});
+        // #endregion
         if (!isBlackHoleOpen) {
             console.log('Opening Black Hole Widget, forPaste:', forPaste);
             isBlackHoleOpen = true;
@@ -513,6 +516,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Drag events - open when dragging files over the button
     blackHoleButton.addEventListener('dragenter', (e) => {
         console.log('Black Hole dragenter event triggered');
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'browser-renderer.js:dragenter',message:'Dragenter on purple button',data:{hasFiles:!!(e.dataTransfer&&e.dataTransfer.types.includes('Files'))},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H8'})}).catch(()=>{});
+        // #endregion
         e.preventDefault();
         openBlackHole();
     });
@@ -577,6 +583,9 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log('Black Hole drop event triggered');
         e.preventDefault();
         cancelAutoClose();
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'browser-renderer.js:drop',message:'Drop event on purple button',data:{hasDataTransfer:!!e.dataTransfer,fileCount:e.dataTransfer?.files?.length||0,fileNames:Array.from(e.dataTransfer?.files||[]).map(f=>f.name)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H8'})}).catch(()=>{});
+        // #endregion
         // The actual drop will be handled by the Black Hole Widget itself
     });
     

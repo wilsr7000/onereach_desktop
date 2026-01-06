@@ -12,7 +12,7 @@ class BlackHoleWidget {
         this.statusText = document.getElementById('statusText');
         this.successRipple = document.getElementById('successRipple');
         this.modal = document.getElementById('spaceModal');
-        this.spaceGrid = document.getElementById('spaceGrid');
+        this.spaceList = document.getElementById('spaceList');
         this.confirmBtn = document.getElementById('confirmBtn');
         this.cancelBtn = document.getElementById('cancelBtn');
         this.modalCloseBtn = document.getElementById('modalCloseBtn');
@@ -21,14 +21,23 @@ class BlackHoleWidget {
         this.contentPreviewText = document.getElementById('contentPreviewText');
         this.savingIndicator = document.getElementById('savingIndicator');
         this.modalActions = document.getElementById('modalActions');
+        this.spaceSearchInput = document.getElementById('spaceSearchInput');
+        this.spaceCountBadge = document.getElementById('spaceCountBadge');
+        this.recentSpacesList = document.getElementById('recentSpacesList');
         
         // State
         this.spaces = [];
+        this.recentSpaceIds = [];
         this.selectedSpaceId = null;
         this.pendingItem = null;
         this.isReady = false;
         this.startExpanded = false;
         this.isClosing = false;
+        this.searchQuery = '';
+        this.searchDebounceTimer = null;
+        
+        // Load recent spaces from localStorage
+        this.loadRecentSpaces();
         
         // Initialize
         this.init();
@@ -53,6 +62,9 @@ class BlackHoleWidget {
     
     async init() {
         console.log('[BlackHole] Initializing...');
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:init',message:'BlackHole widget init called',data:{hasWindowApi:!!window.api,hasClipboard:!!window.clipboard},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H7'})}).catch(()=>{});
+        // #endregion
         
         // Check URL params
         try {
@@ -117,10 +129,16 @@ class BlackHoleWidget {
     
     async loadSpaces() {
         console.log('[BlackHole] Loading spaces...');
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:loadSpaces',message:'Loading spaces',data:{hasClipboard:!!window.clipboard,hasGetSpaces:!!(window.clipboard&&window.clipboard.getSpaces)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H7'})}).catch(()=>{});
+        // #endregion
         try {
             if (window.clipboard && window.clipboard.getSpaces) {
                 this.spaces = await window.clipboard.getSpaces();
                 console.log('[BlackHole] Loaded', this.spaces.length, 'spaces');
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:loadSpaces:success',message:'Spaces loaded',data:{spaceCount:this.spaces.length,spaceNames:this.spaces.slice(0,5).map(s=>s.name)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H7'})}).catch(()=>{});
+                // #endregion
             } else {
                 console.warn('[BlackHole] window.clipboard.getSpaces not available');
                 this.spaces = [];
@@ -129,6 +147,35 @@ class BlackHoleWidget {
             console.error('[BlackHole] Failed to load spaces:', e);
             this.spaces = [];
         }
+    }
+    
+    loadRecentSpaces() {
+        try {
+            const stored = localStorage.getItem('blackhole-recent-spaces');
+            this.recentSpaceIds = stored ? JSON.parse(stored) : [];
+            console.log('[BlackHole] Loaded recent spaces:', this.recentSpaceIds.length);
+        } catch (e) {
+            console.error('[BlackHole] Failed to load recent spaces:', e);
+            this.recentSpaceIds = [];
+        }
+    }
+    
+    saveRecentSpaces() {
+        try {
+            localStorage.setItem('blackhole-recent-spaces', JSON.stringify(this.recentSpaceIds));
+        } catch (e) {
+            console.error('[BlackHole] Failed to save recent spaces:', e);
+        }
+    }
+    
+    addToRecentSpaces(spaceId) {
+        // Remove if already exists
+        this.recentSpaceIds = this.recentSpaceIds.filter(id => id !== spaceId);
+        // Add to front
+        this.recentSpaceIds.unshift(spaceId);
+        // Keep only last 5
+        this.recentSpaceIds = this.recentSpaceIds.slice(0, 5);
+        this.saveRecentSpaces();
     }
     
     setupEventHandlers() {
@@ -191,6 +238,19 @@ class BlackHoleWidget {
                 this.closeModal();
             }
         });
+        
+        // Space search input
+        if (this.spaceSearchInput) {
+            this.spaceSearchInput.addEventListener('input', (e) => {
+                this.handleSpaceSearch(e.target.value);
+            });
+            // Clear search on focus if empty
+            this.spaceSearchInput.addEventListener('focus', () => {
+                if (this.spaceSearchInput.value === '') {
+                    this.searchQuery = '';
+                }
+            });
+        }
         
         // Drop zone
         if (this.dropZone) {
@@ -276,7 +336,66 @@ class BlackHoleWidget {
                 this.originalPosition = pos;
             });
             
-            console.log('[BlackHole] IPC handlers registered successfully');
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:setupIPCHandlers',message:'Registering external-file-drop handler',data:{hasWindowApi:!!window.api,hasReceive:!!(window.api&&window.api.receive)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+            // #endregion
+            
+            // Handler for external file drop from downloads (H1 - was MISSING)
+            // Note: receive() strips the event, so we just get data directly
+            window.api.receive('external-file-drop', async (data) => {
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:external-file-drop',message:'Received external-file-drop event',data:{hasData:!!data,fileName:data?.fileName,fileSize:data?.fileSize,mimeType:data?.mimeType},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+                // #endregion
+                console.log('[BlackHole] Received external-file-drop:', data);
+                this.sendIPC('black-hole:debug', { event: 'EXTERNAL_FILE_DROP', fileName: data?.fileName });
+                
+                if (data && data.fileData) {
+                    this.pendingItem = {
+                        type: 'file',
+                        data: {
+                            fileName: data.fileName,
+                            fileSize: data.fileSize,
+                            fileType: data.mimeType,
+                            mimeType: data.mimeType,  // Pass mimeType separately for thumbnail generation
+                            fileData: data.fileData   // Pass raw base64, NOT data URL
+                        },
+                        preview: data.fileName,
+                        previewType: 'Downloaded File'
+                    };
+                    // #region agent log
+                    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:external-file-drop:pendingSet',message:'pendingItem set from external-file-drop',data:{pendingItemType:this.pendingItem.type,fileName:data.fileName},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+                    // #endregion
+                    this.showModal();
+                }
+            });
+            
+            // Handler for prepare-for-download (H2 - was MISSING)
+            // Note: receive() strips the event, so we just get data directly
+            window.api.receive('prepare-for-download', async (data) => {
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:prepare-for-download',message:'Received prepare-for-download event',data:{fileName:data?.fileName},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
+                // #endregion
+                console.log('[BlackHole] Preparing for download:', data?.fileName);
+                this.sendIPC('black-hole:debug', { event: 'PREPARE_FOR_DOWNLOAD', fileName: data?.fileName });
+                // Ensure spaces are loaded
+                if (this.spaces.length === 0) {
+                    await this.loadSpaces();
+                }
+            });
+            
+            // Handler for check-widget-ready (H3 - was MISSING)
+            // Note: receive() strips the event, so we get no arguments
+            window.api.receive('check-widget-ready', async () => {
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:check-widget-ready',message:'Received check-widget-ready event',data:{isReady:this.isReady,spacesCount:this.spaces.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
+                // #endregion
+                console.log('[BlackHole] Check-widget-ready, isReady:', this.isReady);
+                if (this.isReady) {
+                    this.sendIPC('black-hole:widget-ready');
+                }
+            });
+            
+            console.log('[BlackHole] IPC handlers registered successfully (including external-file-drop)');
         } else {
             console.error('[BlackHole] ERROR: window.api.receive not available!');
         }
@@ -397,21 +516,32 @@ class BlackHoleWidget {
     
     handleDrop(e) {
         console.log('[BlackHole] Handling drop');
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:handleDrop',message:'Drop event received',data:{hasDataTransfer:!!e.dataTransfer,hasFiles:!!(e.dataTransfer&&e.dataTransfer.files),fileCount:e.dataTransfer?.files?.length||0},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})}).catch(()=>{});
+        // #endregion
         
         const files = e.dataTransfer && e.dataTransfer.files;
         if (files && files.length > 0) {
             const file = files[0];
             console.log('[BlackHole] Dropped file:', file.name);
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:handleDrop:file',message:'Processing dropped file',data:{fileName:file.name,fileSize:file.size,fileType:file.type},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})}).catch(()=>{});
+            // #endregion
             
             const reader = new FileReader();
             reader.onload = (evt) => {
+                // Extract raw base64 from data URL (strip the "data:mime/type;base64," prefix)
+                const dataUrl = evt.target.result;
+                const base64Data = dataUrl.split(',')[1] || dataUrl;
+                
                 this.pendingItem = {
                     type: 'file',
                     data: {
                         fileName: file.name,
                         fileSize: file.size,
                         fileType: file.type,
-                        fileData: evt.target.result
+                        mimeType: file.type,  // Pass mimeType separately for thumbnail generation
+                        fileData: base64Data  // Pass raw base64, NOT data URL
                     },
                     preview: file.name,
                     previewType: 'File'
@@ -440,6 +570,9 @@ class BlackHoleWidget {
     
     showModal() {
         console.log('[BlackHole] showModal called');
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:showModal',message:'showModal called',data:{isClosing:this.isClosing,hasModal:!!this.modal,spacesCount:this.spaces.length,hasPendingItem:!!this.pendingItem},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H5'})}).catch(()=>{});
+        // #endregion
         
         // Don't show if we're in the process of closing
         if (this.isClosing) {
@@ -466,9 +599,15 @@ class BlackHoleWidget {
         
         console.log('[BlackHole] Showing modal with', this.spaces.length, 'spaces');
         
-        // Expand window
-        this.sendIPC('black-hole:resize-window', { width: 500, height: 650 });
+        // Expand window - increase height for search and more spaces
+        this.sendIPC('black-hole:resize-window', { width: 500, height: 720 });
         this.sendIPC('black-hole:active');
+        
+        // Reset search
+        this.searchQuery = '';
+        if (this.spaceSearchInput) {
+            this.spaceSearchInput.value = '';
+        }
         
         // Render spaces
         this.renderSpaces();
@@ -494,24 +633,94 @@ class BlackHoleWidget {
         console.log('[BlackHole] Modal shown');
     }
     
-    renderSpaces() {
-        if (!this.spaceGrid) {
-            console.error('[BlackHole] spaceGrid element not found');
+    renderRecentSpaces() {
+        if (!this.recentSpacesList) return;
+        
+        // Get recent spaces that still exist
+        const recentSpaces = this.recentSpaceIds
+            .map(id => this.spaces.find(s => s.id === id))
+            .filter(Boolean)
+            .slice(0, 4);
+        
+        if (recentSpaces.length === 0) {
+            this.recentSpacesList.innerHTML = '<span class="no-recent">No recent spaces</span>';
             return;
         }
         
-        console.log('[BlackHole] Rendering', this.spaces.length, 'spaces');
-        
-        this.spaceGrid.innerHTML = this.spaces.map(space => `
-            <div class="space-item" data-space-id="${space.id}">
-                <span class="space-icon">${space.icon || '📁'}</span>
-                <span class="space-name">${this.escapeHtml(space.name)}</span>
-                <span class="space-count">${space.count || 0} items</span>
+        this.recentSpacesList.innerHTML = recentSpaces.map(space => `
+            <div class="recent-space-chip ${this.selectedSpaceId === space.id ? 'selected' : ''}" data-space-id="${space.id}">
+                <span class="chip-icon">${space.icon || '📁'}</span>
+                <span class="chip-name">${this.escapeHtml(space.name)}</span>
             </div>
         `).join('');
         
         // Add click handlers
-        const items = this.spaceGrid.querySelectorAll('.space-item');
+        const chips = this.recentSpacesList.querySelectorAll('.recent-space-chip');
+        chips.forEach(chip => {
+            chip.addEventListener('click', () => {
+                const spaceId = chip.getAttribute('data-space-id');
+                console.log('[BlackHole] Recent space clicked:', spaceId);
+                this.selectSpace(spaceId);
+            });
+        });
+    }
+    
+    renderSpaces() {
+        if (!this.spaceList) {
+            console.error('[BlackHole] spaceList element not found');
+            return;
+        }
+        
+        // Render recent spaces first
+        this.renderRecentSpaces();
+        
+        // Filter spaces based on search query
+        let filteredSpaces = this.spaces;
+        if (this.searchQuery) {
+            const query = this.searchQuery.toLowerCase();
+            filteredSpaces = this.spaces.filter(space => 
+                space.name.toLowerCase().includes(query)
+            );
+        }
+        
+        console.log('[BlackHole] Rendering', filteredSpaces.length, 'of', this.spaces.length, 'spaces');
+        
+        // Update count badge
+        if (this.spaceCountBadge) {
+            if (this.searchQuery) {
+                this.spaceCountBadge.textContent = `${filteredSpaces.length} of ${this.spaces.length}`;
+            } else {
+                this.spaceCountBadge.textContent = `${this.spaces.length}`;
+            }
+        }
+        
+        // Show empty state or list
+        if (filteredSpaces.length === 0) {
+            this.spaceList.innerHTML = `
+                <div class="space-empty-state">
+                    <div class="icon">🔍</div>
+                    <div class="message">No spaces found</div>
+                </div>
+            `;
+            return;
+        }
+        
+        // Sort alphabetically
+        filteredSpaces.sort((a, b) => a.name.localeCompare(b.name));
+        
+        this.spaceList.innerHTML = filteredSpaces.map(space => `
+            <div class="space-list-item ${this.selectedSpaceId === space.id ? 'selected' : ''}" data-space-id="${space.id}">
+                <span class="item-icon">${space.icon || '📁'}</span>
+                <div class="item-info">
+                    <div class="item-name" title="${this.escapeHtml(space.name)}">${this.escapeHtml(space.name)}</div>
+                    <div class="item-count">${space.count || 0} items</div>
+                </div>
+                <span class="item-check">✓</span>
+            </div>
+        `).join('');
+        
+        // Add click handlers
+        const items = this.spaceList.querySelectorAll('.space-list-item');
         items.forEach(item => {
             item.addEventListener('click', () => {
                 const spaceId = item.getAttribute('data-space-id');
@@ -519,17 +728,46 @@ class BlackHoleWidget {
                 this.selectSpace(spaceId);
             });
         });
+        
+        // If current selection is not in filtered results, select first
+        if (this.selectedSpaceId && !filteredSpaces.find(s => s.id === this.selectedSpaceId)) {
+            if (filteredSpaces.length > 0) {
+                this.selectSpace(filteredSpaces[0].id);
+            } else {
+                this.selectedSpaceId = null;
+                if (this.confirmBtn) this.confirmBtn.disabled = true;
+            }
+        }
+    }
+    
+    handleSpaceSearch(query) {
+        // Debounce search
+        clearTimeout(this.searchDebounceTimer);
+        this.searchDebounceTimer = setTimeout(() => {
+            this.searchQuery = query.trim().toLowerCase();
+            this.renderSpaces();
+        }, 150);
     }
     
     selectSpace(spaceId) {
         console.log('[BlackHole] Selecting space:', spaceId);
         this.selectedSpaceId = spaceId;
         
-        if (this.spaceGrid) {
-            const items = this.spaceGrid.querySelectorAll('.space-item');
+        // Update list items
+        if (this.spaceList) {
+            const items = this.spaceList.querySelectorAll('.space-list-item');
             items.forEach(item => {
                 const isSelected = item.getAttribute('data-space-id') === spaceId;
                 item.classList.toggle('selected', isSelected);
+            });
+        }
+        
+        // Update recent chips
+        if (this.recentSpacesList) {
+            const chips = this.recentSpacesList.querySelectorAll('.recent-space-chip');
+            chips.forEach(chip => {
+                const isSelected = chip.getAttribute('data-space-id') === spaceId;
+                chip.classList.toggle('selected', isSelected);
             });
         }
         
@@ -554,6 +792,9 @@ class BlackHoleWidget {
     
     async handleConfirm() {
         console.log('[BlackHole] ========== HANDLE CONFIRM START ==========');
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:handleConfirm',message:'handleConfirm called',data:{selectedSpaceId:this.selectedSpaceId,hasPendingItem:!!this.pendingItem,pendingItemType:this.pendingItem?.type,hasClipboardAPI:!!window.clipboard,spacesCount:this.spaces.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H5'})}).catch(()=>{});
+        // #endregion
         
         // Send debug info to main process so it shows in terminal
         this.sendIPC('black-hole:debug', {
@@ -608,6 +849,7 @@ class BlackHoleWidget {
                     
                     if (result && result.success) {
                         console.log('[BlackHole] YouTube download started successfully');
+                        this.addToRecentSpaces(this.selectedSpaceId);
                         this.showStatus('Download started');
                         this.animateAndClose(true);
                         return;
@@ -643,6 +885,7 @@ class BlackHoleWidget {
                     // Check if backend detected YouTube
                     if (result && result.success && result.isYouTube && window.youtube && window.youtube.startBackgroundDownload) {
                         console.log('[BlackHole] Backend detected YouTube URL, starting download');
+                        this.addToRecentSpaces(this.selectedSpaceId);
                         await window.youtube.startBackgroundDownload(result.youtubeUrl, this.selectedSpaceId);
                         this.showStatus('Download started');
                         this.animateAndClose(true);
@@ -664,6 +907,9 @@ class BlackHoleWidget {
                     
             case 'file':
                     console.log('[BlackHole] Calling window.clipboard.addFile...');
+                    // #region agent log
+                    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:handleConfirm:addFile',message:'Calling addFile',data:{fileName:item.data?.fileName,fileSize:item.data?.fileSize,spaceId:item.data?.spaceId,hasFileData:!!item.data?.fileData},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H5'})}).catch(()=>{});
+                    // #endregion
                 result = await window.clipboard.addFile(item.data);
                     console.log('[BlackHole] addFile returned:', JSON.stringify(result));
                 break;
@@ -674,9 +920,13 @@ class BlackHoleWidget {
             }
             
             console.log('[BlackHole] Final result:', JSON.stringify(result));
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:handleConfirm:result',message:'Save result received',data:{success:result?.success,error:result?.error,resultKeys:result?Object.keys(result):[]},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H5'})}).catch(()=>{});
+            // #endregion
             
             if (result && result.success) {
                 console.log('[BlackHole] SUCCESS! Closing modal...');
+                this.addToRecentSpaces(this.selectedSpaceId);
                 const space = this.spaces.find(s => s.id === this.selectedSpaceId);
                 const spaceName = space ? `${space.icon} ${space.name}` : 'Space';
                 this.showStatus(`Saved to ${spaceName}`);
@@ -684,6 +934,9 @@ class BlackHoleWidget {
                 this.animateAndClose(true);
         } else {
                 console.error('[BlackHole] FAILED! Result:', result);
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:handleConfirm:failed',message:'Save failed',data:{error:result?.error,result:JSON.stringify(result).substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H5'})}).catch(()=>{});
+                // #endregion
                 this.showStatus(result && result.error ? result.error : 'Save failed', true);
                 this.resetSavingState();
             }

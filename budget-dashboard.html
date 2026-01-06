@@ -777,8 +777,8 @@
             projectId: currentProject === 'all' ? null : currentProject
           });
           
-          // Load saved estimates from localStorage
-          loadEstimates();
+          // Load saved estimates from persistent storage
+          await loadEstimates();
           
           // Update UI
           updateSummary(summary);
@@ -791,13 +791,18 @@
       }
     }
 
-    // Load estimates from localStorage
-    function loadEstimates() {
+    // Load estimates from persistent storage via IPC
+    async function loadEstimates() {
       try {
-        const key = `budget-estimates-${currentProject}`;
-        const saved = localStorage.getItem(key);
-        budgetData.estimates = saved ? JSON.parse(saved) : getDefaultEstimates();
+        if (window.budgetAPI) {
+          // Use persistent storage via IPC
+          budgetData.estimates = await window.budgetAPI.getEstimates(currentProject);
+          console.log('[BudgetDashboard] Loaded estimates from persistent storage:', budgetData.estimates.length);
+        } else {
+          budgetData.estimates = getDefaultEstimates();
+        }
       } catch (e) {
+        console.error('[BudgetDashboard] Error loading estimates:', e);
         budgetData.estimates = getDefaultEstimates();
       }
     }
@@ -812,10 +817,17 @@
       }));
     }
 
-    // Save estimates to localStorage
-    function saveEstimatesToStorage() {
-      const key = `budget-estimates-${currentProject}`;
-      localStorage.setItem(key, JSON.stringify(budgetData.estimates));
+    // Save estimates to persistent storage via IPC
+    async function saveEstimatesToStorage() {
+      try {
+        if (window.budgetAPI) {
+          await window.budgetAPI.saveEstimates(currentProject, budgetData.estimates);
+          console.log('[BudgetDashboard] Saved estimates to persistent storage');
+        }
+      } catch (e) {
+        console.error('[BudgetDashboard] Error saving estimates:', e);
+        showToast('Error saving estimates', true);
+      }
     }
 
     // Update summary cards
@@ -1006,7 +1018,7 @@
     }
 
     // Save estimate
-    function saveEstimate() {
+    async function saveEstimate() {
       const category = document.getElementById('estimateCategory').value;
       const description = document.getElementById('estimateDescription').value;
       const amount = parseFloat(document.getElementById('estimateAmount').value) || 0;
@@ -1019,10 +1031,10 @@
         budgetData.estimates.push({ category, description, amount, units });
       }
       
-      saveEstimatesToStorage();
+      await saveEstimatesToStorage();
       closeEstimateModal();
       updateBudgetTable();
-      refreshData();
+      await refreshData();
       showToast('Estimate saved');
     }
 
@@ -1065,5 +1077,6 @@
   </script>
 </body>
 </html>
+
 
 

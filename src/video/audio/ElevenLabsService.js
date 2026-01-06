@@ -12,6 +12,7 @@ const require = createRequire(import.meta.url);
 const { app } = require('electron');
 import { getSettingsManager } from '../../../settings-manager.js';
 const { getBudgetManager } = require('../../../budget-manager.js');
+const logger = require('../../logger.js');
 
 // ElevenLabs voice IDs (popular voices)
 const VOICE_IDS = {
@@ -53,7 +54,7 @@ export class ElevenLabsService {
         return apiKey;
       }
     } catch (e) {
-      console.warn('[ElevenLabsService] Could not get API key from settings manager:', e.message);
+      logger.warn('ElevenLabsService: Could not get API key from settings manager', { error: e.message });
     }
     
     // Fallback: Check legacy settings file
@@ -89,6 +90,29 @@ export class ElevenLabsService {
 
     const voiceId = VOICE_IDS[voice] || voice; // Use as ID if not in map
     const characterCount = text.length;
+
+    // Check budget before making the API call
+    try {
+      const budgetManager = getBudgetManager();
+      const pricing = budgetManager.getPricing().elevenlabs || { costPer1K: 0.30 };
+      const estimatedCost = (characterCount / 1000) * pricing.costPer1K;
+      
+      const operation = trackingOptions.operation || 'generateAudio';
+      const budgetCheck = budgetManager.checkBudgetWithWarning('elevenlabs', estimatedCost, operation);
+      
+      if (budgetCheck.exceeded) {
+        logger.warn('ElevenLabsService: API call proceeding despite budget exceeded', {
+          operation,
+          characterCount,
+          estimatedCost,
+          remaining: budgetCheck.remaining
+        });
+      }
+    } catch (budgetError) {
+      logger.warn('ElevenLabsService: Budget check failed, proceeding with call', {
+        error: budgetError.message
+      });
+    }
 
     return new Promise((resolve, reject) => {
       const postData = JSON.stringify({
@@ -141,9 +165,12 @@ export class ElevenLabsService {
               operation: trackingOptions.operation || 'generateAudio',
               characters: characterCount
             });
-            console.log(`[ElevenLabsService] Tracked usage: ${characterCount} characters`);
+            logger.info('ElevenLabsService usage tracked', { characterCount });
           } catch (trackingError) {
-            console.error('[ElevenLabsService] Error tracking usage:', trackingError.message);
+            logger.error('ElevenLabsService tracking error', { 
+              error: trackingError.message, 
+              operation: 'trackUsage' 
+            });
           }
           
           resolve(outputPath);
@@ -229,7 +256,11 @@ export class ElevenLabsService {
       };
 
     } catch (error) {
-      console.error('[ElevenLabsService] ElevenLabs replacement error:', error);
+      logger.error('ElevenLabsService replacement error', { 
+        error: error.message, 
+        stack: error.stack,
+        operation: 'elevenLabsReplace' 
+      });
       throw error;
     }
   }

@@ -1633,7 +1633,8 @@ function setupAiderIPC() {
       if (!aiderBridge) {
         throw new Error('Aider not started');
       }
-      const result = await aiderBridge.initialize(repoPath, modelName || 'gpt-4');
+      // GSX Create should honor the selected model; default to Claude Opus 4.5 if none provided.
+      const result = await aiderBridge.initialize(repoPath, modelName || 'claude-opus-4-5-20250929');
       console.log('[Aider] Initialized:', result);
       return result;
     } catch (error) {

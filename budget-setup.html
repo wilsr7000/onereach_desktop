@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com;">
+  <title>Budget Setup</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #0d1117 0%, #161b22 50%, #0d1117 100%);
+      color: #e6edf3;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .setup-container {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 16px;
+      max-width: 600px;
+      width: 100%;
+      overflow: hidden;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    }
+
+    .setup-header {
+      background: linear-gradient(135deg, #238636 0%, #2ea043 100%);
+      padding: 32px;
+      text-align: center;
+    }
+
+    .setup-header h1 {
+      font-size: 24px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+    }
+
+    .setup-header p {
+      font-size: 14px;
+      opacity: 0.9;
+    }
+
+    .setup-body {
+      padding: 32px;
+    }
+
+    .step-indicator {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 32px;
+    }
+
+    .step {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #30363d;
+      transition: all 0.3s ease;
+    }
+
+    .step.active {
+      background: #238636;
+      transform: scale(1.2);
+    }
+
+    .step.completed {
+      background: #3fb950;
+    }
+
+    .form-section {
+      margin-bottom: 24px;
+    }
+
+    .form-section h3 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      color: #e6edf3;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .form-section h3 svg {
+      width: 20px;
+      height: 20px;
+      color: #58a6ff;
+    }
+
+    .info-text {
+      font-size: 13px;
+      color: #8b949e;
+      margin-bottom: 16px;
+      line-height: 1.5;
+    }
+
+    .budget-grid {
+      display: grid;
+      gap: 16px;
+    }
+
+    .budget-item {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 16px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .budget-item.highlight {
+      border-color: #238636;
+      background: #23863610;
+    }
+
+    .budget-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      flex-shrink: 0;
+    }
+
+    .budget-icon.global { background: #23863620; }
+    .budget-icon.openai { background: #58a6ff20; }
+    .budget-icon.elevenlabs { background: #8957e520; }
+    .budget-icon.anthropic { background: #f778ba20; }
+
+    .budget-info {
+      flex: 1;
+    }
+
+    .budget-info label {
+      display: block;
+      font-size: 14px;
+      font-weight: 500;
+      margin-bottom: 4px;
+    }
+
+    .budget-info .description {
+      font-size: 12px;
+      color: #8b949e;
+    }
+
+    .budget-input-wrapper {
+      position: relative;
+      width: 100px;
+    }
+
+    .budget-input-wrapper::before {
+      content: '$';
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #8b949e;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .budget-input {
+      width: 100%;
+      padding: 10px 12px 10px 28px;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #e6edf3;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      text-align: right;
+    }
+
+    .budget-input:focus {
+      outline: none;
+      border-color: #58a6ff;
+    }
+
+    .alert-settings {
+      margin-top: 24px;
+      padding: 16px;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+    }
+
+    .alert-settings h4 {
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: #8b949e;
+    }
+
+    .alert-checkboxes {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .alert-checkbox {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+    }
+
+    .alert-checkbox input {
+      accent-color: #238636;
+    }
+
+    .alert-checkbox label {
+      font-size: 13px;
+      color: #e6edf3;
+      cursor: pointer;
+    }
+
+    .setup-footer {
+      padding: 24px 32px;
+      background: #0d1117;
+      border-top: 1px solid #30363d;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .btn {
+      padding: 10px 20px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      transition: all 0.15s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-primary {
+      background: #238636;
+      color: #fff;
+    }
+
+    .btn-primary:hover {
+      background: #2ea043;
+    }
+
+    .btn-primary:disabled {
+      background: #21262d;
+      color: #8b949e;
+      cursor: not-allowed;
+    }
+
+    .btn-secondary {
+      background: transparent;
+      color: #8b949e;
+      border: 1px solid #30363d;
+    }
+
+    .btn-secondary:hover {
+      color: #e6edf3;
+      border-color: #8b949e;
+    }
+
+    .skip-link {
+      font-size: 13px;
+      color: #8b949e;
+      text-decoration: none;
+    }
+
+    .skip-link:hover {
+      color: #e6edf3;
+    }
+
+    /* Toast notification */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      padding: 12px 20px;
+      background: #238636;
+      color: #fff;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: all 0.2s ease;
+      z-index: 1000;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .toast.error {
+      background: #da3633;
+    }
+
+    /* Summary view */
+    .summary-section {
+      display: none;
+    }
+
+    .summary-section.active {
+      display: block;
+    }
+
+    .summary-card {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+
+    .summary-card h4 {
+      font-size: 12px;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+
+    .summary-value {
+      font-size: 28px;
+      font-weight: 700;
+      color: #3fb950;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .summary-breakdown {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid #21262d;
+    }
+
+    .summary-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 0;
+      font-size: 13px;
+    }
+
+    .summary-row .label {
+      color: #8b949e;
+    }
+
+    .summary-row .value {
+      font-family: 'JetBrains Mono', monospace;
+      color: #e6edf3;
+    }
+  </style>
+</head>
+<body>
+  <div class="setup-container">
+    <div class="setup-header">
+      <h1>
+        <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+        </svg>
+        Budget Setup
+      </h1>
+      <p>Configure your API spending limits to stay in control</p>
+    </div>
+
+    <div class="setup-body">
+      <div class="step-indicator">
+        <div class="step active" id="step1"></div>
+        <div class="step" id="step2"></div>
+      </div>
+
+      <!-- Step 1: Set Budgets -->
+      <div id="budgetStep" class="form-section">
+        <h3>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/>
+            <line x1="1" y1="10" x2="23" y2="10"/>
+          </svg>
+          Set Your Monthly Budgets
+        </h3>
+        <p class="info-text">
+          Set spending limits for each API provider. You'll receive warnings when approaching these limits, 
+          but API calls will still proceed to avoid interrupting your workflow.
+        </p>
+
+        <div class="budget-grid">
+          <div class="budget-item highlight">
+            <div class="budget-icon global">💰</div>
+            <div class="budget-info">
+              <label for="globalBudget">Global Budget</label>
+              <div class="description">Total spending limit across all APIs</div>
+            </div>
+            <div class="budget-input-wrapper">
+              <input type="number" id="globalBudget" class="budget-input" value="50.00" min="1" step="5">
+            </div>
+          </div>
+
+          <div class="budget-item">
+            <div class="budget-icon openai">🤖</div>
+            <div class="budget-info">
+              <label for="openaiBudget">OpenAI</label>
+              <div class="description">GPT models, Whisper transcription</div>
+            </div>
+            <div class="budget-input-wrapper">
+              <input type="number" id="openaiBudget" class="budget-input" value="20.00" min="0" step="5">
+            </div>
+          </div>
+
+          <div class="budget-item">
+            <div class="budget-icon elevenlabs">🎙️</div>
+            <div class="budget-info">
+              <label for="elevenlabsBudget">ElevenLabs</label>
+              <div class="description">Voice generation, sound effects</div>
+            </div>
+            <div class="budget-input-wrapper">
+              <input type="number" id="elevenlabsBudget" class="budget-input" value="20.00" min="0" step="5">
+            </div>
+          </div>
+
+          <div class="budget-item">
+            <div class="budget-icon anthropic">🧠</div>
+            <div class="budget-info">
+              <label for="anthropicBudget">Anthropic (Claude)</label>
+              <div class="description">Metadata generation, analysis</div>
+            </div>
+            <div class="budget-input-wrapper">
+              <input type="number" id="anthropicBudget" class="budget-input" value="10.00" min="0" step="5">
+            </div>
+          </div>
+        </div>
+
+        <div class="alert-settings">
+          <h4>Alert Thresholds</h4>
+          <div class="alert-checkboxes">
+            <div class="alert-checkbox">
+              <input type="checkbox" id="alert50" checked>
+              <label for="alert50">50% used</label>
+            </div>
+            <div class="alert-checkbox">
+              <input type="checkbox" id="alert75" checked>
+              <label for="alert75">75% used</label>
+            </div>
+            <div class="alert-checkbox">
+              <input type="checkbox" id="alert90" checked>
+              <label for="alert90">90% used</label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 2: Summary -->
+      <div id="summaryStep" class="summary-section">
+        <h3>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="9 11 12 14 22 4"/>
+            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+          </svg>
+          You're All Set!
+        </h3>
+        <p class="info-text">
+          Here's a summary of your budget configuration. You can always change these settings later 
+          from the Budget Dashboard.
+        </p>
+
+        <div class="summary-card">
+          <h4>Total Monthly Budget</h4>
+          <div class="summary-value" id="summaryTotal">$50.00</div>
+          <div class="summary-breakdown">
+            <div class="summary-row">
+              <span class="label">OpenAI</span>
+              <span class="value" id="summaryOpenAI">$20.00</span>
+            </div>
+            <div class="summary-row">
+              <span class="label">ElevenLabs</span>
+              <span class="value" id="summaryElevenLabs">$20.00</span>
+            </div>
+            <div class="summary-row">
+              <span class="label">Anthropic</span>
+              <span class="value" id="summaryAnthropic">$10.00</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="summary-card">
+          <h4>Alert Settings</h4>
+          <div id="summaryAlerts" style="font-size: 13px; color: #e6edf3;">
+            You'll receive warnings at 50%, 75%, and 90% of your budget.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="setup-footer">
+      <div>
+        <a href="#" class="skip-link" onclick="skipSetup()">Skip for now</a>
+      </div>
+      <div>
+        <button id="backBtn" class="btn btn-secondary" onclick="goBack()" style="display: none;">Back</button>
+        <button id="nextBtn" class="btn btn-primary" onclick="goNext()">
+          Continue
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="9 18 15 12 9 6"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    let currentStep = 1;
+    const totalSteps = 2;
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', async () => {
+      // Check if already configured
+      if (window.budgetAPI) {
+        try {
+          const configured = await window.budgetAPI.isBudgetConfigured();
+          if (configured) {
+            // Load existing budgets
+            const limits = await window.budgetAPI.getAllBudgetLimits();
+            if (limits.global) document.getElementById('globalBudget').value = limits.global.limit;
+            if (limits.openai) document.getElementById('openaiBudget').value = limits.openai.limit;
+            if (limits.elevenlabs) document.getElementById('elevenlabsBudget').value = limits.elevenlabs.limit;
+            if (limits.anthropic) document.getElementById('anthropicBudget').value = limits.anthropic.limit;
+          }
+        } catch (e) {
+          console.error('Error checking budget configuration:', e);
+        }
+      }
+    });
+
+    function goNext() {
+      if (currentStep === 1) {
+        // Validate budgets
+        const global = parseFloat(document.getElementById('globalBudget').value) || 0;
+        if (global <= 0) {
+          showToast('Please set a global budget greater than $0', true);
+          return;
+        }
+        
+        // Update summary
+        updateSummary();
+        
+        // Move to step 2
+        currentStep = 2;
+        updateUI();
+      } else if (currentStep === 2) {
+        // Save and close
+        saveBudgets();
+      }
+    }
+
+    function goBack() {
+      if (currentStep > 1) {
+        currentStep--;
+        updateUI();
+      }
+    }
+
+    function updateUI() {
+      // Update step indicators
+      for (let i = 1; i <= totalSteps; i++) {
+        const step = document.getElementById(`step${i}`);
+        step.classList.remove('active', 'completed');
+        if (i < currentStep) {
+          step.classList.add('completed');
+        } else if (i === currentStep) {
+          step.classList.add('active');
+        }
+      }
+
+      // Show/hide sections
+      document.getElementById('budgetStep').style.display = currentStep === 1 ? 'block' : 'none';
+      document.getElementById('summaryStep').classList.toggle('active', currentStep === 2);
+
+      // Update buttons
+      document.getElementById('backBtn').style.display = currentStep > 1 ? 'inline-flex' : 'none';
+      document.getElementById('nextBtn').innerHTML = currentStep === totalSteps 
+        ? 'Complete Setup <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>'
+        : 'Continue <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>';
+    }
+
+    function updateSummary() {
+      const global = parseFloat(document.getElementById('globalBudget').value) || 0;
+      const openai = parseFloat(document.getElementById('openaiBudget').value) || 0;
+      const elevenlabs = parseFloat(document.getElementById('elevenlabsBudget').value) || 0;
+      const anthropic = parseFloat(document.getElementById('anthropicBudget').value) || 0;
+
+      document.getElementById('summaryTotal').textContent = `$${global.toFixed(2)}`;
+      document.getElementById('summaryOpenAI').textContent = `$${openai.toFixed(2)}`;
+      document.getElementById('summaryElevenLabs').textContent = `$${elevenlabs.toFixed(2)}`;
+      document.getElementById('summaryAnthropic').textContent = `$${anthropic.toFixed(2)}`;
+
+      // Update alerts summary
+      const alerts = [];
+      if (document.getElementById('alert50').checked) alerts.push('50%');
+      if (document.getElementById('alert75').checked) alerts.push('75%');
+      if (document.getElementById('alert90').checked) alerts.push('90%');
+      
+      document.getElementById('summaryAlerts').textContent = alerts.length > 0
+        ? `You'll receive warnings at ${alerts.join(', ')} of your budget.`
+        : 'No warning alerts configured.';
+    }
+
+    async function saveBudgets() {
+      const global = parseFloat(document.getElementById('globalBudget').value) || 50;
+      const openai = parseFloat(document.getElementById('openaiBudget').value) || 20;
+      const elevenlabs = parseFloat(document.getElementById('elevenlabsBudget').value) || 20;
+      const anthropic = parseFloat(document.getElementById('anthropicBudget').value) || 10;
+
+      // Build alert thresholds
+      const alertAt = [];
+      if (document.getElementById('alert50').checked) alertAt.push(0.5);
+      if (document.getElementById('alert75').checked) alertAt.push(0.75);
+      if (document.getElementById('alert90').checked) alertAt.push(0.9);
+
+      try {
+        if (window.budgetAPI) {
+          // Set budget limits
+          await window.budgetAPI.setBudgetLimit('global', global, alertAt);
+          await window.budgetAPI.setBudgetLimit('openai', openai, alertAt);
+          await window.budgetAPI.setBudgetLimit('elevenlabs', elevenlabs, alertAt);
+          await window.budgetAPI.setBudgetLimit('anthropic', anthropic, alertAt);
+          
+          // Mark budget as configured
+          await window.budgetAPI.markBudgetConfigured();
+          
+          showToast('Budget configuration saved!');
+          
+          // Close window after delay
+          setTimeout(() => {
+            window.close();
+          }, 1500);
+        } else {
+          showToast('Error: Budget API not available', true);
+        }
+      } catch (error) {
+        console.error('Error saving budgets:', error);
+        showToast('Error saving budget configuration', true);
+      }
+    }
+
+    function skipSetup() {
+      if (confirm('Are you sure you want to skip budget setup? Default budgets will be used.')) {
+        if (window.budgetAPI) {
+          window.budgetAPI.markBudgetConfigured().then(() => {
+            window.close();
+          });
+        } else {
+          window.close();
+        }
+      }
+    }
+
+    function showToast(message, isError = false) {
+      const toast = document.getElementById('toast');
+      toast.textContent = message;
+      toast.className = 'toast' + (isError ? ' error' : '');
+      toast.classList.add('show');
+      
+      setTimeout(() => {
+        toast.classList.remove('show');
+      }, 3000);
+    }
+  </script>
+</body>
+</html>
+
+
+
+

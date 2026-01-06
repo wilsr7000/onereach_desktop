@@ -121,18 +121,21 @@ class AiderBridgeClient extends events_1.EventEmitter {
             });
             
             // Wait for ready signal
+            let startupResolved = false;
+            
             const readyHandler = (notification) => {
                 if (notification.method === 'ready') {
                     console.log('[Aider Bridge] Ready signal received, resolving start()');
+                    startupResolved = true;
                     this.removeListener('notification', readyHandler);
                     resolve();
                 }
             };
             this.on('notification', readyHandler);
             
-            // Timeout after 10 seconds
+            // Timeout after 10 seconds - only reject if startup hasn't resolved
             setTimeout(() => {
-                if (this.pendingRequests.size === 0 && this.process && !this.process.killed) {
+                if (!startupResolved && this.process && !this.process.killed) {
                     this.removeListener('notification', readyHandler);
                     const error = new Error('Timeout waiting for Aider Bridge to start. Check if Python and aider-chat are installed.');
                     console.error('[Aider Bridge]', error.message);
@@ -266,7 +269,7 @@ class AiderBridgeClient extends events_1.EventEmitter {
             }, 300000); // 5 minute timeout
         });
     }
-    async initialize(repoPath, modelName = 'gpt-4') {
+    async initialize(repoPath, modelName = 'claude-opus-4-5-20251101') {
         return this.sendRequest('initialize', { repo_path: repoPath, model_name: modelName });
     }
     /**

@@ -3,6 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const ClipboardStorageV2 = require('./clipboard-storage-v2');
 const AppContextCapture = require('./app-context-capture');
+const getLogger = require('./event-logger');
 
 // Handle Electron imports gracefully
 let BrowserWindow, ipcMain, globalShortcut, screen, app, clipboard, nativeImage;
@@ -57,6 +58,14 @@ class ClipboardManagerV2 {
     
     // Set up IPC handlers (needed immediately for IPC)
     this.setupIPC();
+    
+    // Log feature initialization
+    const logger = getLogger();
+    logger.logFeatureUsed('clipboard-manager', { 
+      status: 'initialized',
+      spacesEnabled: this.spacesEnabled,
+      screenshotCaptureEnabled: this.screenshotCaptureEnabled
+    });
     
     // PERFORMANCE: Defer heavy initialization to next tick
     setImmediate(() => {
@@ -159,7 +168,11 @@ class ClipboardManagerV2 {
     // Ensure history is loaded before adding
     this.ensureHistoryLoaded();
     
-    console.log('[V2] Adding item to history:', item.type);
+    const logger = getLogger();
+    logger.logClipboardOperation('add', item.type, { 
+      hasMetadata: !!item.metadata,
+      spaceId: this.currentSpace
+    });
     
     // Capture app context if not already provided
     let context = item.context;
@@ -168,7 +181,11 @@ class ClipboardManagerV2 {
         context = await this.contextCapture.getFullContext();
         console.log('[V2] Captured context:', context);
       } catch (error) {
-        console.error('[V2] Error capturing context:', error);
+        const logger = getLogger();
+        logger.warn('Clipboard context capture failed', {
+          error: error.message,
+          operation: 'addToHistory'
+        });
       }
     }
     
@@ -252,7 +269,12 @@ class ClipboardManagerV2 {
           console.log('[Clipboard] Synced new item to space-metadata.json:', fileKey);
         }
       } catch (syncError) {
-        console.error('[Clipboard] Error syncing new item to space metadata:', syncError);
+        const logger = getLogger();
+        logger.error('Clipboard space sync failed', {
+          error: syncError.message,
+          operation: 'syncNewItem',
+          spaceId: this.currentSpace
+        });
       }
     }
     
@@ -273,14 +295,18 @@ class ClipboardManagerV2 {
     }
     
     // Auto-generate AI metadata if enabled (run async, don't block)
-    this.maybeAutoGenerateMetadata(indexEntry.id, item.type, item.isScreenshot);
+    // Pass fileType for proper categorization of image files
+    this.maybeAutoGenerateMetadata(indexEntry.id, item.type, item.isScreenshot, item.fileType);
   }
   
   /**
    * Check settings and auto-generate AI metadata if enabled
    * This runs asynchronously so it doesn't block clipboard capture
    */
-  async maybeAutoGenerateMetadata(itemId, itemType, isScreenshot) {
+  async maybeAutoGenerateMetadata(itemId, itemType, isScreenshot, fileType = null) {
+    // #region agent log
+    try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'clipboard-manager-v2-adapter.js:maybeAutoGenerateMetadata:entry',message:'maybeAutoGenerateMetadata called',data:{itemId,itemType,isScreenshot,fileType},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-META'})+'\n'); } catch(e){}
+    // #endregion
     try {
       const { getSettingsManager } = require('./settings-manager');
       const settingsManager = getSettingsManager();
@@ -293,9 +319,18 @@ class ClipboardManagerV2 {
       // Also check legacy screenshot setting for backward compatibility
       const autoGenerateScreenshotMetadata = settingsManager.get('autoGenerateScreenshotMetadata');
       
+      // Check if this is an image file (type=file but fileType=image-file)
+      const isImageFile = itemType === 'file' && fileType === 'image-file';
+      
+      // #region agent log
+      try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'clipboard-manager-v2-adapter.js:maybeAutoGenerateMetadata:settings',message:'Settings check',data:{itemId,itemType,fileType,isImageFile,autoAIMetadata,autoAIMetadataTypes,hasApiKey:!!apiKey,autoGenerateScreenshotMetadata},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-META'})+'\n'); } catch(e){}
+      // #endregion
+      
       console.log(`[Auto AI] Settings check for item ${itemId}:`, {
         itemType,
+        fileType,
         isScreenshot,
+        isImageFile,
         autoAIMetadata,
         autoAIMetadataTypes,
         hasApiKey: !!apiKey,
@@ -304,6 +339,9 @@ class ClipboardManagerV2 {
       
       if (!apiKey) {
         console.log('[Auto AI] No API key configured, skipping metadata generation');
+        // #region agent log
+        try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'clipboard-manager-v2-adapter.js:maybeAutoGenerateMetadata:noApiKey',message:'No API key - skipping',data:{itemId},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-META'})+'\n'); } catch(e){}
+        // #endregion
         return; // No API key configured
       }
       
@@ -316,7 +354,8 @@ class ClipboardManagerV2 {
           shouldGenerate = true;
         } else if (isScreenshot && autoAIMetadataTypes.includes('screenshot')) {
           shouldGenerate = true;
-        } else if (itemType === 'image' && autoAIMetadataTypes.includes('image')) {
+        } else if ((itemType === 'image' || isImageFile) && autoAIMetadataTypes.includes('image')) {
+          // Include image files (type=file, fileType=image-file) when 'image' is enabled
           shouldGenerate = true;
         } else if (itemType === 'text' && autoAIMetadataTypes.includes('text')) {
           shouldGenerate = true;
@@ -337,15 +376,30 @@ class ClipboardManagerV2 {
       
       if (!shouldGenerate) {
         console.log(`[Auto AI] Skipping metadata generation for ${itemType} (not in enabled types: ${autoAIMetadataTypes.join(', ')})`);
+        // #region agent log
+        try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'clipboard-manager-v2-adapter.js:maybeAutoGenerateMetadata:skip',message:'Skipping - not in enabled types',data:{itemId,itemType,fileType,autoAIMetadataTypes},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-META'})+'\n'); } catch(e){}
+        // #endregion
         return;
       }
       
       console.log(`[Auto AI] Generating metadata for ${itemType} item: ${itemId}`);
+      // #region agent log
+      try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'clipboard-manager-v2-adapter.js:maybeAutoGenerateMetadata:generate',message:'Will generate metadata',data:{itemId,itemType,fileType},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-META'})+'\n'); } catch(e){}
+      // #endregion
       
       // Generate metadata using NEW specialized system
       const MetadataGenerator = require('./metadata-generator');
       const metadataGen = new MetadataGenerator(this);
+      
+      // #region agent log
+      try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'clipboard-manager-v2-adapter.js:maybeAutoGenerateMetadata:beforeGenerate',message:'About to call generateMetadataForItem',data:{itemId},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-META'})+'\n'); } catch(e){}
+      // #endregion
+      
       const result = await metadataGen.generateMetadataForItem(itemId, apiKey);
+      
+      // #region agent log
+      try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'clipboard-manager-v2-adapter.js:maybeAutoGenerateMetadata:afterGenerate',message:'generateMetadataForItem returned',data:{itemId,success:result?.success,error:result?.error,hasMetadata:!!result?.metadata},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-META'})+'\n'); } catch(e){}
+      // #endregion
       
       if (result.success) {
         console.log(`[Auto AI] Successfully generated specialized metadata for ${itemType}: ${itemId}`);
@@ -364,9 +418,20 @@ class ClipboardManagerV2 {
         }
       } else {
         console.error(`[Auto AI] Failed to generate metadata for item ${itemId}:`, result.error);
+        // #region agent log
+        try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'clipboard-manager-v2-adapter.js:maybeAutoGenerateMetadata:failed',message:'Metadata generation failed',data:{itemId,error:result?.error},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-META'})+'\n'); } catch(e){}
+        // #endregion
       }
     } catch (error) {
-      console.error('[Auto AI] Error in auto-generate metadata:', error);
+      // #region agent log
+      try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'clipboard-manager-v2-adapter.js:maybeAutoGenerateMetadata:exception',message:'Exception in metadata generation',data:{error:error.message,stack:error.stack?.substring(0,500)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-META'})+'\n'); } catch(e){}
+      // #endregion
+      const logger = getLogger();
+      logger.error('Clipboard auto AI metadata generation failed', {
+        error: error.message,
+        stack: error.stack,
+        operation: 'autoGenerateMetadata'
+      });
     }
   }
   
@@ -407,7 +472,11 @@ class ClipboardManagerV2 {
             }
           }
         } catch (error) {
-          console.error('Error loading item content:', error);
+          const logger = getLogger();
+          logger.warn('Clipboard item content load failed', {
+            error: error.message,
+            itemId: item.id
+          });
         }
       }
       return item;
@@ -454,7 +523,12 @@ class ClipboardManagerV2 {
             }
           }
         } catch (syncError) {
-          console.error('[Clipboard] Error removing from space metadata:', syncError);
+          const logger = getLogger();
+          logger.error('Clipboard remove from space failed', {
+            error: syncError.message,
+            operation: 'removeFromSpace',
+            itemId: id
+          });
         }
       }
       
@@ -577,7 +651,12 @@ class ClipboardManagerV2 {
           }
         }
       } catch (syncError) {
-        console.error('[Clipboard] Error syncing move to space metadata:', syncError);
+        const logger = getLogger();
+        logger.error('Clipboard move to space sync failed', {
+          error: syncError.message,
+          operation: 'moveToSpace',
+          targetSpaceId: spaceId
+        });
       }
       
       this.updateSpaceCounts();
@@ -675,12 +754,18 @@ class ClipboardManagerV2 {
       
       return { success: true };
     } catch (error) {
-      console.error('Error deleting space:', error);
+      const logger = getLogger();
+      logger.error('Space deletion failed', {
+        error: error.message,
+        stack: error.stack,
+        operation: 'deleteSpace'
+      });
       return { success: false };
     }
   }
   
   getSpaceItems(spaceId) {
+    this.ensureHistoryLoaded(); // Ensure history is loaded before accessing
     return this.history.filter(item => 
       spaceId === null ? true : item.spaceId === spaceId
     );
@@ -992,7 +1077,11 @@ Respond ONLY with valid JSON, no other text.`;
         }
       }
     } catch (err) {
-      console.error('[AI-Metadata] Error generating metadata:', err.message);
+      const logger = getLogger();
+      logger.error('AI metadata generation failed', {
+        error: err.message,
+        operation: 'generateAIMetadata'
+      });
     }
     
     return null;
@@ -1338,7 +1427,12 @@ Respond ONLY with valid JSON, no other text.`;
       }
       
     } catch (error) {
-      console.error('[YouTube-BG] Background download error:', error);
+      const logger = getLogger();
+      logger.error('YouTube background download failed', {
+        error: error.message,
+        stack: error.stack,
+        operation: 'backgroundDownload'
+      });
       
       // Make sure to clear the progress interval
       if (typeof progressInterval !== 'undefined') {
@@ -1449,6 +1543,9 @@ Respond ONLY with valid JSON, no other text.`;
   // If broken, check TEST-BLACKHOLE.md for troubleshooting
   // Must use app.getAppPath() for preload, NOT __dirname
   createBlackHoleWindow(position, startExpanded = false, clipboardData = null) {
+    // #region agent log
+    try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'clipboard-manager-v2-adapter.js:createBlackHoleWindow',message:'createBlackHoleWindow called',data:{hasPosition:!!position,startExpanded,hasClipboardData:!!clipboardData,windowExists:!!(this.blackHoleWindow&&!this.blackHoleWindow.isDestroyed())},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H7'})+'\n'); } catch(e){}
+    // #endregion
     if (this.blackHoleWindow && !this.blackHoleWindow.isDestroyed()) {
       this.blackHoleWindow.focus();
       // If we have new clipboard data, send it
@@ -1621,7 +1718,11 @@ Respond ONLY with valid JSON, no other text.`;
         }
       });
     } catch (error) {
-      console.error('Error checking existing screenshots:', error);
+      const logger = getLogger();
+      logger.warn('Screenshot check failed', {
+        error: error.message,
+        operation: 'checkExistingScreenshots'
+      });
     }
   }
   
@@ -1772,7 +1873,12 @@ Respond ONLY with valid JSON, no other text.`;
         }, 1000); // Small delay to ensure item is fully saved
       }
     } catch (error) {
-      console.error('Error handling screenshot:', error);
+      const logger = getLogger();
+      logger.error('Screenshot handling failed', {
+        error: error.message,
+        stack: error.stack,
+        operation: 'handleScreenshot'
+      });
     }
   }
   
@@ -2033,7 +2139,8 @@ Respond ONLY with valid JSON, no other text.`;
     });
     
     safeHandle('clipboard:get-space-items', (event, spaceId) => {
-      return this.getSpaceItems(spaceId);
+      const items = this.getSpaceItems(spaceId);
+      return { success: true, items: items || [] };
     });
     
     safeHandle('clipboard:get-spaces-enabled', () => {
@@ -2064,6 +2171,155 @@ Respond ONLY with valid JSON, no other text.`;
       const spaceDir = path.join(this.storage.spacesDir, spaceId);
       if (fs.existsSync(spaceDir)) {
         shell.openPath(spaceDir);
+      }
+      return { success: true };
+    });
+    
+    // Native file drag for external apps/web pages
+    safeHandle('clipboard:start-native-drag', (event, itemId) => {
+      try {
+        const item = this.storage.loadItem(itemId);
+        if (!item || !item.contentPath) {
+          console.error('[NativeDrag] Item not found or no content path:', itemId);
+          return { success: false, error: 'Item not found' };
+        }
+        
+        const filePath = path.join(this.storage.storageRoot, item.contentPath);
+        console.log('[NativeDrag] Starting drag for:', filePath);
+        
+        if (!fs.existsSync(filePath)) {
+          console.error('[NativeDrag] File not found:', filePath);
+          return { success: false, error: 'File not found' };
+        }
+        
+        // Get icon for drag (use thumbnail if available, otherwise generate one)
+        let iconPath = null;
+        if (item.thumbnailPath) {
+          const thumbPath = path.join(this.storage.storageRoot, item.thumbnailPath);
+          if (fs.existsSync(thumbPath)) {
+            iconPath = thumbPath;
+          }
+        }
+        
+        // Start native drag operation
+        event.sender.startDrag({
+          file: filePath,
+          icon: iconPath || undefined
+        });
+        
+        return { success: true, filePath };
+      } catch (error) {
+        console.error('[NativeDrag] Error:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Float card for dragging items to external apps
+    safeHandle('clipboard:float-item', (event, itemId) => {
+      try {
+        const item = this.storage.loadItem(itemId);
+        if (!item) {
+          console.error('[FloatCard] Item not found:', itemId);
+          return { success: false, error: 'Item not found' };
+        }
+        
+        console.log('[FloatCard] Creating float card for:', itemId);
+        
+        // Close existing float card if any
+        if (this.floatCardWindow && !this.floatCardWindow.isDestroyed()) {
+          this.floatCardWindow.close();
+        }
+        
+        // Get mouse position for placement
+        const { screen } = require('electron');
+        const mousePos = screen.getCursorScreenPoint();
+        
+        // Create float card window
+        this.floatCardWindow = new BrowserWindow({
+          width: 100,
+          height: 110,
+          x: mousePos.x - 50,
+          y: mousePos.y - 55,
+          transparent: true,
+          frame: false,
+          alwaysOnTop: true,
+          resizable: false,
+          minimizable: false,
+          maximizable: false,
+          hasShadow: true,
+          skipTaskbar: true,
+          webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            preload: path.join(__dirname, 'preload.js')
+          }
+        });
+        
+        this.floatCardWindow.loadFile('float-card.html');
+        
+        // Send item data when window is ready
+        this.floatCardWindow.webContents.on('did-finish-load', () => {
+          const itemData = {
+            id: itemId,
+            type: item.type,
+            fileType: item.fileType,
+            fileName: item.fileName,
+            thumbnail: item.thumbnail,
+            preview: item.preview
+          };
+          this.floatCardWindow.webContents.send('float-card:init', itemData);
+        });
+        
+        // Handle close request from float card - store reference to this for callbacks
+        const self = this;
+        if (!this._floatCardCloseHandler) {
+          this._floatCardCloseHandler = true;
+          ipcMain.on('float-card:close', () => {
+            console.log('[FloatCard] Close requested');
+            if (self.floatCardWindow && !self.floatCardWindow.isDestroyed()) {
+              self.floatCardWindow.close();
+              self.floatCardWindow = null;
+              console.log('[FloatCard] Window closed');
+            }
+          });
+          
+          ipcMain.on('float-card:ready', () => {
+            console.log('[FloatCard] Window ready');
+          });
+          
+          ipcMain.on('float-card:start-drag', (event, itemId) => {
+            // Forward native drag request
+            if (self.floatCardWindow && !self.floatCardWindow.isDestroyed()) {
+              const item = self.storage.loadItem(itemId);
+              if (item && item.contentPath) {
+                const filePath = path.join(self.storage.storageRoot, item.contentPath);
+                if (fs.existsSync(filePath)) {
+                  event.sender.startDrag({
+                    file: filePath,
+                    icon: item.thumbnailPath ? path.join(self.storage.storageRoot, item.thumbnailPath) : undefined
+                  });
+                }
+              }
+            }
+          });
+        }
+        
+        // Store reference to this window for later closing
+        this.floatCardWindow.on('closed', () => {
+          this.floatCardWindow = null;
+        });
+        
+        return { success: true };
+      } catch (error) {
+        console.error('[FloatCard] Error:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    safeHandle('clipboard:close-float', () => {
+      if (this.floatCardWindow && !this.floatCardWindow.isDestroyed()) {
+        this.floatCardWindow.close();
+        this.floatCardWindow = null;
       }
       return { success: true };
     });
@@ -2117,7 +2373,11 @@ Respond ONLY with valid JSON, no other text.`;
         
         return { success: true };
       } catch (error) {
-        console.error('Error updating metadata:', error);
+        const logger = getLogger();
+        logger.error('Metadata update failed', {
+          error: error.message,
+          operation: 'updateMetadata'
+        });
         return { success: false, error: error.message };
       }
     });
@@ -2202,7 +2462,11 @@ Respond ONLY with valid JSON, no other text.`;
           fileType: item.fileType
         };
       } catch (error) {
-        console.error('Error getting video scenes:', error);
+        const logger = getLogger();
+        logger.error('Get video scenes failed', {
+          error: error.message,
+          operation: 'getVideoScenes'
+        });
         return { success: false, error: error.message };
       }
     });
@@ -2259,7 +2523,11 @@ Respond ONLY with valid JSON, no other text.`;
         console.log(`[Clipboard] Updated ${scenes.length} scenes for video:`, item.fileName);
         return { success: true, scenesCount: scenes.length };
       } catch (error) {
-        console.error('Error updating video scenes:', error);
+        const logger = getLogger();
+        logger.error('Update video scenes failed', {
+          error: error.message,
+          operation: 'updateVideoScenes'
+        });
         return { success: false, error: error.message };
       }
     });
@@ -2296,7 +2564,11 @@ Respond ONLY with valid JSON, no other text.`;
         console.log(`[Clipboard] Added scene "${scene.name}" to video:`, item.fileName);
         return { success: true, scene, totalScenes: metadata.scenes.length };
       } catch (error) {
-        console.error('Error adding video scene:', error);
+        const logger = getLogger();
+        logger.error('Add video scene failed', {
+          error: error.message,
+          operation: 'addVideoScene'
+        });
         return { success: false, error: error.message };
       }
     });
@@ -2328,7 +2600,11 @@ Respond ONLY with valid JSON, no other text.`;
         console.log(`[Clipboard] Deleted scene ${sceneId} from video:`, item.fileName);
         return { success: true, remainingScenes: metadata.scenes.length };
       } catch (error) {
-        console.error('Error deleting video scene:', error);
+        const logger = getLogger();
+        logger.error('Delete video scene failed', {
+          error: error.message,
+          operation: 'deleteVideoScene'
+        });
         return { success: false, error: error.message };
       }
     });
@@ -2398,11 +2674,14 @@ Respond ONLY with valid JSON, no other text.`;
           content = item.html || item.content || '';
         }
         
-        // For files, try to read text content if it's a text-based file
+        // For files, try to read content based on file type
         if (item.type === 'file' && item.content) {
           const textExtensions = ['.txt', '.md', '.log', '.csv', '.json', '.xml', '.yaml', '.yml', 
                                   '.js', '.ts', '.jsx', '.tsx', '.py', '.java', '.cpp', '.c', '.h', 
                                   '.css', '.scss', '.html', '.htm', '.rb', '.go', '.rs', '.php'];
+          const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.ico',
+                                   '.tiff', '.tif', '.heic', '.heif', '.avif', '.jfif', '.apng'];
+          
           if (item.fileExt && textExtensions.includes(item.fileExt.toLowerCase())) {
             try {
               // item.content should be the file path for files
@@ -2412,6 +2691,21 @@ Respond ONLY with valid JSON, no other text.`;
             } catch (readError) {
               console.error('Error reading file content:', readError);
               content = item.preview || '';
+            }
+          } else if (item.fileType === 'image-file' || (item.fileExt && imageExtensions.includes(item.fileExt.toLowerCase()))) {
+            // For image files, return full-resolution image as data URL
+            try {
+              const filePath = item.content;
+              if (fs.existsSync(filePath)) {
+                const buffer = fs.readFileSync(filePath);
+                // Detect actual MIME type from magic bytes
+                const mimeType = this.detectImageMimeType(buffer);
+                content = `data:${mimeType};base64,${buffer.toString('base64')}`;
+                console.log('[getItemContent] Loaded full-resolution image:', item.fileName, 'size:', buffer.length);
+              }
+            } catch (readError) {
+              console.error('Error reading image file:', readError);
+              content = item.thumbnail || '';
             }
           }
         }
@@ -4926,8 +5220,13 @@ ${chunks[i]}`;
         hasFilePath: !!data.filePath,
         hasFileName: !!data.fileName,
         hasFileData: !!data.fileData,
+        hasMimeType: !!data.mimeType,
+        mimeType: data.mimeType,
         spaceId: data.spaceId
       });
+      // #region agent log
+      try { fs.appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'clipboard-manager-v2-adapter.js:add-file',message:'add-file handler called',data:{fileName:data.fileName,fileSize:data.fileSize,mimeType:data.mimeType,hasFileData:!!data.fileData,fileDataLength:data.fileData?.length,spaceId:data.spaceId},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H6'})+'\n'); } catch(e){}
+      // #endregion
       
       // CRITICAL FIX: If filePath is provided (from paste), read the file
       if (data.filePath && !data.fileName) {
@@ -4990,7 +5289,7 @@ ${chunks[i]}`;
       } else if (['.mp3', '.wav', '.flac', '.aac', '.ogg', '.wma', '.m4a', '.opus', '.aiff', '.ape', '.amr', '.au'].includes(ext)) {
         fileType = 'audio';
         fileCategory = 'media';
-      } else if (['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg', '.webp', '.ico'].includes(ext)) {
+      } else if (['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg', '.webp', '.ico', '.tiff', '.tif', '.heic', '.heif', '.avif', '.jfif', '.pjpeg', '.pjp', '.apng'].includes(ext)) {
         fileType = 'image-file';
         fileCategory = 'media';
       } else if (ext === '.pdf') {
@@ -5014,7 +5313,7 @@ ${chunks[i]}`;
         fileType = 'flow';
       }
       
-      // Generate thumbnail for PDF files
+      // Generate thumbnail for PDF files and images
       let thumbnail = null;
       if (fileType === 'pdf') {
         thumbnail = this.generatePDFThumbnail(data.fileName, data.fileSize);
@@ -5022,6 +5321,14 @@ ${chunks[i]}`;
         thumbnail = this.generateHTMLThumbnail(data.fileName, data.fileSize);
       } else if (fileType === 'notebook') {
         thumbnail = this.generateNotebookThumbnail(data.fileName, data.fileSize);
+      } else if (fileType === 'image-file' && data.fileData) {
+        // For image files, create a data URL thumbnail from the base64 data
+        const mimeType = data.mimeType || this.getMimeTypeFromExtension(ext);
+        thumbnail = `data:${mimeType};base64,${data.fileData}`;
+        console.log('[V2] Generated image thumbnail, mimeType:', mimeType, 'dataLength:', data.fileData.length);
+        // #region agent log
+        try { fs.appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'clipboard-manager-v2-adapter.js:add-file:imageThumbnail',message:'Generated image thumbnail',data:{fileName:data.fileName,mimeType,thumbnailLength:thumbnail.length,fileType},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H6'})+'\n'); } catch(e){}
+        // #endregion
       }
       
       const itemId = this.generateId();
@@ -6700,6 +7007,66 @@ ${chunks[i]}`;
     
     // Return placeholder if all else fails
     return this.generatePDFThumbnail(path.basename(filePath), 0);
+  }
+  
+  // Get MIME type from file extension
+  getMimeTypeFromExtension(ext) {
+    const mimeTypes = {
+      // Common web image formats
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.jfif': 'image/jpeg',
+      '.pjpeg': 'image/jpeg',
+      '.pjp': 'image/jpeg',
+      '.png': 'image/png',
+      '.apng': 'image/apng',
+      '.gif': 'image/gif',
+      '.bmp': 'image/bmp',
+      '.webp': 'image/webp',
+      '.svg': 'image/svg+xml',
+      '.ico': 'image/x-icon',
+      // Modern formats
+      '.avif': 'image/avif',
+      '.heic': 'image/heic',
+      '.heif': 'image/heif',
+      // TIFF
+      '.tiff': 'image/tiff',
+      '.tif': 'image/tiff'
+    };
+    return mimeTypes[ext.toLowerCase()] || 'application/octet-stream';
+  }
+  
+  // Detect image MIME type from buffer using magic bytes
+  detectImageMimeType(buffer) {
+    if (!buffer || buffer.length < 4) {
+      return 'image/png'; // Default fallback
+    }
+    
+    // Check magic bytes
+    // JPEG: FF D8 FF
+    if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
+      return 'image/jpeg';
+    }
+    // PNG: 89 50 4E 47
+    if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) {
+      return 'image/png';
+    }
+    // GIF: 47 49 46 38
+    if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38) {
+      return 'image/gif';
+    }
+    // WebP: 52 49 46 46 ... 57 45 42 50
+    if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 &&
+        buffer.length > 11 && buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50) {
+      return 'image/webp';
+    }
+    // BMP: 42 4D
+    if (buffer[0] === 0x42 && buffer[1] === 0x4D) {
+      return 'image/bmp';
+    }
+    
+    // Default to PNG
+    return 'image/png';
   }
   
   // Generate a placeholder thumbnail for PDF files

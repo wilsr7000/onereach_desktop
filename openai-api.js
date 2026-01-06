@@ -10,6 +10,7 @@
 
 const https = require('https');
 const { getBudgetManager } = require('./budget-manager');
+const getLogger = require('./event-logger');
 
 class OpenAIAPI {
   constructor() {
@@ -30,14 +31,23 @@ class OpenAIAPI {
    * @returns {Promise<Object>} Generated metadata
    */
   async generateMetadata(content, contentType, apiKey, options = {}) {
+    const logger = getLogger();
+    
     if (!apiKey) {
-      throw new Error('OpenAI API key is required');
+      const error = new Error('OpenAI API key is required');
+      logger.logAPIError('/v1/chat/completions', error, { operation: 'generateMetadata', contentType });
+      throw error;
     }
 
     const prompt = this.buildPrompt(content, contentType, options);
     
-    console.log(`[OpenAI API] Using GPT-5.2 for ${contentType} analysis`);
-    console.log(`[OpenAI API] Content length: ${content.length} chars`);
+    logger.info('OpenAI API request', {
+      event: 'api:request',
+      provider: 'openai',
+      model: this.defaultModel,
+      operation: `generateMetadata:${contentType}`,
+      contentLength: content.length
+    });
 
     return this.callAPI(prompt, apiKey, {
       operation: `generateMetadata:${contentType}`,
@@ -276,6 +286,36 @@ Respond with valid JSON only.`;
    * @param {string} trackingOptions.projectId - Project ID for tracking
    */
   async callAPI(prompt, apiKey, trackingOptions = {}) {
+    const logger = getLogger();
+    
+    // Check budget before making the call
+    try {
+      const budgetManager = getBudgetManager();
+      
+      // Estimate cost based on prompt length
+      const estimatedInputTokens = Math.ceil(prompt.length / 4);
+      const estimatedOutputTokens = this.maxTokens;
+      const pricing = budgetManager.getPricing().openai || { inputCostPer1K: 0.01, outputCostPer1K: 0.03 };
+      const estimatedCost = (estimatedInputTokens / 1000) * pricing.inputCostPer1K + 
+                           (estimatedOutputTokens / 1000) * pricing.outputCostPer1K;
+      
+      const budgetCheck = budgetManager.checkBudgetWithWarning('openai', estimatedCost, trackingOptions.operation || 'api_call');
+      
+      if (budgetCheck.exceeded) {
+        logger.warn('OpenAI API call proceeding despite budget exceeded', {
+          event: 'budget:exceeded',
+          provider: 'openai',
+          operation: trackingOptions.operation,
+          estimatedCost,
+          remaining: budgetCheck.remaining
+        });
+      }
+    } catch (budgetError) {
+      logger.warn('OpenAI budget check failed, proceeding with call', {
+        error: budgetError.message
+      });
+    }
+
     return new Promise((resolve, reject) => {
       const postData = JSON.stringify({
         model: this.defaultModel,
@@ -306,6 +346,7 @@ Respond with valid JSON only.`;
         }
       };
 
+      const requestStartTime = Date.now();
       const req = https.request(options, (res) => {
         let data = '';
 
@@ -314,18 +355,30 @@ Respond with valid JSON only.`;
         });
 
         res.on('end', () => {
+          const logger = getLogger();
+          const requestDuration = Date.now() - requestStartTime;
+          
           try {
             const response = JSON.parse(data);
             
             if (res.statusCode !== 200) {
               const errorMsg = response.error?.message || `API error: ${res.statusCode}`;
-              console.error('[OpenAI API] Error:', errorMsg);
+              logger.logAPIError('/v1/chat/completions', new Error(errorMsg), {
+                provider: 'openai',
+                statusCode: res.statusCode,
+                operation: trackingOptions.operation,
+                duration: requestDuration
+              });
               reject(new Error(errorMsg));
               return;
             }
 
             const content = response.choices[0]?.message?.content;
             if (!content) {
+              logger.logAPIError('/v1/chat/completions', new Error('No content in API response'), {
+                provider: 'openai',
+                operation: trackingOptions.operation
+              });
               reject(new Error('No content in API response'));
               return;
             }
@@ -347,7 +400,15 @@ Respond with valid JSON only.`;
                   inputTokens: usage.prompt_tokens || 0,
                   outputTokens: usage.completion_tokens || 0
                 });
-                console.log(`[OpenAI API] Tracked usage: ${usage.prompt_tokens} input, ${usage.completion_tokens} output tokens`);
+                
+                logger.logNetworkRequest('POST', '/v1/chat/completions', res.statusCode, requestDuration);
+                logger.info('OpenAI API usage tracked', {
+                  event: 'api:usage',
+                  provider: 'openai',
+                  inputTokens: usage.prompt_tokens,
+                  outputTokens: usage.completion_tokens,
+                  operation: trackingOptions.operation
+                });
                 
                 // Add usage info to metadata
                 metadata._usage = {
@@ -356,22 +417,39 @@ Respond with valid JSON only.`;
                   totalTokens: usage.total_tokens
                 };
               } catch (trackingError) {
-                console.error('[OpenAI API] Error tracking usage:', trackingError.message);
+                logger.warn('OpenAI API usage tracking failed', {
+                  error: trackingError.message,
+                  operation: trackingOptions.operation
+                });
               }
             }
             
-            console.log('[OpenAI API] Successfully generated metadata');
+            logger.info('OpenAI API request successful', {
+              event: 'api:success',
+              provider: 'openai',
+              operation: trackingOptions.operation,
+              duration: requestDuration
+            });
             resolve(metadata);
             
           } catch (error) {
-            console.error('[OpenAI API] Parse error:', error.message);
+            logger.logAPIError('/v1/chat/completions', error, {
+              provider: 'openai',
+              operation: trackingOptions.operation,
+              parseError: true
+            });
             reject(new Error('Failed to parse API response: ' + error.message));
           }
         });
       });
 
       req.on('error', (error) => {
-        console.error('[OpenAI API] Request error:', error.message);
+        const logger = getLogger();
+        logger.logAPIError('/v1/chat/completions', error, {
+          provider: 'openai',
+          operation: trackingOptions.operation,
+          networkError: true
+        });
         reject(error);
       });
 
@@ -389,13 +467,22 @@ Respond with valid JSON only.`;
    * @returns {Promise<Array>} Array of 5 audio prompt suggestions
    */
   async generateAudioSuggestions(marker, type, apiKey, options = {}) {
+    const logger = getLogger();
+    
     if (!apiKey) {
-      throw new Error('OpenAI API key is required');
+      const error = new Error('OpenAI API key is required');
+      logger.logAPIError('/v1/chat/completions', error, { operation: 'generateAudioSuggestions', type });
+      throw error;
     }
 
     const prompt = this.buildAudioSuggestionPrompt(marker, type, options);
     
-    console.log(`[OpenAI API] Generating ${type} suggestions for marker:`, marker.name);
+    logger.info('OpenAI audio suggestions request', {
+      event: 'api:request',
+      provider: 'openai',
+      operation: `audioSuggestions:${type}`,
+      markerName: marker.name
+    });
 
     const result = await this.callAPI(prompt, apiKey, {
       operation: `audioSuggestions:${type}`,

@@ -933,3 +933,8 @@ function hookLayoutSwitching(app, lineScriptPanel, adaptiveModeManager, spotting
 export default initLineScriptBridge;
 
 
+
+
+
+
+

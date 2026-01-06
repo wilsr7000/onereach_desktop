@@ -618,7 +618,9 @@ export class SpaceAssetPicker {
       } else if (this.mediaType === 'video') {
         this.items = await window.spaces?.getVideos(this.selectedSpaceId) || [];
       } else {
-        this.items = await window.spaces?.getItems(this.selectedSpaceId) || [];
+        const result = await window.spaces?.getItems(this.selectedSpaceId);
+        // Handle both { success, items } format and raw array format
+        this.items = (result && result.items) ? result.items : (Array.isArray(result) ? result : []);
         // Filter to only media files
         this.items = this.items.filter(item => 
           item.fileType === 'audio' || 
@@ -881,5 +883,11 @@ export class SpaceAssetPicker {
 
 // Export for module usage
 export default SpaceAssetPicker;
+
+
+
+
+
+
 
 

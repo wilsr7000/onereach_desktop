@@ -2,7 +2,7 @@
 let currentFilter = 'all';
 let currentSpace = null;
 let history = [];
-let spaces = [];
+let spacesData = [];  // Renamed from 'spaces' to avoid conflict with window.spaces API
 let contextMenuItem = null;
 let spacesEnabled = true;
 let activeSpaceId = null;
@@ -67,7 +67,7 @@ async function init() {
         console.log('Active space ID:', activeSpaceId);
         
         await loadSpaces();
-        console.log('Loaded spaces:', spaces.length);
+        console.log('Loaded spaces:', spacesData.length);
         
         await loadHistory();
         console.log('Loaded history items:', history.length);
@@ -164,7 +164,7 @@ function updateSpacesVisibility() {
 
 // Load spaces
 async function loadSpaces() {
-    spaces = await window.clipboard.getSpaces();
+    spacesData = await window.clipboard.getSpaces();
     renderSpaces();
 }
 
@@ -209,7 +209,16 @@ async function loadHistory() {
                 history = [];
             }
         } else {
-            history = await window.clipboard.getSpaceItems(currentSpace);
+            const result = await window.clipboard.getSpaceItems(currentSpace);
+            // Handle both { success, items } format and raw array format
+            if (result && result.items && Array.isArray(result.items)) {
+                history = result.items;
+            } else if (Array.isArray(result)) {
+                history = result;
+            } else {
+                console.error('Unexpected space items format:', result);
+                history = [];
+            }
         }
         
         console.log('Final history length:', history.length);
@@ -507,7 +516,7 @@ async function pasteIntoSpace(spaceId) {
             return;
         }
         
-        const spaceName = spaces.find(s => s.id === spaceId)?.name || 'Space';
+        const spaceName = spacesData.find(s => s.id === spaceId)?.name || 'Space';
         let result;
         
         // IMPROVED Priority order: Image > Text > HTML (prefer text over HTML for simple content)
@@ -622,7 +631,7 @@ async function pasteFileIntoSpace(spaceId) {
             return;
         }
         
-        const spaceName = spaces.find(s => s.id === spaceId)?.name || 'Space';
+        const spaceName = spacesData.find(s => s.id === spaceId)?.name || 'Space';
         const files = fileData.files;
         
         console.log('[PasteFile] Found', files.length, 'file(s):', files);
@@ -698,7 +707,7 @@ function renderSpaces() {
     `;
     
     // Sort spaces by lastUsed (most recent first), then by createdAt
-    const sortedSpaces = [...spaces].sort((a, b) => {
+    const sortedSpaces = [...spacesData].sort((a, b) => {
         const aLastUsed = a.lastUsed || a.createdAt || 0;
         const bLastUsed = b.lastUsed || b.createdAt || 0;
         return bLastUsed - aLastUsed; // Most recent first
@@ -1129,6 +1138,9 @@ function renderHistory(items = history) {
                         <button class="action-btn ${item.pinned ? 'pinned' : ''}" data-action="pin" title="Pin">
                             ${item.pinned ? '◈' : '◇'}
                         </button>
+                        <button class="action-btn float-btn" data-action="float" title="Float for drag to external apps">
+                            ⬛
+                        </button>
                         <button class="action-btn" data-action="menu" title="More">⋮</button>
                     </div>
                 </div>
@@ -1176,7 +1188,7 @@ function renderHistory(items = history) {
 
 // Update item counts for all spaces
 async function updateItemCounts() {
-    console.log('Updating item counts for spaces:', spaces);
+    console.log('Updating item counts for spaces:', spacesData);
     
     // Update "All Items" count - get the actual total count
     const allItemsEl = document.querySelector('[data-space-id="null"] .space-count');
@@ -1195,7 +1207,7 @@ async function updateItemCounts() {
     }
     
     // Update each space count
-    spaces.forEach(space => {
+    spacesData.forEach(space => {
         const spaceEl = document.querySelector(`[data-space-id="${space.id}"] .space-count`);
         if (spaceEl) {
             console.log(`Updating count for space ${space.name}: ${space.itemCount}`);
@@ -1550,7 +1562,7 @@ function filterItems() {
             if (currentFilter === 'spreadsheet') return item.source === 'spreadsheet' || (item.type === 'file' && (item.fileExt === '.xls' || item.fileExt === '.xlsx' || item.fileExt === '.ods'));
             if (currentFilter === 'pdf') return item.type === 'file' && item.fileType === 'pdf';
             if (currentFilter === 'url') return item.source === 'url';
-            if (currentFilter === 'image') return item.type === 'image';
+            if (currentFilter === 'image') return item.type === 'image' || (item.type === 'file' && item.fileType === 'image-file');
             if (currentFilter === 'video') return item.type === 'file' && item.fileType === 'video';
             if (currentFilter === 'audio') return item.type === 'file' && item.fileType === 'audio';
             if (currentFilter === 'file') return item.type === 'file';
@@ -1594,7 +1606,7 @@ async function searchItems(query) {
             if (currentFilter === 'spreadsheet') return item.source === 'spreadsheet' || (item.type === 'file' && (item.fileExt === '.xls' || item.fileExt === '.xlsx' || item.fileExt === '.ods'));
             if (currentFilter === 'pdf') return item.type === 'file' && item.fileType === 'pdf';
             if (currentFilter === 'url') return item.source === 'url';
-            if (currentFilter === 'image') return item.type === 'image';
+            if (currentFilter === 'image') return item.type === 'image' || (item.type === 'file' && item.fileType === 'image-file');
             if (currentFilter === 'video') return item.type === 'file' && item.fileType === 'video';
             if (currentFilter === 'audio') return item.type === 'file' && item.fileType === 'audio';
             if (currentFilter === 'file') return item.type === 'file';
@@ -1894,7 +1906,7 @@ async function showMoveToSpaceModal(itemId) {
             <div class="modal" style="width: 400px;">
                 <h2 class="modal-title">Move to Space</h2>
                 <div class="space-select-list" style="max-height: 300px; overflow-y: auto; margin: 20px 0;">
-                    ${spaces.map(space => `
+                    ${spacesData.map(space => `
                         <div class="space-select-item" data-space-id="${space.id}" style="
                             display: flex;
                             align-items: center;
@@ -1987,7 +1999,7 @@ async function showPasteToSpaceModal() {
                         <span class="space-icon" style="font-size: 18px; margin-right: 12px;">📥</span>
                         <span class="space-name" style="flex: 1;">Unclassified</span>
                     </div>
-                    ${spaces.map(space => `
+                    ${spacesData.map(space => `
                         <div class="space-select-item" data-space-id="${space.id}" style="
                             display: flex;
                             align-items: center;
@@ -2222,7 +2234,7 @@ function getMetadataSchemaForType(item) {
     if (item.fileCategory === 'code' || item.source === 'code') return schemas.code;
     if (type === 'pdf' || item.fileExt === '.pdf') return schemas.pdf;
     if (item.fileCategory === 'data' || ['.json', '.csv', '.yaml'].includes(item.fileExt)) return schemas.data;
-    if (item.type === 'image' || item.isScreenshot) return schemas.image;
+    if (item.type === 'image' || item.isScreenshot || (item.type === 'file' && item.fileType === 'image-file')) return schemas.image;
     if (item.type === 'html' || item.html) return schemas.html;
     // URL detection - single URL with no spaces
     if (item.content && item.content.trim().match(/^https?:\/\/[^\s]+$/)) return schemas.url;
@@ -3008,7 +3020,7 @@ function updateActiveSpaceIndicator() {
     if (activeSpaceId === null) {
         indicator.classList.remove('visible');
     } else {
-        const space = spaces.find(s => s.id === activeSpaceId);
+        const space = spacesData.find(s => s.id === activeSpaceId);
         if (space) {
             icon.textContent = space.icon;
             label.textContent = `Capturing to: ${space.name}`;
@@ -3111,7 +3123,7 @@ function setupEventListeners() {
             const spaceId = action.dataset.spaceId;
             
             if (action.dataset.action === 'edit') {
-                const space = spaces.find(s => s.id === spaceId);
+                const space = spacesData.find(s => s.id === spaceId);
                 if (space) showSpaceModal(space);
             } else if (action.dataset.action === 'delete') {
                 if (confirm('Are you sure you want to delete this space? Items will be moved to "All Items".')) {
@@ -3127,7 +3139,7 @@ function setupEventListeners() {
                 await window.clipboard.openSpaceNotebook(spaceId);
             } else if (action.dataset.action === 'pdf') {
                 // Export space
-                const space = spaces.find(s => s.id === spaceId);
+                const space = spacesData.find(s => s.id === spaceId);
                 if (space) handlePDFExport(space);
             }
             return;
@@ -3256,6 +3268,18 @@ function setupEventListeners() {
                 }
             } else if (actionType === 'menu') {
                 showContextMenu(e, itemId);
+            } else if (actionType === 'float') {
+                // Float the item for dragging to external apps
+                try {
+                    const result = await window.electron.ipcRenderer.invoke('clipboard:float-item', itemId);
+                    if (result && result.success) {
+                        console.log('[Float] Created float card for:', itemId);
+                    } else {
+                        console.error('[Float] Failed to create float card:', result?.error);
+                    }
+                } catch (err) {
+                    console.error('[Float] Error creating float card:', err);
+                }
             } else if (actionType === 'delete') {
                 // Direct delete action (used for error items)
                 if (confirm('Delete this item?')) {
@@ -3513,7 +3537,7 @@ function setupEventListeners() {
     // Listen for spaces updates - set up the listener directly
     window.electron.on('clipboard:spaces-updated', async (event, updatedSpaces) => {
         console.log('Spaces updated:', updatedSpaces);
-        spaces = updatedSpaces;
+        spacesData = updatedSpaces;
         renderSpaces();
         await updateItemCounts();
     });
@@ -3531,7 +3555,7 @@ function setupEventListeners() {
             
             // If a space is selected, paste directly into it
             if (currentSpace) {
-                const spaceName = spaces.find(s => s.id === currentSpace)?.name || 'Current Space';
+                const spaceName = spacesData.find(s => s.id === currentSpace)?.name || 'Current Space';
                 console.log('[Keyboard Paste] Pasting into current space:', currentSpace, spaceName);
                 
                 try {
@@ -3623,7 +3647,7 @@ function setupEventListeners() {
                     Choose where to save: ${fileName}
                 </p>
                 <div class="space-selector" style="max-height: 300px; overflow-y: auto;">
-                    ${spaces.map(space => `
+                    ${spacesData.map(space => `
                         <div class="space-option" data-space-id="${space.id}" style="
                             padding: 12px;
                             margin: 8px 0;
@@ -3764,7 +3788,15 @@ async function showPreviewModal(itemId) {
     
     if (historyItem.type === 'image' || (historyItem.type === 'file' && historyItem.fileType === 'image-file')) {
         // Show image preview
-        const imgSrc = historyItem.content || historyItem.thumbnail || fullContent;
+        // For image files, content may be a file path - prefer thumbnail (data URL) for display
+        let imgSrc;
+        if (historyItem.type === 'file' && historyItem.fileType === 'image-file') {
+            // For image files, prefer thumbnail which should be a data URL
+            imgSrc = historyItem.thumbnail || historyItem.content;
+        } else {
+            // For regular images (pasted), content is the data URL
+            imgSrc = historyItem.content || historyItem.thumbnail || fullContent;
+        }
         document.getElementById('previewImage').src = imgSrc;
         currentImageData = imgSrc; // Store for AI editing
         document.getElementById('previewImageMode').style.display = 'block';
@@ -4914,11 +4946,27 @@ async function applyImageEdit() {
         // Show loading state
         applyBtn.innerHTML = '⏳ Processing...';
         applyBtn.disabled = true;
-        showImageEditStatus('Sending image to AI for editing...', 'info');
+        showImageEditStatus('Loading full-resolution image...', 'info');
         
-        // Get current image data
+        // Get current image data - prefer full resolution for image files
         const imageEl = document.getElementById('previewImage');
-        const imageData = currentImageData || imageEl.src;
+        let imageData = currentImageData || imageEl.src;
+        
+        // For image files, try to load the full-resolution original
+        if (currentPreviewItem.type === 'file' && currentPreviewItem.fileType === 'image-file' && currentPreviewItem.id) {
+            try {
+                // Request full image from main process
+                const fullImage = await window.clipboard.getItemContent(currentPreviewItem.id);
+                if (fullImage && fullImage.startsWith('data:image')) {
+                    imageData = fullImage;
+                    console.log('[AI Edit] Using full-resolution image');
+                }
+            } catch (e) {
+                console.log('[AI Edit] Could not load full image, using thumbnail:', e);
+            }
+        }
+        
+        showImageEditStatus('Sending image to AI for editing...', 'info');
         
         // Save current state to history before edit
         imageEditHistory.push(imageData);
@@ -6018,7 +6066,7 @@ function setupHistoryItemDrag() {
     if (!historyList) return;
     
     // Use event delegation for dynamically created history items
-    historyList.addEventListener('dragstart', (e) => {
+    historyList.addEventListener('dragstart', async (e) => {
         const historyItem = e.target.closest('.history-item');
         if (!historyItem) return;
         
@@ -6027,7 +6075,7 @@ function setupHistoryItemDrag() {
         
         console.log('[Drag] Started dragging item:', itemId);
         
-        // Set drag data
+        // Set drag data for internal app use
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', itemId);
         
@@ -6036,6 +6084,18 @@ function setupHistoryItemDrag() {
         
         // Store the item being dragged
         historyItem.classList.add('dragging');
+        
+        // Trigger native drag for external apps/web pages
+        // This allows the item to be dropped onto web upload fields, Finder, etc.
+        try {
+            const result = await window.electron.ipcRenderer.invoke('clipboard:start-native-drag', itemId);
+            if (result && result.success) {
+                console.log('[Drag] Native drag initiated for:', result.filePath);
+            }
+        } catch (err) {
+            // Native drag may not be available for all item types
+            console.log('[Drag] Native drag not available:', err.message);
+        }
     });
     
     historyList.addEventListener('dragend', (e) => {

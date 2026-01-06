@@ -20,9 +20,10 @@ class MetadataGenerator {
     this.openaiAPI = getOpenAIAPI();
     
     // Model configuration
+    // Note: Vision/voice tasks can use specialized models, but GSX Create only uses Claude 4.5 Opus/Sonnet
     this.models = {
-      vision: 'claude-sonnet-4-20250514',  // Claude for vision tasks
-      text: 'gpt-5.2'                       // GPT-5.2 for large context text
+      vision: 'claude-sonnet-4-5-20250929',  // Claude Sonnet 4.5 for vision tasks
+      text: 'gpt-5.2'                         // GPT-5.2 for large context text (allowed for non-GSX tasks)
     };
   }
   
@@ -304,7 +305,7 @@ Respond with JSON only:
     const prompt = this.buildAudioPrompt(item, spaceContext);
     const messageContent = [{ type: 'text', text: prompt }];
     const metadata = await this.callClaude(messageContent, apiKey);
-    metadata._model_used = 'claude-sonnet-4-20250514';
+    metadata._model_used = 'claude-sonnet-4-5-20250929';
     return metadata;
   }
 
@@ -405,7 +406,7 @@ Respond with JSON only:
     const prompt = this.buildTextPrompt(item, spaceContext);
     const messageContent = [{ type: 'text', text: prompt }];
     const metadata = await this.callClaude(messageContent, apiKey);
-    metadata._model_used = 'claude-sonnet-4-20250514';
+    metadata._model_used = 'claude-sonnet-4-5-20250929';
     return metadata;
   }
 
@@ -539,7 +540,7 @@ Respond with JSON only:
     const prompt = this.buildHtmlPrompt(item, spaceContext);
     const messageContent = [{ type: 'text', text: prompt }];
     const metadata = await this.callClaude(messageContent, apiKey);
-    metadata._model_used = 'claude-sonnet-4-20250514';
+    metadata._model_used = 'claude-sonnet-4-5-20250929';
     return metadata;
   }
 
@@ -715,7 +716,7 @@ Respond with JSON only:
     const prompt = this.buildDataPrompt(item, spaceContext);
     const messageContent = [{ type: 'text', text: prompt }];
     const metadata = await this.callClaude(messageContent, apiKey);
-    metadata._model_used = 'claude-sonnet-4-20250514';
+    metadata._model_used = 'claude-sonnet-4-5-20250929';
     return metadata;
   }
 
@@ -808,7 +809,7 @@ Respond with JSON only:
     const prompt = this.buildUrlPrompt(item, spaceContext);
     const messageContent = [{ type: 'text', text: prompt }];
     const metadata = await this.callClaude(messageContent, apiKey);
-    metadata._model_used = 'claude-sonnet-4-20250514';
+    metadata._model_used = 'claude-sonnet-4-5-20250929';
     return metadata;
   }
 
@@ -910,7 +911,7 @@ Respond with JSON only:
     const prompt = this.buildFilePrompt(item, spaceContext);
     const messageContent = [{ type: 'text', text: prompt }];
     const metadata = await this.callClaude(messageContent, apiKey);
-    metadata._model_used = 'claude-sonnet-4-20250514';
+    metadata._model_used = 'claude-sonnet-4-5-20250929';
     return metadata;
   }
 
@@ -1065,6 +1066,10 @@ Respond with JSON only:
    * Helper: Get image data for item
    */
   async getImageData(item) {
+    // #region agent log
+    try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'metadata-generator.js:getImageData',message:'getImageData called',data:{itemId:item.id,hasThumbnail:!!item.thumbnail,thumbnailLength:item.thumbnail?.length,thumbnailPrefix:item.thumbnail?.substring(0,50),hasContent:!!item.content,contentPrefix:item.content?.substring(0,50),hasFilePath:!!item.filePath,filePath:item.filePath,fileType:item.fileType},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-META'})+'\n'); } catch(e){}
+    // #endregion
+    
     if (item.thumbnail && !item.thumbnail.includes('svg+xml')) {
       return item.thumbnail;
     }
@@ -1076,17 +1081,103 @@ Respond with JSON only:
     if (item.filePath && fs.existsSync(item.filePath)) {
       try {
         const buffer = fs.readFileSync(item.filePath);
-        const ext = path.extname(item.filePath).toLowerCase().replace('.', '') || 'png';
-        return `data:image/${ext};base64,${buffer.toString('base64')}`;
+        // Detect actual image type from magic bytes, not filename
+        const mimeType = this.detectImageMimeType(buffer);
+        return `data:${mimeType};base64,${buffer.toString('base64')}`;
       } catch (e) {
         console.error('[MetadataGen] Error reading image file:', e);
         return null;
       }
     }
     
+    // Try loading from stored file path in items directory
+    if (item.fileName && item.id) {
+      const storedPath = require('path').join(
+        this.clipboardManager.storage.storageRoot,
+        'items',
+        item.id,
+        item.fileName
+      );
+      // #region agent log
+      try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'metadata-generator.js:getImageData:storedPath',message:'Checking stored file path',data:{storedPath,exists:require('fs').existsSync(storedPath)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-META'})+'\n'); } catch(e){}
+      // #endregion
+      
+      if (require('fs').existsSync(storedPath)) {
+        try {
+          const buffer = require('fs').readFileSync(storedPath);
+          // Detect actual image type from magic bytes, not filename
+          const mimeType = this.detectImageMimeType(buffer);
+          // #region agent log
+          try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'metadata-generator.js:getImageData:detected',message:'Detected image type',data:{storedPath,mimeType,bufferLength:buffer.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-META'})+'\n'); } catch(e){}
+          // #endregion
+          return `data:${mimeType};base64,${buffer.toString('base64')}`;
+        } catch (e) {
+          console.error('[MetadataGen] Error reading stored image file:', e);
+        }
+      }
+    }
+    
+    // #region agent log
+    try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'metadata-generator.js:getImageData:failed',message:'Could not get image data',data:{itemId:item.id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-META'})+'\n'); } catch(e){}
+    // #endregion
+    
     return null;
   }
 
+  /**
+   * Helper: Detect image MIME type from buffer using magic bytes
+   */
+  detectImageMimeType(buffer) {
+    if (!buffer || buffer.length < 4) {
+      return 'image/png'; // Default fallback
+    }
+    
+    // Check magic bytes
+    // JPEG: FF D8 FF
+    if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
+      return 'image/jpeg';
+    }
+    // PNG: 89 50 4E 47
+    if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) {
+      return 'image/png';
+    }
+    // GIF: 47 49 46 38
+    if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38) {
+      return 'image/gif';
+    }
+    // WebP: 52 49 46 46 ... 57 45 42 50
+    if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 &&
+        buffer.length > 11 && buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50) {
+      return 'image/webp';
+    }
+    // BMP: 42 4D
+    if (buffer[0] === 0x42 && buffer[1] === 0x4D) {
+      return 'image/bmp';
+    }
+    // ICO: 00 00 01 00
+    if (buffer[0] === 0x00 && buffer[1] === 0x00 && buffer[2] === 0x01 && buffer[3] === 0x00) {
+      return 'image/x-icon';
+    }
+    // TIFF: 49 49 2A 00 (little endian) or 4D 4D 00 2A (big endian)
+    if ((buffer[0] === 0x49 && buffer[1] === 0x49 && buffer[2] === 0x2A && buffer[3] === 0x00) ||
+        (buffer[0] === 0x4D && buffer[1] === 0x4D && buffer[2] === 0x00 && buffer[3] === 0x2A)) {
+      return 'image/tiff';
+    }
+    // AVIF: starts with ftyp box containing 'avif'
+    if (buffer.length > 12 && buffer[4] === 0x66 && buffer[5] === 0x74 && buffer[6] === 0x79 && buffer[7] === 0x70) {
+      const brand = buffer.slice(8, 12).toString('ascii');
+      if (brand === 'avif' || brand === 'avis') {
+        return 'image/avif';
+      }
+      if (brand === 'heic' || brand === 'heix' || brand === 'mif1') {
+        return 'image/heic';
+      }
+    }
+    
+    // Default to PNG
+    return 'image/png';
+  }
+  
   /**
    * Helper: Extract media type from data URL
    */
@@ -1133,7 +1224,7 @@ Respond with JSON only:
     const https = require('https');
     
     const postData = JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-5-20250929',
       max_tokens: 1024,
       messages: [
         {

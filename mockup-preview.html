@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GSX Create - Live Mockup Preview</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        :root {
+            --bg-primary: #0a0a0f;
+            --bg-secondary: #1a1a2e;
+            --bg-tertiary: #2a2a3e;
+            --text-primary: #ffffff;
+            --text-secondary: #a0a0b0;
+            --accent: #667eea;
+            --success: #4ade80;
+            --error: #ef4444;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+        
+        /* Single device view (default) */
+        .preview-container {
+            width: 100%;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .preview-frame {
+            flex: 1;
+            border: none;
+            background: white;
+        }
+        
+        /* Responsive grid view */
+        .grid-container {
+            display: none;
+            padding: 20px;
+            gap: 20px;
+            height: calc(100vh - 60px);
+        }
+        
+        .grid-container.active {
+            display: grid;
+            grid-template-columns: 200px 400px 1fr;
+        }
+        
+        .device-wrapper {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .device-header {
+            padding: 10px 16px;
+            background: var(--bg-tertiary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        
+        .device-header .icon { font-size: 16px; }
+        
+        .device-frame {
+            flex: 1;
+            border: none;
+            background: white;
+        }
+        
+        /* Phone frame */
+        .phone-wrapper {
+            max-width: 200px;
+        }
+        .phone-wrapper .device-frame {
+            width: 100%;
+        }
+        
+        /* Tablet frame */
+        .tablet-wrapper {
+            max-width: 400px;
+        }
+        
+        /* Desktop frame */
+        .desktop-wrapper {
+            min-width: 600px;
+        }
+        
+        /* Control bar */
+        .control-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(26, 26, 46, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 12px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 1000;
+        }
+        
+        .status-section {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--success);
+            animation: pulse 2s infinite;
+        }
+        
+        .status-dot.error { background: var(--error); }
+        .status-dot.syncing { background: var(--accent); animation: spin 1s linear infinite; }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        
+        .status-text {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+        
+        .version-info {
+            font-size: 12px;
+            color: var(--text-secondary);
+            opacity: 0.7;
+        }
+        
+        .controls-section {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .control-btn {
+            background: var(--bg-tertiary);
+            border: 1px solid rgba(255,255,255,0.1);
+            color: var(--text-primary);
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+        
+        .control-btn:hover {
+            background: var(--accent);
+            border-color: var(--accent);
+        }
+        
+        .control-btn.active {
+            background: var(--accent);
+            border-color: var(--accent);
+        }
+        
+        .wake-indicator {
+            font-size: 11px;
+            color: var(--text-secondary);
+            opacity: 0.5;
+        }
+        
+        /* Toast notification */
+        .toast {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 24px 48px;
+            border-radius: 16px;
+            font-size: 20px;
+            z-index: 10000;
+            display: none;
+            animation: toastPulse 0.5s infinite alternate;
+        }
+        
+        .toast.visible { display: block; }
+        
+        @keyframes toastPulse {
+            from { opacity: 0.8; transform: translate(-50%, -50%) scale(1); }
+            to { opacity: 1; transform: translate(-50%, -50%) scale(1.02); }
+        }
+        
+        /* Highlight animation for changed elements */
+        [data-gsx-changed="true"] {
+            animation: highlightChange 2s ease-out;
+        }
+        
+        @keyframes highlightChange {
+            0% { box-shadow: 0 0 30px 15px rgba(74, 222, 128, 0.8); }
+            100% { box-shadow: none; }
+        }
+        
+        /* Loading state */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--bg-primary);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+        
+        .loading-overlay.hidden { display: none; }
+        
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 3px solid var(--bg-tertiary);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        
+        .loading-text {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Loading overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">Connecting to preview...</div>
+    </div>
+    
+    <!-- Toast notification -->
+    <div class="toast" id="toast">🔄 Updating...</div>
+    
+    <!-- Single device preview (default) -->
+    <div class="preview-container" id="singleView">
+        <iframe class="preview-frame" id="mainFrame" src="about:blank"></iframe>
+    </div>
+    
+    <!-- Responsive grid view -->
+    <div class="grid-container" id="gridView">
+        <div class="device-wrapper phone-wrapper">
+            <div class="device-header">
+                <span class="icon">📱</span>
+                <span>Phone (375px)</span>
+            </div>
+            <iframe class="device-frame" id="phoneFrame" src="about:blank"></iframe>
+        </div>
+        <div class="device-wrapper tablet-wrapper">
+            <div class="device-header">
+                <span class="icon">📱</span>
+                <span>Tablet (768px)</span>
+            </div>
+            <iframe class="device-frame" id="tabletFrame" src="about:blank"></iframe>
+        </div>
+        <div class="device-wrapper desktop-wrapper">
+            <div class="device-header">
+                <span class="icon">💻</span>
+                <span>Desktop (1280px)</span>
+            </div>
+            <iframe class="device-frame" id="desktopFrame" src="about:blank"></iframe>
+        </div>
+    </div>
+    
+    <!-- Control bar -->
+    <div class="control-bar">
+        <div class="status-section">
+            <div class="status-dot" id="statusDot"></div>
+            <span class="status-text" id="statusText">Connecting...</span>
+            <span class="version-info" id="versionInfo"></span>
+        </div>
+        <div class="controls-section">
+            <button class="control-btn" id="gridToggle" onclick="toggleGridView()">
+                <span>📐</span> Grid View
+            </button>
+            <button class="control-btn" id="soundToggle" onclick="toggleSound()">
+                <span>🔔</span> Sound
+            </button>
+            <span class="wake-indicator">🔆 Screen lock disabled</span>
+        </div>
+    </div>
+    
+    <script>
+        // GSX Create Live Preview System
+        const GSXPreview = {
+            mockupUrl: null,
+            versionUrl: null,
+            currentVersion: null,
+            checkInterval: 5000,
+            isGridView: false,
+            soundEnabled: true,
+            notifySound: null,
+            wakeLock: null,
+            
+            init() {
+                // Parse URL parameters
+                const params = new URLSearchParams(location.search);
+                this.mockupUrl = params.get('url') || './mockup.html';
+                this.versionUrl = params.get('version') || './version.json';
+                this.isGridView = params.get('grid') === 'true';
+                this.soundEnabled = params.get('sound') !== 'off';
+                
+                // Check if we're in dev mode
+                const isDevMode = params.get('dev') === 'true';
+                if (!isDevMode) {
+                    document.getElementById('loadingOverlay').innerHTML = `
+                        <div style="text-align: center; padding: 40px;">
+                            <h2 style="margin-bottom: 16px;">🎨 GSX Create Preview</h2>
+                            <p style="color: var(--text-secondary); margin-bottom: 24px;">
+                                Add <code style="background: var(--bg-tertiary); padding: 4px 8px; border-radius: 4px;">?dev=true</code> to enable live preview mode.
+                            </p>
+                            <a href="?dev=true" style="color: var(--accent);">Enable Live Preview →</a>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                // Initialize sound
+                this.initSound();
+                
+                // Request wake lock
+                this.requestWakeLock();
+                
+                // Set up grid view if requested
+                if (this.isGridView) {
+                    this.toggleGridView();
+                }
+                
+                // Load initial mockup
+                this.loadMockup();
+                
+                // Start polling for updates
+                this.checkVersion();
+                setInterval(() => this.checkVersion(), this.checkInterval);
+                
+                // Hide loading overlay
+                setTimeout(() => {
+                    document.getElementById('loadingOverlay').classList.add('hidden');
+                }, 1000);
+                
+                console.log('[GSX Preview] 🟢 Live preview initialized');
+            },
+            
+            initSound() {
+                // Create a simple notification sound
+                try {
+                    this.notifySound = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdH+Onp+YjH95dnR4gIuXn5+XjYB4c3N4gYyZoaGZj4N6c3J0foqWn6KhlIuAfHd1eoaRnKCem5OKgnx5eoKLlJqcm5WPiYN/fH+EipCVl5aRjYmFgoB/goaKjY+Qj4yKh4SDgoGBgoOFiIqLioiHhYOBgYKDhIWGhoaFhIKB');
+                    this.notifySound.volume = 0.3;
+                } catch (e) {
+                    console.log('[GSX Preview] Could not initialize sound');
+                }
+            },
+            
+            async requestWakeLock() {
+                if ('wakeLock' in navigator) {
+                    try {
+                        this.wakeLock = await navigator.wakeLock.request('screen');
+                        console.log('[GSX Preview] 🔆 Wake lock acquired');
+                    } catch (e) {
+                        console.log('[GSX Preview] Wake lock not available');
+                    }
+                }
+            },
+            
+            loadMockup() {
+                const mainFrame = document.getElementById('mainFrame');
+                mainFrame.src = this.mockupUrl + '?t=' + Date.now();
+                
+                if (this.isGridView) {
+                    document.getElementById('phoneFrame').src = this.mockupUrl + '?t=' + Date.now();
+                    document.getElementById('tabletFrame').src = this.mockupUrl + '?t=' + Date.now();
+                    document.getElementById('desktopFrame').src = this.mockupUrl + '?t=' + Date.now();
+                }
+            },
+            
+            async checkVersion() {
+                try {
+                    const res = await fetch(this.versionUrl + '?t=' + Date.now(), { cache: 'no-store' });
+                    if (!res.ok) {
+                        this.updateStatus('error', 'Offline - Retrying...');
+                        return;
+                    }
+                    
+                    const data = await res.json();
+                    
+                    // Check if version changed
+                    if (this.currentVersion && data.version !== this.currentVersion) {
+                        console.log('[GSX Preview] 🔄 New version:', data.version);
+                        this.showToast('Updating...');
+                        this.playSound();
+                        
+                        // Reload after brief delay
+                        setTimeout(() => {
+                            this.loadMockup();
+                            this.hideToast();
+                        }, 800);
+                    }
+                    
+                    this.currentVersion = data.version;
+                    this.updateStatus('connected', 'Live • Checking in 5s', data);
+                    
+                } catch (e) {
+                    this.updateStatus('error', 'Connection error - Retrying...');
+                }
+            },
+            
+            updateStatus(status, text, data) {
+                const dot = document.getElementById('statusDot');
+                const statusText = document.getElementById('statusText');
+                const versionInfo = document.getElementById('versionInfo');
+                
+                dot.className = 'status-dot';
+                if (status === 'error') dot.classList.add('error');
+                if (status === 'syncing') dot.classList.add('syncing');
+                
+                statusText.textContent = text;
+                
+                if (data) {
+                    const time = new Date(data.updated).toLocaleTimeString();
+                    versionInfo.textContent = `v${data.mockupVersion || '?'} • ${time}`;
+                }
+            },
+            
+            showToast(message) {
+                const toast = document.getElementById('toast');
+                toast.textContent = '🔄 ' + message;
+                toast.classList.add('visible');
+            },
+            
+            hideToast() {
+                document.getElementById('toast').classList.remove('visible');
+            },
+            
+            playSound() {
+                if (this.soundEnabled && this.notifySound) {
+                    this.notifySound.play().catch(() => {});
+                }
+            },
+            
+            toggleGridView() {
+                this.isGridView = !this.isGridView;
+                const singleView = document.getElementById('singleView');
+                const gridView = document.getElementById('gridView');
+                const btn = document.getElementById('gridToggle');
+                
+                if (this.isGridView) {
+                    singleView.style.display = 'none';
+                    gridView.classList.add('active');
+                    btn.classList.add('active');
+                    // Load all frames
+                    document.getElementById('phoneFrame').src = this.mockupUrl + '?t=' + Date.now();
+                    document.getElementById('tabletFrame').src = this.mockupUrl + '?t=' + Date.now();
+                    document.getElementById('desktopFrame').src = this.mockupUrl + '?t=' + Date.now();
+                } else {
+                    singleView.style.display = 'flex';
+                    gridView.classList.remove('active');
+                    btn.classList.remove('active');
+                }
+            },
+            
+            toggleSound() {
+                this.soundEnabled = !this.soundEnabled;
+                const btn = document.getElementById('soundToggle');
+                btn.classList.toggle('active', this.soundEnabled);
+                btn.innerHTML = this.soundEnabled ? '<span>🔔</span> Sound' : '<span>🔕</span> Muted';
+            }
+        };
+        
+        // Global functions for button handlers
+        function toggleGridView() { GSXPreview.toggleGridView(); }
+        function toggleSound() { GSXPreview.toggleSound(); }
+        
+        // Initialize when DOM is ready
+        document.addEventListener('DOMContentLoaded', () => GSXPreview.init());
+    </script>
+</body>
+</html>
+
+
+
+
+
+

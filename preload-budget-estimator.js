@@ -42,3 +42,8 @@ contextBridge.exposeInMainWorld('budgetAPI', {
 console.log('[preload-budget-estimator] Budget API exposed to renderer');
 
 
+
+
+
+
+

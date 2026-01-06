@@ -507,7 +507,7 @@ export function setupVideoEditorIPC(videoEditor, mainWindow) {
       const settingsManager = getSettingsManager();
       const apiKey = settingsManager.get('llmApiKey');
       const provider = settingsManager.get('llmProvider') || 'anthropic';
-      const model = settingsManager.get('llmModel') || 'claude-sonnet-4-20250514';
+      const model = settingsManager.get('llmModel') || 'claude-sonnet-4-5-20250929';
       
       if (!apiKey) {
         return { success: false, error: 'No LLM API key configured. Please set your API key in Settings.' };
@@ -1837,7 +1837,7 @@ Return JSON array of quotes:
             'anthropic-version': '2023-06-01'
           },
           body: JSON.stringify({
-            model: 'claude-sonnet-4-20250514',
+            model: 'claude-sonnet-4-5-20250929',
             max_tokens: 2000,
             messages: [{ role: 'user', content: prompt }]
           })
@@ -1904,7 +1904,7 @@ Return JSON array:
           'anthropic-version': '2023-06-01'
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
+          model: 'claude-sonnet-4-5-20250929',
           max_tokens: 2000,
           messages: [{ role: 'user', content: prompt }]
         })
@@ -1976,7 +1976,7 @@ Return JSON:
           'anthropic-version': '2023-06-01'
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
+          model: 'claude-sonnet-4-5-20250929',
           max_tokens: 2000,
           messages: [{ role: 'user', content: prompt }]
         })
@@ -2062,7 +2062,7 @@ Return JSON:
           'anthropic-version': '2023-06-01'
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
+          model: 'claude-sonnet-4-5-20250929',
           max_tokens: 3000,
           messages: [{ role: 'user', content: prompt }]
         })

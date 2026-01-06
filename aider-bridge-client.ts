@@ -102,18 +102,23 @@ export class AiderBridgeClient extends EventEmitter {
       });
 
       // Wait for ready signal
+      let startupResolved = false;
+      
       const readyHandler = (notification: JSONRPCNotification) => {
         if (notification.method === 'ready') {
+          startupResolved = true;
           this.removeListener('notification', readyHandler);
           resolve();
         }
       };
       this.on('notification', readyHandler);
 
-      // Timeout after 10 seconds
+      // Timeout after 10 seconds - only reject if startup hasn't resolved
       setTimeout(() => {
-        this.removeListener('notification', readyHandler);
-        reject(new Error('Timeout waiting for Aider Bridge to start'));
+        if (!startupResolved) {
+          this.removeListener('notification', readyHandler);
+          reject(new Error('Timeout waiting for Aider Bridge to start'));
+        }
       }, 10000);
     });
   }
@@ -194,7 +199,7 @@ export class AiderBridgeClient extends EventEmitter {
   /**
    * Initialize Aider with a repository
    */
-  async initialize(repoPath: string, modelName: string = 'gpt-4'): Promise<AiderInitResult> {
+  async initialize(repoPath: string, modelName: string = 'claude-opus-4-5-20251101'): Promise<AiderInitResult> {
     return this.sendRequest('initialize', { repo_path: repoPath, model_name: modelName });
   }
 

@@ -427,6 +427,12 @@
           
         } catch (error) {
           console.error('[SaveSystem] Save failed:', error);
+          if (window.api && window.api.log) {
+            window.api.log.error('Video editor save failed', { 
+              error: error.message, 
+              operation: 'saveProject' 
+            });
+          }
           this._handleSaveError(error);
         }
       },
@@ -474,6 +480,12 @@
           
         } catch (error) {
           console.error('[SaveSystem] Emergency save failed:', error);
+          if (window.api && window.api.log) {
+            window.api.log.error('Video editor emergency save failed', { 
+              error: error.message, 
+              operation: 'emergencySave' 
+            });
+          }
         }
       },
 
@@ -1032,6 +1044,11 @@
         this.loadSpaces();
         this.loadExports();
         
+        // Log feature initialization
+        if (window.api && window.api.logFeatureUsed) {
+          window.api.logFeatureUsed('video-editor', { status: 'initialized' });
+        }
+        
         // Setup quality preset buttons
         document.querySelectorAll('.preset-btn[data-quality]').forEach(btn => {
           btn.addEventListener('click', () => {
@@ -1265,6 +1282,12 @@
           await this.lineScriptAI.startProcessing();
         } catch (error) {
           console.error('[VideoEditor] AI generation error:', error);
+          if (window.api && window.api.log) {
+            window.api.log.error('Video editor AI generation failed', { 
+              error: error.message, 
+              operation: 'aiGeneration' 
+            });
+          }
           this.showToast('AI generation failed: ' + error.message, 'error');
         }
       },
@@ -1533,6 +1556,12 @@
           }
         } catch (error) {
           console.error('[VideoEditor] Error opening recorder:', error);
+          if (window.api && window.api.log) {
+            window.api.log.error('Video editor open recorder failed', { 
+              error: error.message, 
+              operation: 'openRecorder' 
+            });
+          }
           this.showToast('Failed to open recorder: ' + error.message, 'error');
         }
       },
@@ -1797,6 +1826,12 @@
           
         } catch (error) {
           console.error('[Transcription] Error:', error);
+          if (window.api && window.api.log) {
+            window.api.log.error('Video editor transcription failed', { 
+              error: error.message, 
+              operation: 'transcription' 
+            });
+          }
           status.innerHTML = `❌ ${error.message}`;
           this.showToast('error', 'Transcription failed: ' + error.message);
         } finally {
@@ -1866,6 +1901,12 @@
           this.showToast('success', `Generated ${result.count} screen grabs!`);
         } catch (error) {
           console.error('[ScreenGrabs] Error:', error);
+          if (window.api && window.api.log) {
+            window.api.log.error('Video editor screen grabs failed', { 
+              error: error.message, 
+              operation: 'screenGrabs' 
+            });
+          }
           this.showToast('error', 'Failed to generate screen grabs: ' + error.message);
         } finally {
           btn.disabled = false;
@@ -2117,6 +2158,12 @@
         } catch (error) {
           this.hideProgress();
           console.error('[VideoEditor] ElevenLabs error:', error);
+          if (window.api && window.api.log) {
+            window.api.log.error('Video editor ElevenLabs generation failed', { 
+              error: error.message, 
+              operation: 'elevenLabsGenerate' 
+            });
+          }
           this.showToast('error', 'Failed to generate audio: ' + error.message);
         }
       },
@@ -2216,6 +2263,12 @@
         } catch (error) {
           this.hideProgress();
           console.error('[VideoEditor] Export error:', error);
+          if (window.api && window.api.log) {
+            window.api.log.error('Video editor export failed', { 
+              error: error.message, 
+              operation: 'export' 
+            });
+          }
           this.showToast('error', 'Export failed: ' + error.message);
         }
       },
@@ -2322,6 +2375,12 @@
         } catch (error) {
           this.hideProgress();
           console.error('[VideoEditor] ElevenLabs error:', error);
+          if (window.api && window.api.log) {
+            window.api.log.error('Video editor ElevenLabs overlay failed', { 
+              error: error.message, 
+              operation: 'elevenLabsOverlay' 
+            });
+          }
           this.showToast('error', 'Failed to generate audio: ' + error.message);
         }
       },
@@ -4240,6 +4299,12 @@
           return result;
         } catch (error) {
           console.error('[VideoEditor] saveMarkersToSpace error:', error);
+          if (window.api && window.api.log) {
+            window.api.log.error('Video editor save markers failed', { 
+              error: error.message, 
+              operation: 'saveMarkersToSpace' 
+            });
+          }
           return { success: false, error: error.message };
         }
       },
@@ -8094,6 +8159,14 @@
         // Show loading
         document.getElementById('fileName').textContent = 'Loading...';
         
+        // Log feature usage
+        if (window.api && window.api.logFeatureUsed) {
+          window.api.logFeatureUsed('video-editor', { 
+            action: 'load-video',
+            hasPath: !!filePath
+          });
+        }
+        
         try {
           // Get video info
           this.videoInfo = await window.videoEditor.getInfo(filePath);
@@ -9538,6 +9611,12 @@
           }
         } catch (error) {
           console.error('[VideoEditor] Error detaching video:', error);
+          if (window.api && window.api.log) {
+            window.api.log.error('Video editor detach video failed', { 
+              error: error.message, 
+              operation: 'detachVideo' 
+            });
+          }
           // Cleanup listeners on error
           this.detachedCleanupFns.forEach(fn => fn());
           this.detachedCleanupFns = [];
@@ -9557,6 +9636,12 @@
           // Will be handled by onPlayerAttached listener
         } catch (error) {
           console.error('[VideoEditor] Error attaching video:', error);
+          if (window.api && window.api.log) {
+            window.api.log.error('Video editor attach video failed', { 
+              error: error.message, 
+              operation: 'attachVideo' 
+            });
+          }
           // Force cleanup
           this.handlePlayerAttached();
         }
@@ -16960,7 +17045,9 @@
             return;
           }
           
-          const items = await window.spaces.getItems(spaceId);
+          const result = await window.spaces.getItems(spaceId);
+          // Handle both { success, items } format and raw array format
+          const items = (result && result.items) ? result.items : (Array.isArray(result) ? result : []);
           const videos = items.filter(item => 
             item.fileType === 'video' || 
             (item.fileName && this.isVideoFile(item.fileName))
@@ -17033,7 +17120,9 @@
         const spaceId = project?.spaceId || 'default';
         
         // Get videos from the space
-        const items = await window.spaces.getItems(spaceId);
+        const result = await window.spaces.getItems(spaceId);
+        // Handle both { success, items } format and raw array format
+        const items = (result && result.items) ? result.items : (Array.isArray(result) ? result : []);
         const videos = items.filter(item =>
           item.fileType === 'video' ||
           (item.fileName && this.isVideoFile(item.fileName))
@@ -18700,7 +18789,9 @@
         
         // Also load videos from space (legacy support)
         try {
-          const items = await window.spaces.getItems(spaceId);
+          const result = await window.spaces.getItems(spaceId);
+          // Handle both { success, items } format and raw array format
+          const items = (result && result.items) ? result.items : (Array.isArray(result) ? result : []);
           const videos = items.filter(item => 
             item.fileType === 'video' || 
             (item.fileName && this.isVideoFile(item.fileName))
@@ -18858,6 +18949,12 @@
           }
         } catch (error) {
           console.error('[VideoEditor] Error loading video from space:', error);
+          if (window.api && window.api.log) {
+            window.api.log.error('Video editor load from space failed', { 
+              error: error.message, 
+              operation: 'loadVideoFromSpace' 
+            });
+          }
           this.showToast('error', 'Failed to load video: ' + error.message);
         }
       },

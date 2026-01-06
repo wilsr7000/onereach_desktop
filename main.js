@@ -22,8 +22,257 @@ const { getBudgetManager } = require('./budget-manager');
 // Global Budget Manager instance
 let budgetManager = null;
 
-// Global Aider Bridge instance
+// Enable Speech Recognition API in Electron
+// These must be set before app.whenReady()
+app.commandLine.appendSwitch('enable-speech-dispatcher');
+app.commandLine.appendSwitch('enable-experimental-web-platform-features');
+
+// Global Aider Bridge instance (main/shared)
 let aiderBridge = null;
+
+// Branch Aider Manager - handles sandboxed Aider processes per branch
+class BranchAiderManager {
+  constructor() {
+    this.branches = new Map(); // branchId -> { aider: AiderBridgeClient, logFile: string, startTime: Date }
+    this.logsDir = null;
+    this.orchestrationLogFile = null;
+  }
+  
+  async initialize(spacePath) {
+    const fs = require('fs');
+    const path = require('path');
+    
+    this.logsDir = path.join(spacePath, 'logs');
+    const branchLogsDir = path.join(this.logsDir, 'branches');
+    
+    // Create log directories
+    if (!fs.existsSync(branchLogsDir)) {
+      fs.mkdirSync(branchLogsDir, { recursive: true });
+    }
+    
+    this.orchestrationLogFile = path.join(this.logsDir, 'orchestration.log');
+    this.logOrchestration('SESSION', 'Branch Aider Manager initialized');
+  }
+  
+  logOrchestration(level, message, data = {}) {
+    const fs = require('fs');
+    if (!this.orchestrationLogFile) return;
+    
+    const timestamp = new Date().toISOString();
+    const logLine = `[${timestamp}] ${level}: ${message}${Object.keys(data).length ? ' ' + JSON.stringify(data) : ''}\n`;
+    
+    try {
+      fs.appendFileSync(this.orchestrationLogFile, logLine);
+    } catch (e) {
+      console.error('[BranchManager] Failed to write orchestration log:', e);
+    }
+    console.log(`[BranchManager] ${level}: ${message}`);
+  }
+  
+  logBranch(branchId, level, message, data = {}) {
+    const fs = require('fs');
+    const path = require('path');
+    if (!this.logsDir) return;
+    
+    const logFile = path.join(this.logsDir, 'branches', `${branchId}.log`);
+    const timestamp = new Date().toISOString();
+    const logLine = `[${timestamp}] ${level}: ${message}${Object.keys(data).length ? ' ' + JSON.stringify(data) : ''}\n`;
+    
+    try {
+      fs.appendFileSync(logFile, logLine);
+    } catch (e) {
+      console.error(`[BranchManager] Failed to write branch log ${branchId}:`, e);
+    }
+  }
+  
+  async initBranch(branchPath, branchId, model, readOnlyFiles = []) {
+    const { AiderBridgeClient } = require('./aider-bridge-client');
+    const { getSettingsManager } = require('./settings-manager');
+    const path = require('path');
+    
+    this.logOrchestration('BRANCH', `Initializing ${branchId}`, { model, branchPath });
+    
+    // Check if branch already has an Aider instance
+    if (this.branches.has(branchId)) {
+      this.logOrchestration('WARN', `Branch ${branchId} already initialized, cleaning up first`);
+      await this.cleanupBranch(branchId);
+    }
+    
+    const settings = getSettingsManager();
+    const apiKey = settings.getLLMApiKey();
+    const provider = settings.getLLMProvider();
+    
+    // Use pipx-installed Python
+    const aiderPythonPath = '/Users/richardwilson/.local/pipx/venvs/aider-chat/bin/python3';
+    
+    const aider = new AiderBridgeClient(aiderPythonPath, apiKey, provider);
+    await aider.start();
+    
+    // Initialize with branch path as root
+    const initResult = await aider.initialize(branchPath, model || 'claude-opus-4-5-20251101');
+    
+    if (!initResult.success) {
+      throw new Error(`Failed to initialize branch Aider: ${initResult.error}`);
+    }
+    
+    // Set sandbox restrictions
+    const sandboxResult = await aider.sendRequest('set_sandbox', {
+      sandbox_root: branchPath,
+      read_only_files: readOnlyFiles,
+      branch_id: branchId
+    });
+    
+    if (!sandboxResult.success) {
+      console.warn(`[BranchManager] Warning: Sandbox setup returned: ${JSON.stringify(sandboxResult)}`);
+    }
+    
+    // Add branch files to Aider context
+    const fs = require('fs');
+    try {
+      const branchFiles = fs.readdirSync(branchPath);
+      const editableFiles = branchFiles
+        .filter(f => {
+          const filePath = path.join(branchPath, f);
+          const stat = fs.statSync(filePath);
+          // Only include files (not directories), and exclude metadata files
+          return stat.isFile() && !f.startsWith('.') && !f.endsWith('.json');
+        })
+        .map(f => path.join(branchPath, f));
+      
+      if (editableFiles.length > 0) {
+        this.logOrchestration('BRANCH', `Adding ${editableFiles.length} files to ${branchId} context`, { files: editableFiles.map(f => path.basename(f)) });
+        const addResult = await aider.sendRequest('add_files', { file_paths: editableFiles });
+        
+        if (!addResult.success) {
+          console.warn(`[BranchManager] Warning: Failed to add files to branch context:`, addResult);
+        } else {
+          this.logBranch(branchId, 'FILES', `Added ${editableFiles.length} files to context`, { files: editableFiles.map(f => path.basename(f)) });
+        }
+      }
+    } catch (fileError) {
+      console.warn(`[BranchManager] Warning: Could not list branch files:`, fileError.message);
+    }
+    
+    // Store branch info
+    this.branches.set(branchId, {
+      aider,
+      branchPath,
+      logFile: path.join(this.logsDir, 'branches', `${branchId}.log`),
+      startTime: new Date(),
+      model
+    });
+    
+    this.logOrchestration('BRANCH', `${branchId} started`, { model });
+    this.logBranch(branchId, 'INIT', `Aider initialized`, { branchPath, model, sandbox: true });
+    
+    return { success: true, branchId };
+  }
+  
+  async runBranchPrompt(branchId, prompt, streamCallback = null) {
+    const branch = this.branches.get(branchId);
+    if (!branch) {
+      throw new Error(`Branch ${branchId} not initialized`);
+    }
+    
+    this.logBranch(branchId, 'PROMPT', prompt.substring(0, 200) + '...');
+    this.logOrchestration('BRANCH', `${branchId} executing prompt`, { promptLength: prompt.length });
+    
+    let result;
+    if (streamCallback) {
+      result = await branch.aider.runPromptStreaming(prompt, streamCallback);
+    } else {
+      result = await branch.aider.runPrompt(prompt);
+    }
+    
+    this.logBranch(branchId, 'RESPONSE', `Success: ${result.success}`, {
+      modifiedFiles: result.modified_files?.length || 0,
+      newFiles: result.new_files?.length || 0
+    });
+    
+    if (result.file_details) {
+      for (const file of result.file_details) {
+        this.logBranch(branchId, 'EDIT', `${file.action}: ${file.name}`);
+      }
+    }
+    
+    return result;
+  }
+  
+  async cleanupBranch(branchId) {
+    const branch = this.branches.get(branchId);
+    if (!branch) {
+      return { success: true, message: 'Branch not found (already cleaned up)' };
+    }
+    
+    this.logOrchestration('BRANCH', `${branchId} cleaning up`);
+    this.logBranch(branchId, 'CLEANUP', 'Shutting down Aider instance');
+    
+    try {
+      await branch.aider.shutdown();
+    } catch (e) {
+      console.error(`[BranchManager] Error shutting down branch ${branchId}:`, e);
+    }
+    
+    this.branches.delete(branchId);
+    
+    this.logOrchestration('BRANCH', `${branchId} cleaned up`);
+    return { success: true };
+  }
+  
+  async cleanupAll() {
+    this.logOrchestration('SESSION', 'Cleaning up all branches');
+    
+    for (const branchId of this.branches.keys()) {
+      await this.cleanupBranch(branchId);
+    }
+    
+    this.logOrchestration('SESSION', 'All branches cleaned up');
+  }
+  
+  getBranchLog(branchId) {
+    const fs = require('fs');
+    const path = require('path');
+    
+    if (!this.logsDir) return null;
+    
+    const logFile = path.join(this.logsDir, 'branches', `${branchId}.log`);
+    try {
+      if (fs.existsSync(logFile)) {
+        return fs.readFileSync(logFile, 'utf-8');
+      }
+    } catch (e) {
+      console.error(`[BranchManager] Error reading branch log ${branchId}:`, e);
+    }
+    return null;
+  }
+  
+  getOrchestrationLog() {
+    const fs = require('fs');
+    
+    if (!this.orchestrationLogFile) return null;
+    
+    try {
+      if (fs.existsSync(this.orchestrationLogFile)) {
+        return fs.readFileSync(this.orchestrationLogFile, 'utf-8');
+      }
+    } catch (e) {
+      console.error('[BranchManager] Error reading orchestration log:', e);
+    }
+    return null;
+  }
+  
+  getActiveBranches() {
+    return Array.from(this.branches.entries()).map(([id, info]) => ({
+      branchId: id,
+      branchPath: info.branchPath,
+      model: info.model,
+      startTime: info.startTime.toISOString()
+    }));
+  }
+}
+
+// Global Branch Aider Manager instance
+let branchAiderManager = null;
 
 // Global Snapshot Storage instance (for state manager)
 let snapshotStorage = null;
@@ -530,7 +779,6 @@ app.whenReady().then(() => {
     process: 'main',
     pid: process.pid 
   });
-  // Use logger directly to avoid console interceptor loop
   logger.info('Console interceptor initialized for main process');
   
   // Set up module manager IPC handlers
@@ -578,6 +826,14 @@ app.whenReady().then(() => {
   global.settingsManager = getSettingsManager();
   console.log('Settings manager initialized');
   
+  // Initialize Menu Data Manager - SINGLE SOURCE OF TRUTH for all menu data
+  // This handles: IDW environments, external bots, creators, GSX links, etc.
+  // It provides: atomic saves, validation, debounced updates, event-driven architecture
+  const { getMenuDataManager } = require('./menu-data-manager');
+  global.menuDataManager = getMenuDataManager();
+  global.menuDataManager.initialize();
+  console.log('Menu Data Manager initialized');
+  
   // Add keyboard shortcuts to open dev tools (only in development mode)
   const isDevelopment = process.env.NODE_ENV === 'development' || !app.isPackaged;
   
@@ -606,9 +862,6 @@ app.whenReady().then(() => {
   // This makes the app feel snappier by showing the UI first
   setImmediate(() => {
     console.log('[Startup] Initializing deferred managers...');
-    // #region agent log
-    console.log('[DEBUG-H1] setImmediate callback starting - about to init clipboard manager');
-    // #endregion
     
     // Initialize clipboard manager
     try {
@@ -618,18 +871,12 @@ app.whenReady().then(() => {
       clipboardManager.registerShortcut();
       global.clipboardManager = clipboardManager;
       console.log('Clipboard manager initialized');
-      // #region agent log
-      console.log('[DEBUG-H1] Clipboard manager fully initialized, global.clipboardManager set');
-      // #endregion
       logger.logFeatureUsed('clipboard-manager', {
         status: 'initialized',
         shortcutRegistered: true
       });
     } catch (error) {
       console.error('[Startup] Error initializing clipboard manager:', error);
-      // #region agent log
-      console.error('[DEBUG-H1] Clipboard manager init FAILED:', error.message, error.stack);
-      // #endregion
     }
     
     // Initialize video editor
@@ -658,34 +905,18 @@ app.whenReady().then(() => {
       // Make updateApplicationMenu globally available for module manager
       global.updateApplicationMenu = updateApplicationMenu;
       console.log('Module manager initialized');
-      // #region agent log
-      const webTools = moduleManager.getWebTools();
-      const moduleItems = moduleManager.getModuleMenuItems();
-      const webToolItems = moduleManager.getWebToolMenuItems();
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:moduleManager-init',message:'moduleManager initialized',data:{webToolsCount:webTools.length,moduleItemsCount:moduleItems.length,webToolItemsCount:webToolItems.length,webToolNames:webTools.map(t=>t.name)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
-      // #endregion
-      logger.logFeatureUsed('module-manager', {
-        status: 'initialized',
-        modulesPath: moduleManager.modulesPath
-      });
-      
-      // Refresh the menu now that moduleManager is available
-      // This ensures web tools appear in the Tools menu
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:before-menu-refresh',message:'About to refresh menu',data:{globalModuleManagerExists:!!global.moduleManager},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
-      // #endregion
-      const { setApplicationMenu } = require('./menu');
-      const idwEnvironments = global.settingsManager ? global.settingsManager.get('idwEnvironments') || [] : [];
-      setApplicationMenu(idwEnvironments);
-      console.log('[Startup] Menu refreshed with module manager');
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:after-menu-refresh',message:'Menu refresh completed',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
-      // #endregion
     } catch (error) {
       console.error('[Startup] Error initializing module manager:', error);
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:moduleManager-error',message:'moduleManager init failed',data:{error:error.message},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
-      // #endregion
+    }
+    
+    // Initialize the application menu
+    try {
+      console.log('[Startup] Setting up application menu...');
+      const idwEnvironments = global.settingsManager ? global.settingsManager.get('idwEnvironments') || [] : [];
+      setApplicationMenu(idwEnvironments);
+      console.log('[Startup] Application menu initialized with', idwEnvironments.length, 'IDW environments');
+    } catch (error) {
+      console.error('[Startup] Error initializing application menu:', error);
     }
     
     // Initialize Speech Recognition Bridge (Whisper-based, for web apps)
@@ -745,148 +976,6 @@ app.whenReady().then(() => {
   console.log('Module API bridge initialized');
   logger.info('Module API bridge initialized');
   
-  // ============================================
-  // MEMORY MONITORING - for leak detection
-  // ============================================
-  const MEMORY_MONITOR_INTERVAL = 30000; // 30 seconds
-  // PERFORMANCE: Disabled by default - only enable with explicit MEMORY_MONITOR=true
-  let memoryMonitorEnabled = process.env.MEMORY_MONITOR === 'true';
-  
-  function logMemoryUsage() {
-    if (!memoryMonitorEnabled) return;
-    
-    // Main process memory
-    const usage = process.memoryUsage();
-    console.log('[Memory Monitor] Main Process:', {
-      heapUsed: Math.round(usage.heapUsed / 1024 / 1024) + ' MB',
-      heapTotal: Math.round(usage.heapTotal / 1024 / 1024) + ' MB',
-      external: Math.round(usage.external / 1024 / 1024) + ' MB',
-      rss: Math.round(usage.rss / 1024 / 1024) + ' MB'
-    });
-    
-    // All process metrics (main + renderers)
-    try {
-      const metrics = app.getAppMetrics();
-      metrics.forEach(proc => {
-        const memoryMB = Math.round(proc.memory.workingSetSize / 1024);
-        const cpuPercent = proc.cpu.percentCPUUsage.toFixed(2);
-        console.log(`[Memory Monitor] ${proc.type} (PID ${proc.pid}): ${memoryMB} KB, CPU: ${cpuPercent}%`);
-      });
-    } catch (err) {
-      console.error('[Memory Monitor] Error getting app metrics:', err.message);
-    }
-  }
-  
-  // Start memory monitoring interval
-  let memoryMonitorInterval = null;
-  if (memoryMonitorEnabled) {
-    console.log('[Memory Monitor] Memory monitoring enabled (interval: 30s)');
-    console.log('[Memory Monitor] Set MEMORY_MONITOR=false to disable');
-    memoryMonitorInterval = setInterval(logMemoryUsage, MEMORY_MONITOR_INTERVAL);
-    // Log initial memory state
-    logMemoryUsage();
-  }
-  
-  // IPC handler to toggle memory monitoring
-  ipcMain.handle('memory-monitor:toggle', (event, enabled) => {
-    memoryMonitorEnabled = enabled;
-    if (enabled && !memoryMonitorInterval) {
-      memoryMonitorInterval = setInterval(logMemoryUsage, MEMORY_MONITOR_INTERVAL);
-      console.log('[Memory Monitor] Monitoring enabled');
-    } else if (!enabled && memoryMonitorInterval) {
-      clearInterval(memoryMonitorInterval);
-      memoryMonitorInterval = null;
-      console.log('[Memory Monitor] Monitoring disabled');
-    }
-    return memoryMonitorEnabled;
-  });
-  
-  // IPC handler to get current memory stats
-  ipcMain.handle('memory-monitor:get-stats', () => {
-    const usage = process.memoryUsage();
-    const metrics = app.getAppMetrics();
-    return {
-      mainProcess: {
-        heapUsed: usage.heapUsed,
-        heapTotal: usage.heapTotal,
-        external: usage.external,
-        rss: usage.rss
-      },
-      allProcesses: metrics.map(proc => ({
-        type: proc.type,
-        pid: proc.pid,
-        memory: proc.memory.workingSetSize,
-        cpu: proc.cpu.percentCPUUsage
-      }))
-    };
-  });
-  
-  // Clean up memory monitor on app quit
-  app.on('will-quit', () => {
-    if (memoryMonitorInterval) {
-      clearInterval(memoryMonitorInterval);
-      memoryMonitorInterval = null;
-    }
-  });
-  // ============================================
-  
-  // Set up permission handlers for microphone access (voice mode)
-  const { session, systemPreferences } = require('electron');
-
-  // Request microphone access from macOS (triggers the permission dialog)
-  if (process.platform === 'darwin') {
-    (async () => {
-      try {
-        const micStatus = systemPreferences.getMediaAccessStatus('microphone');
-        console.log(`[Permissions] Microphone access status: ${micStatus}`);
-        
-        if (micStatus !== 'granted') {
-          console.log('[Permissions] Requesting microphone access from macOS...');
-          const granted = await systemPreferences.askForMediaAccess('microphone');
-          console.log(`[Permissions] Microphone access ${granted ? 'GRANTED' : 'DENIED'}`);
-        }
-      } catch (err) {
-        console.error('[Permissions] Error requesting microphone access:', err);
-      }
-    })();
-  }
-
-  // Handle permission requests globally
-  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
-    console.log(`Permission requested: ${permission} from ${webContents.getURL()}`);
-    
-    // Allow microphone for voice mode
-    if (permission === 'media' || permission === 'audioCapture' || permission === 'microphone') {
-      console.log(`Allowing ${permission} permission`);
-      callback(true);
-    } else if (permission === 'notifications') {
-      console.log('Allowing notifications permission');
-      callback(true);
-    } else if (permission === 'clipboard-read') {
-      console.log('Allowing clipboard-read permission');
-      callback(true);
-    } else {
-      console.log(`Denying ${permission} permission`);
-      callback(false);
-    }
-  });
-  
-  // Also handle permission checks
-  session.defaultSession.setPermissionCheckHandler((webContents, permission) => {
-    console.log(`Permission check: ${permission} from ${webContents ? webContents.getURL() : 'unknown'}`);
-    
-    // Allow microphone and related permissions
-    if (permission === 'media' || permission === 'audioCapture' || permission === 'microphone') {
-      return true;
-    } else if (permission === 'notifications') {
-      return true;
-    } else if (permission === 'clipboard-read') {
-      return true;
-    }
-    
-    return false;
-  });
-  
   // Create and setup IPC handlers  
   console.log('[Main] About to call setupIPC');
   try {
@@ -894,213 +983,19 @@ app.whenReady().then(() => {
     console.log('[Main] setupIPC completed successfully');
   } catch (error) {
     console.error('[Main] Error in setupIPC:', error);
-    console.error('[Main] Stack trace:', error.stack);
   }
   
-  // Add a global context menu handler as a fallback for all webviews
-  app.on('web-contents-created', (event, contents) => {
-    console.log('[Main] New web contents created, type:', contents.getType());
-    
-    // Add context menu to webviews and windows (excluding the main window)
-    if (contents.getType() === 'webview' || (contents.getType() === 'window' && !contents.getURL().includes('tabbed-browser.html'))) {
-      console.log('[Main] Adding fallback context menu handler to', contents.getType());
-      
-      // Add a small delay to avoid conflicts with specific handlers
-      setTimeout(() => {
-        // Check if this webview already has a context menu handler
-        if (!contents.listenerCount('context-menu')) {
-          console.log('[Main] No existing context menu handler found, adding fallback');
-          
-          contents.on('context-menu', (event, params) => {
-            console.log('[Main] Fallback context menu triggered at:', params.x, params.y);
-            
-            // Allow native DevTools context menu to work (only when right-clicking IN DevTools)
-            const url = contents.getURL();
-            if (url.startsWith('devtools://') || url.startsWith('chrome-devtools://')) {
-              console.log('[Main] DevTools panel detected, allowing native context menu');
-              return; // Don't prevent default, let DevTools handle it
-            }
-            
-            event.preventDefault();
-            
-            // Create context menu with "Paste to Black Hole" option
-            const contextMenu = Menu.buildFromTemplate([
-              {
-                label: 'Paste to Black Hole',
-                click: () => {
-                  console.log('[Main] Fallback: Paste to Black Hole clicked');
-                  
-                  // Get clipboard manager from global
-                  if (global.clipboardManager) {
-                    // Get the browser window that contains this webview
-                    const win = BrowserWindow.fromWebContents(event.sender);
-                    if (win) {
-                      const bounds = win.getBounds();
-                      const position = {
-                        x: bounds.x + params.x,
-                        y: bounds.y + params.y
-                      };
-                      
-                      // Pass true as second parameter to show in expanded mode with space chooser
-                      global.clipboardManager.createBlackHoleWindow(position, true);
-                      
-                      // Send clipboard content after a delay
-                      setTimeout(() => {
-                        const { clipboard } = require('electron');
-                        const text = clipboard.readText();
-                        if (text && global.clipboardManager && global.clipboardManager.blackHoleWindow) {
-                          global.clipboardManager.blackHoleWindow.webContents.send('paste-content', {
-                            type: 'text',
-                            content: text
-                          });
-                        }
-                      }, 300);
-                    }
-                  }
-                }
-              }
-            ]);
-            
-            // Use setImmediate to ensure the menu shows after all other handlers
-            setImmediate(() => {
-              const win = BrowserWindow.fromWebContents(event.sender);
-              if (win) {
-                contextMenu.popup({
-                  window: win,
-                  x: params.x,
-                  y: params.y
-                });
-              }
-            });
-          });
-        } else {
-          console.log('[Main] Webview already has', contents.listenerCount('context-menu'), 'context menu handler(s), skipping fallback');
-        }
-      }, 100);
-    }
-  });
-  
-  // Initialize SmartExport and set up its IPC handlers
-  const SmartExport = require('./smart-export');
-  global.smartExport = new SmartExport();
-  global.smartExport.setupIpcHandlers();
-  console.log('SmartExport initialized and IPC handlers set up');
-  
-  // Initialize rollback manager
-  rollbackManager.init().then(() => {
-    console.log('Rollback manager initialized');
-  }).catch(err => {
-    console.error('Failed to initialize rollback manager:', err);
-  });
-
-  // Initialize snapshot storage for state manager
-  snapshotStorage = new SnapshotStorage(app.getPath('userData'));
-  global.snapshotStorage = snapshotStorage;
-  console.log('Snapshot storage initialized');
-
-  // ═══════════════════════════════════════════════════════════
-  // STATE MANAGER IPC HANDLERS
-  // ═══════════════════════════════════════════════════════════
-
-  // Save a snapshot
-  ipcMain.handle('stateManager:saveSnapshot', async (event, editorId, snapshot) => {
-    try {
-      return snapshotStorage.saveSnapshot(editorId, snapshot);
-    } catch (error) {
-      console.error('[StateManager] Error saving snapshot:', error);
-      throw error;
-    }
-  });
-
-  // List snapshots for an editor
-  ipcMain.handle('stateManager:listSnapshots', async (event, editorId) => {
-    try {
-      return snapshotStorage.listSnapshots(editorId);
-    } catch (error) {
-      console.error('[StateManager] Error listing snapshots:', error);
-      throw error;
-    }
-  });
-
-  // Get a specific snapshot
-  ipcMain.handle('stateManager:getSnapshot', async (event, editorId, snapshotId) => {
-    try {
-      return snapshotStorage.getSnapshot(editorId, snapshotId);
-    } catch (error) {
-      console.error('[StateManager] Error getting snapshot:', error);
-      throw error;
-    }
-  });
-
-  // Delete a snapshot
-  ipcMain.handle('stateManager:deleteSnapshot', async (event, editorId, snapshotId) => {
-    try {
-      return snapshotStorage.deleteSnapshot(editorId, snapshotId);
-    } catch (error) {
-      console.error('[StateManager] Error deleting snapshot:', error);
-      throw error;
-    }
-  });
-
-  // Rename a snapshot
-  ipcMain.handle('stateManager:renameSnapshot', async (event, editorId, snapshotId, newName) => {
-    try {
-      return snapshotStorage.renameSnapshot(editorId, snapshotId, newName);
-    } catch (error) {
-      console.error('[StateManager] Error renaming snapshot:', error);
-      throw error;
-    }
-  });
-
-  // Get storage stats
-  ipcMain.handle('stateManager:getStats', async (event, editorId) => {
-    try {
-      return snapshotStorage.getStats(editorId);
-    } catch (error) {
-      console.error('[StateManager] Error getting stats:', error);
-      throw error;
-    }
-  });
-
-  // Clear all snapshots for an editor
-  ipcMain.handle('stateManager:clearSnapshots', async (event, editorId) => {
-    try {
-      snapshotStorage.clearSnapshots(editorId);
-      return true;
-    } catch (error) {
-      console.error('[StateManager] Error clearing snapshots:', error);
-      throw error;
-    }
-  });
-  
-  // Set application menu (menu is already set in createWindow, so we can skip this duplicate call)
-  // Commenting out duplicate menu setup that was overriding the Share menu
-  console.log('[Main] Application menu already set in createWindow');
-  /*
+  // Setup unified Spaces API
   try {
-    setApplicationMenu();
-    console.log('[Main] Application menu set successfully');
+    setupSpacesAPI();
+    console.log('[Main] Spaces API initialized');
   } catch (error) {
-    console.error('[Main] Error setting application menu:', error);
-    console.error('[Main] Stack trace:', error.stack);
+    console.error('[Main] Error setting up Spaces API:', error);
   }
-  */
   
   // Register test menu shortcut
   console.log('[Main] Registering test menu shortcut');
   registerTestMenuShortcut();
-  
-  // Register global shortcuts after menu is set up
-  try {
-    if (typeof global.registerGlobalShortcuts === 'function') {
-      global.registerGlobalShortcuts();
-      console.log('Global shortcuts registered');
-    } else {
-      console.warn('[Shortcuts] registerGlobalShortcuts not initialized yet (setupIPC scope). Skipping initial registration.');
-    }
-  } catch (error) {
-    console.error('Error registering global shortcuts:', error);
-  }
   
   // Set up auto updater
   setupAutoUpdater();
@@ -1112,135 +1007,492 @@ app.whenReady().then(() => {
     } else {
       log.info('Not checking for updates in development mode');
     }
-  }, 3000);  // 3 second delay
-  
-  // Initialize menus once the window is fully loaded
-  const mainWindow = browserWindow.getMainWindow();
-  if (mainWindow) {
-    mainWindow.webContents.on('did-finish-load', () => {
-      // Wait a bit to ensure all scripts are loaded and localStorage is accessible
-      setTimeout(() => {
-        // Load IDW environments from config file and save to localStorage
-        try {
-          let idwEnvironments = [];
-          if (fs.existsSync(idwConfigPath)) {
-            idwEnvironments = JSON.parse(fs.readFileSync(idwConfigPath, 'utf8'));
-            console.log('Loading IDW environments from config:', idwEnvironments);
-            
-            // Save to localStorage in renderer process
-            mainWindow.webContents.executeJavaScript(`
-              localStorage.setItem('idwEnvironments', ${JSON.stringify(JSON.stringify(idwEnvironments))});
-              console.log('Saved IDW environments to localStorage:', ${JSON.stringify(JSON.stringify(idwEnvironments))});
-            `).catch(err => console.error('Error saving IDW environments to localStorage:', err));
-          }
-          
-          // Also load GSX links from file if it exists
-          const gsxLinksPath = path.join(app.getPath('userData'), 'gsx-links.json');
-          if (fs.existsSync(gsxLinksPath)) {
-            try {
-              const gsxLinks = JSON.parse(fs.readFileSync(gsxLinksPath, 'utf8'));
-              console.log('Loading GSX links from config:', gsxLinks);
-              
-              // Save to localStorage in renderer process
-              mainWindow.webContents.executeJavaScript(`
-                localStorage.setItem('gsxLinks', ${JSON.stringify(JSON.stringify(gsxLinks))});
-                console.log('Saved GSX links to localStorage:', ${JSON.stringify(JSON.stringify(gsxLinks))});
-              `).catch(err => console.error('Error saving GSX links to localStorage:', err));
-              
-              // Update the menu with environments (the menu system will look up the GSX links file)
-              updateApplicationMenu(idwEnvironments);
-            } catch (error) {
-              console.error('Error parsing GSX links file:', error);
-            }
-          } else {
-            console.log('No GSX links file found at:', gsxLinksPath);
-            updateApplicationMenu(idwEnvironments);
-          }
-        } catch (error) {
-          console.error('Error loading configuration:', error);
-        }
-        
-        // Debug IDW environments to see what's available
-        debugIDWEnvironments();
-      }, 1000); // 1 second delay
-    });
-  }
-  
-  // Check if we should open the test window directly (from command line argument)
-  if (process.argv.includes('--test')) {
-    console.log('Opening test window directly from command line argument');
-    setTimeout(() => {
-      openDataTestPage();
-    }, 1500); // Longer delay to ensure main window is ready
-  }
-  
-  // On macOS, re-create a window when dock icon is clicked and no other windows are open
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
-  
-  // Add a 'before-quit' event handler to save tab state
-  app.on('before-quit', () => {
-    console.log('App is about to quit, saving tab state');
-    logger.logAppQuit('user-initiated');
-    
-    const mainWindow = browserWindow.getMainWindow();
-    if (mainWindow) {
-      mainWindow.webContents.send('save-tabs-state');
-      
-      // Small delay to ensure the save completes
-      const start = Date.now();
-      while (Date.now() - start < 100) {
-        // Wait for a short time to allow saving to complete
-      }
-    }
-  });
-  
-  // Screen sharing feature removed – do not start local signalling server
+  }, 5000); // Check after 5 seconds to not block startup
 });
 
-// Quit when all windows are closed, except on macOS where it's common for applications 
-// to stay open until the user quits explicitly with Cmd + Q
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
-});
+// ============================================
+// UNIFIED SPACES API
+// ============================================
 
-// Clean up clipboard manager on quit
-app.on('will-quit', () => {
-  logger.info('App will quit - cleaning up resources');
+/**
+ * Set up the unified Spaces API IPC handlers
+ * This provides a consistent API for all apps to access spaces and items
+ */
+function setupSpacesAPI() {
+  console.log('[SpacesAPI] Setting up IPC handlers...');
   
-  // Shutdown Aider Bridge
-  if (aiderBridge) {
-    console.log('Shutting down Aider Bridge...');
-    aiderBridge.shutdown().catch(err => 
-      console.error('Error shutting down Aider:', err)
-    );
-  }
+  const { getSpacesAPI } = require('./spaces-api');
+  const spacesAPI = getSpacesAPI();
   
-  if (clipboardManager) {
-    clipboardManager.destroy();
-    console.log('Clipboard manager cleaned up');
-    logger.info('Clipboard manager destroyed');
-  }
-  
-  // Unregister only our tracked shortcuts
-  registeredShortcuts.forEach(shortcut => {
+  // Set up broadcast handler to notify all windows of changes
+  spacesAPI.setBroadcastHandler((event, data) => {
     try {
-      globalShortcut.unregister(shortcut);
-    } catch (e) {
-      console.error(`Error unregistering shortcut ${shortcut}:`, e);
+      BrowserWindow.getAllWindows().forEach(win => {
+        if (!win.isDestroyed()) {
+          win.webContents.send('spaces:event', { type: event, ...data });
+        }
+      });
+    } catch (error) {
+      console.error('[SpacesAPI] Broadcast error:', error);
     }
   });
-  console.log('Global shortcuts unregistered');
-  logger.info('Global shortcuts unregistered', {
-    shortcutsCount: registeredShortcuts.length
+  
+  // ---- SPACE MANAGEMENT ----
+  
+  // List all spaces
+  ipcMain.handle('spaces:list', async () => {
+    try {
+      return await spacesAPI.list();
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:list:', error);
+      return [];
+    }
   });
   
-  // Final flush of logs before quit
-  if (logger && logger.flush) {
-    logger.flush();
-  }
-});
+  // Get a single space
+  ipcMain.handle('spaces:get', async (event, spaceId) => {
+    try {
+      return await spacesAPI.get(spaceId);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:get:', error);
+      return null;
+    }
+  });
+  
+  // Create a new space
+  ipcMain.handle('spaces:create', async (event, name, options = {}) => {
+    try {
+      return await spacesAPI.create(name, options);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:create:', error);
+      throw error;
+    }
+  });
+  
+  // Update a space
+  ipcMain.handle('spaces:update', async (event, spaceId, data) => {
+    try {
+      return await spacesAPI.update(spaceId, data);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:update:', error);
+      return false;
+    }
+  });
+  
+  // Delete a space
+  ipcMain.handle('spaces:delete', async (event, spaceId) => {
+    try {
+      return await spacesAPI.delete(spaceId);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:delete:', error);
+      return false;
+    }
+  });
+  
+  // ---- ITEM MANAGEMENT ----
+  
+  // List items in a space
+  ipcMain.handle('spaces:items:list', async (event, spaceId, options = {}) => {
+    try {
+      return await spacesAPI.items.list(spaceId, options);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:items:list:', error);
+      return [];
+    }
+  });
+  
+  // Get a single item
+  ipcMain.handle('spaces:items:get', async (event, spaceId, itemId) => {
+    try {
+      return await spacesAPI.items.get(spaceId, itemId);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:items:get:', error);
+      return null;
+    }
+  });
+  
+  // Add an item to a space
+  ipcMain.handle('spaces:items:add', async (event, spaceId, item) => {
+    try {
+      return await spacesAPI.items.add(spaceId, item);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:items:add:', error);
+      throw error;
+    }
+  });
+  
+  // Update an item
+  ipcMain.handle('spaces:items:update', async (event, spaceId, itemId, data) => {
+    try {
+      return await spacesAPI.items.update(spaceId, itemId, data);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:items:update:', error);
+      return false;
+    }
+  });
+  
+  // Delete an item
+  ipcMain.handle('spaces:items:delete', async (event, spaceId, itemId) => {
+    try {
+      return await spacesAPI.items.delete(spaceId, itemId);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:items:delete:', error);
+      return false;
+    }
+  });
+  
+  // Move an item to a different space
+  ipcMain.handle('spaces:items:move', async (event, itemId, fromSpaceId, toSpaceId) => {
+    try {
+      return await spacesAPI.items.move(itemId, fromSpaceId, toSpaceId);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:items:move:', error);
+      return false;
+    }
+  });
+  
+  // Toggle item pin
+  ipcMain.handle('spaces:items:togglePin', async (event, spaceId, itemId) => {
+    try {
+      return await spacesAPI.items.togglePin(spaceId, itemId);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:items:togglePin:', error);
+      return false;
+    }
+  });
+  
+  // ---- SEARCH ----
+  
+  // Search across spaces
+  ipcMain.handle('spaces:search', async (event, query, options = {}) => {
+    try {
+      return await spacesAPI.search(query, options);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:search:', error);
+      return [];
+    }
+  });
+  
+  // ---- METADATA ----
+  
+  // Get space metadata
+  ipcMain.handle('spaces:metadata:get', async (event, spaceId) => {
+    try {
+      return await spacesAPI.metadata.getSpace(spaceId);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:metadata:get:', error);
+      return null;
+    }
+  });
+  
+  // Update space metadata
+  ipcMain.handle('spaces:metadata:update', async (event, spaceId, data) => {
+    try {
+      return await spacesAPI.metadata.updateSpace(spaceId, data);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:metadata:update:', error);
+      return null;
+    }
+  });
+  
+  // Get file metadata
+  ipcMain.handle('spaces:metadata:getFile', async (event, spaceId, filePath) => {
+    try {
+      return await spacesAPI.metadata.getFile(spaceId, filePath);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:metadata:getFile:', error);
+      return null;
+    }
+  });
+  
+  // Set file metadata
+  ipcMain.handle('spaces:metadata:setFile', async (event, spaceId, filePath, data) => {
+    try {
+      return await spacesAPI.metadata.setFile(spaceId, filePath, data);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:metadata:setFile:', error);
+      return null;
+    }
+  });
+  
+  // Set asset metadata
+  ipcMain.handle('spaces:metadata:setAsset', async (event, spaceId, assetType, data) => {
+    try {
+      return await spacesAPI.metadata.setAsset(spaceId, assetType, data);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:metadata:setAsset:', error);
+      return null;
+    }
+  });
+  
+  // Set approval
+  ipcMain.handle('spaces:metadata:setApproval', async (event, spaceId, itemType, itemId, approved) => {
+    try {
+      return await spacesAPI.metadata.setApproval(spaceId, itemType, itemId, approved);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:metadata:setApproval:', error);
+      return null;
+    }
+  });
+  
+  // Add version
+  ipcMain.handle('spaces:metadata:addVersion', async (event, spaceId, versionData) => {
+    try {
+      return await spacesAPI.metadata.addVersion(spaceId, versionData);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:metadata:addVersion:', error);
+      return null;
+    }
+  });
+  
+  // Update project config
+  ipcMain.handle('spaces:metadata:updateProjectConfig', async (event, spaceId, config) => {
+    try {
+      return await spacesAPI.metadata.updateProjectConfig(spaceId, config);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:metadata:updateProjectConfig:', error);
+      return null;
+    }
+  });
+  
+  // ---- FILE SYSTEM ----
+  
+  // Get space path
+  ipcMain.handle('spaces:files:getPath', async (event, spaceId) => {
+    try {
+      return await spacesAPI.files.getSpacePath(spaceId);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:files:getPath:', error);
+      return null;
+    }
+  });
+  
+  // List files in space
+  ipcMain.handle('spaces:files:list', async (event, spaceId, subPath = '') => {
+    try {
+      return await spacesAPI.files.list(spaceId, subPath);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:files:list:', error);
+      return [];
+    }
+  });
+  
+  // Read file from space
+  ipcMain.handle('spaces:files:read', async (event, spaceId, filePath) => {
+    try {
+      return await spacesAPI.files.read(spaceId, filePath);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:files:read:', error);
+      return null;
+    }
+  });
+  
+  // Write file to space
+  ipcMain.handle('spaces:files:write', async (event, spaceId, filePath, content) => {
+    try {
+      return await spacesAPI.files.write(spaceId, filePath, content);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:files:write:', error);
+      return false;
+    }
+  });
+  
+  // Delete file from space
+  ipcMain.handle('spaces:files:delete', async (event, spaceId, filePath) => {
+    try {
+      return await spacesAPI.files.delete(spaceId, filePath);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:files:delete:', error);
+      return false;
+    }
+  });
+  
+  // Get storage root path
+  ipcMain.handle('spaces:getStorageRoot', async () => {
+    try {
+      return spacesAPI.getStorageRoot();
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:getStorageRoot:', error);
+      return null;
+    }
+  });
+  
+  // ---- TAG MANAGEMENT ----
+  
+  // Get tags for an item
+  ipcMain.handle('spaces:items:getTags', async (event, spaceId, itemId) => {
+    try {
+      return await spacesAPI.items.getTags(spaceId, itemId);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:items:getTags:', error);
+      return [];
+    }
+  });
+  
+  // Set tags for an item
+  ipcMain.handle('spaces:items:setTags', async (event, spaceId, itemId, tags) => {
+    try {
+      return await spacesAPI.items.setTags(spaceId, itemId, tags);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:items:setTags:', error);
+      return false;
+    }
+  });
+  
+  // Add a tag to an item
+  ipcMain.handle('spaces:items:addTag', async (event, spaceId, itemId, tag) => {
+    try {
+      return await spacesAPI.items.addTag(spaceId, itemId, tag);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:items:addTag:', error);
+      return [];
+    }
+  });
+  
+  // Remove a tag from an item
+  ipcMain.handle('spaces:items:removeTag', async (event, spaceId, itemId, tag) => {
+    try {
+      return await spacesAPI.items.removeTag(spaceId, itemId, tag);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:items:removeTag:', error);
+      return [];
+    }
+  });
+  
+  // Generate metadata for an item
+  ipcMain.handle('spaces:items:generateMetadata', async (event, spaceId, itemId, options = {}) => {
+    try {
+      return await spacesAPI.items.generateMetadata(spaceId, itemId, options);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:items:generateMetadata:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // List all tags in a space
+  ipcMain.handle('spaces:tags:list', async (event, spaceId) => {
+    try {
+      return await spacesAPI.tags.list(spaceId);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:tags:list:', error);
+      return [];
+    }
+  });
+  
+  // List all tags across all spaces
+  ipcMain.handle('spaces:tags:listAll', async () => {
+    try {
+      return await spacesAPI.tags.listAll();
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:tags:listAll:', error);
+      return [];
+    }
+  });
+  
+  // Find items by tags
+  ipcMain.handle('spaces:tags:findItems', async (event, tags, options = {}) => {
+    try {
+      return await spacesAPI.tags.findItems(tags, options);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:tags:findItems:', error);
+      return [];
+    }
+  });
+  
+  // Rename a tag in a space
+  ipcMain.handle('spaces:tags:rename', async (event, spaceId, oldTag, newTag) => {
+    try {
+      return await spacesAPI.tags.rename(spaceId, oldTag, newTag);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:tags:rename:', error);
+      return 0;
+    }
+  });
+  
+  // Delete a tag from a space
+  ipcMain.handle('spaces:tags:deleteFromSpace', async (event, spaceId, tag) => {
+    try {
+      return await spacesAPI.tags.deleteFromSpace(spaceId, tag);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:tags:deleteFromSpace:', error);
+      return 0;
+    }
+  });
+  
+  // ---- SMART FOLDERS ----
+  
+  // List all smart folders
+  ipcMain.handle('spaces:smartFolders:list', async () => {
+    try {
+      return await spacesAPI.smartFolders.list();
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:smartFolders:list:', error);
+      return [];
+    }
+  });
+  
+  // Get a single smart folder
+  ipcMain.handle('spaces:smartFolders:get', async (event, folderId) => {
+    try {
+      return await spacesAPI.smartFolders.get(folderId);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:smartFolders:get:', error);
+      return null;
+    }
+  });
+  
+  // Create a smart folder
+  ipcMain.handle('spaces:smartFolders:create', async (event, name, criteria, options = {}) => {
+    try {
+      return await spacesAPI.smartFolders.create(name, criteria, options);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:smartFolders:create:', error);
+      throw error;
+    }
+  });
+  
+  // Update a smart folder
+  ipcMain.handle('spaces:smartFolders:update', async (event, folderId, updates) => {
+    try {
+      return await spacesAPI.smartFolders.update(folderId, updates);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:smartFolders:update:', error);
+      return null;
+    }
+  });
+  
+  // Delete a smart folder
+  ipcMain.handle('spaces:smartFolders:delete', async (event, folderId) => {
+    try {
+      return await spacesAPI.smartFolders.delete(folderId);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:smartFolders:delete:', error);
+      return false;
+    }
+  });
+  
+  // Get items matching a smart folder
+  ipcMain.handle('spaces:smartFolders:getItems', async (event, folderId, options = {}) => {
+    try {
+      return await spacesAPI.smartFolders.getItems(folderId, options);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:smartFolders:getItems:', error);
+      return [];
+    }
+  });
+  
+  // Preview items for criteria without saving
+  ipcMain.handle('spaces:smartFolders:preview', async (event, criteria, options = {}) => {
+    try {
+      return await spacesAPI.smartFolders.preview(criteria, options);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:smartFolders:preview:', error);
+      return [];
+    }
+  });
+  
+  console.log('[SpacesAPI] ✅ All IPC handlers registered (including tags and smart folders)');
+}
 
 // Set up module manager IPC handlers
 function setupModuleManagerIPC() {
@@ -1366,11 +1618,6 @@ function setupModuleManagerIPC() {
     try {
       const https = require('https');
       const http = require('http');
-      const fs = require('fs');
-      const path = require('path');
-      const { app } = require('electron');
-      
-      // Create temp file path
       const tempDir = app.getPath('temp');
       const tempFile = path.join(tempDir, `module-${Date.now()}.zip`);
       
@@ -1607,197 +1854,111 @@ function setupModuleManagerIPC() {
       return { success: false, error: error.message };
     }
   });
+  
+  console.log('[setupModuleManagerIPC] All handlers registered');
 }
 
 // Set up Aider Bridge IPC handlers
 function setupAiderIPC() {
   console.log('[setupAiderIPC] Setting up Aider Bridge handlers');
   
-  // Start Aider
-  ipcMain.handle('aider:start', async () => {
+  // Run prompt on a specific branch's Aider (with streaming)
+  ipcMain.handle('aider:branch-prompt', async (event, branchId, prompt, channel) => {
     try {
-      if (!aiderBridge) {
-        // Get API key from settings
-        const { getSettingsManager } = require('./settings-manager');
-        const settings = getSettingsManager();
-        const apiKey = settings.getLLMApiKey();
-        const provider = settings.getLLMProvider();
-        
-        console.log(`[Aider] Starting with provider: ${provider}, API key present: ${!!apiKey}`);
-        
-        // Use pipx-installed Python with aider-chat (Python 3.14 doesn't support aider's numpy dependency)
-        const aiderPythonPath = '/Users/richardwilson/.local/pipx/venvs/aider-chat/bin/python3';
-        console.log(`[Aider] Using Python path: ${aiderPythonPath}`);
-        aiderBridge = new AiderBridgeClient(aiderPythonPath, apiKey, provider);
-        await aiderBridge.start();
-        console.log('[Aider] Bridge started successfully');
+      if (!branchAiderManager) {
+        throw new Error('Branch manager not initialized');
+      }
+      
+      let result;
+      if (channel) {
+        // Streaming mode
+        result = await branchAiderManager.runBranchPrompt(branchId, prompt, (token) => {
+          event.sender.send(channel, { type: 'token', token });
+        });
+        event.sender.send(channel, { type: 'done', result });
+      } else {
+        // Non-streaming mode
+        result = await branchAiderManager.runBranchPrompt(branchId, prompt);
+      }
+      
+      return result;
+    } catch (error) {
+      console.error('[BranchAider] Prompt failed:', error);
+      if (channel) {
+        event.sender.send(channel, { type: 'error', error: error.message });
+      }
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Cleanup a branch's Aider instance
+  ipcMain.handle('aider:cleanup-branch', async (event, branchId) => {
+    try {
+      if (!branchAiderManager) {
+        return { success: true, message: 'No branch manager' };
+      }
+      
+      const result = await branchAiderManager.cleanupBranch(branchId);
+      return result;
+    } catch (error) {
+      console.error('[BranchAider] Cleanup failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Cleanup all branch Aider instances
+  ipcMain.handle('aider:cleanup-all-branches', async () => {
+    try {
+      if (branchAiderManager) {
+        await branchAiderManager.cleanupAll();
       }
       return { success: true };
     } catch (error) {
-      console.error('[Aider] Failed to start:', error);
+      console.error('[BranchAider] Cleanup all failed:', error);
       return { success: false, error: error.message };
     }
   });
   
-  // Initialize with repo
-  ipcMain.handle('aider:initialize', async (event, repoPath, modelName) => {
+  // Get branch log
+  ipcMain.handle('aider:get-branch-log', async (event, branchId) => {
     try {
-      if (!aiderBridge) {
-        throw new Error('Aider not started');
+      if (!branchAiderManager) {
+        return { success: false, error: 'Branch manager not initialized' };
       }
-      const result = await aiderBridge.initialize(repoPath, modelName || 'gpt-4');
-      console.log('[Aider] Initialized:', result);
-      return result;
+      const log = branchAiderManager.getBranchLog(branchId);
+      return { success: true, log: log || '' };
     } catch (error) {
-      console.error('[Aider] Initialize failed:', error);
+      console.error('[BranchAider] Get log failed:', error);
       return { success: false, error: error.message };
     }
   });
   
-  // Run prompt
-  ipcMain.handle('aider:run-prompt', async (event, message) => {
+  // Get orchestration log
+  ipcMain.handle('aider:get-orchestration-log', async () => {
     try {
-      if (!aiderBridge) {
-        throw new Error('Aider not started');
+      if (!branchAiderManager) {
+        return { success: false, error: 'Branch manager not initialized' };
       }
-      console.log('[Aider] Running prompt:', message.substring(0, 100) + '...');
-      const result = await aiderBridge.runPrompt(message);
-      console.log('[Aider] Prompt result:', result.success ? 'Success' : 'Failed');
-      return result;
+      const log = branchAiderManager.getOrchestrationLog();
+      return { success: true, log: log || '' };
     } catch (error) {
-      console.error('[Aider] Run prompt failed:', error);
+      console.error('[BranchAider] Get orchestration log failed:', error);
       return { success: false, error: error.message };
     }
   });
   
-  // Run prompt with streaming
-  ipcMain.handle('aider:run-prompt-streaming', async (event, message, channel) => {
+  // Get active branches
+  ipcMain.handle('aider:get-active-branches', async () => {
     try {
-      if (!aiderBridge) {
-        throw new Error('Aider not started');
+      if (!branchAiderManager) {
+        return { success: true, branches: [] };
       }
-      console.log('[Aider] Running streaming prompt:', message.substring(0, 100) + '...');
-      
-      const result = await aiderBridge.runPromptStreaming(message, (token) => {
-        event.sender.send(channel, { type: 'token', token });
-      });
-      
-      event.sender.send(channel, { type: 'done', result });
-      return result;
+      const branches = branchAiderManager.getActiveBranches();
+      return { success: true, branches };
     } catch (error) {
-      console.error('[Aider] Streaming prompt failed:', error);
-      event.sender.send(channel, { type: 'error', error: error.message });
+      console.error('[BranchAider] Get active branches failed:', error);
       return { success: false, error: error.message };
     }
-  });
-  
-  // Add files
-  ipcMain.handle('aider:add-files', async (event, filePaths) => {
-    try {
-      if (!aiderBridge) {
-        throw new Error('Aider not started');
-      }
-      const result = await aiderBridge.addFiles(filePaths);
-      console.log('[Aider] Added files:', filePaths);
-      return result;
-    } catch (error) {
-      console.error('[Aider] Add files failed:', error);
-      return { success: false, error: error.message };
-    }
-  });
-  
-  // Remove files
-  ipcMain.handle('aider:remove-files', async (event, filePaths) => {
-    try {
-      if (!aiderBridge) {
-        throw new Error('Aider not started');
-      }
-      const result = await aiderBridge.removeFiles(filePaths);
-      console.log('[Aider] Removed files:', filePaths);
-      return result;
-    } catch (error) {
-      console.error('[Aider] Remove files failed:', error);
-      return { success: false, error: error.message };
-    }
-  });
-  
-  // Get repo map
-  ipcMain.handle('aider:get-repo-map', async () => {
-    try {
-      if (!aiderBridge) {
-        throw new Error('Aider not started');
-      }
-      const result = await aiderBridge.getRepoMap();
-      return result;
-    } catch (error) {
-      console.error('[Aider] Get repo map failed:', error);
-      return { success: false, error: error.message };
-    }
-  });
-  
-  // Set test command
-  ipcMain.handle('aider:set-test-cmd', async (event, command) => {
-    try {
-      if (!aiderBridge) {
-        throw new Error('Aider not started');
-      }
-      const result = await aiderBridge.setTestCmd(command);
-      console.log('[Aider] Set test command:', command);
-      return result;
-    } catch (error) {
-      console.error('[Aider] Set test command failed:', error);
-      return { success: false, error: error.message };
-    }
-  });
-  
-  // Set lint command
-  ipcMain.handle('aider:set-lint-cmd', async (event, command) => {
-    try {
-      if (!aiderBridge) {
-        throw new Error('Aider not started');
-      }
-      const result = await aiderBridge.setLintCmd(command);
-      console.log('[Aider] Set lint command:', command);
-      return result;
-    } catch (error) {
-      console.error('[Aider] Set lint command failed:', error);
-      return { success: false, error: error.message };
-    }
-  });
-  
-  // Shutdown
-  ipcMain.handle('aider:shutdown', async () => {
-    try {
-      if (aiderBridge) {
-        await aiderBridge.shutdown();
-        aiderBridge = null;
-        console.log('[Aider] Shutdown complete');
-      }
-      return { success: true };
-    } catch (error) {
-      console.error('[Aider] Shutdown failed:', error);
-      return { success: false, error: error.message };
-    }
-  });
-  
-  // Get app path for Aider
-  ipcMain.handle('aider:get-app-path', async () => {
-    return app.getAppPath();
-  });
-  
-  // Select folder dialog for Aider
-  ipcMain.handle('aider:select-folder', async () => {
-    const { dialog } = require('electron');
-    const result = await dialog.showOpenDialog({
-      properties: ['openDirectory'],
-      title: 'Select Project Folder'
-    });
-    
-    if (result.canceled || result.filePaths.length === 0) {
-      return null;
-    }
-    
-    return result.filePaths[0];
   });
   
   // Dialog handlers for Video Editor and other tools
@@ -1888,28 +2049,12 @@ function setupAiderIPC() {
 
   // Get API configuration for Aider UI
   ipcMain.handle('aider:get-api-config', async () => {
-    // #region agent log
-    console.log('[GSX-DEBUG] H3: aider:get-api-config handler invoked');
-    const http = require('http');
-    const logH3Start = JSON.stringify({location:'main.js:aider:get-api-config',message:'H3: Getting API config',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'});
-    const reqH3Start = http.request({hostname:'127.0.0.1',port:7242,path:'/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',method:'POST',headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(logH3Start)}},()=>{});
-    reqH3Start.on('error',()=>{});
-    reqH3Start.write(logH3Start);
-    reqH3Start.end();
-    // #endregion
     const { getSettingsManager } = require('./settings-manager');
     const settings = getSettingsManager();
     
     const apiKey = settings.getLLMApiKey();
     const provider = settings.getLLMProvider();
     
-    // #region agent log
-    const logH3Result = JSON.stringify({location:'main.js:aider:get-api-config:result',message:'H3: API config result',data:{hasApiKey:!!apiKey,provider:provider||'anthropic'},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'});
-    const reqH3Result = http.request({hostname:'127.0.0.1',port:7242,path:'/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',method:'POST',headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(logH3Result)}},()=>{});
-    reqH3Result.on('error',()=>{});
-    reqH3Result.write(logH3Result);
-    reqH3Result.end();
-    // #endregion
     return {
       hasApiKey: !!apiKey,
       provider: provider || 'anthropic',
@@ -1917,17 +2062,184 @@ function setupAiderIPC() {
     };
   });
   
+  // Evaluate content using LLM (runs in main process with access to API key)
+  ipcMain.handle('aider:evaluate', async (event, systemPrompt, userPrompt, modelName) => {
+    console.log('[GSX Create] Evaluation request received, model:', modelName);
+    try {
+      const { getSettingsManager } = require('./settings-manager');
+      const settings = getSettingsManager();
+      
+      const apiKey = settings.getLLMApiKey();
+      
+      if (!apiKey) {
+        throw new Error('No API key configured. Please add your API key in Settings.');
+      }
+      
+      // Determine provider from model name
+      const isOpenAI = modelName && (modelName.startsWith('gpt-') || modelName.startsWith('o1') || modelName.startsWith('o3'));
+      const isAnthropic = modelName && modelName.startsWith('claude');
+      
+      // Use the passed model, or fall back to settings - GSX Create only uses Claude 4.5 models
+      const provider = isOpenAI ? 'openai' : (isAnthropic ? 'anthropic' : (settings.getLLMProvider() || 'anthropic'));
+      const model = modelName || 'claude-opus-4-5-20251101';
+      
+      console.log('[GSX Create] Using provider:', provider, 'model:', model);
+      
+      let response;
+      
+      if (provider === 'openai') {
+        // OpenAI API call
+        response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: model,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt }
+            ],
+            temperature: 0.7,
+            max_tokens: 4000
+          })
+        });
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
+        }
+        
+        const data = await response.json();
+        return { success: true, content: data.choices[0].message.content };
+        
+      } else {
+        // ============================================================
+        // ANTHROPIC API CALL - CLAUDE 4.5 MODELS ONLY
+        // ============================================================
+        // IMPORTANT: Only use Claude 4.5 models (Opus 4.5 or Sonnet 4.5)
+        // NO FALLBACK to older models - if 4.5 not available, wait and retry
+        // Allowed models:
+        //   - claude-opus-4-5-20251101   (for complex analysis, coding)
+        //   - claude-sonnet-4-5-20250929 (for general tasks)
+        // DO NOT USE older models like claude-3-opus, claude-3-5-sonnet, etc.
+        // Exception: Image/voice tasks may use specialized models
+        // ============================================================
+        
+        console.log('[GSX Create] Making API request with Claude 4.5 model:', model);
+        
+        // Validate model is Claude 4.5
+        // Correct model names (as of Dec 2025):
+        //   - claude-sonnet-4-5-20250929  (Sonnet 4.5, released Sept 29, 2025)
+        //   - claude-opus-4-5-20251101    (Opus 4.5, released Nov 1, 2025)
+        if (!model.includes('4-5') && !model.includes('4.5')) {
+          console.warn('[GSX Create] WARNING: Non-4.5 model requested:', model);
+          console.warn('[GSX Create] Forcing to claude-opus-4-5-20251101');
+          model = 'claude-opus-4-5-20251101';
+        }
+        
+        const requestBody = {
+          model: model,
+          max_tokens: 4096,
+          system: systemPrompt,
+          messages: [
+            { role: 'user', content: userPrompt }
+          ]
+        };
+        
+        // Retry logic with exponential backoff for Claude 4.5 models
+        // If model not available, wait and retry (do NOT fallback to older models)
+        const maxRetries = 10;
+        const maxWaitSeconds = 30;
+        let waitSeconds = 1;
+        let lastError = null;
+        
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+          console.log(`[GSX Create] Attempt ${attempt}/${maxRetries} with model: ${model}`);
+          
+          try {
+            response = await fetch('https://api.anthropic.com/v1/messages', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': apiKey,
+                'anthropic-version': '2023-06-01'
+              },
+              body: JSON.stringify(requestBody)
+            });
+            
+            if (!response.ok) {
+              const errorText = await response.text();
+              console.error('[GSX Create] API error:', response.status, errorText);
+              
+              try {
+                const errorJson = JSON.parse(errorText);
+                lastError = errorJson.error?.message || errorText;
+                
+                // If model not found (404), wait and retry - DO NOT fallback
+                if (response.status === 404 || errorJson.error?.type === 'not_found_error') {
+                  if (attempt < maxRetries) {
+                    console.log(`[GSX Create] Model ${model} not available yet, waiting ${waitSeconds}s before retry...`);
+                    await new Promise(resolve => setTimeout(resolve, waitSeconds * 1000));
+                    waitSeconds = Math.min(waitSeconds * 2, maxWaitSeconds);
+                    continue;
+                  }
+                }
+              } catch (e) {
+                lastError = errorText;
+              }
+              
+              throw new Error(`Anthropic API error: ${response.status} - ${lastError}`);
+            }
+            
+            // Success!
+            const data = await response.json();
+            
+            let responseText = '';
+            if (data.content) {
+              for (const block of data.content) {
+                if (block.type === 'text') {
+                  responseText += block.text;
+                }
+              }
+            }
+            
+            console.log('[GSX Create] Claude 4.5 API success, response length:', responseText.length);
+            return { 
+              success: true, 
+              content: responseText || data.content?.[0]?.text,
+              model: model,
+              usage: data.usage
+            };
+            
+          } catch (fetchError) {
+            lastError = fetchError.message;
+            
+            // Network errors - retry
+            if (attempt < maxRetries && (fetchError.message.includes('fetch') || fetchError.message.includes('network'))) {
+              console.log(`[GSX Create] Network error, waiting ${waitSeconds}s before retry...`);
+              await new Promise(resolve => setTimeout(resolve, waitSeconds * 1000));
+              waitSeconds = Math.min(waitSeconds * 2, maxWaitSeconds);
+              continue;
+            }
+            
+            throw fetchError;
+          }
+        }
+        
+        // All retries exhausted - no fallback, just fail
+        throw new Error(`Claude 4.5 model ${model} not available after ${maxRetries} retries. Last error: ${lastError}`);
+      }
+      
+    } catch (error) {
+      console.error('[GSX Create] Evaluation error:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
   // Get spaces with folder paths for GSX Create
   ipcMain.handle('aider:get-spaces', async () => {
-    // #region agent log
-    console.log('[GSX-DEBUG] H2: aider:get-spaces handler invoked');
-    const http = require('http');
-    const logH2Start = JSON.stringify({location:'main.js:aider:get-spaces',message:'H2: Getting spaces for GSX Create',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'});
-    const reqH2Start = http.request({hostname:'127.0.0.1',port:7242,path:'/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',method:'POST',headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(logH2Start)}},()=>{});
-    reqH2Start.on('error',()=>{});
-    reqH2Start.write(logH2Start);
-    reqH2Start.end();
-    // #endregion
     try {
       const ClipboardStorage = require('./clipboard-storage-v2');
       const storage = new ClipboardStorage();
@@ -1947,22 +2259,8 @@ function setupAiderIPC() {
           itemCount: itemCount
         };
       });
-      // #region agent log
-      const logH2Result = JSON.stringify({location:'main.js:aider:get-spaces:result',message:'H2: Spaces loaded',data:{spaceCount:result.length,spaceNames:result.map(s=>s.name)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'});
-      const reqH2Result = http.request({hostname:'127.0.0.1',port:7242,path:'/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',method:'POST',headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(logH2Result)}},()=>{});
-      reqH2Result.on('error',()=>{});
-      reqH2Result.write(logH2Result);
-      reqH2Result.end();
-      // #endregion
       return result;
     } catch (error) {
-      // #region agent log
-      const logH2Error = JSON.stringify({location:'main.js:aider:get-spaces:error',message:'H2: Failed to get spaces',data:{error:error.message},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'});
-      const reqH2Error = http.request({hostname:'127.0.0.1',port:7242,path:'/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',method:'POST',headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(logH2Error)}},()=>{});
-      reqH2Error.on('error',()=>{});
-      reqH2Error.write(logH2Error);
-      reqH2Error.end();
-      // #endregion
       console.error('[GSX Create] Failed to get spaces:', error);
       return [];
     }
@@ -2189,14 +2487,6 @@ function setupAiderIPC() {
   
   // Read a file
   ipcMain.handle('aider:read-file', async (event, filePath) => {
-    // #region agent log
-    const http = require('http');
-    const logH4Read = JSON.stringify({location:'main.js:aider:read-file',message:'H4: Reading file',data:{filePath:filePath},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'});
-    const reqH4Read = http.request({hostname:'127.0.0.1',port:7242,path:'/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',method:'POST',headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(logH4Read)}},()=>{});
-    reqH4Read.on('error',()=>{});
-    reqH4Read.write(logH4Read);
-    reqH4Read.end();
-    // #endregion
     try {
       if (!filePath || typeof filePath !== 'string') {
         console.error('[GSX Create] Invalid file path:', filePath);
@@ -2208,13 +2498,6 @@ function setupAiderIPC() {
         return null;
       }
       const content = fs.readFileSync(filePath, 'utf-8');
-      // #region agent log
-      const logH4ReadOk = JSON.stringify({location:'main.js:aider:read-file:success',message:'H4: File read OK',data:{filePath:filePath,contentLength:content.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'});
-      const reqH4ReadOk = http.request({hostname:'127.0.0.1',port:7242,path:'/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',method:'POST',headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(logH4ReadOk)}},()=>{});
-      reqH4ReadOk.on('error',()=>{});
-      reqH4ReadOk.write(logH4ReadOk);
-      reqH4ReadOk.end();
-      // #endregion
       return content;
     } catch (error) {
       console.error('[GSX Create] Failed to read file:', filePath, error.message || error);
@@ -2237,6 +2520,637 @@ function setupAiderIPC() {
       return { success: true };
     } catch (error) {
       console.error('[GSX Create] Failed to write file:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Delete a file from the project
+  ipcMain.handle('aider:delete-file', async (event, filePath) => {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      
+      // Security check - only allow deletion within spaces directory
+      const spacesRoot = path.join(require('os').homedir(), 'Documents', 'OR-Spaces', 'spaces');
+      const resolvedPath = path.resolve(filePath);
+      
+      if (!resolvedPath.startsWith(spacesRoot)) {
+        console.error('[GSX Create] Security: Attempted to delete file outside spaces directory:', filePath);
+        return { success: false, error: 'Can only delete files within the project space' };
+      }
+      
+      if (!fs.existsSync(filePath)) {
+        return { success: false, error: 'File does not exist' };
+      }
+      
+      const stat = fs.statSync(filePath);
+      if (stat.isDirectory()) {
+        // For directories, use recursive deletion
+        fs.rmSync(filePath, { recursive: true, force: true });
+      } else {
+        fs.unlinkSync(filePath);
+      }
+      
+      console.log('[GSX Create] File deleted:', filePath);
+      return { success: true };
+    } catch (error) {
+      console.error('[GSX Create] Failed to delete file:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // ========== Version Backup/Restore System ==========
+  
+  // Backup current version to backups folder
+  ipcMain.handle('aider:backup-version', async (event, spacePath, version, metadata = {}) => {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      
+      if (!spacePath || !version) {
+        return { success: false, error: 'Space path and version required' };
+      }
+      
+      const backupsDir = path.join(spacePath, 'backups');
+      const versionDir = path.join(backupsDir, `v${version}`);
+      
+      // Create backups directory if needed
+      if (!fs.existsSync(backupsDir)) {
+        fs.mkdirSync(backupsDir, { recursive: true });
+      }
+      
+      // If version backup exists, skip (don't overwrite)
+      if (fs.existsSync(versionDir)) {
+        console.log('[GSX Create] Version backup already exists:', versionDir);
+        return { success: true, alreadyExists: true, path: versionDir };
+      }
+      
+      fs.mkdirSync(versionDir, { recursive: true });
+      
+      // Get all files in space (excluding backups and branches folders)
+      const files = fs.readdirSync(spacePath);
+      const excludeDirs = ['backups', 'branches', 'node_modules', '.git'];
+      const backedUpFiles = [];
+      
+      for (const file of files) {
+        if (excludeDirs.includes(file)) continue;
+        
+        const srcPath = path.join(spacePath, file);
+        const destPath = path.join(versionDir, file);
+        const stat = fs.statSync(srcPath);
+        
+        if (stat.isDirectory()) {
+          // Recursively copy directory
+          copyDirSync(srcPath, destPath);
+          backedUpFiles.push(file + '/');
+        } else {
+          fs.copyFileSync(srcPath, destPath);
+          backedUpFiles.push(file);
+        }
+      }
+      
+      // Save version metadata
+      const versionInfo = {
+        version: version,
+        timestamp: new Date().toISOString(),
+        score: metadata.score || 0,
+        objective: metadata.objective || '',
+        approach: metadata.approach || '',
+        model: metadata.model || '',
+        files: backedUpFiles,
+        ...metadata
+      };
+      
+      fs.writeFileSync(
+        path.join(versionDir, 'version-info.json'),
+        JSON.stringify(versionInfo, null, 2)
+      );
+      
+      console.log('[GSX Create] Version backup created:', versionDir, 'Files:', backedUpFiles.length);
+      return { success: true, path: versionDir, files: backedUpFiles };
+      
+    } catch (error) {
+      console.error('[GSX Create] Backup version failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Helper function to copy directory recursively
+  function copyDirSync(src, dest) {
+    const fs = require('fs');
+    const path = require('path');
+    
+    fs.mkdirSync(dest, { recursive: true });
+    const entries = fs.readdirSync(src, { withFileTypes: true });
+    
+    for (const entry of entries) {
+      const srcPath = path.join(src, entry.name);
+      const destPath = path.join(dest, entry.name);
+      
+      if (entry.isDirectory()) {
+        copyDirSync(srcPath, destPath);
+      } else {
+        fs.copyFileSync(srcPath, destPath);
+      }
+    }
+  }
+  
+  // Restore version from backup
+  ipcMain.handle('aider:restore-version', async (event, spacePath, version, createBackupFirst = true) => {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      
+      if (!spacePath || !version) {
+        return { success: false, error: 'Space path and version required' };
+      }
+      
+      const backupsDir = path.join(spacePath, 'backups');
+      const versionDir = path.join(backupsDir, `v${version}`);
+      
+      if (!fs.existsSync(versionDir)) {
+        return { success: false, error: `Version v${version} backup not found` };
+      }
+      
+      // Read version info
+      const versionInfoPath = path.join(versionDir, 'version-info.json');
+      let versionInfo = {};
+      if (fs.existsSync(versionInfoPath)) {
+        versionInfo = JSON.parse(fs.readFileSync(versionInfoPath, 'utf-8'));
+      }
+      
+      // Get files from backup (excluding version-info.json)
+      const backupFiles = fs.readdirSync(versionDir).filter(f => f !== 'version-info.json');
+      const excludeDirs = ['backups', 'branches', 'node_modules', '.git'];
+      
+      // Restore files
+      const restoredFiles = [];
+      for (const file of backupFiles) {
+        const srcPath = path.join(versionDir, file);
+        const destPath = path.join(spacePath, file);
+        const stat = fs.statSync(srcPath);
+        
+        if (stat.isDirectory()) {
+          // Remove existing directory first
+          if (fs.existsSync(destPath)) {
+            fs.rmSync(destPath, { recursive: true, force: true });
+          }
+          copyDirSync(srcPath, destPath);
+          restoredFiles.push(file + '/');
+        } else {
+          fs.copyFileSync(srcPath, destPath);
+          restoredFiles.push(file);
+        }
+      }
+      
+      console.log('[GSX Create] Version restored:', version, 'Files:', restoredFiles.length);
+      return { 
+        success: true, 
+        version: version,
+        files: restoredFiles,
+        versionInfo: versionInfo
+      };
+      
+    } catch (error) {
+      console.error('[GSX Create] Restore version failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // List available version backups
+  ipcMain.handle('aider:list-backups', async (event, spacePath) => {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      
+      if (!spacePath) {
+        return { success: false, error: 'Space path required' };
+      }
+      
+      const backupsDir = path.join(spacePath, 'backups');
+      
+      if (!fs.existsSync(backupsDir)) {
+        return { success: true, backups: [] };
+      }
+      
+      const versions = fs.readdirSync(backupsDir)
+        .filter(d => d.startsWith('v') && fs.statSync(path.join(backupsDir, d)).isDirectory())
+        .map(d => {
+          const versionDir = path.join(backupsDir, d);
+          const infoPath = path.join(versionDir, 'version-info.json');
+          let info = { version: d.replace('v', '') };
+          
+          if (fs.existsSync(infoPath)) {
+            try {
+              info = { ...info, ...JSON.parse(fs.readFileSync(infoPath, 'utf-8')) };
+            } catch (e) {
+              console.error('[GSX Create] Error reading version info:', e);
+            }
+          }
+          
+          return info;
+        })
+        .sort((a, b) => Number(b.version) - Number(a.version));
+      
+      return { success: true, backups: versions };
+      
+    } catch (error) {
+      console.error('[GSX Create] List backups failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // ========== Branch System for Parallel Versions ==========
+  
+  // Create a new branch from current state
+  ipcMain.handle('aider:create-branch', async (event, spacePath, branchId, metadata = {}) => {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      
+      if (!spacePath || !branchId) {
+        return { success: false, error: 'Space path and branch ID required' };
+      }
+      
+      const branchesDir = path.join(spacePath, 'branches');
+      const branchDir = path.join(branchesDir, branchId);
+      
+      // Create branches directory if needed
+      if (!fs.existsSync(branchesDir)) {
+        fs.mkdirSync(branchesDir, { recursive: true });
+      }
+      
+      // Create branch directory
+      fs.mkdirSync(branchDir, { recursive: true });
+      
+      // Copy current files to branch
+      const files = fs.readdirSync(spacePath);
+      const excludeDirs = ['backups', 'branches', 'node_modules', '.git'];
+      const branchFiles = [];
+      
+      for (const file of files) {
+        if (excludeDirs.includes(file)) continue;
+        
+        const srcPath = path.join(spacePath, file);
+        const destPath = path.join(branchDir, file);
+        const stat = fs.statSync(srcPath);
+        
+        if (stat.isDirectory()) {
+          copyDirSync(srcPath, destPath);
+          branchFiles.push(file + '/');
+        } else {
+          fs.copyFileSync(srcPath, destPath);
+          branchFiles.push(file);
+        }
+      }
+      
+      // Save branch metadata
+      const branchInfo = {
+        branchId: branchId,
+        createdAt: new Date().toISOString(),
+        status: 'pending',
+        approach: metadata.approach || '',
+        model: metadata.model || '',
+        instructions: metadata.instructions || '',
+        score: 0,
+        cost: 0,
+        files: branchFiles,
+        ...metadata
+      };
+      
+      fs.writeFileSync(
+        path.join(branchDir, 'branch-info.json'),
+        JSON.stringify(branchInfo, null, 2)
+      );
+      
+      console.log('[GSX Create] Branch created:', branchId);
+      return { success: true, branchId: branchId, path: branchDir, files: branchFiles };
+      
+    } catch (error) {
+      console.error('[GSX Create] Create branch failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // List branches
+  ipcMain.handle('aider:list-branches', async (event, spacePath) => {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      
+      if (!spacePath) {
+        return { success: false, error: 'Space path required' };
+      }
+      
+      const branchesDir = path.join(spacePath, 'branches');
+      
+      if (!fs.existsSync(branchesDir)) {
+        return { success: true, branches: [] };
+      }
+      
+      const branches = fs.readdirSync(branchesDir)
+        .filter(d => fs.statSync(path.join(branchesDir, d)).isDirectory())
+        .map(d => {
+          const branchDir = path.join(branchesDir, d);
+          const infoPath = path.join(branchDir, 'branch-info.json');
+          let info = { branchId: d };
+          
+          if (fs.existsSync(infoPath)) {
+            try {
+              info = { ...info, ...JSON.parse(fs.readFileSync(infoPath, 'utf-8')) };
+            } catch (e) {
+              console.error('[GSX Create] Error reading branch info:', e);
+            }
+          }
+          
+          return info;
+        });
+      
+      return { success: true, branches: branches };
+      
+    } catch (error) {
+      console.error('[GSX Create] List branches failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Update branch info
+  ipcMain.handle('aider:update-branch', async (event, spacePath, branchId, updates) => {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      
+      const branchDir = path.join(spacePath, 'branches', branchId);
+      const infoPath = path.join(branchDir, 'branch-info.json');
+      
+      if (!fs.existsSync(branchDir)) {
+        return { success: false, error: 'Branch not found' };
+      }
+      
+      let info = { branchId: branchId };
+      if (fs.existsSync(infoPath)) {
+        info = JSON.parse(fs.readFileSync(infoPath, 'utf-8'));
+      }
+      
+      info = { ...info, ...updates, updatedAt: new Date().toISOString() };
+      fs.writeFileSync(infoPath, JSON.stringify(info, null, 2));
+      
+      return { success: true, branchInfo: info };
+      
+    } catch (error) {
+      console.error('[GSX Create] Update branch failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Promote branch to main (copy branch files to space root)
+  ipcMain.handle('aider:promote-branch', async (event, spacePath, branchId) => {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      
+      const branchDir = path.join(spacePath, 'branches', branchId);
+      
+      if (!fs.existsSync(branchDir)) {
+        return { success: false, error: 'Branch not found' };
+      }
+      
+      // Get files from branch
+      const branchFiles = fs.readdirSync(branchDir).filter(f => f !== 'branch-info.json');
+      const excludeDirs = ['backups', 'branches', 'node_modules', '.git'];
+      
+      // Copy branch files to space root
+      const promotedFiles = [];
+      for (const file of branchFiles) {
+        const srcPath = path.join(branchDir, file);
+        const destPath = path.join(spacePath, file);
+        const stat = fs.statSync(srcPath);
+        
+        if (stat.isDirectory()) {
+          if (fs.existsSync(destPath)) {
+            fs.rmSync(destPath, { recursive: true, force: true });
+          }
+          copyDirSync(srcPath, destPath);
+          promotedFiles.push(file + '/');
+        } else {
+          fs.copyFileSync(srcPath, destPath);
+          promotedFiles.push(file);
+        }
+      }
+      
+      console.log('[GSX Create] Branch promoted:', branchId, 'Files:', promotedFiles.length);
+      return { success: true, branchId: branchId, files: promotedFiles };
+      
+    } catch (error) {
+      console.error('[GSX Create] Promote branch failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Delete branch
+  ipcMain.handle('aider:delete-branch', async (event, spacePath, branchId) => {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      
+      const branchDir = path.join(spacePath, 'branches', branchId);
+      
+      if (!fs.existsSync(branchDir)) {
+        return { success: true }; // Already deleted
+      }
+      
+      fs.rmSync(branchDir, { recursive: true, force: true });
+      console.log('[GSX Create] Branch deleted:', branchId);
+      return { success: true };
+      
+    } catch (error) {
+      console.error('[GSX Create] Delete branch failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // ========== Git Branch Operations for Tabbed UI ==========
+  
+  // Create a new git branch
+  ipcMain.handle('aider:git-create-branch', async (event, repoPath, branchName, baseBranch = 'main') => {
+    try {
+      const { execSync } = require('child_process');
+      
+      if (!repoPath || !branchName) {
+        return { success: false, error: 'Missing required parameters' };
+      }
+      
+      // Create and switch to new branch
+      execSync(`git checkout -b ${branchName} ${baseBranch}`, { 
+        cwd: repoPath,
+        encoding: 'utf-8'
+      });
+      
+      console.log('[GSX Create] Git branch created:', branchName, 'from', baseBranch);
+      return { success: true, branch: branchName };
+      
+    } catch (error) {
+      console.error('[GSX Create] Git create branch failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Switch to a git branch
+  ipcMain.handle('aider:git-switch-branch', async (event, repoPath, branchName) => {
+    try {
+      const { execSync } = require('child_process');
+      
+      if (!repoPath || !branchName) {
+        return { success: false, error: 'Missing required parameters' };
+      }
+      
+      execSync(`git checkout ${branchName}`, { 
+        cwd: repoPath,
+        encoding: 'utf-8'
+      });
+      
+      console.log('[GSX Create] Switched to git branch:', branchName);
+      return { success: true, branch: branchName };
+      
+    } catch (error) {
+      console.error('[GSX Create] Git switch branch failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Delete a git branch
+  ipcMain.handle('aider:git-delete-branch', async (event, repoPath, branchName) => {
+    try {
+      const { execSync } = require('child_process');
+      
+      if (!repoPath || !branchName) {
+        return { success: false, error: 'Missing required parameters' };
+      }
+      
+      // Switch to main first if on the branch being deleted
+      const currentBranch = execSync('git branch --show-current', { 
+        cwd: repoPath,
+        encoding: 'utf-8'
+      }).trim();
+      
+      if (currentBranch === branchName) {
+        execSync('git checkout main', { cwd: repoPath, encoding: 'utf-8' });
+      }
+      
+      // Delete the branch
+      execSync(`git branch -D ${branchName}`, { 
+        cwd: repoPath,
+        encoding: 'utf-8'
+      });
+      
+      console.log('[GSX Create] Git branch deleted:', branchName);
+      return { success: true };
+      
+    } catch (error) {
+      console.error('[GSX Create] Git delete branch failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Initialize git repository in a directory
+  ipcMain.handle('aider:git-init', async (event, repoPath) => {
+    const http = require('http');
+    try {
+      const { execSync } = require('child_process');
+      const fs = require('fs');
+      
+      if (!repoPath || !fs.existsSync(repoPath)) {
+        return { success: false, error: 'Invalid or missing repoPath' };
+      }
+      
+      // Check if already a git repo
+      const gitDir = path.join(repoPath, '.git');
+      if (fs.existsSync(gitDir)) {
+        return { success: true, alreadyInitialized: true };
+      }
+      
+      // Initialize git repository
+      execSync('git init', { cwd: repoPath, encoding: 'utf-8' });
+      
+      // Create initial commit with all existing files
+      execSync('git add -A', { cwd: repoPath, encoding: 'utf-8' });
+      try {
+        execSync('git commit -m "Initial commit from GSX Create"', { cwd: repoPath, encoding: 'utf-8' });
+      } catch (e) {
+        // Ignore if nothing to commit
+      }
+      
+      
+      console.log('[GSX Create] Git repository initialized at:', repoPath);
+      return { success: true, initialized: true };
+      
+    } catch (error) {
+      console.error('[GSX Create] Git init failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // List git branches
+  ipcMain.handle('aider:git-list-branches', async (event, repoPath) => {
+    try {
+      const { execSync } = require('child_process');
+      const fs = require('fs');
+      
+      if (!repoPath) {
+        return { success: false, error: 'Missing repoPath' };
+      }
+      
+      // Check if the directory exists and is a git repo
+      const gitDir = path.join(repoPath, '.git');
+      const isGitRepo = fs.existsSync(gitDir);
+      
+      if (!isGitRepo) {
+        return { success: false, error: 'Not a git repository', notGitRepo: true };
+      }
+      
+      const output = execSync('git branch -a', { 
+        cwd: repoPath,
+        encoding: 'utf-8'
+      });
+      
+      const branches = output.split('\n')
+        .map(b => b.trim().replace('* ', ''))
+        .filter(b => b && !b.startsWith('remotes/'));
+      
+      const currentBranch = execSync('git branch --show-current', { 
+        cwd: repoPath,
+        encoding: 'utf-8'
+      }).trim();
+      
+      console.log('[GSX Create] Listed git branches:', branches.length);
+      return { success: true, branches, currentBranch };
+      
+    } catch (error) {
+      console.error('[GSX Create] Git list branches failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Get diff between branches
+  ipcMain.handle('aider:git-diff-branches', async (event, repoPath, branchA, branchB) => {
+    try {
+      const { execSync } = require('child_process');
+      
+      if (!repoPath || !branchA || !branchB) {
+        return { success: false, error: 'Missing required parameters' };
+      }
+      
+      const diff = execSync(`git diff ${branchA}..${branchB}`, { 
+        cwd: repoPath,
+        encoding: 'utf-8',
+        maxBuffer: 10 * 1024 * 1024 // 10MB buffer for large diffs
+      });
+      
+      console.log('[GSX Create] Got diff between', branchA, 'and', branchB);
+      return { success: true, diff };
+      
+    } catch (error) {
+      console.error('[GSX Create] Git diff failed:', error);
       return { success: false, error: error.message };
     }
   });
@@ -2838,7 +3752,7 @@ function setupAiderIPC() {
       }
       
       const response = await client.messages.create({
-        model: settings.llmModel || 'claude-sonnet-4-20250514',
+        model: settings.llmModel || 'claude-opus-4-5-20251101',
         max_tokens: 4096,
         messages: [{
           role: 'user',
@@ -2852,7 +3766,7 @@ function setupAiderIPC() {
       return { 
         success: true, 
         analysis,
-        model: settings.llmModel || 'claude-sonnet-4-20250514',
+        model: settings.llmModel || 'claude-opus-4-5-20251101',
         usage: response.usage
       };
     } catch (error) {
@@ -2901,6 +3815,101 @@ function setupIPC() {
     console.error('[setupIPC] Failed to setup Project Manager:', error);
   }
   
+  // Web search for error diagnosis - provides up-to-date info on AI models, software versions, etc.
+  ipcMain.handle('aider:web-search', async (event, query, options = {}) => {
+    try {
+      console.log('[WebSearch] Searching for:', query);
+      const maxResults = options.maxResults || 5;
+      
+      // Use DuckDuckGo HTML search (no API key required)
+      // This fetches the lite version which is easier to parse
+      const searchUrl = `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`;
+      
+      const response = await fetch(searchUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Search failed: ${response.status}`);
+      }
+      
+      const html = await response.text();
+      
+      // Parse results from DuckDuckGo lite HTML
+      const results = [];
+      
+      // Extract result snippets and links using regex
+      // DuckDuckGo lite uses simple table structure
+      const linkRegex = /<a[^>]+class="result-link"[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/gi;
+      const snippetRegex = /<td[^>]*class="result-snippet"[^>]*>([^<]+)<\/td>/gi;
+      
+      // Simpler parsing for lite.duckduckgo.com
+      const resultBlocks = html.split(/<tr[^>]*class="result-link"/i);
+      
+      for (let i = 1; i < resultBlocks.length && results.length < maxResults; i++) {
+        const block = resultBlocks[i];
+        
+        // Extract URL
+        const urlMatch = block.match(/href="([^"]+)"/i);
+        const titleMatch = block.match(/>([^<]+)<\/a>/i);
+        
+        // Find the next snippet
+        const snippetMatch = block.match(/class="result-snippet"[^>]*>([^<]*)</i);
+        
+        if (urlMatch && titleMatch) {
+          results.push({
+            title: titleMatch[1].trim(),
+            url: urlMatch[1],
+            snippet: snippetMatch ? snippetMatch[1].trim() : ''
+          });
+        }
+      }
+      
+      // If regex parsing didn't work well, try a simpler approach
+      if (results.length === 0) {
+        // Alternative: look for any href patterns that look like search results
+        const allLinks = html.match(/<a[^>]+href="(https?:\/\/[^"]+)"[^>]*>([^<]+)<\/a>/gi) || [];
+        
+        for (const link of allLinks.slice(0, maxResults)) {
+          const urlMatch = link.match(/href="(https?:\/\/[^"]+)"/i);
+          const textMatch = link.match(/>([^<]+)<\/a>/i);
+          
+          if (urlMatch && textMatch) {
+            const url = urlMatch[1];
+            // Filter out DuckDuckGo internal links
+            if (!url.includes('duckduckgo.com') && !url.includes('duck.co')) {
+              results.push({
+                title: textMatch[1].trim(),
+                url: url,
+                snippet: ''
+              });
+            }
+          }
+        }
+      }
+      
+      console.log('[WebSearch] Found', results.length, 'results');
+      
+      return {
+        success: true,
+        query: query,
+        results: results,
+        timestamp: new Date().toISOString()
+      };
+      
+    } catch (error) {
+      console.error('[WebSearch] Error:', error.message);
+      return {
+        success: false,
+        error: error.message,
+        query: query,
+        results: []
+      };
+    }
+  });
+  
   // Settings IPC handlers
   console.log('[setupIPC] Setting up settings handlers');
   
@@ -2934,7 +3943,8 @@ function setupIPC() {
       console.error('Settings manager not initialized');
       return {};
     }
-    return settingsManager.getAll();
+    const allSettings = settingsManager.getAll();
+    return allSettings;
   });
   
   ipcMain.handle('settings:save', async (event, settings) => {
@@ -3382,31 +4392,12 @@ function setupIPC() {
     }
   });
 
-  // Alias for clipboard:get-spaces (consistent naming)
-  ipcMain.handle('clipboard:get-spaces', async (event) => {
-    try {
-      const ClipboardStorage = require('./clipboard-storage-v2');
-      const storage = new ClipboardStorage();
-      const spaces = storage.index.spaces || [];
-      return spaces;
-    } catch (error) {
-      console.error('[Clipboard] Error getting spaces:', error);
-      return [];
-    }
-  });
-
-  // Get all items from a space
-  ipcMain.handle('clipboard:get-space-items', async (event, spaceId) => {
-    try {
-      const ClipboardStorage = require('./clipboard-storage-v2');
-      const storage = new ClipboardStorage();
-      const items = storage.getSpaceItems(spaceId);
-      return items || [];
-    } catch (error) {
-      console.error('[Clipboard] Error getting space items:', error);
-      return [];
-    }
-  });
+  // NOTE: Space management handlers (clipboard:get-spaces, clipboard:create-space, 
+  // clipboard:update-space, clipboard:delete-space, clipboard:set-current-space, 
+  // clipboard:move-to-space) are registered in clipboard-manager-v2-adapter.js
+  // Using the singleton ClipboardManagerV2 instance ensures consistent in-memory state
+  // and prevents issues with multiple ClipboardStorage instances causing stale data
+  // Also includes: clipboard:get-space-items
 
   // Get audio items from a space
   ipcMain.handle('clipboard:get-space-audio', async (event, spaceId) => {
@@ -3863,8 +4854,9 @@ function setupIPC() {
     } else {
       // If no environments in localStorage, try reading from file as fallback
       try {
-        if (fs.existsSync(idwConfigPath)) {
-          const data = fs.readFileSync(idwConfigPath, 'utf8');
+        const configPath = getIdwConfigPath();
+        if (fs.existsSync(configPath)) {
+          const data = fs.readFileSync(configPath, 'utf8');
           const idwEnvironments = JSON.parse(data);
           console.log(`Found ${idwEnvironments.length} IDW environments in config file`);
           updateApplicationMenu(idwEnvironments);
@@ -5043,25 +6035,24 @@ function setupIPC() {
     }
   });
 
-  // Handle get-idw-environments request
-  ipcMain.on('get-idw-environments', (event) => {
-    try {
-      const idwConfig = JSON.parse(fs.readFileSync(idwConfigPath, 'utf8'));
-      event.reply('get-idw-environments', idwConfig);
-    } catch (error) {
-      console.error('Error reading IDW config file:', error);
-      event.reply('get-idw-environments', []);
-    }
-  });
+  // NOTE: get-idw-environments is now handled by MenuDataManager (menu-data-manager.js)
+  // The handler provides: validation, caching, atomic saves, and debounced menu updates
+  // Use: global.menuDataManager.getIDWEnvironments() for programmatic access
 
-  // Handle synchronous get-idw-entries request
+  // Handle synchronous get-idw-entries request (legacy support)
   ipcMain.on('get-idw-entries', (event) => {
     try {
-      if (fs.existsSync(idwConfigPath)) {
-        const idwConfig = JSON.parse(fs.readFileSync(idwConfigPath, 'utf8'));
-        event.returnValue = idwConfig;
+      // Use MenuDataManager if available, otherwise fall back to file
+      if (global.menuDataManager) {
+        event.returnValue = global.menuDataManager.getIDWEnvironments();
       } else {
-        event.returnValue = [];
+        const configPath = getIdwConfigPath();
+        if (fs.existsSync(configPath)) {
+          const idwConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+          event.returnValue = idwConfig;
+        } else {
+          event.returnValue = [];
+        }
       }
     } catch (error) {
       console.error('Error reading IDW entries:', error);
@@ -6027,36 +7018,9 @@ function setupIPC() {
   // so we don't crash with "registerGlobalShortcuts is not defined".
   global.registerGlobalShortcuts = registerGlobalShortcuts;
   
-  // Handle refresh menu request
-  ipcMain.on('refresh-menu', (event) => {
-    console.log('='.repeat(70));
-    console.log('[REFRESH-MENU] 🔵 Handler called!');
-    try {
-      // Reload IDW environments from file AND settings
-      const idwConfigPath = path.join(app.getPath('userData'), 'idw-entries.json');
-      
-      // Try settings first
-      let idwEnvironments = global.settingsManager.get('idwEnvironments') || [];
-      console.log(`[REFRESH-MENU] Loaded ${idwEnvironments.length} IDWs from settings`);
-      
-      // Fallback to file if settings empty
-      if (idwEnvironments.length === 0 && fs.existsSync(idwConfigPath)) {
-        const data = fs.readFileSync(idwConfigPath, 'utf8');
-        idwEnvironments = JSON.parse(data);
-        console.log(`[REFRESH-MENU] Loaded ${idwEnvironments.length} IDWs from file (fallback)`);
-      }
-      
-      // Update the application menu
-      console.log('[REFRESH-MENU] Calling setApplicationMenu with', idwEnvironments.length, 'IDWs...');
-      const { setApplicationMenu } = require('./menu');
-      setApplicationMenu(idwEnvironments);
-      console.log('[REFRESH-MENU] ✅ Menu refreshed successfully!');
-      console.log('='.repeat(70));
-    } catch (error) {
-      console.error('[REFRESH-MENU] ❌ Error refreshing menu:', error);
-      console.error('[REFRESH-MENU] Stack:', error.stack);
-    }
-  });
+  // NOTE: refresh-menu handler is now managed by MenuDataManager (menu-data-manager.js)
+  // This provides single source of truth and prevents duplicate handler registration
+  // See: getMenuDataManager().forceRefresh() for programmatic refresh
   
   // Handle menu actions from the menu.js
   ipcMain.on('menu-action', (event, data) => {
@@ -7120,6 +8084,7 @@ function setupIPC() {
       }
       
       // Test the connection with a simple request
+      // Using Claude 4.5 Sonnet for consistency - only 4.5 models allowed
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -7128,7 +8093,7 @@ function setupIPC() {
           'anthropic-version': '2023-06-01'
         },
         body: JSON.stringify({
-          model: 'claude-3-haiku-20240307',
+          model: 'claude-sonnet-4-5-20250929',  // Claude 4.5 only - no older models
           messages: [{ role: 'user', content: 'Hello' }],
           max_tokens: 10
         })
@@ -7511,16 +8476,17 @@ function openSetupWizard() {
   console.log('Opening setup wizard window...');
   
   // Debug existing configuration
-  console.log('Configuration path:', idwConfigPath);
+  const configPath = getIdwConfigPath();
+  console.log('Configuration path:', configPath);
   let existingConfig = [];
   try {
-    if (fs.existsSync(idwConfigPath)) {
-      const rawData = fs.readFileSync(idwConfigPath, 'utf8');
+    if (fs.existsSync(configPath)) {
+      const rawData = fs.readFileSync(configPath, 'utf8');
       console.log('Raw config data:', rawData);
       existingConfig = JSON.parse(rawData);
       console.log('Parsed IDW config:', existingConfig);
     } else {
-      console.log('No configuration file exists at', idwConfigPath);
+      console.log('No configuration file exists at', configPath);
     }
   } catch (error) {
     console.error('Error reading config:', error);
@@ -7560,8 +8526,9 @@ function openSetupWizard() {
   // Prepare the IDW config data to inject into the setup wizard
   let idwEnvironments = [];
   try {
-    if (fs.existsSync(idwConfigPath)) {
-      const configData = fs.readFileSync(idwConfigPath, 'utf8');
+    const wizardConfigPath = getIdwConfigPath();
+    if (fs.existsSync(wizardConfigPath)) {
+      const configData = fs.readFileSync(wizardConfigPath, 'utf8');
       console.log('Loaded IDW config data for setup wizard:', configData);
       try {
         idwEnvironments = JSON.parse(configData);
@@ -8382,7 +9349,7 @@ ipcMain.handle('test-agent:interactive', async (event, htmlFilePath) => {
       
       aiAnalyzer = async (data) => {
         const response = await client.messages.create({
-          model: 'claude-sonnet-4-5-20250929',
+          model: 'claude-sonnet-4-5-20250929', // Vision model for screenshot analysis
           max_tokens: 2000,
           messages: [{
             role: 'user',
@@ -8533,9 +9500,189 @@ ipcMain.handle('budget:updatePricing', async (event, provider, pricing) => {
   return budgetManager.updatePricing(provider, pricing);
 });
 
-// Reset to defaults
-ipcMain.handle('budget:resetToDefaults', async () => {
-  return budgetManager.resetToDefaults();
+// Reset to defaults - REQUIRES CONFIRMATION TOKEN
+ipcMain.handle('budget:resetToDefaults', async (event, confirmToken) => {
+  return budgetManager.resetToDefaults(confirmToken);
+});
+
+// Import data
+ipcMain.handle('budget:importData', async (event, jsonData) => {
+  return budgetManager.importData(jsonData);
+});
+
+// ==================== BUDGET CONFIGURATION ====================
+
+// Check if budget is configured
+ipcMain.handle('budget:isBudgetConfigured', async () => {
+  return budgetManager.isBudgetConfigured();
+});
+
+// Mark budget as configured
+ipcMain.handle('budget:markBudgetConfigured', async () => {
+  return budgetManager.markBudgetConfigured();
+});
+
+// ==================== ESTIMATES ====================
+
+// Get estimates for a project
+ipcMain.handle('budget:getEstimates', async (event, projectId) => {
+  return budgetManager.getEstimates(projectId);
+});
+
+// Save estimates for a project
+ipcMain.handle('budget:saveEstimates', async (event, projectId, estimates) => {
+  return budgetManager.saveEstimates(projectId, estimates);
+});
+
+// Update a single estimate
+ipcMain.handle('budget:updateEstimate', async (event, projectId, category, update) => {
+  return budgetManager.updateEstimate(projectId, category, update);
+});
+
+// Get total estimated amount
+ipcMain.handle('budget:getTotalEstimated', async (event, projectId) => {
+  return budgetManager.getTotalEstimated(projectId);
+});
+
+// Get estimate categories
+ipcMain.handle('budget:getEstimateCategories', async () => {
+  return budgetManager.getEstimateCategories();
+});
+
+// ==================== BACKUP & RESTORE ====================
+
+// Create a backup
+ipcMain.handle('budget:createBackup', async () => {
+  return budgetManager.createBackup();
+});
+
+// List available backups
+ipcMain.handle('budget:listBackups', async () => {
+  return budgetManager.listBackups();
+});
+
+// Restore from a backup
+ipcMain.handle('budget:restoreFromBackup', async (event, backupPath) => {
+  return budgetManager.restoreFromBackup(backupPath);
+});
+
+// ==================== BUDGET SETUP WIZARD ====================
+
+// Check if budget has been configured, show setup wizard if not
+function checkAndShowBudgetSetup() {
+  try {
+    if (!budgetManager) {
+      console.log('[Budget] Budget manager not initialized');
+      return;
+    }
+    
+    const isConfigured = budgetManager.isBudgetConfigured();
+    console.log('[Budget] Budget configured:', isConfigured);
+    
+    if (!isConfigured) {
+      console.log('[Budget] Budget not configured, showing setup wizard...');
+      // Small delay to let the main window fully initialize
+      setTimeout(() => {
+        openBudgetSetup();
+      }, 500);
+    }
+  } catch (error) {
+    console.error('[Budget] Error checking budget configuration:', error);
+  }
+}
+
+// Keep a reference to the budget setup window
+let budgetSetupWindow = null;
+
+// Function to open the budget setup wizard window
+function openBudgetSetup() {
+  console.log('Opening budget setup window...');
+  
+  // Check if budget setup window already exists and is not destroyed
+  if (budgetSetupWindow && !budgetSetupWindow.isDestroyed()) {
+    console.log('Budget setup window exists, focusing it');
+    budgetSetupWindow.show();
+    budgetSetupWindow.focus();
+    return;
+  }
+  
+  console.log('Creating new budget setup window');
+  
+  // Get the main window for modal parent
+  const mainWindow = browserWindow.getMainWindow();
+  
+  // Create the budget setup window
+  budgetSetupWindow = new BrowserWindow({
+    width: 650,
+    height: 700,
+    title: 'Budget Setup - Required',
+    parent: mainWindow || undefined,
+    modal: !!mainWindow, // Only modal if we have a parent
+    resizable: false,
+    minimizable: false,
+    closable: true, // User can close but will be prompted again on next launch
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload-budget.js'),
+      webSecurity: true,
+      enableRemoteModule: false,
+      sandbox: false
+    }
+  });
+  
+  // Clear the reference when the window is closed
+  budgetSetupWindow.on('closed', () => {
+    console.log('Budget setup window closed');
+    budgetSetupWindow = null;
+  });
+  
+  // Handle any load errors
+  budgetSetupWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+    console.error('Failed to load budget setup window:', errorCode, errorDescription);
+  });
+  
+  // Log when the window successfully loads
+  budgetSetupWindow.webContents.on('did-finish-load', () => {
+    console.log('Budget setup window loaded successfully');
+  });
+  
+  // Load the budget setup HTML file
+  budgetSetupWindow.loadFile('budget-setup.html').catch(err => {
+    console.error('Error loading budget-setup.html:', err);
+  });
+}
+
+// Make budget setup globally accessible
+global.openBudgetSetupGlobal = openBudgetSetup;
+
+// Open budget setup (can be called from other windows)
+ipcMain.on('open-budget-setup', () => {
+  console.log('Opening budget setup via IPC');
+  openBudgetSetup();
+});
+
+// Register budget warning callback to broadcast to all budget windows
+budgetManager.onWarning((warningInfo) => {
+  console.log('[main.js] Budget warning received:', warningInfo);
+  
+  // Broadcast to budget dashboard if open
+  if (budgetDashboardWindow && !budgetDashboardWindow.isDestroyed()) {
+    budgetDashboardWindow.webContents.send('budget:warning', warningInfo);
+  }
+  
+  // Show system notification for exceeded budgets
+  if (warningInfo.type === 'budget_exceeded') {
+    const { Notification } = require('electron');
+    if (Notification.isSupported()) {
+      const notification = new Notification({
+        title: 'Budget Exceeded',
+        body: warningInfo.message,
+        icon: path.join(__dirname, 'assets', 'icon.png')
+      });
+      notification.show();
+    }
+  }
 });
 
 // Open budget dashboard (can be called from other windows)
@@ -8556,5 +9703,6 @@ module.exports = {
   updateIDWMenu,
   updateGSXMenu,
   openBudgetDashboard,
-  openBudgetEstimator
+  openBudgetEstimator,
+  openBudgetSetup
 }; 

@@ -1,9 +1,79 @@
 const { app, net } = require('electron');
+const getLogger = require('./event-logger');
+const { getBudgetManager } = require('./budget-manager');
 
 class ClaudeAPI {
   constructor() {
     this.baseURL = 'https://api.anthropic.com/v1';
-    this.defaultModel = 'claude-sonnet-4-20250514'; // Claude Sonnet 4.5 - powerful and supports vision
+    this.defaultModel = 'claude-opus-4-5-20251101'; // Claude Opus 4.5 - most capable model
+    this.maxTokens = 1000; // Default max tokens for responses
+  }
+
+  /**
+   * Check budget before making an API call and emit warning if exceeded
+   * @param {string} operation - Operation name for tracking
+   * @param {number} estimatedInputTokens - Estimated input tokens
+   * @param {number} estimatedOutputTokens - Estimated output tokens
+   * @param {string} projectId - Optional project ID
+   */
+  checkBudgetBeforeCall(operation, estimatedInputTokens, estimatedOutputTokens, projectId = null) {
+    const logger = getLogger();
+    try {
+      const budgetManager = getBudgetManager();
+      const pricing = budgetManager.getPricing().anthropic || { inputCostPer1K: 0.015, outputCostPer1K: 0.075 };
+      const estimatedCost = (estimatedInputTokens / 1000) * pricing.inputCostPer1K + 
+                           (estimatedOutputTokens / 1000) * pricing.outputCostPer1K;
+      
+      const budgetCheck = budgetManager.checkBudgetWithWarning('anthropic', estimatedCost, operation);
+      
+      if (budgetCheck.exceeded) {
+        logger.warn('Claude API call proceeding despite budget exceeded', {
+          event: 'budget:exceeded',
+          provider: 'anthropic',
+          operation,
+          estimatedCost,
+          remaining: budgetCheck.remaining
+        });
+      }
+      
+      return budgetCheck;
+    } catch (budgetError) {
+      logger.warn('Claude budget check failed, proceeding with call', {
+        error: budgetError.message
+      });
+      return { exceeded: false, warning: null };
+    }
+  }
+
+  /**
+   * Track usage after a successful API call
+   * @param {string} operation - Operation name
+   * @param {Object} usage - Usage data from API response
+   * @param {string} projectId - Optional project ID
+   */
+  trackUsage(operation, usage, projectId = null) {
+    const logger = getLogger();
+    try {
+      const budgetManager = getBudgetManager();
+      budgetManager.trackUsage('anthropic', projectId, {
+        operation,
+        inputTokens: usage.input_tokens || 0,
+        outputTokens: usage.output_tokens || 0
+      });
+      
+      logger.info('Claude API usage tracked', {
+        event: 'api:usage',
+        provider: 'anthropic',
+        inputTokens: usage.input_tokens,
+        outputTokens: usage.output_tokens,
+        operation
+      });
+    } catch (trackingError) {
+      logger.warn('Claude API usage tracking failed', {
+        error: trackingError.message,
+        operation
+      });
+    }
   }
 
   /**
@@ -28,9 +98,17 @@ class ClaudeAPI {
     // Build the message content based on whether we have an image
     let messageContent;
     
+    const logger = getLogger();
+    
     if (imageData && contentType === 'image') {
       // For images, use Claude's vision capabilities
-      console.log('[Claude API] Using vision model to analyze image');
+      logger.info('Claude API vision request', {
+        event: 'api:request',
+        provider: 'anthropic',
+        model: this.defaultModel,
+        contentType: 'image',
+        hasCustomPrompt: !!customPrompt
+      });
       
       // Validate image data
       if (!imageData || imageData.length < 100) {
@@ -56,7 +134,10 @@ class ClaudeAPI {
         throw new Error('Image data appears to be too small or corrupted');
       }
       
-      console.log(`[Claude API] Image format: ${mediaType}, Base64 length: ${base64Data.length}`);
+      logger.debug('Claude API image data', {
+        mediaType,
+        base64Length: base64Data.length
+      });
       
       messageContent = [
         {
@@ -92,7 +173,13 @@ Respond with valid JSON only, no markdown formatting.`
       ];
     } else {
       // For non-image content, use text-only prompt
-      console.log('[Claude API] Using text-only analysis (no vision)');
+      logger.info('Claude API text request', {
+        event: 'api:request',
+        provider: 'anthropic',
+        model: this.defaultModel,
+        contentType,
+        hasCustomPrompt: !!customPrompt
+      });
       
       // Special handling for HTML content
       let analysisPrompt;
@@ -233,14 +320,28 @@ Respond with valid JSON only, no markdown formatting.`;
     try {
       // Log the message type being sent
       if (imageData) {
-        console.log('[Claude API] Sending vision request with image data length:', imageData.length);
-        console.log('[Claude API] Image data preview:', imageData.substring(0, 100));
+        logger.debug('Claude API sending vision request', {
+          imageDataLength: imageData.length
+        });
       }
+      
+      // Estimate tokens and check budget before making the call
+      const messageContentStr = typeof messageContent === 'string' 
+        ? messageContent 
+        : JSON.stringify(messageContent);
+      const estimatedInputTokens = Math.ceil(messageContentStr.length / 4);
+      const estimatedOutputTokens = this.maxTokens;
+      
+      this.checkBudgetBeforeCall(
+        `generateMetadata:${contentType}`, 
+        estimatedInputTokens, 
+        estimatedOutputTokens
+      );
       
       // Use Electron's net module for the request
       const requestData = JSON.stringify({
         model: this.defaultModel,
-        max_tokens: 1000,
+        max_tokens: this.maxTokens,
         temperature: 0.3, // Lower temperature for more consistent metadata
         messages: [{
           role: 'user',
@@ -257,11 +358,18 @@ Respond with valid JSON only, no markdown formatting.`;
         }
       }, requestData);
       
+      // Track usage from response
+      if (data.usage) {
+        this.trackUsage(`generateMetadata:${contentType}`, data.usage);
+      }
+      
       // Extract JSON from Claude's response
       const content = data.content[0].text;
       
       // Debug log the raw response
-      console.log('[Claude API] Raw response:', content.substring(0, 500) + (content.length > 500 ? '...' : ''));
+      logger.debug('Claude API response received', {
+        responseLength: content.length
+      });
       
       // Try to parse JSON from the response
       let metadata;
@@ -270,9 +378,16 @@ Respond with valid JSON only, no markdown formatting.`;
         const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) || content.match(/{[\s\S]*}/);
         const jsonStr = jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : content;
         metadata = JSON.parse(jsonStr);
-        console.log('[Claude API] Parsed metadata:', metadata);
+        logger.info('Claude API metadata parsed successfully', {
+          event: 'api:success',
+          provider: 'anthropic',
+          contentType
+        });
       } catch (parseError) {
-        console.error('Failed to parse Claude response as JSON:', content);
+        logger.warn('Claude API JSON parse failed, using fallback', {
+          error: parseError.message,
+          contentType
+        });
         // Fallback to basic extraction
         metadata = this.extractBasicMetadata(content, contentType);
       }
@@ -286,7 +401,7 @@ Respond with valid JSON only, no markdown formatting.`;
         source: metadata.source || 'unknown',
         ai_generated: metadata.ai_detected || false,
         ai_assisted: false,
-        ai_model: 'claude-sonnet-4-5',
+        ai_model: 'claude-opus-4-5',
         ai_provider: 'Anthropic',
         category: metadata.category || 'other'
       };
@@ -298,7 +413,11 @@ Respond with valid JSON only, no markdown formatting.`;
       
       return result;
     } catch (error) {
-      console.error('Claude API error:', error);
+      logger.logAPIError('/v1/messages', error, {
+        provider: 'anthropic',
+        contentType,
+        model: this.defaultModel
+      });
       throw error;
     }
   }
@@ -384,6 +503,7 @@ Respond with valid JSON only, no markdown formatting.`;
    * Test the API connection with a simple request
    */
   async testConnection(apiKey) {
+    const logger = getLogger();
     try {
       const requestData = JSON.stringify({
         model: this.defaultModel,
@@ -403,9 +523,17 @@ Respond with valid JSON only, no markdown formatting.`;
         }
       }, requestData);
 
+      logger.info('Claude API connection test successful', {
+        event: 'api:test',
+        provider: 'anthropic',
+        success: true
+      });
       return true;
     } catch (error) {
-      console.error('Claude API test failed:', error);
+      logger.logAPIError('/v1/messages', error, {
+        provider: 'anthropic',
+        operation: 'testConnection'
+      });
       return false;
     }
   }
@@ -427,12 +555,17 @@ Respond with valid JSON only, no markdown formatting.`;
 
     const {
       maxTokens = 4000,
-      temperature = 0.3
+      temperature = 0.3,
+      projectId = null
     } = options;
+
+    // Check budget before making the call
+    const estimatedInputTokens = Math.ceil(prompt.length / 4);
+    this.checkBudgetBeforeCall('analyze', estimatedInputTokens, maxTokens, projectId);
 
     try {
       const requestData = JSON.stringify({
-        model: settings.model || 'claude-sonnet-4-20250514',
+        model: settings.model || 'claude-sonnet-4-5-20250929',
         max_tokens: maxTokens,
         temperature: temperature,
         system: "You are a technical log analyzer. Analyze the provided logs and return a structured JSON response with the following fields: summary (string), issues (array of objects with title, severity, component, impact, description, fix, and optional codeChanges fields), patterns (array of strings), recommendations (array of strings), and fixes (object with immediate and longTerm arrays). Ensure the response is valid JSON that can be parsed.",
@@ -450,6 +583,11 @@ Respond with valid JSON only, no markdown formatting.`;
           'anthropic-version': '2023-06-01'
         }
       }, requestData);
+
+      // Track usage from response
+      if (data.usage) {
+        this.trackUsage('analyze', data.usage, projectId);
+      }
 
       if (data.content && data.content.length > 0) {
         const responseText = data.content[0].text;
@@ -472,7 +610,11 @@ Respond with valid JSON only, no markdown formatting.`;
             fixes: analysis.fixes || { immediate: [], longTerm: [] }
           };
         } catch (parseError) {
-          console.error('Failed to parse Claude response as JSON:', parseError);
+          const logger = getLogger();
+          logger.warn('Claude API analyze parse failed', {
+            error: parseError.message,
+            operation: 'analyze'
+          });
           // Return a structured response even if parsing fails
           return {
             summary: responseText,
@@ -486,7 +628,11 @@ Respond with valid JSON only, no markdown formatting.`;
         throw new Error('No content in Claude response');
       }
     } catch (error) {
-      console.error('Claude API error:', error);
+      const logger = getLogger();
+      logger.logAPIError('/v1/messages', error, {
+        provider: 'anthropic',
+        operation: 'analyze'
+      });
       throw error;
     }
   }

@@ -56,20 +56,51 @@ class SettingsManager {
         for (const [key, value] of Object.entries(encryptedData)) {
           if (key.includes('apiKey') || key.includes('secret') || key.includes('Token')) {
             // Decrypt sensitive data
-            // Skip Keychain decryption in dev mode to avoid password prompts
-            if (!isDev() && safeStorage.isEncryptionAvailable() && value.encrypted) {
+            // Try to decrypt if encryption is available (even in dev mode)
+            if (safeStorage.isEncryptionAvailable() && value && value.encrypted) {
               try {
                 const decrypted = safeStorage.decryptString(Buffer.from(value.data, 'base64'));
                 settings[key] = decrypted;
+                console.log(`[Settings] Successfully decrypted ${key} (${decrypted.length} chars)`);
               } catch (error) {
-                console.error(`Error decrypting ${key}:`, error);
+                console.error(`[Settings] Error decrypting ${key}:`, error);
+                // Fallback: check if there's a plain value in the regular settings file
+                try {
+                  if (fs.existsSync(this.settingsPath)) {
+                    const plainSettings = JSON.parse(fs.readFileSync(this.settingsPath, 'utf8'));
+                    if (plainSettings[key]) {
+                      settings[key] = plainSettings[key];
+                      console.log(`[Settings] Using fallback plain value for ${key}`);
+                    } else {
+                      settings[key] = '';
+                    }
+                  } else {
+                    settings[key] = '';
+                  }
+                } catch (e) {
+                  settings[key] = '';
+                }
+              }
+            } else if (value && value.encrypted) {
+              // Encryption not available but value is encrypted - try plain fallback
+              console.warn(`[Settings] Encryption not available for ${key}, trying fallback`);
+              try {
+                if (fs.existsSync(this.settingsPath)) {
+                  const plainSettings = JSON.parse(fs.readFileSync(this.settingsPath, 'utf8'));
+                  if (plainSettings[key]) {
+                    settings[key] = plainSettings[key];
+                    console.log(`[Settings] Using fallback plain value for ${key}`);
+                  } else {
+                    settings[key] = '';
+                  }
+                } else {
+                  settings[key] = '';
+                }
+              } catch (e) {
                 settings[key] = '';
               }
-            } else if (value.encrypted) {
-              // In dev mode, just use empty string for encrypted values
-              settings[key] = '';
             } else {
-              settings[key] = value;
+              settings[key] = value || '';
             }
           } else {
             settings[key] = value;
@@ -89,7 +120,7 @@ class SettingsManager {
     return {
       llmApiKey: '',
       llmProvider: 'anthropic',
-      llmModel: 'claude-opus-4-20250514',
+      llmModel: 'claude-opus-4-5-20251101',
       theme: 'dark',
       autoSave: true,
       claude4ThinkingMode: 'enabled',
@@ -169,7 +200,7 @@ class SettingsManager {
     const defaults = {
       llmApiKey: '',
       llmProvider: 'anthropic',
-      llmModel: 'claude-opus-4-20250514',
+      llmModel: 'claude-opus-4-5-20251101',
       theme: 'dark',
       autoSave: true,
       claude4ThinkingMode: 'enabled',
@@ -226,7 +257,7 @@ class SettingsManager {
   }
 
   getLLMModel() {
-    return this.get('llmModel') || 'claude-opus-4-20250514';
+    return this.get('llmModel') || 'claude-opus-4-5-20251101';
   }
 
   setLLMModel(model) {
@@ -254,7 +285,7 @@ class SettingsManager {
   getClaude4Headers() {
     const headers = {};
     
-    if (this.getLLMModel() === 'claude-opus-4-20250514' && 
+    if (this.getLLMModel() === 'claude-opus-4-5-20251101' && 
         this.getClaude4ThinkingMode() === 'enabled') {
       headers['interleaved-thinking-2025-05-14'] = 'true';
     }

@@ -10,7 +10,7 @@ const path = require('path');
 const PRICING = {
   // Anthropic Claude models (current)
   'claude-sonnet-4-5-20250929': { input: 3.00, output: 15.00 },
-  'claude-opus-4-5-20250929': { input: 15.00, output: 75.00 },
+  'claude-opus-4-5-20251101': { input: 15.00, output: 75.00 },
   
   // Legacy Claude models
   'claude-sonnet-4-20250514': { input: 3.00, output: 15.00 },

@@ -445,6 +445,7 @@ class ModuleManager {
     const size = windowSizes[tool.windowSize] || windowSizes.medium;
     
     // Create new window for the web tool
+    // Use preload-spaces.js to give tools access to the full Spaces API (window.spaces)
     const window = new BrowserWindow({
       width: size.width,
       height: size.height,
@@ -453,7 +454,7 @@ class ModuleManager {
         nodeIntegration: false,
         contextIsolation: true,
         webSecurity: true,
-        preload: path.join(__dirname, 'preload.js'),
+        preload: path.join(__dirname, 'preload-spaces.js'),
         // Enable features needed for speech recognition and media
         enableBlinkFeatures: 'MediaStreamAPI,WebRTC,AudioWorklet,WebAudio,MediaRecorder',
         experimentalFeatures: true

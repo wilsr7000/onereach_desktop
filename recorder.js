@@ -12,6 +12,7 @@
 const { BrowserWindow, ipcMain, systemPreferences, app } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const getLogger = require('./event-logger');
 
 // Helper to get storage root for saving recordings
 function getStorageRoot() {
@@ -50,14 +51,24 @@ class Recorder {
    * @param {string} options.projectId - Target project ID for saving
    */
   open(options = {}) {
+    const logger = getLogger();
+    
     if (this.window) {
       this.window.focus();
       if (options.instructions) {
         this.instructions = options;
         this.window.webContents.send('recorder:instructions', options);
       }
+      logger.logFeatureUsed('recorder', { action: 'focus-existing' });
       return this.window;
     }
+
+    logger.logFeatureUsed('recorder', { 
+      action: 'open',
+      hasInstructions: !!options.instructions,
+      targetSpace: options.spaceId || null,
+      targetProject: options.projectId || null
+    });
 
     this.instructions = options;
     this.targetSpace = options.spaceId || null;
@@ -214,7 +225,17 @@ class Recorder {
         const buffer = Buffer.from(blob, 'base64');
         fs.writeFileSync(savePath, buffer);
 
-        console.log('[Recorder] Saved recording to:', savePath);
+        const logger = getLogger();
+        logger.logFeatureUsed('recorder', {
+          action: 'save-recording',
+          spaceId: spaceId || null,
+          projectId: projectId || null,
+          size: buffer.length
+        });
+        logger.logFileOperation('save', savePath, { 
+          size: buffer.length,
+          type: 'video-recording'
+        });
 
         // Save metadata if provided
         if (metadata) {
@@ -228,7 +249,11 @@ class Recorder {
           size: buffer.length
         };
       } catch (error) {
-        console.error('[Recorder] Save error:', error);
+        const logger = getLogger();
+        logger.error('Recorder save failed', {
+          error: error.message,
+          stack: error.stack
+        });
         return { success: false, error: error.message };
       }
     });
