@@ -1,6 +1,7 @@
 const { app, net } = require('electron');
 const getLogger = require('./event-logger');
 const { getBudgetManager } = require('./budget-manager');
+const { getLLMUsageTracker } = require('./llm-usage-tracker');
 
 class ClaudeAPI {
   constructor() {
@@ -68,12 +69,39 @@ class ClaudeAPI {
         outputTokens: usage.output_tokens,
         operation
       });
+      
+      // Track in LLM usage tracker for dashboard
+      try {
+        const llmTracker = getLLMUsageTracker();
+        llmTracker.trackClaudeCall({
+          model: usage.model || this.defaultModel,
+          inputTokens: usage.input_tokens || 0,
+          outputTokens: usage.output_tokens || 0,
+          feature: this._getFeatureFromOperation(operation),
+          purpose: operation
+        });
+      } catch (llmTrackerError) {
+        // Silent fail - don't break main flow
+      }
     } catch (trackingError) {
       logger.warn('Claude API usage tracking failed', {
         error: trackingError.message,
         operation
       });
     }
+  }
+  
+  /**
+   * Map operation name to feature category for dashboard
+   */
+  _getFeatureFromOperation(operation) {
+    if (!operation) return 'other';
+    const op = operation.toLowerCase();
+    if (op.includes('metadata')) return 'metadata-generation';
+    if (op.includes('gsx') || op.includes('create')) return 'gsx-create';
+    if (op.includes('agent') || op.includes('diagnos')) return 'agent-diagnosis';
+    if (op.includes('vision') || op.includes('image')) return 'vision-analysis';
+    return 'other';
   }
 
   /**
@@ -497,6 +525,117 @@ Respond with valid JSON only, no markdown formatting.`;
       
       request.end();
     });
+  }
+
+  /**
+   * Generic chat method for conversation-style interactions
+   * Used by the App Manager Agent for complex diagnosis
+   * @param {Array} messages - Array of message objects with role and content
+   * @param {string} apiKey - API key (or null to use settings)
+   * @param {Object} options - Options including maxTokens, temperature, model
+   * @returns {Promise<Object>} Response object with content
+   */
+  async chat(messages, apiKey = null, options = {}) {
+    const logger = getLogger();
+    
+    // Get API key from settings if not provided
+    if (!apiKey) {
+      const { getSettingsManager } = require('./settings-manager');
+      const settingsManager = getSettingsManager();
+      apiKey = settingsManager.get('llmApiKey') || 
+               settingsManager.get('anthropicApiKey') ||
+               settingsManager.get('llmConfig.anthropic.apiKey');
+    }
+    
+    if (!apiKey) {
+      throw new Error('API key is required for chat');
+    }
+
+    const {
+      maxTokens = this.maxTokens,
+      temperature = 0.3,
+      model = this.defaultModel,
+      system = null
+    } = options;
+
+    // Estimate tokens for budget check
+    const totalContentLength = messages.reduce((sum, m) => sum + (m.content?.length || 0), 0);
+    const estimatedInputTokens = Math.ceil(totalContentLength / 4);
+    
+    try {
+      this.checkBudgetBeforeCall('chat', estimatedInputTokens, maxTokens);
+    } catch (budgetError) {
+      logger.warn('Chat budget warning', { error: budgetError.message });
+      // Continue anyway - budget is advisory
+    }
+
+    try {
+      const requestBody = {
+        model: model,
+        max_tokens: maxTokens,
+        temperature: temperature,
+        messages: messages
+      };
+      
+      // Add system prompt if provided
+      if (system) {
+        requestBody.system = system;
+      }
+
+      const requestData = JSON.stringify(requestBody);
+
+      logger.debug('Claude chat request', {
+        model,
+        maxTokens,
+        messageCount: messages.length,
+        estimatedInputTokens
+      });
+
+      const data = await this.makeRequest(`${this.baseURL}/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': apiKey,
+          'anthropic-version': '2023-06-01'
+        }
+      }, requestData);
+
+      // Track usage
+      if (data.usage) {
+        this.trackUsage('chat', data.usage);
+        
+        // Track in LLM usage tracker
+        try {
+          const llmTracker = getLLMUsageTracker();
+          llmTracker.trackClaudeCall({
+            model: model,
+            inputTokens: data.usage.input_tokens || 0,
+            outputTokens: data.usage.output_tokens || 0,
+            feature: 'agent-diagnosis',
+            purpose: 'App Manager Agent chat'
+          });
+        } catch (trackerError) {
+          // Tracker might not be available
+        }
+      }
+
+      if (data.content && data.content.length > 0) {
+        return {
+          content: data.content[0].text,
+          usage: data.usage,
+          model: data.model,
+          stopReason: data.stop_reason
+        };
+      } else {
+        throw new Error('No content in Claude response');
+      }
+    } catch (error) {
+      logger.logAPIError('/v1/messages (chat)', error, {
+        provider: 'anthropic',
+        model
+      });
+      throw error;
+    }
   }
 
   /**

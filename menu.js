@@ -2773,6 +2773,19 @@ END OF AUTOMATED REPORT
             }
           ]
         },
+        { type: 'separator' },
+        {
+          label: '◎ App Health Dashboard',
+          accelerator: 'CmdOrCtrl+Shift+H',
+          click: () => {
+            console.log("[Menu] Opening App Health Dashboard");
+            if (global.openDashboardWindow) {
+              global.openDashboardWindow();
+            } else {
+              console.error('[Menu] Dashboard window function not available');
+            }
+          }
+        },
         // Conditionally add test menu items if showTestMenu is true
         ...(showTestMenu ? [
           { type: 'separator' },

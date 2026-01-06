@@ -266,7 +266,13 @@ class ClipboardStorageV2 {
       contentPath = `items/${itemId}/content.${ext}`;
     }
     
-    const thumbnailPath = item.thumbnail ? `items/${itemId}/thumbnail.png` : null;
+    // Determine thumbnail extension based on content type
+    let thumbnailPath = null;
+    if (item.thumbnail) {
+      const isSvg = item.thumbnail.startsWith('data:image/svg+xml');
+      const thumbExt = isSvg ? 'svg' : 'png';
+      thumbnailPath = `items/${itemId}/thumbnail.${thumbExt}`;
+    }
     const metadataPath = `items/${itemId}/metadata.json`;
     
     // Save content
@@ -413,7 +419,14 @@ class ClipboardStorageV2 {
           content = fs.readFileSync(actualContentPath, 'utf8');
         } else if (indexEntry.type === 'image') {
           const imageData = fs.readFileSync(actualContentPath);
-          content = `data:image/png;base64,${imageData.toString('base64')}`;
+          // Detect mime type from file extension
+          const ext = path.extname(actualContentPath).toLowerCase();
+          let mimeType = 'image/png';
+          if (ext === '.jpg' || ext === '.jpeg') mimeType = 'image/jpeg';
+          else if (ext === '.gif') mimeType = 'image/gif';
+          else if (ext === '.webp') mimeType = 'image/webp';
+          else if (ext === '.svg') mimeType = 'image/svg+xml';
+          content = `data:${mimeType};base64,${imageData.toString('base64')}`;
         }
       }
     }
@@ -424,7 +437,14 @@ class ClipboardStorageV2 {
       const thumbPath = path.join(this.storageRoot, indexEntry.thumbnailPath);
       if (fs.existsSync(thumbPath)) {
         const thumbData = fs.readFileSync(thumbPath);
-        thumbnail = `data:image/png;base64,${thumbData.toString('base64')}`;
+        // Detect mime type from file extension
+        const ext = path.extname(thumbPath).toLowerCase();
+        let mimeType = 'image/png';
+        if (ext === '.svg') mimeType = 'image/svg+xml';
+        else if (ext === '.jpg' || ext === '.jpeg') mimeType = 'image/jpeg';
+        else if (ext === '.gif') mimeType = 'image/gif';
+        else if (ext === '.webp') mimeType = 'image/webp';
+        thumbnail = `data:${mimeType};base64,${thumbData.toString('base64')}`;
       }
     }
     

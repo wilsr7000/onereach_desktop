@@ -11,6 +11,7 @@
 const https = require('https');
 const { getBudgetManager } = require('./budget-manager');
 const getLogger = require('./event-logger');
+const { getLLMUsageTracker } = require('./llm-usage-tracker');
 
 class OpenAIAPI {
   constructor() {
@@ -416,6 +417,21 @@ Respond with valid JSON only.`;
                   outputTokens: usage.completion_tokens,
                   totalTokens: usage.total_tokens
                 };
+                
+                // Track in LLM usage tracker for dashboard
+                try {
+                  const llmTracker = getLLMUsageTracker();
+                  llmTracker.trackOpenAICall({
+                    model: this.defaultModel,
+                    inputTokens: usage.prompt_tokens || 0,
+                    outputTokens: usage.completion_tokens || 0,
+                    feature: this._getFeatureFromOperation(trackingOptions.operation),
+                    purpose: trackingOptions.operation,
+                    duration: requestDuration
+                  });
+                } catch (llmTrackerError) {
+                  // Silent fail - don't break main flow
+                }
               } catch (trackingError) {
                 logger.warn('OpenAI API usage tracking failed', {
                   error: trackingError.message,
@@ -617,6 +633,20 @@ Make the prompts detailed and specific. Include layered sounds where appropriate
       return { model: 'gpt-5.2', reason: 'Large content (>50K chars)' };
     }
     return { model: 'gpt-5.2', reason: 'Standard analysis' };
+  }
+  
+  /**
+   * Map operation name to feature category for dashboard
+   */
+  _getFeatureFromOperation(operation) {
+    if (!operation) return 'other';
+    const op = operation.toLowerCase();
+    if (op.includes('metadata')) return 'metadata-generation';
+    if (op.includes('gsx') || op.includes('create')) return 'gsx-create';
+    if (op.includes('agent') || op.includes('diagnos')) return 'agent-diagnosis';
+    if (op.includes('code')) return 'code-analysis';
+    if (op.includes('text')) return 'text-analysis';
+    return 'other';
   }
 }
 

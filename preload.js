@@ -173,6 +173,10 @@ contextBridge.exposeInMainWorld(
         'black-hole:trigger-paste',
         'black-hole:debug',
         'black-hole:widget-ready',
+        'black-hole:resize-window',
+        'black-hole:move-window',
+        'black-hole:get-position',
+        'black-hole:restore-position',
         'open-external-url'
       ];
       if (validChannels.includes(channel)) {
@@ -559,7 +563,7 @@ contextBridge.exposeInMainWorld('flipboardAPI', {
 // Expose electronAPI for GSX toolbar functionality
 contextBridge.exposeInMainWorld('electronAPI', {
   triggerMissionControl: () => ipcRenderer.send('trigger-mission-control'),
-  clearCacheAndReload: () => ipcRenderer.send('clear-cache-and-reload'),
+  clearCacheAndReload: (options) => ipcRenderer.send('clear-cache-and-reload', options),
   openSettings: () => ipcRenderer.send('open-settings'),
   openExternal: (url) => ipcRenderer.invoke('open-external', url)
 });

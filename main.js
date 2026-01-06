@@ -875,6 +875,67 @@ app.whenReady().then(() => {
         status: 'initialized',
         shortcutRegistered: true
       });
+      
+      // Initialize App Health Dashboard components
+      try {
+        const { getDashboardAPI } = require('./dashboard-api');
+        const { getLLMUsageTracker } = require('./llm-usage-tracker');
+        const { getAssetPipeline } = require('./asset-pipeline');
+        const { getPipelineVerifier } = require('./pipeline-verifier');
+        const { getThumbnailPipeline } = require('./thumbnail-pipeline');
+        const { getAppManagerAgent } = require('./app-manager-agent');
+        const MetadataGenerator = require('./metadata-generator');
+        
+        // Initialize LLM tracker
+        const llmTracker = getLLMUsageTracker();
+        global.llmUsageTracker = llmTracker;
+        
+        // Initialize Dashboard API
+        const dashboardAPI = getDashboardAPI();
+        global.dashboardAPI = dashboardAPI;
+        
+        // Initialize pipeline components
+        const thumbnailPipeline = getThumbnailPipeline();
+        const pipelineVerifier = getPipelineVerifier(clipboardManager.storage);
+        const metadataGenerator = new MetadataGenerator(clipboardManager);
+        
+        // Initialize asset pipeline with dependencies
+        const assetPipeline = getAssetPipeline({
+          clipboardManager,
+          thumbnailPipeline,
+          metadataGenerator,
+          verifier: pipelineVerifier,
+          dashboardAPI
+        });
+        global.assetPipeline = assetPipeline;
+        
+        // Initialize App Manager Agent
+        const agent = getAppManagerAgent({
+          dashboardAPI,
+          clipboardManager,
+          pipelineVerifier,
+          metadataGenerator,
+          thumbnailPipeline
+        });
+        global.appManagerAgent = agent;
+        
+        // Set up Dashboard IPC handlers
+        dashboardAPI.setupIPC({
+          clipboardManager,
+          llmTracker,
+          agent
+        });
+        
+        // Start agent (delayed to allow app to fully initialize)
+        setTimeout(() => {
+          agent.start();
+          console.log('[App] App Manager Agent started');
+        }, 5000);
+        
+        console.log('[App] Dashboard API and components initialized');
+      } catch (dashboardError) {
+        console.error('[App] Error initializing dashboard components:', dashboardError);
+      }
     } catch (error) {
       console.error('[Startup] Error initializing clipboard manager:', error);
     }
@@ -3921,10 +3982,33 @@ function setupIPC() {
   });
   
   // Clear cache and reload for GSX toolbar refresh button
-  ipcMain.on('clear-cache-and-reload', async (event) => {
+  // If options.clearStorage is true, also clear site storage for the current page before reloading.
+  ipcMain.on('clear-cache-and-reload', async (event, options = {}) => {
     try {
       const win = BrowserWindow.fromWebContents(event.sender);
       if (win) {
+        const clearStorage = !!options.clearStorage;
+        if (clearStorage) {
+          // Best-effort clear of per-page web storage before reload.
+          // Note: we intentionally do NOT clear cookies by default, to avoid forced logouts.
+          try {
+            await win.webContents.executeJavaScript(
+              "try { localStorage.clear(); sessionStorage.clear(); } catch (e) {}",
+              true
+            );
+          } catch (e) {
+            // ignore - may fail on some origins / CSP
+          }
+          try {
+            await win.webContents.session.clearStorageData({
+              storages: ['localstorage', 'indexdb', 'cachestorage', 'serviceworkers']
+            });
+            console.log('[IPC] Storage cleared for window (localstorage/indexdb/cachestorage/serviceworkers)');
+          } catch (e) {
+            console.error('[IPC] Error clearing storage data:', e);
+          }
+        }
+
         // Clear the cache for this session
         await win.webContents.session.clearCache();
         console.log('[IPC] Cache cleared for window');
@@ -8358,6 +8442,98 @@ function openSettingsWindow() {
 
 // Make settings window globally accessible
 global.openSettingsWindowGlobal = openSettingsWindow;
+
+// Keep a reference to the dashboard window
+let dashboardWindow = null;
+
+// Function to open the App Health Dashboard
+function openDashboardWindow() {
+  console.log('[Dashboard] Opening App Health Dashboard...');
+  
+  // Check if dashboard window already exists and is not destroyed
+  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+    console.log('[Dashboard] Window exists, focusing it');
+    dashboardWindow.show();
+    dashboardWindow.focus();
+    return;
+  }
+  
+  console.log('[Dashboard] Creating new dashboard window');
+  dashboardWindow = new BrowserWindow({
+    width: 1400,
+    height: 900,
+    minWidth: 1000,
+    minHeight: 600,
+    title: 'OneReach.ai - App Health Dashboard',
+    backgroundColor: '#0a0a0f',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload-health-dashboard.js'),
+      webSecurity: true,
+      enableRemoteModule: false,
+      sandbox: false
+    }
+  });
+  
+  // Clear the reference when the window is closed
+  dashboardWindow.on('closed', () => {
+    console.log('[Dashboard] Window closed');
+    dashboardWindow = null;
+  });
+  
+  // Log when the window successfully loads
+  dashboardWindow.webContents.on('did-finish-load', () => {
+    console.log('[Dashboard] Window loaded successfully');
+  });
+  
+  // Load the dashboard HTML file
+  dashboardWindow.loadFile('app-health-dashboard.html').catch(err => {
+    console.error('[Dashboard] Error loading dashboard:', err);
+  });
+}
+
+// Make dashboard window globally accessible
+global.openDashboardWindow = openDashboardWindow;
+
+// IPC handler to open dashboard
+ipcMain.handle('dashboard:open-log-folder', async () => {
+  try {
+    const logDir = path.join(app.getPath('userData'), 'logs');
+    if (fs.existsSync(logDir)) {
+      shell.openPath(logDir);
+      return { success: true };
+    }
+    return { success: false, error: 'Log folder not found' };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC handler to resolve/ignore agent issues
+ipcMain.handle('dashboard:resolve-issue', async (event, issueId) => {
+  try {
+    if (global.appManagerAgent) {
+      const result = global.appManagerAgent.resolveEscalatedIssue(issueId);
+      return { success: result };
+    }
+    return { success: false, error: 'Agent not available' };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('dashboard:ignore-issue', async (event, issueId) => {
+  try {
+    if (global.appManagerAgent) {
+      const result = global.appManagerAgent.ignoreEscalatedIssue(issueId);
+      return { success: result };
+    }
+    return { success: false, error: 'Agent not available' };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
 
 // Keep a reference to the budget dashboard window
 let budgetDashboardWindow = null;

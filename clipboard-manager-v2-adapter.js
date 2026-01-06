@@ -4,6 +4,7 @@ const os = require('os');
 const ClipboardStorageV2 = require('./clipboard-storage-v2');
 const AppContextCapture = require('./app-context-capture');
 const getLogger = require('./event-logger');
+const { getContentIngestionService, ValidationError, retryOperation } = require('./content-ingestion');
 
 // Handle Electron imports gracefully
 let BrowserWindow, ipcMain, globalShortcut, screen, app, clipboard, nativeImage;
@@ -766,9 +767,36 @@ class ClipboardManagerV2 {
   
   getSpaceItems(spaceId) {
     this.ensureHistoryLoaded(); // Ensure history is loaded before accessing
-    return this.history.filter(item => 
+    
+    // Filter items by space
+    const items = this.history.filter(item => 
       spaceId === null ? true : item.spaceId === spaceId
     );
+    
+    // Load content and thumbnails on demand (same as getHistory does)
+    return items.map(item => {
+      if (item._needsContent || !item.thumbnail) {
+        try {
+          const fullItem = this.storage.loadItem(item.id);
+          item.content = fullItem.content;
+          item.thumbnail = fullItem.thumbnail;
+          item._needsContent = false;
+          
+          // Merge metadata from storage
+          if (fullItem.metadata) {
+            item.metadata = { ...item.metadata, ...fullItem.metadata };
+            
+            // Update fileSize from metadata if not set
+            if (!item.fileSize && fullItem.metadata.fileSize) {
+              item.fileSize = fullItem.metadata.fileSize;
+            }
+          }
+        } catch (error) {
+          console.warn('[getSpaceItems] Failed to load content for item:', item.id, error.message);
+        }
+      }
+      return item;
+    });
   }
   
   updateSpaceCounts() {
@@ -5020,68 +5048,62 @@ ${chunks[i]}`;
       }
     });
     
-    // Black hole handlers
+    // Black hole handlers - using ContentIngestionService for validation
     ipcMain.handle('black-hole:add-text', async (event, data) => {
-      console.log('\n');
-      console.log('╔══════════════════════════════════════════════════════════════╗');
-      console.log('║  BLACK HOLE ADD-TEXT HANDLER CALLED                          ║');
-      console.log('╚══════════════════════════════════════════════════════════════╝');
-      console.log('[BlackHole-Backend] Time:', new Date().toISOString());
-      console.log('[BlackHole-Backend] Data received:', data ? 'YES' : 'NO');
-      if (data) {
-        console.log('[BlackHole-Backend] spaceId:', data.spaceId);
-        console.log('[BlackHole-Backend] content:', data.content ? data.content.substring(0, 80) : 'NONE');
-        console.log('[BlackHole-Backend] content length:', data.content ? data.content.length : 0);
-      }
+      const opId = `add-text-${Date.now()}`;
+      console.log(`[ContentIngestion:${opId}] ═══════════════════════════════════════`);
+      console.log(`[ContentIngestion:${opId}] ADD-TEXT HANDLER - Time: ${new Date().toISOString()}`);
+      console.log(`[ContentIngestion:${opId}] Data:`, data ? { spaceId: data.spaceId, contentLength: data.content?.length || 0 } : 'NO DATA');
+      
+      // Get ingestion service for validation
+      const ingestionService = getContentIngestionService(this);
       
       try {
-        // Check if content is a YouTube URL
+        // Quick validation using ingestion service
+        const validation = ingestionService.validateContent('text', data);
+        if (!validation.valid) {
+          console.error(`[ContentIngestion:${opId}] Validation failed:`, validation.errors);
+          return { success: false, error: validation.errors.join('; '), code: 'VALIDATION_ERROR' };
+        }
+        
+        // Check if content is a YouTube URL (special handling)
         let isYouTubeUrl;
         try {
           const ytModule = require('./youtube-downloader');
           isYouTubeUrl = ytModule.isYouTubeUrl;
-          console.log('[BlackHole-Backend] YouTube module loaded successfully');
         } catch (e) {
-          console.error('[BlackHole-Backend] Failed to load youtube-downloader:', e.message);
+          console.warn(`[ContentIngestion:${opId}] YouTube module not available`);
           isYouTubeUrl = () => false;
         }
         
         const content = data.content?.trim();
         const isYT = isYouTubeUrl(content);
-        console.log('[BlackHole-Backend] Content preview:', content?.substring(0, 80));
-        console.log('[BlackHole-Backend] Is YouTube URL:', isYT);
         
         if (isYT) {
-          console.log('[BlackHole-Backend] >>> YOUTUBE PATH - Returning YouTube detection <<<');
-          const result = { 
+          console.log(`[ContentIngestion:${opId}] YouTube URL detected - returning for download handling`);
+          return { 
             success: true, 
             isYouTube: true, 
             youtubeUrl: content,
             spaceId: data.spaceId || this.currentSpace || 'unclassified',
             message: 'YouTube video detected'
           };
-          console.log('[BlackHole-Backend] Returning:', JSON.stringify(result));
-          return result;
         }
         
-        console.log('[BlackHole-Backend] >>> TEXT PATH - Saving as text <<<');
-        
-        // Capture app context for the source of the paste
+        // Capture app context
         let context = null;
         try {
           context = await this.contextCapture.getFullContext();
-          console.log('[BlackHole-Backend] Context captured');
         } catch (error) {
-          console.error('[BlackHole-Backend] Context capture error:', error.message);
+          console.warn(`[ContentIngestion:${opId}] Context capture failed:`, error.message);
         }
         
-        // Enhance source detection with context
+        // Enhance source detection
         const detectedSource = context 
           ? this.contextCapture.enhanceSourceDetection(data.content, context)
           : this.detectSource(data.content);
         
-        console.log('[BlackHole-Backend] Detected source:', detectedSource);
-        
+        // Build item
         const item = {
           type: 'text',
           content: data.content,
@@ -5092,9 +5114,7 @@ ${chunks[i]}`;
           source: detectedSource
         };
         
-        console.log('[BlackHole-Backend] Item prepared:', JSON.stringify({ ...item, content: item.content.substring(0, 50) }));
-        
-        // Add context to metadata if available
+        // Add context metadata
         if (context) {
           item.metadata = {
             context: {
@@ -5105,176 +5125,216 @@ ${chunks[i]}`;
           };
         }
         
-        console.log('[BlackHole-Backend] Calling addToHistory...');
+        // Save item
+        console.log(`[ContentIngestion:${opId}] Saving text item to space: ${item.spaceId}`);
         await this.addToHistory(item);
-        console.log('[BlackHole-Backend] addToHistory completed');
         
-        console.log('[BlackHole-Backend] ========== ADD-TEXT SUCCESS ==========');
-        return { success: true };
+        // Get the saved item ID
+        const savedItem = this.history?.[0];
+        console.log(`[ContentIngestion:${opId}] ✓ Text saved successfully, itemId: ${savedItem?.id}`);
+        
+        return { success: true, itemId: savedItem?.id };
         
       } catch (error) {
-        console.error('[BlackHole-Backend] ========== ADD-TEXT ERROR ==========');
-        console.error('[BlackHole-Backend] Error:', error);
-        console.error('[BlackHole-Backend] Stack:', error.stack);
-        return { success: false, error: error.message };
+        console.error(`[ContentIngestion:${opId}] ERROR:`, error.message);
+        console.error(`[ContentIngestion:${opId}] Stack:`, error.stack);
+        return ingestionService.handleError(error, { opId, type: 'text', spaceId: data?.spaceId });
       }
     });
     
     ipcMain.handle('black-hole:add-html', async (event, data) => {
-      console.log('Black hole: Adding HTML to space:', data.spaceId);
+      const opId = `add-html-${Date.now()}`;
+      console.log(`[ContentIngestion:${opId}] ADD-HTML HANDLER - spaceId: ${data?.spaceId}`);
       
-      // Capture app context for the source of the paste
-      let context = null;
+      const ingestionService = getContentIngestionService(this);
+      
       try {
-        context = await this.contextCapture.getFullContext();
-        console.log('[Black hole] Captured context:', context);
-      } catch (error) {
-        console.error('[Black hole] Error capturing context:', error);
-      }
-      
-      // Enhance source detection with context
-      const detectedSource = context 
-        ? this.contextCapture.enhanceSourceDetection(data.plainText || data.content, context)
-        : 'black-hole';
-      
-      const item = {
-        type: 'html',
-        content: data.content,
-        plainText: data.plainText,
-        preview: this.truncateText(data.plainText || this.stripHtml(data.content), 100),
-        timestamp: Date.now(),
-        pinned: false,
-        spaceId: data.spaceId || this.currentSpace || 'unclassified',
-        source: detectedSource
-      };
-      
-      // Add context to metadata if available
-      if (context) {
-        item.metadata = {
-          context: {
-            app: context.app,
-            window: context.window,
-            contextDisplay: this.contextCapture.formatContextDisplay(context)
-          }
+        // Validate
+        const validation = ingestionService.validateContent('html', data);
+        if (!validation.valid) {
+          console.error(`[ContentIngestion:${opId}] Validation failed:`, validation.errors);
+          return { success: false, error: validation.errors.join('; '), code: 'VALIDATION_ERROR' };
+        }
+        
+        // Capture app context
+        let context = null;
+        try {
+          context = await this.contextCapture.getFullContext();
+        } catch (error) {
+          console.warn(`[ContentIngestion:${opId}] Context capture failed:`, error.message);
+        }
+        
+        // Enhance source detection
+        const detectedSource = context 
+          ? this.contextCapture.enhanceSourceDetection(data.plainText || data.content, context)
+          : 'black-hole';
+        
+        // Build item
+        const item = {
+          type: 'html',
+          content: data.content,
+          plainText: data.plainText,
+          preview: this.truncateText(data.plainText || this.stripHtml(data.content), 100),
+          timestamp: Date.now(),
+          pinned: false,
+          spaceId: data.spaceId || this.currentSpace || 'unclassified',
+          source: detectedSource
         };
+        
+        // Add context metadata
+        if (context) {
+          item.metadata = {
+            context: {
+              app: context.app,
+              window: context.window,
+              contextDisplay: this.contextCapture.formatContextDisplay(context)
+            }
+          };
+        }
+        
+        // Save item
+        console.log(`[ContentIngestion:${opId}] Saving HTML item to space: ${item.spaceId}`);
+        await this.addToHistory(item);
+        
+        const savedItem = this.history?.[0];
+        console.log(`[ContentIngestion:${opId}] ✓ HTML saved successfully, itemId: ${savedItem?.id}`);
+        
+        return { success: true, itemId: savedItem?.id };
+        
+      } catch (error) {
+        console.error(`[ContentIngestion:${opId}] ERROR:`, error.message);
+        return ingestionService.handleError(error, { opId, type: 'html', spaceId: data?.spaceId });
       }
-      
-      await this.addToHistory(item);
-      
-      return { success: true };
     });
     
     ipcMain.handle('black-hole:add-image', async (event, data) => {
-      console.log('Black hole: Adding image to space:', data.spaceId);
+      const opId = `add-image-${Date.now()}`;
+      console.log(`[ContentIngestion:${opId}] ADD-IMAGE HANDLER - spaceId: ${data?.spaceId}`);
       
-      // Capture app context for the source of the paste
-      let context = null;
+      const ingestionService = getContentIngestionService(this);
+      
       try {
-        context = await this.contextCapture.getFullContext();
-        console.log('[Black hole] Captured context:', context);
-      } catch (error) {
-        console.error('[Black hole] Error capturing context:', error);
-      }
-      
-      // Generate thumbnail if needed
-      let thumbnail = data.dataUrl;
-      if (data.dataUrl && data.dataUrl.length > 100000) {
-        thumbnail = this.generateImageThumbnail(data.dataUrl);
-      }
-      
-      const item = {
-        type: 'image',
-        content: data.dataUrl,
-        thumbnail: thumbnail,
-        preview: `Image: ${data.fileName}`,
-        timestamp: Date.now(),
-        pinned: false,
-        spaceId: data.spaceId || this.currentSpace || 'unclassified',
-        source: context?.app?.name || 'black-hole',
-        metadata: {
-          fileName: data.fileName,
-          fileSize: data.fileSize
+        // Validate
+        const validation = ingestionService.validateContent('image', data);
+        if (!validation.valid) {
+          console.error(`[ContentIngestion:${opId}] Validation failed:`, validation.errors);
+          return { success: false, error: validation.errors.join('; '), code: 'VALIDATION_ERROR' };
         }
-      };
-      
-      // Add context to metadata if available
-      if (context) {
-        item.metadata = {
-          ...item.metadata,
-          context: {
-            app: context.app,
-            window: context.window,
-            contextDisplay: this.contextCapture.formatContextDisplay(context)
+        
+        // Capture app context
+        let context = null;
+        try {
+          context = await this.contextCapture.getFullContext();
+        } catch (error) {
+          console.warn(`[ContentIngestion:${opId}] Context capture failed:`, error.message);
+        }
+        
+        // Generate thumbnail if needed
+        let thumbnail = data.dataUrl;
+        if (data.dataUrl && data.dataUrl.length > 100000) {
+          thumbnail = this.generateImageThumbnail(data.dataUrl);
+        }
+        
+        // Build item
+        const item = {
+          type: 'image',
+          content: data.dataUrl,
+          thumbnail: thumbnail,
+          preview: `Image: ${data.fileName || 'Untitled'}`,
+          timestamp: Date.now(),
+          pinned: false,
+          spaceId: data.spaceId || this.currentSpace || 'unclassified',
+          source: context?.app?.name || 'black-hole',
+          metadata: {
+            fileName: data.fileName,
+            fileSize: data.fileSize
           }
         };
+        
+        // Add context metadata
+        if (context) {
+          item.metadata = {
+            ...item.metadata,
+            context: {
+              app: context.app,
+              window: context.window,
+              contextDisplay: this.contextCapture.formatContextDisplay(context)
+            }
+          };
+        }
+        
+        // Save item with retry for transient disk errors
+        console.log(`[ContentIngestion:${opId}] Saving image to space: ${item.spaceId}`);
+        await retryOperation(
+          () => this.addToHistory(item),
+          { maxRetries: 3, baseDelay: 200 }
+        );
+        
+        const savedItem = this.history?.[0];
+        console.log(`[ContentIngestion:${opId}] ✓ Image saved successfully, itemId: ${savedItem?.id}`);
+        
+        return { success: true, itemId: savedItem?.id };
+        
+      } catch (error) {
+        console.error(`[ContentIngestion:${opId}] ERROR:`, error.message);
+        return ingestionService.handleError(error, { opId, type: 'image', spaceId: data?.spaceId });
       }
-      
-      await this.addToHistory(item);
-      
-      return { success: true };
     });
     
     ipcMain.handle('black-hole:add-file', async (event, data) => {
-      console.log('Black hole: Adding file to space:', data.spaceId);
-      console.log('[BlackHole-AddFile] Input data:', {
-        hasFilePath: !!data.filePath,
-        hasFileName: !!data.fileName,
-        hasFileData: !!data.fileData,
-        hasMimeType: !!data.mimeType,
-        mimeType: data.mimeType,
-        spaceId: data.spaceId
-      });
-      // #region agent log
-      try { fs.appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'clipboard-manager-v2-adapter.js:add-file',message:'add-file handler called',data:{fileName:data.fileName,fileSize:data.fileSize,mimeType:data.mimeType,hasFileData:!!data.fileData,fileDataLength:data.fileData?.length,spaceId:data.spaceId},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H6'})+'\n'); } catch(e){}
-      // #endregion
+      const opId = `add-file-${Date.now()}`;
+      console.log(`[ContentIngestion:${opId}] ADD-FILE HANDLER - spaceId: ${data?.spaceId}, fileName: ${data?.fileName}`);
       
-      // CRITICAL FIX: If filePath is provided (from paste), read the file
-      if (data.filePath && !data.fileName) {
-        try {
-          if (!fs.existsSync(data.filePath)) {
-            console.error('[BlackHole-AddFile] File does not exist:', data.filePath);
-            return { success: false, error: 'File does not exist: ' + data.filePath };
-          }
-          
-          const stats = fs.statSync(data.filePath);
-          if (!stats.isFile()) {
-            console.error('[BlackHole-AddFile] Path is not a file:', data.filePath);
-            return { success: false, error: 'Path is not a file: ' + data.filePath };
-          }
-          
-          // Extract file info from path
-          data.fileName = path.basename(data.filePath);
-          data.fileSize = stats.size;
-          
-          // Read file data as base64
-          const fileBuffer = fs.readFileSync(data.filePath);
-          data.fileData = fileBuffer.toString('base64');
-          
-          console.log('[BlackHole-AddFile] File read from path:', {
-            fileName: data.fileName,
-            fileSize: data.fileSize,
-            dataLength: data.fileData.length
-          });
-        } catch (readError) {
-          console.error('[BlackHole-AddFile] Error reading file:', readError);
-          return { success: false, error: 'Error reading file: ' + readError.message };
-        }
-      }
+      const ingestionService = getContentIngestionService(this);
       
-      // Validate we have required data
-      if (!data.fileName) {
-        console.error('[BlackHole-AddFile] No fileName provided');
-        return { success: false, error: 'No file name provided' };
-      }
-      
-      // Capture app context for the source of the paste
-      let context = null;
       try {
-        context = await this.contextCapture.getFullContext();
-        console.log('[Black hole] Captured context:', context);
-      } catch (error) {
-        console.error('[Black hole] Error capturing context:', error);
-      }
+        // CRITICAL FIX: If filePath is provided (from paste), read the file
+        if (data.filePath && !data.fileName) {
+          try {
+            if (!fs.existsSync(data.filePath)) {
+              console.error(`[ContentIngestion:${opId}] File does not exist:`, data.filePath);
+              return { success: false, error: 'File does not exist: ' + data.filePath, code: 'FILE_NOT_FOUND' };
+            }
+            
+            const stats = fs.statSync(data.filePath);
+            if (!stats.isFile()) {
+              console.error(`[ContentIngestion:${opId}] Path is not a file:`, data.filePath);
+              return { success: false, error: 'Path is not a file: ' + data.filePath, code: 'NOT_A_FILE' };
+            }
+            
+            // Extract file info from path
+            data.fileName = path.basename(data.filePath);
+            data.fileSize = stats.size;
+            
+            // Read file data as base64
+            const fileBuffer = fs.readFileSync(data.filePath);
+            data.fileData = fileBuffer.toString('base64');
+            
+            console.log(`[ContentIngestion:${opId}] File read from path:`, {
+              fileName: data.fileName,
+              fileSize: data.fileSize,
+              dataLength: data.fileData.length
+            });
+          } catch (readError) {
+            console.error(`[ContentIngestion:${opId}] Error reading file:`, readError);
+            return ingestionService.handleError(readError, { opId, type: 'file', spaceId: data?.spaceId });
+          }
+        }
+        
+        // Validate using ingestion service
+        const validation = ingestionService.validateContent('file', data);
+        if (!validation.valid) {
+          console.error(`[ContentIngestion:${opId}] Validation failed:`, validation.errors);
+          return { success: false, error: validation.errors.join('; '), code: 'VALIDATION_ERROR' };
+        }
+        
+        // Capture app context
+        let context = null;
+        try {
+          context = await this.contextCapture.getFullContext();
+        } catch (error) {
+          console.warn(`[ContentIngestion:${opId}] Context capture failed:`, error.message);
+        }
       
       // Extract file extension and determine category
       const ext = path.extname(data.fileName).toLowerCase();
@@ -5423,8 +5483,12 @@ ${chunks[i]}`;
         }
       }
       
-      // Add item to history - this will store the file in the correct location
-      await this.addToHistory(item);
+      // Add item to history with retry for transient disk errors
+      console.log(`[ContentIngestion:${opId}] Saving file item to space: ${item.spaceId}`);
+      await retryOperation(
+        () => this.addToHistory(item),
+        { maxRetries: 3, baseDelay: 200 }
+      );
       
       // Now the file has been copied to items/[id]/fileName by the storage system
       // We need to find the actual stored file path for post-processing
@@ -5465,13 +5529,19 @@ ${chunks[i]}`;
       if (item.filePath && item.filePath.includes('clipboard-temp-files')) {
         try {
           fs.unlinkSync(item.filePath);
-          console.log('[V2] Cleaned up temp file:', item.filePath);
+          console.log(`[ContentIngestion:${opId}] Cleaned up temp file:`, item.filePath);
         } catch (err) {
           // Ignore cleanup errors
         }
       }
       
-      return { success: true };
+      console.log(`[ContentIngestion:${opId}] ✓ File saved successfully, itemId: ${item.id}`);
+      return { success: true, itemId: item.id };
+      
+      } catch (error) {
+        console.error(`[ContentIngestion:${opId}] ERROR:`, error.message);
+        return ingestionService.handleError(error, { opId, type: 'file', spaceId: data?.spaceId });
+      }
     });
     
     // Screenshot completion handler

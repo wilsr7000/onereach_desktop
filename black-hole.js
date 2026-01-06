@@ -925,11 +925,11 @@ class BlackHoleWidget {
             // #endregion
             
             if (result && result.success) {
-                console.log('[BlackHole] SUCCESS! Closing modal...');
+                console.log('[BlackHole] SUCCESS! ItemId:', result.itemId, 'Closing modal...');
                 this.addToRecentSpaces(this.selectedSpaceId);
                 const space = this.spaces.find(s => s.id === this.selectedSpaceId);
                 const spaceName = space ? `${space.icon} ${space.name}` : 'Space';
-                this.showStatus(`Saved to ${spaceName}`);
+                this.showStatus(`✓ Saved to ${spaceName}`);
                 this.showSuccessEffect();
                 this.animateAndClose(true);
         } else {
@@ -937,14 +937,21 @@ class BlackHoleWidget {
                 // #region agent log
                 fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:handleConfirm:failed',message:'Save failed',data:{error:result?.error,result:JSON.stringify(result).substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H5'})}).catch(()=>{});
                 // #endregion
-                this.showStatus(result && result.error ? result.error : 'Save failed', true);
+                
+                // Show user-friendly error with error code for debugging
+                const errorMessage = result?.error || 'Save failed';
+                const errorCode = result?.code || null;
+                this.showStatus(errorMessage, true, errorCode);
                 this.resetSavingState();
             }
             
         } catch (err) {
             console.error('[BlackHole] EXCEPTION during save:', err);
             console.error('[BlackHole] Error stack:', err.stack);
-            this.showStatus(err.message, true);
+            
+            // Show user-friendly error message
+            const errorMessage = err.message || 'An unexpected error occurred';
+            this.showStatus(errorMessage, true, 'EXCEPTION');
             this.resetSavingState();
         }
         
@@ -1013,20 +1020,33 @@ class BlackHoleWidget {
         }, 300);
     }
     
-    showStatus(message, isError = false) {
-        console.log('[BlackHole] Status:', message, isError ? '(error)' : '');
+    showStatus(message, isError = false, errorCode = null) {
+        console.log('[BlackHole] Status:', message, isError ? '(error)' : '', errorCode ? `[${errorCode}]` : '');
         
         if (!this.statusText) return;
         
-        this.statusText.textContent = message;
-        this.statusText.classList.toggle('error', isError);
+        // For errors, add icon and keep visible longer
+        if (isError) {
+            this.statusText.textContent = `❌ ${message}`;
+            this.statusText.classList.add('error');
+            
+            // Log error for debugging
+            console.error('[BlackHole] Error displayed to user:', { message, errorCode });
+        } else {
+            this.statusText.textContent = message;
+            this.statusText.classList.remove('error');
+        }
+        
         this.statusText.classList.add('visible');
-                
-                setTimeout(() => {
+        
+        // Errors stay visible longer (5s), success messages shorter (3s)
+        const duration = isError ? 5000 : 3000;
+        
+        setTimeout(() => {
             if (this.statusText) {
                 this.statusText.classList.remove('visible');
-                    }
-                }, 3000);
+            }
+        }, duration);
     }
     
     showSuccessEffect() {
