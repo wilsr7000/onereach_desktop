@@ -402,45 +402,130 @@ class AppManagerAgent {
   }
 
   /**
-   * Get recent errors from event log
+   * Get recent errors from event log AND console logs
    * Filters out already processed events and deduplicates similar events
    */
   async _getRecentErrors() {
+    const allErrors = [];
+    
+    // Clean up old processed event tracking
+    this._cleanupProcessedEvents();
+    
+    const oneHourAgo = Date.now() - (60 * 60 * 1000);
+    
+    // 1. Get errors from event-db
     try {
       const { getEventDB } = require('./event-db');
       const eventDb = getEventDB(app.getPath('userData'));
-      
       const logs = await eventDb.getEventLogs({ limit: 200 });
       
-      // Clean up old processed event tracking
-      this._cleanupProcessedEvents();
-      
-      // Filter for errors in the last hour
-      const oneHourAgo = Date.now() - (60 * 60 * 1000);
-      const errors = logs.filter(log => {
+      const eventDbErrors = logs.filter(log => {
         const logTime = new Date(log.timestamp).getTime();
         const isError = (log.level === 'error' || log.level === 'ERROR');
         const isRecent = logTime > oneHourAgo;
         
-        // Skip if already processed
-        if (this.processedEventIds.has(log.id)) {
-          return false;
-        }
+        if (this.processedEventIds.has(log.id)) return false;
         
-        // Skip if duplicate fingerprint within dedupe window
         const fingerprint = this._getEventFingerprint(log);
-        if (this._isDuplicateEvent(fingerprint, logTime)) {
-          return false;
-        }
+        if (this._isDuplicateEvent(fingerprint, logTime)) return false;
         
         return isError && isRecent;
       });
       
-      return errors.slice(0, CONFIG.maxErrorsPerScan);
+      allErrors.push(...eventDbErrors);
     } catch (error) {
-      console.error('[Agent] Error fetching logs:', error);
-      return [];
+      console.warn('[Agent] Error fetching event-db logs:', error.message);
     }
+    
+    // 2. Get errors from console log files (NDJSON format)
+    try {
+      const consoleErrors = await this._getConsoleErrors(oneHourAgo);
+      allErrors.push(...consoleErrors);
+    } catch (error) {
+      console.warn('[Agent] Error fetching console logs:', error.message);
+    }
+    
+    // Sort by timestamp (newest first) and deduplicate
+    allErrors.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    
+    return allErrors.slice(0, CONFIG.maxErrorsPerScan);
+  }
+
+  /**
+   * Get errors from console log files (NDJSON format)
+   * These contain console.error messages that may not be in event-db
+   */
+  async _getConsoleErrors(sinceTimestamp) {
+    const errors = [];
+    
+    try {
+      const logsDir = path.join(app.getPath('userData'), 'logs');
+      
+      if (!fs.existsSync(logsDir)) {
+        return errors;
+      }
+      
+      // Get log files from last 24 hours
+      const files = fs.readdirSync(logsDir)
+        .filter(f => f.endsWith('.log'))
+        .sort()
+        .reverse()
+        .slice(0, 5); // Check last 5 log files
+      
+      for (const file of files) {
+        const filePath = path.join(logsDir, file);
+        const content = fs.readFileSync(filePath, 'utf8');
+        const lines = content.split('\n').filter(line => line.trim());
+        
+        // Parse NDJSON and filter for errors
+        for (const line of lines) {
+          try {
+            const entry = JSON.parse(line);
+            
+            // Check if it's an error level log
+            if (entry.level === 'ERROR' || entry.level === 'error') {
+              const logTime = new Date(entry.timestamp).getTime();
+              
+              // Skip if too old
+              if (logTime < sinceTimestamp) continue;
+              
+              // Create a normalized error object
+              const errorObj = {
+                id: `console-${logTime}-${Math.random().toString(36).substr(2, 5)}`,
+                timestamp: entry.timestamp,
+                level: 'error',
+                source: 'console',
+                category: entry.consoleMethod || 'error',
+                message: entry.message || 'Unknown error',
+                details: entry.args || entry.data || null
+              };
+              
+              // Skip if already processed
+              if (this.processedEventIds.has(errorObj.id)) continue;
+              
+              // Skip duplicates
+              const fingerprint = this._getEventFingerprint(errorObj);
+              if (this._isDuplicateEvent(fingerprint, logTime)) continue;
+              
+              // Skip agent's own "no errors found" messages
+              if (errorObj.message.includes('[Agent]')) continue;
+              
+              // Skip known noise
+              if (errorObj.message.includes('service_worker_storage') || 
+                  errorObj.message.includes('Failed to delete the database')) continue;
+              
+              errors.push(errorObj);
+            }
+          } catch (parseError) {
+            // Skip malformed JSON lines
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('[Agent] Error reading console logs:', error.message);
+    }
+    
+    return errors;
   }
 
   /**
