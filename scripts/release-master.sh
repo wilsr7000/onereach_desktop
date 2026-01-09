@@ -31,13 +31,18 @@ echo ""
 # Check prerequisites
 echo -e "${YELLOW}Checking prerequisites...${NC}"
 
-# Check if gh CLI is installed
+# Check if gh CLI is installed and working (silent check)
 if ! command -v gh &> /dev/null; then
-    echo -e "${RED}❌ GitHub CLI (gh) is not installed.${NC}"
-    echo "Install it with: brew install gh"
-    echo "Then run: gh auth login"
+    echo -e "${RED}❌ GitHub CLI (gh) is not installed. Install with: brew install gh${NC}"
     exit 1
 fi
+
+# Verify gh can actually connect (tests auth silently)
+if ! gh api user --silent 2>/dev/null; then
+    echo -e "${RED}❌ GitHub CLI not authenticated. Run: gh auth login${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✅ GitHub CLI authenticated${NC}"
 
 # Check if we're in the right directory
 if [ ! -f "package.json" ]; then

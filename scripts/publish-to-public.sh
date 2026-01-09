@@ -12,11 +12,13 @@ echo "🔒 Publishing release from private to public repository"
 echo "=================================================="
 echo ""
 
-# Check if gh CLI is installed
+# Check if gh CLI is installed and authenticated (silent)
 if ! command -v gh &> /dev/null; then
-    echo "❌ GitHub CLI (gh) is not installed."
-    echo "Install it with: brew install gh"
-    echo "Then run: gh auth login"
+    echo "❌ GitHub CLI (gh) not installed. Run: brew install gh"
+    exit 1
+fi
+if ! gh api user --silent 2>/dev/null; then
+    echo "❌ GitHub CLI not authenticated. Run: gh auth login"
     exit 1
 fi
 
