@@ -22,16 +22,35 @@ These documents are the source of truth for project planning and must be kept cu
 
 ## Development Workflow
 
-### Before Making Changes
-1. Check PUNCH-LIST.md for related known issues
-2. Check ROADMAP.md for strategic context
-3. Understand which product area is affected
+### Before Making Changes (REQUIRED)
+**For any non-trivial task, ALWAYS:**
+1. Check PUNCH-LIST.md - Is this task tracked?
+2. Check ROADMAP.md - Is this on the roadmap?
+3. **If NOT tracked**: Inform the user before proceeding
+   - "This task isn't on the punch list or roadmap. Should I add it before proceeding?"
+   - Suggest which section/priority it belongs to
+4. **Exception**: Simple bug fixes can proceed without tracking check
+
+### What Counts as "Simple Bug Fix" (no check needed)
+- Typos, syntax errors
+- Broken imports/references
+- CSS/styling tweaks
+- Console error fixes
+- Configuration corrections
+
+### What Requires Tracking Check
+- New features (any size)
+- Refactoring
+- Architecture changes
+- UI/UX changes
+- Integration work
+- Performance improvements
 
 ### After Completing Work
 1. Update PUNCH-LIST.md:
    - Mark completed items with [x]
    - Move to "Recently Completed" section with version
-   - Add any new issues discovered
+   - Add any new issues discovered during work
 2. Update ROADMAP.md if:
    - Major feature completed
    - Timeline needs adjustment
