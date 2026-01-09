@@ -233,14 +233,13 @@ echo -e "${GREEN}✅ x64 build complete${NC}"
 
 # Step 6: Verify all required files
 echo ""
-echo -e "${YELLOW}Step 6/6: Publishing to public repository...${NC}"
+echo -e "${YELLOW}Step 6/7: Verifying build files...${NC}"
 
 FILES=(
     "dist/Onereach.ai-${NEW_VERSION}-arm64.dmg"
     "dist/Onereach.ai-${NEW_VERSION}-arm64-mac.zip"
     "dist/Onereach.ai-${NEW_VERSION}.dmg"
     "dist/Onereach.ai-${NEW_VERSION}-mac.zip"
-    "dist/latest-mac.yml"
 )
 
 echo "Verifying build files..."
@@ -259,6 +258,72 @@ if [ "$ALL_FILES_EXIST" = false ]; then
     echo -e "${RED}❌ Build failed - missing files${NC}"
     exit 1
 fi
+
+# Step 7: Generate fresh checksums from actual built files (CRITICAL for auto-updater)
+echo ""
+echo -e "${YELLOW}Step 7/7: Generating verified checksums for auto-updater...${NC}"
+
+# Generate checksums from the actual files
+ARM64_ZIP="dist/Onereach.ai-${NEW_VERSION}-arm64-mac.zip"
+ARM64_DMG="dist/Onereach.ai-${NEW_VERSION}-arm64.dmg"
+X64_ZIP="dist/Onereach.ai-${NEW_VERSION}-mac.zip"
+X64_DMG="dist/Onereach.ai-${NEW_VERSION}.dmg"
+
+ARM64_ZIP_SHA512=$(shasum -a 512 "$ARM64_ZIP" | awk '{print $1}' | xxd -r -p | base64)
+ARM64_DMG_SHA512=$(shasum -a 512 "$ARM64_DMG" | awk '{print $1}' | xxd -r -p | base64)
+X64_ZIP_SHA512=$(shasum -a 512 "$X64_ZIP" | awk '{print $1}' | xxd -r -p | base64)
+X64_DMG_SHA512=$(shasum -a 512 "$X64_DMG" | awk '{print $1}' | xxd -r -p | base64)
+
+ARM64_ZIP_SIZE=$(stat -f%z "$ARM64_ZIP")
+ARM64_DMG_SIZE=$(stat -f%z "$ARM64_DMG")
+X64_ZIP_SIZE=$(stat -f%z "$X64_ZIP")
+X64_DMG_SIZE=$(stat -f%z "$X64_DMG")
+
+RELEASE_DATE=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+
+echo -e "${GREEN}✅ Checksums generated from actual files${NC}"
+
+# Create latest-mac.yml with verified checksums
+cat > dist/latest-mac.yml << EOF
+version: ${NEW_VERSION}
+files:
+  - url: Onereach.ai-${NEW_VERSION}-arm64-mac.zip
+    sha512: ${ARM64_ZIP_SHA512}
+    size: ${ARM64_ZIP_SIZE}
+  - url: Onereach.ai-${NEW_VERSION}-arm64.dmg
+    sha512: ${ARM64_DMG_SHA512}
+    size: ${ARM64_DMG_SIZE}
+  - url: Onereach.ai-${NEW_VERSION}-mac.zip
+    sha512: ${X64_ZIP_SHA512}
+    size: ${X64_ZIP_SIZE}
+  - url: Onereach.ai-${NEW_VERSION}.dmg
+    sha512: ${X64_DMG_SHA512}
+    size: ${X64_DMG_SIZE}
+path: Onereach.ai-${NEW_VERSION}-arm64-mac.zip
+sha512: ${ARM64_ZIP_SHA512}
+releaseDate: '${RELEASE_DATE}'
+EOF
+
+echo -e "${GREEN}✅ Created verified latest-mac.yml${NC}"
+
+# Verify checksums match the files (paranoid double-check)
+echo "Verifying checksums..."
+VERIFY_ARM64_ZIP=$(shasum -a 512 "$ARM64_ZIP" | awk '{print $1}' | xxd -r -p | base64)
+if [[ "$VERIFY_ARM64_ZIP" != "$ARM64_ZIP_SHA512" ]]; then
+    echo -e "${RED}❌ FATAL: Checksum verification failed for ARM64 ZIP!${NC}"
+    exit 1
+fi
+
+VERIFY_X64_ZIP=$(shasum -a 512 "$X64_ZIP" | awk '{print $1}' | xxd -r -p | base64)
+if [[ "$VERIFY_X64_ZIP" != "$X64_ZIP_SHA512" ]]; then
+    echo -e "${RED}❌ FATAL: Checksum verification failed for x64 ZIP!${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}✅ All checksums verified - files are intact${NC}"
+
+# Add latest-mac.yml to the files list for upload
+FILES+=("dist/latest-mac.yml")
 
 # Check if public repo exists (this will fail if repo doesn't exist or is private)
 echo ""
@@ -294,9 +359,9 @@ fi
 
 # Create release on public repository
 echo ""
-echo "Creating release on public repository..."
+echo -e "${YELLOW}Publishing to public repository...${NC}"
 
-# Format release notes for public
+# Format release notes for public (include checksums for transparency)
 PUBLIC_NOTES="# Onereach.ai Desktop v${NEW_VERSION}
 
 ## 📥 Download Instructions
@@ -318,6 +383,14 @@ If you have a previous version installed, you'll automatically receive an update
 
 ## 🐛 Found a Bug?
 Report issues through **Help → Report a Bug** in the app menu.
+
+## 🔐 Checksums (SHA512)
+\`\`\`
+ARM64 ZIP: ${ARM64_ZIP_SHA512}
+ARM64 DMG: ${ARM64_DMG_SHA512}
+x64 ZIP:   ${X64_ZIP_SHA512}
+x64 DMG:   ${X64_DMG_SHA512}
+\`\`\`
 
 ---
 *This is the official releases repository. The app will automatically check here for updates.*"
