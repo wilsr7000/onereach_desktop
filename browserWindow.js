@@ -1,4 +1,4 @@
-const { BrowserWindow, shell, app, dialog, Notification } = require('electron');
+const { BrowserWindow, shell, app, dialog, Notification, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const getLogger = require('./event-logger');
@@ -6,6 +6,11 @@ let logger;
 
 // Main browser window reference - kept global to prevent garbage collection
 let mainWindow = null;
+
+// Graceful shutdown state (module-level for IPC handler access)
+let isShuttingDown = false;
+let shutdownTimeout = null;
+let shutdownHandlersRegistered = false;
 
 // Add at the top with other global variables
 let authWindow = null;
@@ -396,6 +401,51 @@ function createMainWindow(app) {
     `).catch(err => console.error('Failed to check for Material Symbols:', err));
   });
 
+  // Handle window close event - save state and close gracefully
+  mainWindow.on('close', (event) => {
+    console.log('[BrowserWindow] Close event - isShuttingDown:', isShuttingDown);
+    
+    // If already shutting down, allow the close
+    if (isShuttingDown) {
+      console.log('[BrowserWindow] Already shutting down, allowing close');
+      return;
+    }
+    
+    // Mark as shutting down immediately
+    isShuttingDown = true;
+    
+    // Prevent the default close temporarily
+    event.preventDefault();
+    console.log('[BrowserWindow] Close requested - giving renderer time to save state');
+    
+    // Send shutdown signal to renderer (it will save state via beforeunload anyway)
+    try {
+      mainWindow.webContents.send('request-graceful-shutdown');
+    } catch (e) {
+      console.log('[BrowserWindow] Could not send shutdown signal:', e.message);
+    }
+    
+    // Short delay to let beforeunload complete, then force destroy
+    // This is a simple, reliable approach
+    setTimeout(() => {
+      console.log('[BrowserWindow] Forcing window destroy');
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.destroy();
+      }
+    }, 500); // 500ms is enough for localStorage saves
+  });
+  
+  // Register IPC handlers only once (for future extension if needed)
+  if (!shutdownHandlersRegistered) {
+    shutdownHandlersRegistered = true;
+    
+    // Optional: renderer can signal early if ready
+    ipcMain.on('shutdown-ready', () => {
+      console.log('[BrowserWindow] Renderer signaled shutdown-ready (early)');
+      // Window will be destroyed by the timeout anyway
+    });
+  }
+  
   // Handle window closed event
   mainWindow.on('closed', () => {
     logger.logWindowClosed('main-window', 'main');

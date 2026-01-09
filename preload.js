@@ -1017,7 +1017,19 @@ contextBridge.exposeInMainWorld('aider', {
   generateDesignChoices: (options) => ipcRenderer.invoke('design:generate-choices', options),
   regenerateDesign: (options) => ipcRenderer.invoke('design:regenerate-single', options),
   extractDesignTokens: (options) => ipcRenderer.invoke('design:extract-tokens', options),
-  generateCodeFromDesign: (options) => ipcRenderer.invoke('design:generate-code', options)
+  generateCodeFromDesign: (options) => ipcRenderer.invoke('design:generate-code', options),
+  
+  // ========== GRACEFUL SHUTDOWN ==========
+  // Listen for shutdown request from main process
+  onShutdownRequest: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on('request-graceful-shutdown', handler);
+    return () => ipcRenderer.removeListener('request-graceful-shutdown', handler);
+  },
+  // Signal that shutdown can proceed (state saved)
+  sendShutdownReady: () => ipcRenderer.send('shutdown-ready'),
+  // Signal that shutdown is blocked (task running) with reason
+  sendShutdownBlocked: (reason) => ipcRenderer.send('shutdown-blocked', reason)
 });
 
 // Expose auth API

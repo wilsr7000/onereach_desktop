@@ -1178,6 +1178,16 @@
             transition: all 0.2s;
             position: relative;
         }
+        
+        /* Execute phase - Hexagon shape, larger */
+        .phase-dot#phase-execute {
+            width: 12px;
+            height: 12px;
+            border-radius: 0;
+            clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+            margin: 0 -2px; /* Compensate for larger size in flow */
+        }
+        
         .phase-dot:hover {
             transform: scale(1.3);
         }
@@ -1193,14 +1203,222 @@
             background: var(--bg-tertiary);
             padding: 2px 6px;
             border-radius: 3px;
+            z-index: 10;
         }
+        
+        /* Execute hexagon needs adjusted tooltip position */
+        .phase-dot#phase-execute:hover::after {
+            bottom: 18px;
+        }
+        
         .phase-dot.active {
             background: var(--accent);
             box-shadow: 0 0 8px var(--accent);
-            animation: pulse-dot 1.5s infinite;
         }
         .phase-dot.completed { background: var(--success); }
         .phase-dot.failed { background: var(--danger); }
+        
+        /* ========== PHASE-SPECIFIC ACTIVE ANIMATIONS ========== */
+        
+        /* Evaluate - Radar sweep scanning effect */
+        .phase-dot.active#phase-evaluate {
+            background: #6366f1;
+            box-shadow: 0 0 8px #6366f1;
+            animation: radar-sweep 2s infinite linear;
+        }
+        
+        /* Research - Expanding ripple effect */
+        .phase-dot.active#phase-research {
+            background: #8b5cf6;
+            box-shadow: 0 0 8px #8b5cf6;
+            animation: ripple-out 1.5s infinite ease-out;
+        }
+        
+        /* Plan - Orbiting pulse effect */
+        .phase-dot.active#phase-plan {
+            background: #a855f7;
+            box-shadow: 0 0 8px #a855f7;
+            animation: orbit-pulse 2s infinite ease-in-out;
+        }
+        
+        /* Execute - Heartbeat bounce (hexagon) */
+        .phase-dot.active#phase-execute {
+            background: #ec4899;
+            box-shadow: 0 0 12px #ec4899, 0 0 24px rgba(236, 72, 153, 0.4);
+            animation: heartbeat-hex 0.8s infinite ease-in-out;
+        }
+        
+        /* Test - Blinking validation check */
+        .phase-dot.active#phase-test {
+            background: #f43f5e;
+            box-shadow: 0 0 8px #f43f5e;
+            animation: blink-check 1s infinite;
+        }
+        
+        /* Improve - Spinning rotation */
+        .phase-dot.active#phase-improve {
+            background: #f97316;
+            box-shadow: 0 0 8px #f97316;
+            animation: spin-refine 1.5s infinite linear;
+        }
+        
+        /* Finalize - Glowing shimmer celebration */
+        .phase-dot.active#phase-finalize {
+            background: #22c55e;
+            box-shadow: 0 0 8px #22c55e;
+            animation: glow-celebrate 1.2s infinite ease-in-out;
+        }
+        
+        /* ========== KEYFRAME ANIMATIONS ========== */
+        
+        /* Evaluate: Radar sweep - rotating glow around the dot */
+        @keyframes radar-sweep {
+            0% {
+                box-shadow: 0 0 8px #6366f1, 
+                            8px 0 12px rgba(99, 102, 241, 0.6),
+                            0 0 2px #6366f1 inset;
+            }
+            25% {
+                box-shadow: 0 0 8px #6366f1, 
+                            0 8px 12px rgba(99, 102, 241, 0.6),
+                            0 0 2px #6366f1 inset;
+            }
+            50% {
+                box-shadow: 0 0 8px #6366f1, 
+                            -8px 0 12px rgba(99, 102, 241, 0.6),
+                            0 0 2px #6366f1 inset;
+            }
+            75% {
+                box-shadow: 0 0 8px #6366f1, 
+                            0 -8px 12px rgba(99, 102, 241, 0.6),
+                            0 0 2px #6366f1 inset;
+            }
+            100% {
+                box-shadow: 0 0 8px #6366f1, 
+                            8px 0 12px rgba(99, 102, 241, 0.6),
+                            0 0 2px #6366f1 inset;
+            }
+        }
+        
+        /* Research: Ripple - expanding rings outward */
+        @keyframes ripple-out {
+            0% {
+                box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.7),
+                            0 0 0 0 rgba(139, 92, 246, 0.5),
+                            0 0 0 0 rgba(139, 92, 246, 0.3);
+            }
+            100% {
+                box-shadow: 0 0 0 4px rgba(139, 92, 246, 0),
+                            0 0 0 8px rgba(139, 92, 246, 0),
+                            0 0 0 12px rgba(139, 92, 246, 0);
+            }
+        }
+        
+        /* Plan: Orbit - pulsing with slight rotation feel */
+        @keyframes orbit-pulse {
+            0%, 100% {
+                transform: scale(1);
+                box-shadow: 0 0 8px #a855f7, 
+                            4px 0 6px rgba(168, 85, 247, 0.5),
+                            -4px 0 6px rgba(168, 85, 247, 0.5);
+            }
+            50% {
+                transform: scale(1.1);
+                box-shadow: 0 0 12px #a855f7, 
+                            0 4px 6px rgba(168, 85, 247, 0.5),
+                            0 -4px 6px rgba(168, 85, 247, 0.5);
+            }
+        }
+        
+        /* Execute: Heartbeat - strong energetic bounce */
+        @keyframes heartbeat-hex {
+            0%, 100% {
+                transform: scale(1);
+                box-shadow: 0 0 12px #ec4899, 0 0 24px rgba(236, 72, 153, 0.4);
+            }
+            14% {
+                transform: scale(1.3);
+                box-shadow: 0 0 20px #ec4899, 0 0 40px rgba(236, 72, 153, 0.6);
+            }
+            28% {
+                transform: scale(1);
+                box-shadow: 0 0 12px #ec4899, 0 0 24px rgba(236, 72, 153, 0.4);
+            }
+            42% {
+                transform: scale(1.2);
+                box-shadow: 0 0 16px #ec4899, 0 0 32px rgba(236, 72, 153, 0.5);
+            }
+            56% {
+                transform: scale(1);
+                box-shadow: 0 0 12px #ec4899, 0 0 24px rgba(236, 72, 153, 0.4);
+            }
+        }
+        
+        /* Test: Blink check - quick validation flash */
+        @keyframes blink-check {
+            0%, 100% {
+                opacity: 1;
+                box-shadow: 0 0 8px #f43f5e;
+            }
+            25% {
+                opacity: 0.4;
+                box-shadow: 0 0 4px #f43f5e;
+            }
+            50% {
+                opacity: 1;
+                box-shadow: 0 0 16px #f43f5e, 0 0 4px #fff inset;
+            }
+            75% {
+                opacity: 0.6;
+                box-shadow: 0 0 6px #f43f5e;
+            }
+        }
+        
+        /* Improve: Spin refine - rotating improvement */
+        @keyframes spin-refine {
+            0% {
+                box-shadow: 0 0 8px #f97316,
+                            6px 0 0 rgba(249, 115, 22, 0.8);
+            }
+            25% {
+                box-shadow: 0 0 8px #f97316,
+                            0 6px 0 rgba(249, 115, 22, 0.8);
+            }
+            50% {
+                box-shadow: 0 0 8px #f97316,
+                            -6px 0 0 rgba(249, 115, 22, 0.8);
+            }
+            75% {
+                box-shadow: 0 0 8px #f97316,
+                            0 -6px 0 rgba(249, 115, 22, 0.8);
+            }
+            100% {
+                box-shadow: 0 0 8px #f97316,
+                            6px 0 0 rgba(249, 115, 22, 0.8);
+            }
+        }
+        
+        /* Finalize: Glow celebrate - victorious shimmer */
+        @keyframes glow-celebrate {
+            0%, 100% {
+                box-shadow: 0 0 8px #22c55e,
+                            0 0 16px rgba(34, 197, 94, 0.3);
+                filter: brightness(1);
+            }
+            50% {
+                box-shadow: 0 0 16px #22c55e,
+                            0 0 32px rgba(34, 197, 94, 0.5),
+                            0 0 48px rgba(34, 197, 94, 0.2);
+                filter: brightness(1.2);
+            }
+        }
+        
+        /* Fallback pulse for any phase without specific animation */
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
         .phase-line {
             width: 20px;
             height: 1px;
@@ -1208,11 +1426,6 @@
         }
         .phase-line.active { background: var(--accent); }
         .phase-line.completed { background: var(--success); }
-        
-        @keyframes pulse-dot {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
         
         /* Compact Version Pills */
         .version-timeline {
@@ -6735,6 +6948,9 @@
                     
                     // Set up HUD activity listener for Aider Bridge and Agent updates
                     this.setupHUDActivityListener();
+                    
+                    // Set up graceful shutdown listener
+                    this.setupShutdownListener();
                 } catch (error) {
                     console.error('[GSX Create] Init error:', error);
                 }
@@ -7819,6 +8035,9 @@
             // Select Space from Main Setup
             async selectSpaceFromMain(spaceId) {
                 const startBtn = document.getElementById('mainStartBtn');
+                const previewWelcomeTitle = document.getElementById('previewWelcomeTitle');
+                const previewWelcomeSubtitle = document.getElementById('previewWelcomeSubtitle');
+                const previewWelcomeStatus = document.getElementById('previewWelcomeStatus');
                 
                 if (!spaceId) {
                     document.getElementById('spaceSelectedConfig').style.display = 'none';
@@ -7826,6 +8045,13 @@
                         startBtn.disabled = true;
                         startBtn.style.opacity = '0.5';
                         startBtn.style.cursor = 'not-allowed';
+                    // Reset welcome state
+                    if (previewWelcomeTitle) previewWelcomeTitle.textContent = 'Your App Preview';
+                    if (previewWelcomeSubtitle) previewWelcomeSubtitle.textContent = 'Select a space and start building. Your app will appear here in real-time.';
+                    if (previewWelcomeStatus) {
+                        previewWelcomeStatus.classList.remove('building');
+                        previewWelcomeStatus.textContent = 'Select a space to begin';
+                    }
                     return;
                 }
                 
@@ -7843,6 +8069,14 @@
                 
                 console.log('[GSX Create] Selected space from main:', this.currentSpace);
                 this.trackBehavior('space_selected', { spaceId, name: this.currentSpaceName });
+                
+                // Update welcome state in preview panel
+                if (previewWelcomeTitle) previewWelcomeTitle.textContent = this.currentSpaceName;
+                if (previewWelcomeSubtitle) previewWelcomeSubtitle.textContent = 'Start a session to begin building. Your app will appear here as you work.';
+                if (previewWelcomeStatus) {
+                    previewWelcomeStatus.classList.remove('building');
+                    previewWelcomeStatus.textContent = 'Ready to build - click Start Session';
+                }
                 
                 // Enable start button
                     startBtn.disabled = false;
@@ -7866,6 +8100,9 @@
                     this.loadGlobalInstructions(),
                     this.loadCycleState()
                 ]);
+                
+                // Load task queue for this space
+                this.loadTaskQueue();
                 
                 // Load version backups and branches
                 await this.loadVersionBackups();
@@ -8263,6 +8500,9 @@ ${content}`;
                     this.loadGlobalInstructions(),
                     this.loadCycleState()
                 ]);
+                
+                // Load task queue for this space
+                this.loadTaskQueue();
                 
                 // Load version backups and branches
                 await this.loadVersionBackups();
@@ -11288,6 +11528,7 @@ If unsure, reply with the middle position.`;
                     // #endregion
                     console.error('[TaskQueue] Task failed:', e);
                     task.status = 'completed';  // Mark as complete anyway to continue
+                    task.completedAt = Date.now();
                     task.error = e.message;
                     this.addMessage('error', `Task failed: ${e.message}`);
                 } finally {
@@ -11576,6 +11817,9 @@ If unsure, reply with the middle position.`;
                 }).join('');
                 
                 this.updateQueueStats();
+                
+                // Persist task queue to storage
+                this.saveTaskQueue();
             },
             
             // Cancel a pending task
@@ -13196,6 +13440,75 @@ For each failed test:
                 localStorage.setItem(storageKey, JSON.stringify(this.todos));
             },
             
+            // ========== TASK QUEUE PERSISTENCE ==========
+            
+            // Load task queue from storage
+            loadTaskQueue() {
+                if (!this.currentSpaceId) {
+                    console.log('[TaskQueue] No space selected, skipping load');
+                    return;
+                }
+                
+                try {
+                    const storageKey = `gsx-taskqueue-${this.currentSpaceId}`;
+                    const stored = localStorage.getItem(storageKey);
+                    
+                    if (stored) {
+                        const parsed = JSON.parse(stored);
+                        // Filter out completed tasks older than 24 hours to prevent bloat
+                        const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
+                        this.taskQueue = parsed.filter(task => {
+                            if (task.status === 'completed' && task.completedAt) {
+                                return new Date(task.completedAt).getTime() > oneDayAgo;
+                            }
+                            return true;
+                        });
+                        
+                        // Reset any "running" tasks to "pending" (they were interrupted)
+                        this.taskQueue.forEach(task => {
+                            if (task.status === 'running') {
+                                task.status = 'pending';
+                            }
+                        });
+                        
+                        // Update stats
+                        this.queueStats.total = this.taskQueue.length;
+                        this.queueStats.completed = this.taskQueue.filter(t => t.status === 'completed').length;
+                        
+                        console.log('[TaskQueue] Loaded', this.taskQueue.length, 'tasks from storage');
+                    } else {
+                        this.taskQueue = [];
+                        console.log('[TaskQueue] No saved queue, starting fresh');
+                    }
+                    
+                    this.renderTaskQueue();
+                } catch (error) {
+                    console.error('[TaskQueue] Failed to load:', error);
+                    this.taskQueue = [];
+                }
+            },
+            
+            // Save task queue to storage
+            saveTaskQueue() {
+                if (!this.currentSpaceId) return;
+                
+                try {
+                    const storageKey = `gsx-taskqueue-${this.currentSpaceId}`;
+                    // Only save pending and recently completed tasks
+                    const tasksToSave = this.taskQueue.filter(task => {
+                        if (task.status === 'completed') {
+                            // Keep completed tasks from last 24 hours
+                            const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
+                            return task.completedAt && new Date(task.completedAt).getTime() > oneDayAgo;
+                        }
+                        return task.status === 'pending' || task.status === 'running';
+                    });
+                    localStorage.setItem(storageKey, JSON.stringify(tasksToSave));
+                } catch (error) {
+                    console.error('[TaskQueue] Failed to save:', error);
+                }
+            },
+            
             // Add a new todo
             addTodo() {
                 const input = document.getElementById('newTodoInput');
@@ -13426,6 +13739,58 @@ For each failed test:
                     localStorage.setItem(key, JSON.stringify(stateToSave));
                 } catch (error) {
                     console.error('[GSX Create] Failed to save cycle state:', error);
+                }
+            },
+            
+            // ========== GRACEFUL SHUTDOWN ==========
+            
+            // Save all state for graceful shutdown
+            saveAllStateForShutdown() {
+                console.log('[GSX Create] Saving all state for shutdown...');
+                
+                try {
+                    // Save task queue
+                    this.saveTaskQueue();
+                    
+                    // Save cycle state
+                    this.saveCycleState();
+                    
+                    // Save todos
+                    this.saveTodos();
+                    
+                    // Save global instructions
+                    const instructionsEl = document.getElementById('globalInstructions');
+                    if (instructionsEl && this.currentSpaceId) {
+                        const key = `gsx-global-instructions-${this.currentSpaceId}`;
+                        localStorage.setItem(key, instructionsEl.value);
+                    }
+                    
+                    console.log('[GSX Create] All state saved');
+                } catch (error) {
+                    console.error('[GSX Create] Error saving state for shutdown:', error);
+                }
+            },
+            
+            // Handle graceful shutdown request from main process
+            handleShutdownRequest() {
+                console.log('[GSX Create] Shutdown request received');
+                
+                // Save all state
+                this.saveAllStateForShutdown();
+                
+                // Signal ready to close
+                if (window.aider && window.aider.sendShutdownReady) {
+                    window.aider.sendShutdownReady();
+                }
+            },
+            
+            // Set up shutdown listener
+            setupShutdownListener() {
+                if (window.aider && window.aider.onShutdownRequest) {
+                    window.aider.onShutdownRequest(() => {
+                        this.handleShutdownRequest();
+                    });
+                    console.log('[GSX Create] Shutdown listener registered');
                 }
             },
             
@@ -21547,6 +21912,22 @@ Respond with ONLY the objective, no other text.`;
             // DOM already loaded, call init immediately
             GSXCreate.init();
         }
+        
+        // ========== BEFOREUNLOAD FALLBACK ==========
+        // Save state when window is about to close
+        window.addEventListener('beforeunload', (event) => {
+            console.log('[GSX Create] beforeunload triggered - saving state');
+            
+            // Save all state synchronously
+            try {
+                GSXCreate.saveAllStateForShutdown();
+            } catch (error) {
+                console.error('[GSX Create] Error in beforeunload save:', error);
+            }
+            
+            // Don't block the close - just let it happen after saving
+            // The state is saved, so no data is lost
+        });
     </script>
     
     <!-- Floating Voice Panel (doesn't block app view) -->

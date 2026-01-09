@@ -1190,7 +1190,7 @@
 <body>
     <div class="wizard-container">
         <div class="progress-bar">
-            <div class="progress" style="width: 33%"></div>
+            <div class="progress" style="width: 0%"></div>
         </div>
 
         <div class="step active" id="step0">
@@ -1785,6 +1785,293 @@
         let selectedAudioGeneratorType = null;
         let selectedUIDesignType = null;
 
+        // Progress bar update function
+        function updateProgressBar() {
+            const progressBar = document.querySelector('.progress');
+            if (!progressBar) return;
+            
+            const currentStep = document.querySelector('.step.active');
+            if (!currentStep) return;
+            
+            const stepId = currentStep.id;
+            let progress = 0;
+            
+            // Calculate progress based on current step and workflow
+            switch(stepId) {
+                case 'step0':
+                    // Manager view - no progress shown
+                    progress = 0;
+                    break;
+                case 'step-choice':
+                    // Choice screen - early in the flow
+                    progress = 25;
+                    break;
+                case 'step1':
+                    // IDW flow step 1
+                    progress = 50;
+                    break;
+                case 'step2':
+                    // IDW flow step 2 (final)
+                    progress = 90;
+                    break;
+                case 'step-external':
+                case 'step-image':
+                case 'step-video':
+                case 'step-audio':
+                case 'step-ui-design':
+                    // Single-step flows - at the final step
+                    progress = 75;
+                    break;
+                default:
+                    progress = 0;
+            }
+            
+            progressBar.style.width = progress + '%';
+            
+            // Also save wizard state when progress updates
+            saveWizardState();
+        }
+
+        // Wizard state persistence functions
+        function saveWizardState() {
+            const currentStep = document.querySelector('.step.active');
+            if (!currentStep) return;
+            
+            const state = {
+                currentStepId: currentStep.id,
+                addType: addType,
+                selectedBotType: selectedBotType,
+                selectedImageCreatorType: selectedImageCreatorType,
+                selectedVideoCreatorType: selectedVideoCreatorType,
+                selectedAudioCategory: selectedAudioCategory,
+                selectedAudioGeneratorType: selectedAudioGeneratorType,
+                selectedUIDesignType: selectedUIDesignType,
+                formData: getFormData(),
+                timestamp: Date.now()
+            };
+            
+            localStorage.setItem('wizardState', JSON.stringify(state));
+        }
+
+        function getFormData() {
+            const formData = {};
+            
+            // IDW form data (step1)
+            const idwHomeUrl = document.getElementById('idw-home-url');
+            const idwChatUrl = document.getElementById('idw-chat-url');
+            const gsxAccountId = document.getElementById('gsx-account-id');
+            
+            if (idwHomeUrl) formData.idwHomeUrl = idwHomeUrl.value;
+            if (idwChatUrl) formData.idwChatUrl = idwChatUrl.value;
+            if (gsxAccountId) formData.gsxAccountId = gsxAccountId.value;
+            
+            // External bot form data
+            const botName = document.getElementById('bot-name');
+            const botChatUrl = document.getElementById('bot-chat-url');
+            const botApiUrl = document.getElementById('bot-api-url');
+            
+            if (botName) formData.botName = botName.value;
+            if (botChatUrl) formData.botChatUrl = botChatUrl.value;
+            if (botApiUrl) formData.botApiUrl = botApiUrl.value;
+            
+            // Image creator form data
+            const imageCreatorName = document.getElementById('image-creator-name');
+            const imageCreatorUrl = document.getElementById('image-creator-url');
+            const imageCreatorApiUrl = document.getElementById('image-creator-api-url');
+            
+            if (imageCreatorName) formData.imageCreatorName = imageCreatorName.value;
+            if (imageCreatorUrl) formData.imageCreatorUrl = imageCreatorUrl.value;
+            if (imageCreatorApiUrl) formData.imageCreatorApiUrl = imageCreatorApiUrl.value;
+            
+            // Video creator form data
+            const videoCreatorName = document.getElementById('video-creator-name');
+            const videoCreatorUrl = document.getElementById('video-creator-url');
+            const videoCreatorApiUrl = document.getElementById('video-creator-api-url');
+            
+            if (videoCreatorName) formData.videoCreatorName = videoCreatorName.value;
+            if (videoCreatorUrl) formData.videoCreatorUrl = videoCreatorUrl.value;
+            if (videoCreatorApiUrl) formData.videoCreatorApiUrl = videoCreatorApiUrl.value;
+            
+            // Audio generator form data
+            const audioGeneratorName = document.getElementById('audio-generator-name');
+            const audioGeneratorUrl = document.getElementById('audio-generator-url');
+            const audioGeneratorApiUrl = document.getElementById('audio-generator-api-url');
+            
+            if (audioGeneratorName) formData.audioGeneratorName = audioGeneratorName.value;
+            if (audioGeneratorUrl) formData.audioGeneratorUrl = audioGeneratorUrl.value;
+            if (audioGeneratorApiUrl) formData.audioGeneratorApiUrl = audioGeneratorApiUrl.value;
+            
+            // UI Design tool form data
+            const uiDesignName = document.getElementById('ui-design-name');
+            const uiDesignUrl = document.getElementById('ui-design-url');
+            const uiDesignApiUrl = document.getElementById('ui-design-api-url');
+            
+            if (uiDesignName) formData.uiDesignName = uiDesignName.value;
+            if (uiDesignUrl) formData.uiDesignUrl = uiDesignUrl.value;
+            if (uiDesignApiUrl) formData.uiDesignApiUrl = uiDesignApiUrl.value;
+            
+            return formData;
+        }
+
+        function restoreWizardState() {
+            const stateJson = localStorage.getItem('wizardState');
+            if (!stateJson) return false;
+            
+            try {
+                const state = JSON.parse(stateJson);
+                
+                // Check if state is stale (older than 24 hours)
+                const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+                if (Date.now() - state.timestamp > maxAge) {
+                    localStorage.removeItem('wizardState');
+                    return false;
+                }
+                
+                // Only restore if we're not on the manager step (step0)
+                // and the saved step is not step0
+                if (state.currentStepId && state.currentStepId !== 'step0') {
+                    // Restore selection states
+                    addType = state.addType || 'idw';
+                    selectedBotType = state.selectedBotType;
+                    selectedImageCreatorType = state.selectedImageCreatorType;
+                    selectedVideoCreatorType = state.selectedVideoCreatorType;
+                    selectedAudioCategory = state.selectedAudioCategory;
+                    selectedAudioGeneratorType = state.selectedAudioGeneratorType;
+                    selectedUIDesignType = state.selectedUIDesignType;
+                    
+                    // Switch to the saved step
+                    document.querySelectorAll('.step').forEach(step => {
+                        step.classList.remove('active');
+                    });
+                    
+                    const targetStep = document.getElementById(state.currentStepId);
+                    if (targetStep) {
+                        targetStep.classList.add('active');
+                        
+                        // Restore form data
+                        if (state.formData) {
+                            restoreFormData(state.formData);
+                        }
+                        
+                        // Update progress bar without saving (to avoid overwriting)
+                        const progressBar = document.querySelector('.progress');
+                        if (progressBar) {
+                            let progress = 0;
+                            switch(state.currentStepId) {
+                                case 'step-choice': progress = 25; break;
+                                case 'step1': progress = 50; break;
+                                case 'step2': progress = 90; break;
+                                case 'step-external':
+                                case 'step-image':
+                                case 'step-video':
+                                case 'step-audio':
+                                case 'step-ui-design':
+                                    progress = 75; break;
+                            }
+                            progressBar.style.width = progress + '%';
+                        }
+                        
+                        return true;
+                    }
+                }
+            } catch (e) {
+                console.error('Error restoring wizard state:', e);
+                localStorage.removeItem('wizardState');
+            }
+            
+            return false;
+        }
+
+        function restoreFormData(formData) {
+            // IDW form data
+            if (formData.idwHomeUrl) {
+                const el = document.getElementById('idw-home-url');
+                if (el) el.value = formData.idwHomeUrl;
+            }
+            if (formData.idwChatUrl) {
+                const el = document.getElementById('idw-chat-url');
+                if (el) el.value = formData.idwChatUrl;
+            }
+            if (formData.gsxAccountId) {
+                const el = document.getElementById('gsx-account-id');
+                if (el) el.value = formData.gsxAccountId;
+            }
+            
+            // External bot form data
+            if (formData.botName) {
+                const el = document.getElementById('bot-name');
+                if (el) el.value = formData.botName;
+            }
+            if (formData.botChatUrl) {
+                const el = document.getElementById('bot-chat-url');
+                if (el) el.value = formData.botChatUrl;
+            }
+            if (formData.botApiUrl) {
+                const el = document.getElementById('bot-api-url');
+                if (el) el.value = formData.botApiUrl;
+            }
+            
+            // Image creator form data
+            if (formData.imageCreatorName) {
+                const el = document.getElementById('image-creator-name');
+                if (el) el.value = formData.imageCreatorName;
+            }
+            if (formData.imageCreatorUrl) {
+                const el = document.getElementById('image-creator-url');
+                if (el) el.value = formData.imageCreatorUrl;
+            }
+            if (formData.imageCreatorApiUrl) {
+                const el = document.getElementById('image-creator-api-url');
+                if (el) el.value = formData.imageCreatorApiUrl;
+            }
+            
+            // Video creator form data
+            if (formData.videoCreatorName) {
+                const el = document.getElementById('video-creator-name');
+                if (el) el.value = formData.videoCreatorName;
+            }
+            if (formData.videoCreatorUrl) {
+                const el = document.getElementById('video-creator-url');
+                if (el) el.value = formData.videoCreatorUrl;
+            }
+            if (formData.videoCreatorApiUrl) {
+                const el = document.getElementById('video-creator-api-url');
+                if (el) el.value = formData.videoCreatorApiUrl;
+            }
+            
+            // Audio generator form data
+            if (formData.audioGeneratorName) {
+                const el = document.getElementById('audio-generator-name');
+                if (el) el.value = formData.audioGeneratorName;
+            }
+            if (formData.audioGeneratorUrl) {
+                const el = document.getElementById('audio-generator-url');
+                if (el) el.value = formData.audioGeneratorUrl;
+            }
+            if (formData.audioGeneratorApiUrl) {
+                const el = document.getElementById('audio-generator-api-url');
+                if (el) el.value = formData.audioGeneratorApiUrl;
+            }
+            
+            // UI Design tool form data
+            if (formData.uiDesignName) {
+                const el = document.getElementById('ui-design-name');
+                if (el) el.value = formData.uiDesignName;
+            }
+            if (formData.uiDesignUrl) {
+                const el = document.getElementById('ui-design-url');
+                if (el) el.value = formData.uiDesignUrl;
+            }
+            if (formData.uiDesignApiUrl) {
+                const el = document.getElementById('ui-design-api-url');
+                if (el) el.value = formData.uiDesignApiUrl;
+            }
+        }
+
+        function clearWizardState() {
+            localStorage.removeItem('wizardState');
+        }
+
         // Predefined bot configurations
         // Agent type configurations
         const botConfigs = {
@@ -2029,6 +2316,7 @@
                     document.getElementById('step-ui-design').classList.add('active');
                     break;
             }
+            updateProgressBar();
         }
 
         // Function to go back to choice screen
@@ -2039,6 +2327,7 @@
             });
             // Show choice step
             document.getElementById('step-choice').classList.add('active');
+            updateProgressBar();
         }
 
         // Function to select bot type
@@ -3157,6 +3446,7 @@
             
             // Validate
             validateAudioGenerator();
+            updateProgressBar();
         }
 
         // Function to delete audio generator from list
@@ -3232,6 +3522,28 @@
             
             // Initialize audio category to music
             selectedAudioCategory = 'music';
+            
+            // Restore wizard state if available (do this after initial data load)
+            setTimeout(() => {
+                const wasRestored = restoreWizardState();
+                if (wasRestored) {
+                    console.log('[SetupWizard] Restored previous wizard state');
+                }
+                // Update progress bar based on current state
+                updateProgressBar();
+            }, 100);
+            
+            // Add input listeners to save state on form changes
+            const formInputs = document.querySelectorAll('input[type="text"], input[type="url"]');
+            formInputs.forEach(input => {
+                input.addEventListener('input', () => {
+                    // Debounce the save to avoid too many writes
+                    clearTimeout(input._saveTimeout);
+                    input._saveTimeout = setTimeout(() => {
+                        saveWizardState();
+                    }, 500);
+                });
+            });
         });
 
         // Add missing helper functions
@@ -3271,6 +3583,7 @@
 
             // Validate URLs to ensure form is ready
             validateIDWUrls();
+            updateProgressBar();
         }
 
         function editExternalBot(id) {
@@ -3303,6 +3616,7 @@
             
             // Validate
             validateExternalBot();
+            updateProgressBar();
         }
 
         function editImageCreator(id) {
@@ -3334,6 +3648,7 @@
             
             // Validate
             validateImageCreator();
+            updateProgressBar();
         }
 
         function editVideoCreator(id) {
@@ -3365,6 +3680,7 @@
             
             // Validate
             validateVideoCreator();
+            updateProgressBar();
         }
 
         function deleteIDWEnvironment(id) {
@@ -3461,6 +3777,7 @@
         function showAddChoice() {
             document.getElementById('step0').classList.remove('active');
             document.getElementById('step-choice').classList.add('active');
+            updateProgressBar();
         }
 
         function backToManager() {
@@ -3474,6 +3791,9 @@
             populateEnvironmentsList();
             // Reset all forms
             resetAllForms();
+            // Clear wizard state since we're back at the manager
+            clearWizardState();
+            updateProgressBar();
         }
 
         function resetAllForms(preserveEditingId = false) {
@@ -3554,6 +3874,7 @@
                 currentStep.classList.remove('active');
                 document.getElementById('step2').classList.add('active');
                 populateGSXLinks();
+                updateProgressBar();
             } else if (currentId === 'step2') {
                 finish(); // Call finish at the end of step2
             }
@@ -3566,6 +3887,7 @@
             if (currentId === 'step2') {
                 currentStep.classList.remove('active');
                 document.getElementById('step1').classList.add('active');
+                updateProgressBar();
             }
         }
 
@@ -4505,6 +4827,7 @@
             
             // Validate
             validateUIDesign();
+            updateProgressBar();
         }
 
         // Function to delete UI design tool from list
