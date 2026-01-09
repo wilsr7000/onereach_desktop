@@ -7,6 +7,77 @@ let openChatLinksInNewTab = false; // Preference for chat link behavior
 // Initialize IDW Registry for reliable tab tracking
 const idwRegistry = new IDWRegistry();
 
+// LLM Badge state
+let llmBadgeTimeout = null;
+let llmBadgeHideTimeout = null;
+
+/**
+ * Initialize LLM Badge handler
+ * Shows a badge in the tab bar when LLM API calls are made
+ */
+function initLLMBadge() {
+    const badge = document.getElementById('llm-badge');
+    const badgeText = document.getElementById('llm-badge-text');
+    const badgeCost = document.getElementById('llm-badge-cost');
+    
+    if (!badge) {
+        console.warn('[LLM Badge] Badge element not found');
+        return;
+    }
+    
+    // Listen for LLM call notifications
+    if (window.api && window.api.receive) {
+        window.api.receive('llm:call-made', (data) => {
+            console.log('[LLM Badge] Call received:', data);
+            showLLMBadge(data);
+        });
+        console.log('[LLM Badge] Listener registered');
+    }
+    
+    // Click handler to show usage details
+    badge.addEventListener('click', () => {
+        const cost = badgeCost.textContent;
+        const text = badgeText.textContent;
+        alert(`LLM Usage This Session:\n${text}\nTotal Cost: ${cost}`);
+    });
+}
+
+/**
+ * Show the LLM badge with animation
+ */
+function showLLMBadge(data) {
+    const badge = document.getElementById('llm-badge');
+    const badgeText = document.getElementById('llm-badge-text');
+    const badgeCost = document.getElementById('llm-badge-cost');
+    
+    if (!badge) return;
+    
+    // Clear any existing timeouts
+    if (llmBadgeTimeout) clearTimeout(llmBadgeTimeout);
+    if (llmBadgeHideTimeout) clearTimeout(llmBadgeHideTimeout);
+    
+    // Update badge content
+    const providerIcon = data.provider === 'claude' ? '🟣' : '🟢';
+    const featureLabel = data.feature ? data.feature.replace(/-/g, ' ') : 'LLM';
+    
+    badgeText.textContent = `${providerIcon} ${data.sessionTotal?.calls || 1} calls`;
+    badgeCost.textContent = `$${(data.sessionTotal?.cost || data.cost || 0).toFixed(4)}`;
+    
+    // Show badge with animation
+    badge.classList.add('active');
+    badge.classList.add('calling');
+    
+    // Remove "calling" class after animation
+    llmBadgeTimeout = setTimeout(() => {
+        badge.classList.remove('calling');
+    }, 2000);
+    
+    // Keep badge visible for 30 seconds after last call, then hide
+    llmBadgeHideTimeout = setTimeout(() => {
+        badge.classList.remove('active');
+    }, 30000);
+}
+
 // Initialize when the document is loaded
 document.addEventListener('DOMContentLoaded', () => {
     // Load preferences
@@ -22,6 +93,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const forwardButton = document.getElementById('forward-button');
     const refreshButton = document.getElementById('refresh-button');
     const loadingIndicator = document.getElementById('loading-indicator');
+    
+    // Initialize LLM Badge for API call notifications
+    initLLMBadge();
     
     // Set up event listeners
     let menuDebounceTimer = null;
@@ -659,6 +733,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const isCmdOrCtrl = e.metaKey || e.ctrlKey;
         
         if (isCmdOrCtrl && (e.key === 'v' || e.key === 'V')) {
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'browser-renderer.js:keydown:CmdV',message:'Cmd/Ctrl+V detected in browser-renderer',data:{isBlackHoleOpen,isMouseOverButton,activeElementId:document.activeElement?.id,activeElementTag:document.activeElement?.tagName,blackHoleButtonId:blackHoleButton?.id,conditionMet:!!(isBlackHoleOpen || isMouseOverButton || document.activeElement === blackHoleButton)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+            // #endregion
             // Check if black hole is open or if mouse is over button or button is focused
             if (isBlackHoleOpen || isMouseOverButton || document.activeElement === blackHoleButton) {
                 console.log('Cmd/Ctrl+V detected - Black hole open:', isBlackHoleOpen);
@@ -690,6 +767,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     }, 600);
                 }
                 return; // Don't process the else block below
+            } else {
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'browser-renderer.js:keydown:CmdV:conditionNotMet',message:'Cmd/Ctrl+V condition NOT met - paste not sent to black hole',data:{isBlackHoleOpen,isMouseOverButton,activeElementId:document.activeElement?.id,activeElementTag:document.activeElement?.tagName,isButtonFocused:document.activeElement === blackHoleButton},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+                // #endregion
             }
         }
     });

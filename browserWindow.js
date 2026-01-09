@@ -407,9 +407,9 @@ function createMainWindow(app) {
     logger.logWindowFocused('main-window', 'main');
   });
 
-  // Add context menu handler for right-click "Paste to Black Hole"
+  // Add context menu handler for right-click with standard editing options and "Send to Space"
   mainWindow.webContents.on('context-menu', (event, params) => {
-    console.log('[BrowserWindow] Context menu requested at:', params.x, params.y);
+    console.log('[BrowserWindow] Context menu requested at:', params.x, params.y, 'selectionText:', params.selectionText);
     
     // Allow native DevTools context menu to work (only when right-clicking IN DevTools)
     const url = mainWindow.webContents.getURL();
@@ -420,9 +420,181 @@ function createMainWindow(app) {
     
     event.preventDefault();
     
-    const { Menu, MenuItem } = require('electron');
+    const { Menu, MenuItem, clipboard } = require('electron');
     const contextMenu = new Menu();
     
+    // Add Cut option if text is selected and editable
+    if (params.editFlags.canCut) {
+      contextMenu.append(new MenuItem({
+        label: 'Cut',
+        accelerator: 'CmdOrCtrl+X',
+        click: () => {
+          mainWindow.webContents.cut();
+        }
+      }));
+    }
+    
+    // Add Copy option if text is selected
+    if (params.editFlags.canCopy) {
+      contextMenu.append(new MenuItem({
+        label: 'Copy',
+        accelerator: 'CmdOrCtrl+C',
+        click: () => {
+          mainWindow.webContents.copy();
+        }
+      }));
+    }
+    
+    // Add Paste option if paste is available
+    if (params.editFlags.canPaste) {
+      contextMenu.append(new MenuItem({
+        label: 'Paste',
+        accelerator: 'CmdOrCtrl+V',
+        click: () => {
+          mainWindow.webContents.paste();
+        }
+      }));
+    }
+    
+    // Add Select All option
+    if (params.editFlags.canSelectAll) {
+      contextMenu.append(new MenuItem({
+        label: 'Select All',
+        accelerator: 'CmdOrCtrl+A',
+        click: () => {
+          mainWindow.webContents.selectAll();
+        }
+      }));
+    }
+    
+    // Add separator if we have any standard options
+    if (params.editFlags.canCut || params.editFlags.canCopy || params.editFlags.canPaste || params.editFlags.canSelectAll) {
+      contextMenu.append(new MenuItem({ type: 'separator' }));
+    }
+    
+    // Add "Send to Space" option if text is selected
+    if (params.selectionText && params.selectionText.trim().length > 0) {
+      contextMenu.append(new MenuItem({
+        label: 'Send to Space',
+        click: () => {
+          console.log('[BrowserWindow] Send to Space clicked with selection:', params.selectionText.substring(0, 50));
+          
+          if (global.clipboardManager) {
+            const selectionData = {
+              hasText: true,
+              hasHtml: false,
+              hasImage: false,
+              text: params.selectionText,
+              html: null
+            };
+            
+            console.log('[BrowserWindow] Selection data ready:', { textLength: params.selectionText.length });
+            
+            // Position the window
+            const bounds = mainWindow.getBounds();
+            const position = {
+              x: bounds.x + bounds.width - 100,
+              y: bounds.y + 100
+            };
+            
+            // Create window with selection data - will show modal directly
+            global.clipboardManager.createBlackHoleWindow(position, true, selectionData);
+          }
+        }
+      }));
+    }
+    
+    // Add "Send Image to Space" option if right-clicking on an image
+    if (params.mediaType === 'image' && params.srcURL) {
+      contextMenu.append(new MenuItem({
+        label: 'Send Image to Space',
+        click: async () => {
+          console.log('[BrowserWindow] Send Image to Space clicked:', params.srcURL);
+          
+          if (global.clipboardManager) {
+            try {
+              const { net } = require('electron');
+              
+              // Download the image
+              const imageData = await new Promise((resolve, reject) => {
+                const request = net.request(params.srcURL);
+                const chunks = [];
+                
+                request.on('response', (response) => {
+                  const contentType = response.headers['content-type'] || 'image/png';
+                  
+                  response.on('data', (chunk) => {
+                    chunks.push(chunk);
+                  });
+                  
+                  response.on('end', () => {
+                    const buffer = Buffer.concat(chunks);
+                    const base64 = buffer.toString('base64');
+                    const mimeType = Array.isArray(contentType) ? contentType[0] : contentType;
+                    resolve(`data:${mimeType};base64,${base64}`);
+                  });
+                  
+                  response.on('error', reject);
+                });
+                
+                request.on('error', reject);
+                request.end();
+              });
+              
+              const imageDataObj = {
+                hasText: false,
+                hasHtml: false,
+                hasImage: true,
+                text: null,
+                html: null,
+                imageDataUrl: imageData,
+                sourceUrl: params.srcURL
+              };
+              
+              console.log('[BrowserWindow] Image data ready from:', params.srcURL);
+              
+              // Position the window
+              const bounds = mainWindow.getBounds();
+              const position = {
+                x: bounds.x + bounds.width - 100,
+                y: bounds.y + 100
+              };
+              
+              // Create window with image data - will show modal directly
+              global.clipboardManager.createBlackHoleWindow(position, true, imageDataObj);
+            } catch (error) {
+              console.error('[BrowserWindow] Error downloading image:', error);
+              // Fallback: just send the URL as text
+              const fallbackData = {
+                hasText: true,
+                hasHtml: false,
+                hasImage: false,
+                text: params.srcURL,
+                html: null
+              };
+              
+              const bounds = mainWindow.getBounds();
+              const position = {
+                x: bounds.x + bounds.width - 100,
+                y: bounds.y + 100
+              };
+              
+              global.clipboardManager.createBlackHoleWindow(position, true, fallbackData);
+            }
+          }
+        }
+      }));
+      
+      // Also add "Copy Image" option for convenience
+      contextMenu.append(new MenuItem({
+        label: 'Copy Image',
+        click: () => {
+          mainWindow.webContents.copyImageAt(params.x, params.y);
+        }
+      }));
+    }
+    
+    // Add "Paste to Space" option (for clipboard content)
     contextMenu.append(new MenuItem({
       label: 'Paste to Space',
       click: () => {
@@ -430,8 +602,6 @@ function createMainWindow(app) {
         
         // Get clipboard manager from global
         if (global.clipboardManager) {
-          const { clipboard } = require('electron');
-          
           // Read clipboard data FIRST
           const text = clipboard.readText();
           const html = clipboard.readHTML();

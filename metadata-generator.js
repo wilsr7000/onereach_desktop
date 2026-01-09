@@ -779,6 +779,199 @@ Respond with JSON only:
   }
 
   /**
+   * STYLE GUIDE METADATA - Specialized for design system/style guide JSON files
+   */
+  async generateStyleGuideMetadata(item, apiKey, spaceContext) {
+    const content = item.content || item.text || item.preview || '';
+    
+    // Get API keys from settings
+    const settingsManager = global.settingsManager;
+    const openaiKey = settingsManager?.get('openaiApiKey') || process.env.OPENAI_API_KEY;
+    
+    // Parse JSON to extract key information
+    let styleGuideInfo = '';
+    try {
+      const data = typeof content === 'string' ? JSON.parse(content) : content;
+      styleGuideInfo = `
+Style Guide Name: ${data.name || data.id || 'Unknown'}
+Version: ${data.version || 'N/A'}
+Colors: ${data.colors ? Object.keys(data.colors).join(', ') : 'N/A'}
+Typography: ${data.typography?.fontFamilies?.length || 0} font families, ${data.typography?.scale?.length || 0} scale levels
+Has Spacing: ${data.spacing ? 'Yes' : 'No'}
+Has Shadows: ${data.shadows ? 'Yes' : 'No'}
+Has Animations: ${data.animations ? 'Yes' : 'No'}
+Components: ${data.components?.length || 0} defined`;
+    } catch (e) {
+      styleGuideInfo = content.substring(0, 2000);
+    }
+    
+    const prompt = this.buildStyleGuidePrompt(item, styleGuideInfo, spaceContext);
+    
+    if (openaiKey) {
+      console.log('[MetadataGen] Using GPT-5.2 for Style Guide analysis');
+      try {
+        const metadata = await this.openaiAPI.generateMetadata(prompt, 'style-guide', openaiKey);
+        metadata._model_used = 'gpt-5.2-128k';
+        metadata.assetType = 'style-guide';
+        return metadata;
+      } catch (error) {
+        console.warn('[MetadataGen] GPT-5.2 failed for style guide, falling back to Claude:', error.message);
+      }
+    }
+    
+    // Fallback to Claude
+    const metadata = await this.claudeAPI.generateMetadata(prompt, 'style-guide', apiKey);
+    metadata._model_used = 'claude-sonnet-4-5-20250929';
+    metadata.assetType = 'style-guide';
+    return metadata;
+  }
+
+  buildStyleGuidePrompt(item, styleGuideInfo, spaceContext) {
+    let contextInfo = '';
+    if (spaceContext) {
+      contextInfo = `\nSPACE: "${spaceContext.name}"`;
+      if (spaceContext.purpose) contextInfo += ` - ${spaceContext.purpose}`;
+    }
+
+    return `You are analyzing a STYLE GUIDE / DESIGN SYSTEM JSON file.${contextInfo}
+
+FILE INFORMATION:
+Filename: ${item.fileName || 'Unknown'}
+File Size: ${item.fileSize ? this.formatBytes(item.fileSize) : 'Unknown'}
+
+EXTRACTED STYLE GUIDE INFO:
+${styleGuideInfo}
+
+Analyze this style guide and provide metadata:
+
+1. IDENTIFICATION:
+   - What project/product is this style guide for?
+   - What design philosophy does it represent?
+   - Is it light/dark themed?
+
+2. DESIGN CHARACTERISTICS:
+   - Color palette mood (warm, cool, neutral, vibrant, muted)
+   - Typography style (modern, classic, playful, professional)
+   - Overall aesthetic
+
+3. USAGE:
+   - What type of application would use this?
+   - Target audience based on design choices
+   - Recommended use cases
+
+Respond with JSON only:
+{
+  "title": "Style guide name/purpose",
+  "description": "What this style guide defines and its aesthetic (2-3 sentences)",
+  "designSystem": "Name of the design system if identifiable",
+  "theme": "light|dark|mixed",
+  "colorMood": "warm|cool|neutral|vibrant|muted|mixed",
+  "typographyStyle": "modern|classic|playful|professional|technical",
+  "aesthetic": "Overall design aesthetic description",
+  "targetApplication": "Web app|Mobile app|Dashboard|Marketing|Documentation|General",
+  "tags": ["relevant", "design", "tags"],
+  "notes": "Additional observations about the style guide"
+}`;
+  }
+
+  /**
+   * JOURNEY MAP METADATA - Specialized for customer journey map JSON files
+   */
+  async generateJourneyMapMetadata(item, apiKey, spaceContext) {
+    const content = item.content || item.text || item.preview || '';
+    
+    // Get API keys from settings
+    const settingsManager = global.settingsManager;
+    const openaiKey = settingsManager?.get('openaiApiKey') || process.env.OPENAI_API_KEY;
+    
+    // Parse JSON to extract key information
+    let journeyInfo = '';
+    try {
+      const data = typeof content === 'string' ? JSON.parse(content) : content;
+      const journeyData = data.journeyData || data;
+      journeyInfo = `
+Journey Title: ${journeyData.title || data.name || 'Unknown'}
+Project: ${data.metadata?.projectName || 'N/A'}
+Version: ${data.metadata?.version || journeyData.version || 'N/A'}
+Persona: ${journeyData.persona?.name || 'N/A'}
+Persona Role: ${journeyData.persona?.role || 'N/A'}
+Number of Journeys: ${journeyData.persona?.journeys?.length || 0}
+Number of Stages: ${journeyData.persona?.journeys?.[0]?.stages?.length || 0}
+Has Triggers: ${journeyData.persona?.journeys?.[0]?.triggers ? 'Yes' : 'No'}`;
+    } catch (e) {
+      journeyInfo = content.substring(0, 2000);
+    }
+    
+    const prompt = this.buildJourneyMapPrompt(item, journeyInfo, spaceContext);
+    
+    if (openaiKey) {
+      console.log('[MetadataGen] Using GPT-5.2 for Journey Map analysis');
+      try {
+        const metadata = await this.openaiAPI.generateMetadata(prompt, 'journey-map', openaiKey);
+        metadata._model_used = 'gpt-5.2-128k';
+        metadata.assetType = 'journey-map';
+        return metadata;
+      } catch (error) {
+        console.warn('[MetadataGen] GPT-5.2 failed for journey map, falling back to Claude:', error.message);
+      }
+    }
+    
+    // Fallback to Claude
+    const metadata = await this.claudeAPI.generateMetadata(prompt, 'journey-map', apiKey);
+    metadata._model_used = 'claude-sonnet-4-5-20250929';
+    metadata.assetType = 'journey-map';
+    return metadata;
+  }
+
+  buildJourneyMapPrompt(item, journeyInfo, spaceContext) {
+    let contextInfo = '';
+    if (spaceContext) {
+      contextInfo = `\nSPACE: "${spaceContext.name}"`;
+      if (spaceContext.purpose) contextInfo += ` - ${spaceContext.purpose}`;
+    }
+
+    return `You are analyzing a CUSTOMER JOURNEY MAP JSON file.${contextInfo}
+
+FILE INFORMATION:
+Filename: ${item.fileName || 'Unknown'}
+File Size: ${item.fileSize ? this.formatBytes(item.fileSize) : 'Unknown'}
+
+EXTRACTED JOURNEY MAP INFO:
+${journeyInfo}
+
+Analyze this journey map and provide metadata:
+
+1. IDENTIFICATION:
+   - What journey/process is being mapped?
+   - Who is the target persona?
+   - What is the business context?
+
+2. JOURNEY CHARACTERISTICS:
+   - Type of journey (customer acquisition, onboarding, support, etc.)
+   - Complexity level (simple, moderate, complex)
+   - Key stages identified
+
+3. USAGE:
+   - What decisions could this inform?
+   - Target audience for this map
+   - Potential action items
+
+Respond with JSON only:
+{
+  "title": "Journey map title/purpose",
+  "description": "What journey this maps and key insights (2-3 sentences)",
+  "journeyType": "acquisition|onboarding|support|purchase|engagement|other",
+  "persona": "Primary persona name if identifiable",
+  "personaType": "customer|employee|partner|user",
+  "complexity": "simple|moderate|complex",
+  "keyStages": ["main", "journey", "stages"],
+  "businessContext": "What business problem this addresses",
+  "tags": ["relevant", "journey", "tags"],
+  "notes": "Key insights or recommendations from the journey map"
+}`;
+  }
+
+  /**
    * URL/WEB LINK METADATA - Specialized for web URLs
    * Uses GPT-5.2 for URL analysis
    */
@@ -1009,6 +1202,14 @@ Respond with JSON only:
         // PDF
         const thumbnail = item.thumbnail;
         metadata = await this.generatePdfMetadata(item, thumbnail, apiKey, spaceContext);
+      }
+      else if (item.jsonSubtype === 'style-guide') {
+        // STYLE GUIDE - Specialized JSON file for design systems
+        metadata = await this.generateStyleGuideMetadata(item, apiKey, spaceContext);
+      }
+      else if (item.jsonSubtype === 'journey-map') {
+        // JOURNEY MAP - Specialized JSON file for customer journey mapping
+        metadata = await this.generateJourneyMapMetadata(item, apiKey, spaceContext);
       }
       else if (item.fileCategory === 'data' || ['.json', '.csv', '.yaml', '.yml', '.xml'].includes(item.fileExt)) {
         // DATA FILES

@@ -1,12 +1,16 @@
 /**
  * Event Database for GSX Create
- * JSON file-based storage for event logs and transactions
+ * JSON file-based storage for event logs and transactions (Episodic Memory)
  * DuckDB for querying JSON files across spaces
  * Logs are stored in each space's folder
+ * 
+ * Uses unified pricing from pricing-config.js
+ * Delegates to BudgetManager for centralized cost tracking
  */
 
 const path = require('path');
 const fs = require('fs');
+const { calculateCost, formatCost, resolveModelName } = require('./pricing-config');
 
 let DuckDB;
 try {
@@ -199,6 +203,10 @@ class EventDB {
 
   // ========== TRANSACTION LOGGING (JSON FILES) ==========
 
+  /**
+   * Log a transaction (episodic memory)
+   * Uses unified pricing and delegates to BudgetManager
+   */
   async logTransaction(tx) {
     const spaceId = tx.spaceId;
     if (!spaceId) {
@@ -211,20 +219,38 @@ class EventDB {
       const filePath = this.getTransactionLogFile(spaceId);
       const transactions = this.readJsonFile(filePath);
 
+      // Recalculate cost using unified pricing if not provided or if we have token data
+      const inputTokens = tx.inputTokens || 0;
+      const outputTokens = tx.outputTokens || 0;
+      const model = tx.model || 'claude-sonnet-4-5-20250929';
+      
+      let cost = tx.cost;
+      let costBreakdown = null;
+      
+      // If we have tokens and no cost, or if we want to verify the cost
+      if ((inputTokens > 0 || outputTokens > 0) && (!cost || tx.recalculateCost)) {
+        const costResult = calculateCost(model, inputTokens, outputTokens);
+        cost = costResult.totalCost;
+        costBreakdown = costResult;
+      }
+
       const newTx = {
         id: Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
         timestamp: tx.timestamp || new Date().toISOString(),
         type: tx.type || 'api_call',
-        model: tx.model || null,
-        inputTokens: tx.inputTokens || 0,
-        outputTokens: tx.outputTokens || 0,
-        cost: tx.cost || 0,
+        model: resolveModelName(model),
+        inputTokens,
+        outputTokens,
+        cost: cost || 0,
+        costFormatted: formatCost(cost || 0),
         status: tx.status || 'success',
         promptPreview: tx.promptPreview || null,
         responsePreview: tx.responsePreview || null,
         errorMessage: tx.errorMessage || null,
         durationMs: tx.durationMs || null,
-        metadata: tx.metadata || null
+        feature: tx.feature || tx.type || 'other',
+        metadata: tx.metadata || null,
+        costBreakdown
       };
 
       transactions.unshift(newTx);
@@ -235,10 +261,42 @@ class EventDB {
       }
 
       this.writeJsonFile(filePath, transactions);
+      
+      // Delegate to BudgetManager for centralized tracking
+      this._delegateToBudgetManager(newTx, spaceId);
+      
       return true;
     } catch (e) {
       console.error('[EventDB] Failed to log transaction:', e);
       return false;
+    }
+  }
+  
+  /**
+   * Delegate transaction to BudgetManager for centralized cost tracking
+   */
+  _delegateToBudgetManager(tx, spaceId) {
+    try {
+      const { getBudgetManager } = require('./budget-manager');
+      const budgetManager = getBudgetManager();
+      
+      // Only track if we have meaningful data
+      if (tx.inputTokens > 0 || tx.outputTokens > 0 || tx.cost > 0) {
+        budgetManager.trackUsage({
+          provider: tx.costBreakdown?.provider || 'anthropic',
+          model: tx.model,
+          inputTokens: tx.inputTokens,
+          outputTokens: tx.outputTokens,
+          projectId: spaceId,
+          spaceId: spaceId,
+          feature: tx.feature || 'gsx-create',
+          operation: tx.type || 'api_call',
+          success: tx.status === 'success'
+        });
+      }
+    } catch (error) {
+      // BudgetManager might not be available in all contexts
+      console.warn('[EventDB] Could not delegate to BudgetManager:', error.message);
     }
   }
 
@@ -288,11 +346,13 @@ class EventDB {
   async getCostSummary(spaceId = null) {
     if (spaceId) {
       const transactions = await this.getTransactions({ spaceId });
+      const totalCost = transactions.reduce((sum, t) => sum + (t.cost || 0), 0);
       return {
         totalCalls: transactions.length,
         totalInputTokens: transactions.reduce((sum, t) => sum + (t.inputTokens || 0), 0),
         totalOutputTokens: transactions.reduce((sum, t) => sum + (t.outputTokens || 0), 0),
-        totalCost: transactions.reduce((sum, t) => sum + (t.cost || 0), 0)
+        totalCost,
+        totalCostFormatted: formatCost(totalCost)
       };
     }
 

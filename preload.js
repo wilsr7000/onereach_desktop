@@ -177,7 +177,11 @@ contextBridge.exposeInMainWorld(
         'black-hole:move-window',
         'black-hole:get-position',
         'black-hole:restore-position',
-        'open-external-url'
+        'open-external-url',
+        // Credential management channels
+        'credentials-captured',
+        'credentials-dismiss-save',
+        'login-form-detected'
       ];
       if (validChannels.includes(channel)) {
         ipcRenderer.send(channel, data);
@@ -223,7 +227,11 @@ contextBridge.exposeInMainWorld(
         'black-hole:position-response',
         'external-file-drop',
         'prepare-for-download',
-        'check-widget-ready'
+        'check-widget-ready',
+        // Credential management channels
+        'show-save-credential-prompt',
+        // LLM usage tracking
+        'llm:call-made'
       ];
       if (validChannels.includes(channel)) {
         // Deliberately strip event as it includes `sender` 
@@ -391,6 +399,16 @@ contextBridge.exposeInMainWorld(
     saveStyleGuide: (guide) => ipcRenderer.invoke('save-style-guide', guide),
     deleteStyleGuide: (id) => ipcRenderer.invoke('delete-style-guide', id),
     
+    // Credential Management API (IDW auto-login)
+    credentialsCheck: (url) => ipcRenderer.invoke('credentials-check', { url }),
+    credentialsGet: (url) => ipcRenderer.invoke('credentials-get', { url }),
+    credentialsList: () => ipcRenderer.invoke('credentials-list'),
+    credentialsSavePending: (url) => ipcRenderer.invoke('credentials-save-pending', { url }),
+    credentialsSaveManual: (url, username, password, idwName) => 
+      ipcRenderer.invoke('credentials-save-manual', { url, username, password, idwName }),
+    credentialsDelete: (accountKey) => ipcRenderer.invoke('credentials-delete', { accountKey }),
+    credentialsDeleteAll: () => ipcRenderer.invoke('credentials-delete-all'),
+    
     // Unified invoke method for all async IPC calls
     // PERFORMANCE: Merged all invoke channels into a single definition
     invoke: (channel, ...args) => {
@@ -415,7 +433,15 @@ contextBridge.exposeInMainWorld(
         'log-lesson-click',
         // IDW Store channels
         'idw-store:fetch-directory',
-        'idw-store:add-to-menu'
+        'idw-store:add-to-menu',
+        // Credential management channels
+        'credentials-check',
+        'credentials-get',
+        'credentials-list',
+        'credentials-save-pending',
+        'credentials-save-manual',
+        'credentials-delete',
+        'credentials-delete-all'
       ];
       if (validChannels.includes(channel)) {
         return ipcRenderer.invoke(channel, ...args);
@@ -565,7 +591,33 @@ contextBridge.exposeInMainWorld('electronAPI', {
   triggerMissionControl: () => ipcRenderer.send('trigger-mission-control'),
   clearCacheAndReload: (options) => ipcRenderer.send('clear-cache-and-reload', options),
   openSettings: () => ipcRenderer.send('open-settings'),
-  openExternal: (url) => ipcRenderer.invoke('open-external', url)
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  
+  // Log event (for branch events)
+  logEvent: (eventType, eventData) => ipcRenderer.send('logger:event', { eventType, eventData }),
+  
+  // Agent intervention system
+  // Listen for agent escalation notifications
+  onAgentIntervention: (callback) => {
+    ipcRenderer.on('agent:user-intervention-needed', (event, escalation) => callback(escalation));
+    // Return cleanup function
+    return () => ipcRenderer.removeListener('agent:user-intervention-needed', callback);
+  },
+  
+  // Respond to an agent escalation
+  respondToAgentIntervention: (escalationId, action, details) => 
+    ipcRenderer.invoke('agent:respond-to-escalation', escalationId, action, details),
+  
+  // Get pending escalations
+  getPendingEscalations: () => ipcRenderer.invoke('agent:get-pending-escalations'),
+  
+  // HUD Activity updates - listen for activity from Aider Bridge and Agent
+  onHUDActivity: (callback) => {
+    const handler = (event, data) => callback(data);
+    ipcRenderer.on('hud:activity', handler);
+    // Return cleanup function
+    return () => ipcRenderer.removeListener('hud:activity', handler);
+  }
 });
 
 // Expose Resource Manager API for CPU/GPU throttling
@@ -653,7 +705,14 @@ contextBridge.exposeInMainWorld('realtimeSpeech', {
   // Listen for transcription events
   // Events: transcript_delta (partial), transcript (final), speech_started, speech_stopped, error
   onEvent: (callback) => {
-    const handler = (event, data) => callback(data);
+    const handler = (event, data) => {
+      // #region agent log
+      if (data.type === 'transcript' || data.type === 'transcript_delta') {
+        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'preload.js:onEvent',message:'speech event received from main',data:{type:data.type,text:data.text?.substring(0,50),isFinal:data.isFinal},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A,D'})}).catch(()=>{});
+      }
+      // #endregion
+      callback(data);
+    };
     ipcRenderer.on('realtime-speech:event', handler);
     return () => ipcRenderer.removeListener('realtime-speech:event', handler);
   },
@@ -731,6 +790,48 @@ contextBridge.exposeInMainWorld('realtimeSpeech', {
   }
 });
 
+// Expose Voice TTS API (ElevenLabs Text-to-Speech for voice mode)
+contextBridge.exposeInMainWorld('voiceTTS', {
+  // Speak text using ElevenLabs TTS
+  // Returns path to generated audio file
+  speak: (text, voice = 'Rachel') => ipcRenderer.invoke('voice:speak', text, voice),
+  
+  // Stop any currently playing TTS audio
+  stop: () => ipcRenderer.invoke('voice:stop'),
+  
+  // Check if TTS is available (has API key)
+  isAvailable: () => ipcRenderer.invoke('voice:is-available'),
+  
+  // List available voices
+  listVoices: () => ipcRenderer.invoke('voice:list-voices')
+});
+
+// Expose Dependency Management API
+contextBridge.exposeInMainWorld('deps', {
+  // Check all dependencies (Python, pipx, aider-chat)
+  checkAll: () => ipcRenderer.invoke('deps:check-all'),
+  
+  // Install a specific dependency
+  install: (depName) => ipcRenderer.invoke('deps:install', depName),
+  
+  // Install all missing dependencies
+  installAll: () => ipcRenderer.invoke('deps:install-all'),
+  
+  // Cancel an ongoing installation
+  cancelInstall: (depName) => ipcRenderer.invoke('deps:cancel-install', depName),
+  
+  // Get the aider Python path
+  getAiderPython: () => ipcRenderer.invoke('deps:get-aider-python'),
+  
+  // Listen for installation output (streaming)
+  onInstallOutput: (callback) => {
+    const handler = (event, data) => callback(data);
+    ipcRenderer.on('deps:install-output', handler);
+    // Return cleanup function
+    return () => ipcRenderer.removeListener('deps:install-output', handler);
+  }
+});
+
 // Expose Aider API for GSX Create
 contextBridge.exposeInMainWorld('aider', {
   start: () => ipcRenderer.invoke('aider:start'),
@@ -750,7 +851,14 @@ contextBridge.exposeInMainWorld('aider', {
   getAppPath: () => ipcRenderer.invoke('aider:get-app-path'),
   selectFolder: () => ipcRenderer.invoke('aider:select-folder'),
   getApiConfig: () => ipcRenderer.invoke('aider:get-api-config'),
-  evaluate: (systemPrompt, userPrompt, model) => ipcRenderer.invoke('aider:evaluate', systemPrompt, userPrompt, model),
+  evaluate: (arg1, arg2, arg3) => {
+    // Support both old style (systemPrompt, userPrompt, model) and new style (options object)
+    if (typeof arg1 === 'object' && arg1 !== null) {
+      return ipcRenderer.invoke('aider:evaluate', arg1);
+    } else {
+      return ipcRenderer.invoke('aider:evaluate', arg1, arg2, arg3);
+    }
+  },
   getSpaces: () => ipcRenderer.invoke('aider:get-spaces'),
   createSpace: (name) => ipcRenderer.invoke('aider:create-space', name),
   listProjectFiles: (dirPath) => ipcRenderer.invoke('aider:list-project-files', dirPath),
@@ -787,10 +895,13 @@ contextBridge.exposeInMainWorld('aider', {
   // Git branch operations for tabbed UI
   gitInit: (repoPath) => ipcRenderer.invoke('aider:git-init', repoPath),
   gitCreateBranch: (repoPath, branchName, baseBranch) => ipcRenderer.invoke('aider:git-create-branch', repoPath, branchName, baseBranch),
+  gitCreateOrphanBranch: (repoPath, branchName) => ipcRenderer.invoke('aider:git-create-orphan-branch', repoPath, branchName),
   gitSwitchBranch: (repoPath, branchName) => ipcRenderer.invoke('aider:git-switch-branch', repoPath, branchName),
   gitDeleteBranch: (repoPath, branchName) => ipcRenderer.invoke('aider:git-delete-branch', repoPath, branchName),
   gitListBranches: (repoPath) => ipcRenderer.invoke('aider:git-list-branches', repoPath),
   gitDiffBranches: (repoPath, branchA, branchB) => ipcRenderer.invoke('aider:git-diff-branches', repoPath, branchA, branchB),
+  gitMergeBranch: (repoPath, sourceBranch, targetBranch) => ipcRenderer.invoke('aider:git-merge-branch', repoPath, sourceBranch, targetBranch),
+  gitMergePreview: (repoPath, sourceBranch, targetBranch) => ipcRenderer.invoke('aider:git-merge-preview', repoPath, sourceBranch, targetBranch),
   
   // Sandboxed Aider per branch (parallel exploration)
   initBranchManager: (spacePath) => ipcRenderer.invoke('aider:init-branch-manager', spacePath),
@@ -826,6 +937,10 @@ contextBridge.exposeInMainWorld('aider', {
   analyzeScreenshot: (screenshotBase64, prompt) => ipcRenderer.invoke('aider:analyze-screenshot', screenshotBase64, prompt),
   // Web search for up-to-date info (AI models, software versions, error solutions)
   webSearch: (query, options) => ipcRenderer.invoke('aider:web-search', query, options),
+  
+  // ========== MULTI-AGENT SYSTEM ==========
+  // Direct AI call for parallel agent operations (bypasses Aider bridge)
+  directAICall: (params) => ipcRenderer.invoke('ai:direct-call', params),
   // File registration with Space Manager
   registerCreatedFile: (data) => ipcRenderer.invoke('aider:register-created-file', data),
   updateFileMetadata: (data) => ipcRenderer.invoke('aider:update-file-metadata', data),
@@ -860,6 +975,25 @@ contextBridge.exposeInMainWorld('aider', {
   eventdbSearchSpaces: (searchTerm) => ipcRenderer.invoke('eventdb:search-spaces', searchTerm),
   eventdbQuery: (sql) => ipcRenderer.invoke('eventdb:query', sql),
   
+  // Budget Manager Integration (for global budget tracking)
+  budgetTrackUsage: (provider, projectId, usage) => ipcRenderer.invoke('budget:trackUsage', provider, projectId, usage),
+  budgetGetCostSummary: (period) => ipcRenderer.invoke('budget:getCostSummary', period),
+  budgetCheckBudget: (provider, estimatedCost) => ipcRenderer.invoke('budget:checkBudget', provider, estimatedCost),
+  
+  // Budget Query (Chat/Voice support)
+  budgetGetStatus: (projectId) => ipcRenderer.invoke('budget:getStatus', projectId),
+  budgetAnswerQuestion: (question, projectId) => ipcRenderer.invoke('budget:answerQuestion', question, projectId),
+  budgetGetStatsByFeature: () => ipcRenderer.invoke('budget:getStatsByFeature'),
+  budgetGetStatsByProvider: () => ipcRenderer.invoke('budget:getStatsByProvider'),
+  budgetGetStatsByModel: () => ipcRenderer.invoke('budget:getStatsByModel'),
+  budgetGetDailyCosts: (days) => ipcRenderer.invoke('budget:getDailyCosts', days),
+  budgetSetHardLimitEnabled: (enabled) => ipcRenderer.invoke('budget:setHardLimitEnabled', enabled),
+  budgetSetProjectBudget: (projectId, limit, alertAt, hardLimit) => ipcRenderer.invoke('budget:setProjectBudget', projectId, limit, alertAt, hardLimit),
+  
+  // Unified Pricing API
+  pricingGetAll: () => ipcRenderer.invoke('pricing:getAll'),
+  pricingCalculate: (model, inputTokens, outputTokens, options) => ipcRenderer.invoke('pricing:calculate', model, inputTokens, outputTokens, options),
+  
   // Unified Space Metadata System
   getSpaceMetadata: (spaceId) => ipcRenderer.invoke('aider:get-space-metadata', spaceId),
   updateSpaceMetadata: (spaceId, updates) => ipcRenderer.invoke('aider:update-space-metadata', spaceId, updates),
@@ -876,7 +1010,14 @@ contextBridge.exposeInMainWorld('aider', {
   querySpaces: (whereClause) => ipcRenderer.invoke('aider:query-spaces', whereClause),
   getAllSpacesWithMetadata: () => ipcRenderer.invoke('aider:get-all-spaces-with-metadata'),
   getSpaceFiles: (spaceId) => ipcRenderer.invoke('aider:get-space-files', spaceId),
-  getSpacePath: (spaceId) => ipcRenderer.invoke('aider:get-space-path', spaceId)
+  getSpacePath: (spaceId) => ipcRenderer.invoke('aider:get-space-path', spaceId),
+  
+  // Design-First Workflow - UI Mockup Generation
+  getDesignApproaches: (options) => ipcRenderer.invoke('design:get-approaches', options),
+  generateDesignChoices: (options) => ipcRenderer.invoke('design:generate-choices', options),
+  regenerateDesign: (options) => ipcRenderer.invoke('design:regenerate-single', options),
+  extractDesignTokens: (options) => ipcRenderer.invoke('design:extract-tokens', options),
+  generateCodeFromDesign: (options) => ipcRenderer.invoke('design:generate-code', options)
 });
 
 // Expose auth API
@@ -1033,6 +1174,11 @@ contextBridge.exposeInMainWorld('clipboard', {
   getVideoPath: (itemId) => ipcRenderer.invoke('clipboard:get-video-path', itemId),
   openVideoEditor: (filePath) => ipcRenderer.invoke('clipboard:open-video-editor', filePath),
   
+  // Specialized JSON Asset Editors (Style Guide, Journey Map)
+  openStyleGuideEditor: (itemId) => ipcRenderer.invoke('clipboard:open-style-guide-editor', itemId),
+  openJourneyMapEditor: (itemId) => ipcRenderer.invoke('clipboard:open-journey-map-editor', itemId),
+  getJsonAssetPath: (itemId) => ipcRenderer.invoke('clipboard:get-json-asset-path', itemId),
+  
   // Get current user
   getCurrentUser: () => ipcRenderer.invoke('clipboard:get-current-user'),
   
@@ -1047,8 +1193,13 @@ contextBridge.exposeInMainWorld('clipboard', {
   getPDFPageThumbnail: (itemId, pageNumber) => ipcRenderer.invoke('clipboard:get-pdf-page-thumbnail', itemId, pageNumber),
   generateSpacePDF: (spaceId, options) => ipcRenderer.invoke('clipboard:generate-space-pdf', spaceId, options),
   exportSpacePDF: (spaceId, options) => ipcRenderer.invoke('clipboard:export-space-pdf', spaceId, options),
-      smartExportSpace: (spaceId) => ipcRenderer.invoke('clipboard:smart-export-space', spaceId),
-    openExportPreview: (spaceId, options) => ipcRenderer.invoke('clipboard:open-export-preview', spaceId, options),
+  smartExportSpace: (spaceId) => ipcRenderer.invoke('clipboard:smart-export-space', spaceId),
+  openExportPreview: (spaceId, options) => ipcRenderer.invoke('clipboard:open-export-preview', spaceId, options),
+  
+  // Multi-format export
+  openFormatModal: (spaceId) => ipcRenderer.invoke('smart-export:open-modal', spaceId),
+  generateExport: (params) => ipcRenderer.invoke('smart-export:generate', params),
+  getExportFormats: () => ipcRenderer.invoke('smart-export:get-formats'),
   
   // Screenshot methods
   completeScreenshot: (data) => ipcRenderer.invoke('clipboard:complete-screenshot', data),

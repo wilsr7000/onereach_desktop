@@ -90,6 +90,76 @@ class ClipboardManagerV2 {
     }
   }
   
+  /**
+   * Detect JSON subtype from content
+   * Returns: 'style-guide', 'journey-map', or null for generic JSON
+   * @param {string|object} jsonContent - JSON string or parsed object
+   * @returns {string|null} - Detected subtype or null
+   */
+  detectJsonSubtype(jsonContent) {
+    try {
+      const data = typeof jsonContent === 'string' ? JSON.parse(jsonContent) : jsonContent;
+      
+      // Journey Map detection (check first - more specific structure)
+      // Matches exported journey maps from Journey Editor
+      if (data.journeyData && data.metadata?.exportVersion) {
+        console.log('[JsonSubtype] Detected journey-map (export format)');
+        return 'journey-map';
+      }
+      if (data.journeyData?.persona?.journeys?.[0]?.stages) {
+        console.log('[JsonSubtype] Detected journey-map (stages format)');
+        return 'journey-map';
+      }
+      // Journey map template format (from templates/export/)
+      if (data.prompt && data.systemPrompt && data.htmlTemplate && data.styling) {
+        console.log('[JsonSubtype] Detected journey-map (template format)');
+        return 'journey-map';
+      }
+      
+      // Style Guide / Design System detection
+      // Matches style guides with colors + typography + design tokens
+      if (data.colors && data.typography) {
+        const hasColorTokens = data.colors.primary || data.colors.secondary || 
+                               data.colors.accent || data.colors.neutral ||
+                               data.colors.text || data.colors.backgrounds;
+        const hasTypographyTokens = data.typography.fontFamilies || data.typography.scale ||
+                                    data.typography.fonts || data.typography.headings || 
+                                    data.typography.body;
+        const hasDesignTokens = data.spacing || data.borderRadius || data.shadows ||
+                                data.borders || data.animations;
+        
+        if (hasColorTokens && hasTypographyTokens) {
+          console.log('[JsonSubtype] Detected style-guide');
+          return 'style-guide';
+        }
+      }
+      
+      // No specific subtype detected
+      return null;
+    } catch (e) {
+      console.warn('[JsonSubtype] Error parsing JSON for subtype detection:', e.message);
+      return null;
+    }
+  }
+  
+  /**
+   * Read JSON file content and detect subtype
+   * @param {string} filePath - Path to JSON file
+   * @returns {string|null} - Detected subtype or null
+   */
+  detectJsonSubtypeFromFile(filePath) {
+    try {
+      if (!filePath || !fs.existsSync(filePath)) {
+        return null;
+      }
+      const content = fs.readFileSync(filePath, 'utf8');
+      return this.detectJsonSubtype(content);
+    } catch (e) {
+      console.warn('[JsonSubtype] Error reading file for subtype detection:', e.message);
+      return null;
+    }
+  }
+  
   // NOTE: getHistory() is defined below with content loading logic
   
   // Getter for spaces that ensures lazy loading
@@ -136,6 +206,12 @@ class ClipboardManagerV2 {
         historyItem.filePath = item.filePath; // This will be updated when content is loaded
       }
       
+      // Preserve jsonSubtype for ALL item types (style-guide, journey-map)
+      // This is needed for both file and text items
+      if (item.jsonSubtype) {
+        historyItem.jsonSubtype = item.jsonSubtype;
+      }
+      
       return historyItem;
     });
     
@@ -170,6 +246,59 @@ class ClipboardManagerV2 {
     this.ensureHistoryLoaded();
     
     const logger = getLogger();
+    
+    // ========================================
+    // INPUT VALIDATION
+    // ========================================
+    
+    // Validate item exists
+    if (!item) {
+      logger.error('addToHistory called with null/undefined item');
+      throw new Error('Item is required');
+    }
+    
+    // Validate type
+    const validTypes = ['text', 'html', 'image', 'file', 'code'];
+    const type = item.type || 'text';
+    if (!validTypes.includes(type)) {
+      logger.warn('Invalid item type, defaulting to text', { providedType: item.type });
+      item.type = 'text';
+    }
+    
+    // Validate content exists for content-based types
+    if (['text', 'code'].includes(type)) {
+      if (!item.content && item.content !== '') {
+        logger.error('Content is required for text/code items');
+        throw new Error('Content is required for text/code items');
+      }
+      if (typeof item.content === 'string' && item.content.trim().length === 0) {
+        logger.error('Content cannot be empty for text/code items');
+        throw new Error('Content cannot be empty');
+      }
+    }
+    
+    // Validate file items
+    if (type === 'file') {
+      if (!item.filePath && !item.fileData && !item.content) {
+        logger.error('File path, file data, or content is required for file items');
+        throw new Error('File path, file data, or content is required for file items');
+      }
+    }
+    
+    // Validate spaceId exists (if specified and not 'unclassified')
+    const requestedSpaceId = item.spaceId || this.currentSpace || 'unclassified';
+    if (requestedSpaceId && requestedSpaceId !== 'unclassified') {
+      const spaceExists = this.storage.index?.spaces?.some(s => s.id === requestedSpaceId);
+      if (!spaceExists) {
+        logger.warn('Space not found, defaulting to unclassified', { spaceId: requestedSpaceId });
+        item.spaceId = 'unclassified';
+      }
+    }
+    
+    // ========================================
+    // END VALIDATION
+    // ========================================
+    
     logger.logClipboardOperation('add', item.type, { 
       hasMetadata: !!item.metadata,
       spaceId: this.currentSpace
@@ -472,6 +601,7 @@ class ClipboardManagerV2 {
               } catch (e) {}
             }
           }
+          
         } catch (error) {
           const logger = getLogger();
           logger.warn('Clipboard item content load failed', {
@@ -480,6 +610,53 @@ class ClipboardManagerV2 {
           });
         }
       }
+      
+      // Detect jsonSubtype SEPARATELY for items that don't have it yet
+      // This runs even for items with metadata already loaded
+      if (!item.jsonSubtype && (item.type === 'text' || (item.type === 'file' && item.fileExt === '.json'))) {
+        try {
+          let detectedSubtype = null;
+          
+          // For text items, check if content is JSON
+          if (item.type === 'text') {
+            // Load content if not already loaded
+            if (!item.content) {
+              const fullItem = this.storage.loadItem(item.id);
+              item.content = fullItem.content;
+            }
+            const content = typeof item.content === 'string' ? item.content : null;
+            if (content && (content.trim().startsWith('{') || content.trim().startsWith('['))) {
+              detectedSubtype = this.detectJsonSubtype(content);
+            }
+          }
+          
+          // For file items with .json extension
+          if (item.type === 'file' && item.fileExt === '.json') {
+            // Load content (file path) if not already loaded
+            if (!item.content) {
+              const fullItem = this.storage.loadItem(item.id);
+              item.content = fullItem.content;
+            }
+            if (item.content) {
+              detectedSubtype = this.detectJsonSubtypeFromFile(item.content);
+            }
+          }
+          
+          if (detectedSubtype) {
+            item.jsonSubtype = detectedSubtype;
+            // Update the storage index for future loads
+            const indexEntry = this.storage.index.items.find(i => i.id === item.id);
+            if (indexEntry && !indexEntry.jsonSubtype) {
+              indexEntry.jsonSubtype = detectedSubtype;
+              this.storage.saveIndex();
+              console.log(`[ClipboardManager] Detected and saved jsonSubtype: ${detectedSubtype} for item ${item.id}`);
+            }
+          }
+        } catch (e) {
+          // Ignore detection errors
+        }
+      }
+      
       return item;
     });
   }
@@ -4991,6 +5168,128 @@ ${chunks[i]}`;
       return { success: true };
     });
     
+    // Get JSON asset file path
+    safeHandle('clipboard:get-json-asset-path', async (event, itemId) => {
+      try {
+        const item = this.storage.loadItem(itemId);
+        if (!item) {
+          return { success: false, error: 'Item not found' };
+        }
+        
+        const indexEntry = this.storage.index.items.find(i => i.id === itemId);
+        if (!indexEntry?.contentPath) {
+          return { success: false, error: 'Content path not found' };
+        }
+        
+        const filePath = path.join(this.storage.storageRoot, indexEntry.contentPath);
+        if (!fs.existsSync(filePath)) {
+          return { success: false, error: 'File not found: ' + filePath };
+        }
+        
+        return { success: true, filePath, jsonSubtype: indexEntry.jsonSubtype };
+      } catch (error) {
+        console.error('[ClipboardManager] Error getting JSON asset path:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Open Style Guide Editor
+    safeHandle('clipboard:open-style-guide-editor', async (event, itemId) => {
+      try {
+        const { BrowserWindow, shell } = require('electron');
+        
+        // Get the file path for this item
+        const pathResult = await ipcMain.emit('clipboard:get-json-asset-path', event, itemId);
+        const indexEntry = this.storage.index.items.find(i => i.id === itemId);
+        
+        if (!indexEntry?.contentPath) {
+          return { success: false, error: 'Item not found or missing content path' };
+        }
+        
+        const filePath = path.join(this.storage.storageRoot, indexEntry.contentPath);
+        
+        if (!fs.existsSync(filePath)) {
+          return { success: false, error: 'Style guide file not found' };
+        }
+        
+        console.log('[ClipboardManager] Opening Style Guide Editor with file:', filePath);
+        
+        // Open the style guide preview with the file data
+        const styleGuideWindow = new BrowserWindow({
+          width: 1200,
+          height: 900,
+          title: 'Style Guide Editor',
+          webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            preload: path.join(__dirname, 'preload-smart-export.js')
+          }
+        });
+        
+        // Load the style guide HTML file
+        styleGuideWindow.loadFile('smart-export-style-guide.html');
+        
+        // Pass the file path to the window when it's ready
+        styleGuideWindow.webContents.once('did-finish-load', () => {
+          styleGuideWindow.webContents.send('load-style-guide-file', filePath);
+        });
+        
+        return { success: true };
+      } catch (error) {
+        console.error('[ClipboardManager] Error opening Style Guide Editor:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Open Journey Map Editor
+    safeHandle('clipboard:open-journey-map-editor', async (event, itemId) => {
+      try {
+        const { BrowserWindow, shell } = require('electron');
+        
+        const indexEntry = this.storage.index.items.find(i => i.id === itemId);
+        
+        if (!indexEntry?.contentPath) {
+          return { success: false, error: 'Item not found or missing content path' };
+        }
+        
+        const filePath = path.join(this.storage.storageRoot, indexEntry.contentPath);
+        
+        if (!fs.existsSync(filePath)) {
+          return { success: false, error: 'Journey map file not found' };
+        }
+        
+        console.log('[ClipboardManager] Opening Journey Map Editor with file:', filePath);
+        
+        // For now, show the file in Finder as there may not be a dedicated journey editor
+        // In the future, this could open a dedicated journey map editor window
+        shell.showItemInFolder(filePath);
+        
+        // Also try to open the smart export preview which can display journey maps
+        const journeyWindow = new BrowserWindow({
+          width: 1400,
+          height: 900,
+          title: 'Journey Map Viewer',
+          webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            preload: path.join(__dirname, 'preload-smart-export.js')
+          }
+        });
+        
+        journeyWindow.loadFile('smart-export-preview.html');
+        
+        // Pass the file path to the window when it's ready
+        journeyWindow.webContents.once('did-finish-load', () => {
+          journeyWindow.webContents.send('load-journey-map-file', filePath);
+        });
+        
+        return { success: true };
+      } catch (error) {
+        console.error('[ClipboardManager] Error opening Journey Map Editor:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
     // Screenshot capture
     safeHandle('clipboard:get-screenshot-capture-enabled', () => {
       return this.screenshotCaptureEnabled;
@@ -5373,6 +5672,28 @@ ${chunks[i]}`;
         fileType = 'flow';
       }
       
+      // Detect JSON subtypes (style-guide, journey-map)
+      let jsonSubtype = null;
+      if (ext === '.json') {
+        // Try to detect from file data first (if provided as base64)
+        if (data.fileData) {
+          try {
+            const content = Buffer.from(data.fileData, 'base64').toString('utf8');
+            jsonSubtype = this.detectJsonSubtype(content);
+          } catch (e) {
+            console.warn('[V2] Error detecting JSON subtype from fileData:', e.message);
+          }
+        }
+        // If not detected yet and we have a file path, try reading the file
+        if (!jsonSubtype && data.filePath) {
+          jsonSubtype = this.detectJsonSubtypeFromFile(data.filePath);
+        }
+        
+        if (jsonSubtype) {
+          console.log(`[V2] Detected JSON subtype: ${jsonSubtype} for file: ${data.fileName}`);
+        }
+      }
+      
       // Generate thumbnail for PDF files and images
       let thumbnail = null;
       if (fileType === 'pdf') {
@@ -5400,6 +5721,7 @@ ${chunks[i]}`;
         fileType: fileType,
         fileCategory: fileCategory,
         fileExt: ext,
+        jsonSubtype: jsonSubtype,  // style-guide, journey-map, or null
         preview: `File: ${data.fileName}`,
         thumbnail: thumbnail,
         timestamp: Date.now(),
@@ -6331,6 +6653,9 @@ ${chunks[i]}`;
   
   // Helper method for space names
   getSpaceName(spaceId) {
+    // Ensure spaces are loaded before accessing (lazy loading pattern)
+    this.ensureHistoryLoaded();
+    
     if (!spaceId || spaceId === null) {
       return 'All Items';
     }

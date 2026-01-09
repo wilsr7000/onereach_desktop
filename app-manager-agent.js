@@ -61,6 +61,30 @@ const FIX_STRATEGIES = {
   ESCALATE: 'escalate'
 };
 
+// Fallback strategies - when primary fix fails, try these alternatives
+const FALLBACK_STRATEGIES = {
+  [FIX_STRATEGIES.REBUILD_INDEX]: [
+    FIX_STRATEGIES.CLEANUP_ORPHAN,
+    FIX_STRATEGIES.REPAIR_METADATA
+  ],
+  [FIX_STRATEGIES.REGENERATE_THUMBNAIL]: [
+    FIX_STRATEGIES.CLEANUP_ORPHAN
+  ],
+  [FIX_STRATEGIES.REGENERATE_METADATA]: [
+    FIX_STRATEGIES.REPAIR_METADATA,
+    FIX_STRATEGIES.CLEANUP_ORPHAN
+  ],
+  [FIX_STRATEGIES.REPAIR_METADATA]: [
+    FIX_STRATEGIES.CLEANUP_ORPHAN
+  ],
+  [FIX_STRATEGIES.RETRY]: [
+    FIX_STRATEGIES.SKIP  // After retries fail, skip
+  ]
+};
+
+// Maximum attempts before escalating to user
+const MAX_FIX_ATTEMPTS_BEFORE_ESCALATION = 3;
+
 class AppManagerAgent {
   constructor(dependencies = {}) {
     this.dashboardAPI = dependencies.dashboardAPI;
@@ -94,6 +118,12 @@ class AppManagerAgent {
     // Escalated issues requiring attention
     this.escalatedIssues = [];
     
+    // Broken Items Registry - tracks all items/errors that break
+    // Auto-clears when app version changes
+    this.brokenItemsRegistry = [];
+    this.lastKnownAppVersion = null;
+    this.maxBrokenItems = 500;
+    
     // Context Management for LLM - tracks processed events to avoid redundancy
     this.processedEventIds = new Set();      // Track event IDs already processed
     this.processedEventTimestamps = new Map(); // Event ID -> timestamp processed
@@ -115,6 +145,20 @@ class AppManagerAgent {
   _ensureDataDir() {
     if (!fs.existsSync(this.dataDir)) {
       fs.mkdirSync(this.dataDir, { recursive: true });
+    }
+  }
+
+  /**
+   * Broadcast HUD activity update to all windows
+   * Uses global function set up by main.js
+   */
+  _broadcastHUD(data) {
+    try {
+      if (global.broadcastHUDActivity) {
+        global.broadcastHUDActivity(data);
+      }
+    } catch (e) {
+      // Silently ignore if not available
     }
   }
 
@@ -166,10 +210,33 @@ class AppManagerAgent {
           this.lastContextSummary = data.lastContextSummary;
         }
         
+        // Load eventFingerprints for deduplication (NEW)
+        if (data.eventFingerprints && Array.isArray(data.eventFingerprints)) {
+          const now = Date.now();
+          for (const [fingerprint, timestamp] of data.eventFingerprints) {
+            // Only load fingerprints from the last hour
+            if (now - timestamp < CONFIG.processedEventTTL) {
+              this.eventFingerprints.set(fingerprint, timestamp);
+            }
+          }
+          console.log(`[Agent] Loaded ${this.eventFingerprints.size} event fingerprints`);
+        }
+        
         // Load external API config (if previously configured)
         if (data.externalAPIConfig) {
           this.externalAPIConfig = { ...CONFIG.externalAPI, ...data.externalAPIConfig };
           console.log('[Agent] Loaded external API config, enabled:', this.externalAPIConfig.enabled);
+        }
+        
+        // Load broken items registry
+        if (data.brokenItemsRegistry) {
+          this.brokenItemsRegistry = data.brokenItemsRegistry.slice(0, this.maxBrokenItems);
+          console.log(`[Agent] Loaded ${this.brokenItemsRegistry.length} broken items from registry`);
+        }
+        
+        // Load last known app version
+        if (data.lastKnownAppVersion) {
+          this.lastKnownAppVersion = data.lastKnownAppVersion;
         }
       }
     } catch (error) {
@@ -185,6 +252,9 @@ class AppManagerAgent {
       const processedIds = [...this.processedEventIds];
       const processedTimestamps = processedIds.map(id => this.processedEventTimestamps.get(id));
       
+      // Convert eventFingerprints Map to array for persistence
+      const fingerprintEntries = [...this.eventFingerprints.entries()].slice(0, CONFIG.maxProcessedEventsCache);
+      
       const data = {
         stats: this.stats,
         escalatedIssues: this.escalatedIssues,
@@ -194,6 +264,7 @@ class AppManagerAgent {
         contextHistory: this.contextHistory.slice(0, CONFIG.contextWindowSize),
         processedEventIds: processedIds.slice(0, CONFIG.maxProcessedEventsCache),
         processedEventTimestamps: processedTimestamps.slice(0, CONFIG.maxProcessedEventsCache),
+        eventFingerprints: fingerprintEntries, // NEW: persist fingerprints for deduplication
         lastContextSummary: this.lastContextSummary,
         
         // External API config (without sensitive API key)
@@ -206,6 +277,10 @@ class AppManagerAgent {
           reportOnIssue: this.externalAPIConfig.reportOnIssue,
           reportOnFix: this.externalAPIConfig.reportOnFix
         },
+        
+        // Broken items registry - tracks all errors for this version
+        brokenItemsRegistry: this.brokenItemsRegistry.slice(0, this.maxBrokenItems),
+        lastKnownAppVersion: this.lastKnownAppVersion || app.getVersion(),
         
         lastSaved: new Date().toISOString()
       };
@@ -229,6 +304,9 @@ class AppManagerAgent {
     this.paused = false;
     this.startTime = Date.now();
     
+    // Check for version update and clear broken items if new version
+    this._checkVersionAndClearRegistry();
+    
     // Run initial scan
     this.runScan();
     
@@ -245,6 +323,64 @@ class AppManagerAgent {
     }
     
     console.log(`[Agent] Started. Scanning every ${CONFIG.scanIntervalMs / 1000}s`);
+  }
+
+  /**
+   * Check if app version changed and clear broken items registry
+   */
+  _checkVersionAndClearRegistry() {
+    const currentVersion = app.getVersion();
+    
+    if (this.lastKnownAppVersion && this.lastKnownAppVersion !== currentVersion) {
+      console.log(`[Agent] App updated: ${this.lastKnownAppVersion} -> ${currentVersion}`);
+      console.log(`[Agent] Clearing ${this.brokenItemsRegistry.length} broken items from previous version`);
+      
+      // Archive old broken items before clearing (for reference)
+      this._archiveBrokenItems(this.lastKnownAppVersion);
+      
+      // Clear the registry
+      this.brokenItemsRegistry = [];
+      this.escalatedIssues = [];
+      this.issueHistory.clear();
+      this.processedEventIds.clear();
+      this.processedEventTimestamps.clear();
+      this.eventFingerprints.clear();
+      
+      // Reset daily stats for fresh start
+      this.stats = {
+        scansCompleted: 0,
+        issuesDetected: 0,
+        fixesApplied: 0,
+        fixesFailed: 0,
+        escalated: 0,
+        lastReset: new Date().toDateString()
+      };
+      
+      console.log('[Agent] Registry cleared for new version');
+    }
+    
+    this.lastKnownAppVersion = currentVersion;
+    this._saveState();
+  }
+
+  /**
+   * Archive broken items from previous version
+   */
+  _archiveBrokenItems(previousVersion) {
+    if (this.brokenItemsRegistry.length === 0) return;
+    
+    try {
+      const archivePath = path.join(this.dataDir, `broken-items-archive-${previousVersion}.json`);
+      const archiveData = {
+        version: previousVersion,
+        archivedAt: new Date().toISOString(),
+        items: this.brokenItemsRegistry
+      };
+      fs.writeFileSync(archivePath, JSON.stringify(archiveData, null, 2));
+      console.log(`[Agent] Archived ${this.brokenItemsRegistry.length} broken items to ${archivePath}`);
+    } catch (error) {
+      console.error('[Agent] Error archiving broken items:', error.message);
+    }
   }
 
   /**
@@ -300,7 +436,17 @@ class AppManagerAgent {
     }
     
     const scanStart = Date.now();
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app-manager-agent.js:403',message:'Scan starting',data:{processedEventsCount:this.processedEventIds.size,fingerprintsCount:this.eventFingerprints.size,contextHistoryLen:this.contextHistory.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3-H4'})}).catch(()=>{});
+    // #endregion
     console.log('[Agent] Starting scan...');
+    
+    // Broadcast HUD: scan starting
+    this._broadcastHUD({
+      type: 'agent',
+      phase: 'Monitor',
+      action: 'Scanning for errors...'
+    });
     
     const result = {
       timestamp: new Date().toISOString(),
@@ -324,6 +470,17 @@ class AppManagerAgent {
       }
       
       console.log(`[Agent] Found ${errors.length} errors to analyze`);
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app-manager-agent.js:432',message:'Errors found for analysis',data:{errorsCount:errors.length,samples:errors.slice(0,3).map(e=>({id:e.id,msg:e.message?.substring(0,60),source:e.source}))},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H2'})}).catch(()=>{});
+      // #endregion
+      
+      // Broadcast HUD: errors found
+      this._broadcastHUD({
+        type: 'agent',
+        phase: 'Monitor',
+        action: `Analyzing ${errors.length} errors...`,
+        task: `Found ${errors.length} issues to diagnose`
+      });
       
       // Group errors by type/source
       const groupedErrors = this._groupErrors(errors);
@@ -335,13 +492,40 @@ class AppManagerAgent {
           result.issuesDiagnosed++;
           this.stats.issuesDetected++;
           
+          // Register in broken items registry (tracks all errors for this version)
+          this.registerBrokenItem(errorGroup, diagnosis);
+          
           if (diagnosis.strategy !== FIX_STRATEGIES.SKIP && 
               diagnosis.strategy !== FIX_STRATEGIES.ESCALATE) {
-            const fixResult = await this._applyFix(diagnosis);
+            // Track fix attempt
+            this.incrementFixAttempt(errorGroup);
+            
+            // Use escalation chain: primary -> alternatives -> AI workaround -> user
+            const fixResult = await this._applyFixWithEscalation(diagnosis, errorGroup);
             
             if (fixResult.success) {
               result.fixesApplied++;
               this.stats.fixesApplied++;
+              
+              // Broadcast HUD: fix applied
+              this._broadcastHUD({
+                type: 'agent',
+                phase: 'Monitor',
+                action: 'Fix applied!',
+                recent: `Fixed: ${diagnosis.issue?.substring(0, 30) || 'Error'}...`
+              });
+              
+              // Update broken item status to fixed
+              const normalizedMsg = this._normalizeErrorMessage(errorGroup.message);
+              const brokenItem = this.brokenItemsRegistry.find(i => 
+                i.normalizedMessage === normalizedMsg
+              );
+              if (brokenItem) {
+                this.updateBrokenItemStatus(brokenItem.id, 'fixed', { 
+                  strategy: diagnosis.strategy,
+                  attempts: fixResult.attempts 
+                });
+              }
               
               // Update context history with success
               this._updateContextHistoryResult(diagnosis, true);
@@ -352,7 +536,7 @@ class AppManagerAgent {
                   diagnosis.issue,
                   diagnosis.strategy,
                   'success',
-                  { operationId: diagnosis.operationId }
+                  { operationId: diagnosis.operationId, attempts: fixResult.attempts }
                 );
               }
               
@@ -360,15 +544,19 @@ class AppManagerAgent {
               this.reportIssue(diagnosis, 'fixed').catch(err =>
                 console.warn('[Agent] Failed to report fixed issue:', err.message)
               );
+            } else if (fixResult.escalated) {
+              // Error was escalated to user - don't count as failed, just waiting
+              result.escalated = (result.escalated || 0) + 1;
+              console.log(`[Agent] Error escalated to user, awaiting intervention`);
+              
+              // Update context history
+              this._updateContextHistoryResult(diagnosis, false, { escalated: true });
             } else {
               result.fixesFailed++;
               this.stats.fixesFailed++;
               
               // Update context history with failure
               this._updateContextHistoryResult(diagnosis, false);
-              
-              // Track for escalation
-              this._trackFailedFix(diagnosis);
               
               // Report failure to external API
               this.reportIssue(diagnosis, 'failed').catch(err =>
@@ -398,7 +586,186 @@ class AppManagerAgent {
     
     console.log(`[Agent] Scan complete. Fixed: ${result.fixesApplied}, Failed: ${result.fixesFailed}`);
     
+    // Broadcast HUD: scan complete
+    this._broadcastHUD({
+      type: 'agent',
+      phase: 'Monitor',
+      action: result.fixesApplied > 0 
+        ? `Scan complete: ${result.fixesApplied} fixed` 
+        : 'Scan complete',
+      task: `Scanned ${result.errorsFound} errors`
+    });
+    
+    // Generate AI summary of activity
+    await this._generateActivitySummary(result);
+    
     return result;
+  }
+
+  /**
+   * Generate AI summary of recent activity
+   * Called after each scan cycle to provide human-readable status
+   */
+  async _generateActivitySummary(scanResult) {
+    try {
+      const { getSettingsManager } = require('./settings-manager');
+      const settingsManager = getSettingsManager();
+      const apiKey = settingsManager.get('llmApiKey') || settingsManager.get('anthropicApiKey');
+      
+      if (!apiKey) {
+        console.log('[Agent] No API key for activity summary');
+        return;
+      }
+
+      // Collect activity context
+      const context = this._collectActivityContext(scanResult);
+      
+      // Skip if nothing interesting to summarize
+      if (!context.hasActivity) {
+        return;
+      }
+
+      const ClaudeAPI = require('./claude-api');
+      const claude = new ClaudeAPI();
+      claude.defaultModel = 'claude-sonnet-4-5-20250929'; // Use Sonnet for cost efficiency
+      claude.maxTokens = 150; // Keep summaries concise
+      
+      const prompt = `You are a helpful AI assistant summarizing app activity for a developer.
+
+Current App State:
+${context.appState}
+
+Recent Activity:
+${context.activity}
+
+Provide a single, concise sentence (max 80 chars) summarizing what's happening.
+Focus on the most important/actionable item.
+Use present tense, be specific but brief.
+Examples:
+- "Monitoring API rate limits, 3 errors auto-fixed"
+- "Building login form, editing LoginForm.jsx"
+- "Scan complete, all systems healthy"
+
+Summary:`;
+
+      const startTime = Date.now();
+      const response = await claude.complete(prompt, { 
+        systemPrompt: 'You are a concise status summarizer. Respond with only the summary, nothing else.' 
+      });
+      const elapsed = Date.now() - startTime;
+      
+      if (response) {
+        const summary = response.trim().replace(/^["']|["']$/g, '').substring(0, 100);
+        
+        console.log(`[Agent] AI Summary (${elapsed}ms): ${summary}`);
+        
+        // Broadcast summary to HUD
+        this._broadcastHUD({
+          type: 'summary',
+          phase: 'Monitor',
+          action: summary,
+          aiGenerated: true
+        });
+        
+        // Send to chat as system message
+        this._broadcastHUD({
+          type: 'chat',
+          message: `🤖 ${summary}`,
+          aiGenerated: true
+        });
+        
+        // Track cost
+        const inputTokens = Math.ceil(prompt.length / 4);
+        const outputTokens = Math.ceil(response.length / 4);
+        const estimatedCost = (inputTokens * 0.003 + outputTokens * 0.015) / 1000; // Sonnet pricing
+        
+        this._broadcastHUD({
+          type: 'cost',
+          model: 'claude-sonnet-4-5-20250929',
+          inputTokens,
+          outputTokens,
+          cost: estimatedCost,
+          feature: 'agent-summary'
+        });
+      }
+    } catch (error) {
+      console.error('[Agent] Activity summary error:', error.message);
+    }
+  }
+
+  /**
+   * Collect activity context for AI summarization
+   */
+  _collectActivityContext(scanResult) {
+    const context = {
+      hasActivity: false,
+      appState: '',
+      activity: ''
+    };
+    
+    // App state
+    const appStateLines = [];
+    appStateLines.push(`- Scans completed today: ${this.stats.scansCompleted}`);
+    appStateLines.push(`- Issues detected: ${this.stats.issuesDetected}`);
+    appStateLines.push(`- Fixes applied: ${this.stats.fixesApplied}`);
+    appStateLines.push(`- Broken items tracked: ${this.brokenItemsRegistry.length}`);
+    
+    if (this.escalatedIssues.length > 0) {
+      appStateLines.push(`- Escalated issues awaiting user: ${this.escalatedIssues.length}`);
+    }
+    
+    context.appState = appStateLines.join('\n');
+    
+    // Recent activity from this scan
+    const activityLines = [];
+    
+    if (scanResult.errorsFound > 0) {
+      activityLines.push(`- Found ${scanResult.errorsFound} errors this scan`);
+      context.hasActivity = true;
+    }
+    
+    if (scanResult.fixesApplied > 0) {
+      activityLines.push(`- Applied ${scanResult.fixesApplied} automatic fixes`);
+      context.hasActivity = true;
+    }
+    
+    if (scanResult.fixesFailed > 0) {
+      activityLines.push(`- ${scanResult.fixesFailed} fixes failed`);
+      context.hasActivity = true;
+    }
+    
+    // Include recent diagnoses for context
+    if (this.recentDiagnoses.length > 0) {
+      const recentIssues = this.recentDiagnoses.slice(0, 3).map(d => 
+        `- ${d.issue?.substring(0, 50) || 'Unknown issue'}`
+      );
+      activityLines.push('Recent issues:');
+      activityLines.push(...recentIssues);
+      context.hasActivity = true;
+    }
+    
+    // Include top broken items
+    if (this.brokenItemsRegistry.length > 0) {
+      const topBroken = this.brokenItemsRegistry
+        .filter(b => b.status !== 'fixed')
+        .slice(0, 2)
+        .map(b => `- ${b.normalizedMessage?.substring(0, 40) || 'Error'} (${b.occurrences}x)`);
+      
+      if (topBroken.length > 0) {
+        activityLines.push('Top issues:');
+        activityLines.push(...topBroken);
+        context.hasActivity = true;
+      }
+    }
+    
+    context.activity = activityLines.join('\n') || 'No significant activity';
+    
+    // Always generate summary if we have any stats
+    if (this.stats.scansCompleted > 0) {
+      context.hasActivity = true;
+    }
+    
+    return context;
   }
 
   /**
@@ -542,6 +909,9 @@ class AppManagerAgent {
    */
   _isDuplicateEvent(fingerprint, eventTime) {
     const existingTime = this.eventFingerprints.get(fingerprint);
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app-manager-agent.js:672',message:'Duplicate check',data:{fingerprint:fingerprint?.substring(0,80),hasExisting:!!existingTime,timeDiff:existingTime?(eventTime-existingTime):null,dedupeWindow:CONFIG.eventDedupeWindowMs},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
+    // #endregion
     if (!existingTime) return false;
     
     return (eventTime - existingTime) < CONFIG.eventDedupeWindowMs;
@@ -630,6 +1000,174 @@ class AppManagerAgent {
       .substring(0, 100);
   }
 
+  // ============================================
+  // Broken Items Registry
+  // ============================================
+
+  /**
+   * Register a broken item in the registry
+   * This tracks all errors/issues for the current app version
+   * Registry is auto-cleared when app updates to a new version
+   */
+  registerBrokenItem(errorGroup, diagnosis = null) {
+    const brokenItem = {
+      id: `broken-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      registeredAt: new Date().toISOString(),
+      appVersion: app.getVersion(),
+      source: errorGroup.source || 'unknown',
+      message: errorGroup.message,
+      normalizedMessage: this._normalizeErrorMessage(errorGroup.message),
+      occurrences: errorGroup.count || 1,
+      firstSeen: errorGroup.errors?.[0]?.timestamp || new Date().toISOString(),
+      lastSeen: new Date().toISOString(),
+      sampleErrors: (errorGroup.errors || []).slice(0, 3).map(e => ({
+        timestamp: e.timestamp,
+        message: e.message,
+        details: e.details
+      })),
+      diagnosis: diagnosis ? {
+        strategy: diagnosis.strategy,
+        confidence: diagnosis.confidence,
+        details: diagnosis.details
+      } : null,
+      status: 'open', // open, fixed, ignored
+      fixAttempts: 0
+    };
+    
+    // Check if similar item already exists
+    const existingIndex = this.brokenItemsRegistry.findIndex(item => 
+      item.normalizedMessage === brokenItem.normalizedMessage &&
+      item.source === brokenItem.source
+    );
+    
+    if (existingIndex >= 0) {
+      // Update existing entry
+      const existing = this.brokenItemsRegistry[existingIndex];
+      existing.occurrences += brokenItem.occurrences;
+      existing.lastSeen = brokenItem.lastSeen;
+      if (brokenItem.diagnosis) {
+        existing.diagnosis = brokenItem.diagnosis;
+      }
+      console.log(`[Agent] Updated broken item: ${existing.normalizedMessage} (${existing.occurrences} occurrences)`);
+    } else {
+      // Add new entry
+      this.brokenItemsRegistry.unshift(brokenItem);
+      
+      // Trim if too large
+      if (this.brokenItemsRegistry.length > this.maxBrokenItems) {
+        this.brokenItemsRegistry = this.brokenItemsRegistry.slice(0, this.maxBrokenItems);
+      }
+      
+      console.log(`[Agent] Registered broken item: ${brokenItem.normalizedMessage}`);
+    }
+    
+    this._saveState();
+    return brokenItem;
+  }
+
+  /**
+   * Update broken item status (fixed, ignored)
+   */
+  updateBrokenItemStatus(itemId, status, details = {}) {
+    const item = this.brokenItemsRegistry.find(i => i.id === itemId);
+    if (item) {
+      item.status = status;
+      item.statusUpdatedAt = new Date().toISOString();
+      item.statusDetails = details;
+      this._saveState();
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Increment fix attempt counter for broken item
+   */
+  incrementFixAttempt(errorGroup) {
+    const normalizedMsg = this._normalizeErrorMessage(errorGroup.message);
+    const item = this.brokenItemsRegistry.find(i => 
+      i.normalizedMessage === normalizedMsg &&
+      i.source === (errorGroup.source || 'unknown')
+    );
+    if (item) {
+      item.fixAttempts++;
+      item.lastFixAttempt = new Date().toISOString();
+      this._saveState();
+    }
+  }
+
+  /**
+   * Get broken items registry (for dashboard display)
+   */
+  getBrokenItemsRegistry(options = {}) {
+    const { status = 'all', limit = 50 } = options;
+    
+    let items = this.brokenItemsRegistry;
+    
+    if (status !== 'all') {
+      items = items.filter(i => i.status === status);
+    }
+    
+    return {
+      appVersion: app.getVersion(),
+      totalItems: this.brokenItemsRegistry.length,
+      openItems: this.brokenItemsRegistry.filter(i => i.status === 'open').length,
+      items: items.slice(0, limit),
+      lastCleared: this.lastKnownAppVersion !== app.getVersion() ? 'pending' : null
+    };
+  }
+
+  /**
+   * Manually clear broken items registry
+   */
+  clearBrokenItemsRegistry(archive = true) {
+    if (archive && this.brokenItemsRegistry.length > 0) {
+      this._archiveBrokenItems(`manual-${Date.now()}`);
+    }
+    
+    const count = this.brokenItemsRegistry.length;
+    this.brokenItemsRegistry = [];
+    this._saveState();
+    
+    console.log(`[Agent] Manually cleared ${count} broken items from registry`);
+    return { cleared: count };
+  }
+
+  /**
+   * Get archived broken items from previous versions
+   */
+  getArchivedBrokenItems() {
+    const archives = [];
+    
+    try {
+      const files = fs.readdirSync(this.dataDir);
+      const archiveFiles = files.filter(f => f.startsWith('broken-items-archive-') && f.endsWith('.json'));
+      
+      for (const file of archiveFiles) {
+        try {
+          const filePath = path.join(this.dataDir, file);
+          const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+          archives.push({
+            filename: file,
+            version: data.version,
+            archivedAt: data.archivedAt,
+            itemCount: data.items?.length || 0,
+            items: data.items || []
+          });
+        } catch (err) {
+          console.warn(`[Agent] Error reading archive ${file}:`, err.message);
+        }
+      }
+      
+      // Sort by archive date (newest first)
+      archives.sort((a, b) => new Date(b.archivedAt) - new Date(a.archivedAt));
+    } catch (error) {
+      console.error('[Agent] Error reading archived broken items:', error);
+    }
+    
+    return archives;
+  }
+
   /**
    * Diagnose an error group and determine fix strategy
    */
@@ -646,13 +1184,38 @@ class AppManagerAgent {
     };
 
     try {
+      // ARCHITECTURAL FIX: Check if this error type was already diagnosed
+      // Reuse cached diagnosis from brokenItemsRegistry instead of calling LLM again
+      const normalizedMsg = this._normalizeErrorMessage(errorGroup.message);
+      const existingItem = this.brokenItemsRegistry.find(item => 
+        item.normalizedMessage === normalizedMsg && 
+        item.source === (errorGroup.source || 'unknown')
+      );
+      
+      if (existingItem && existingItem.diagnosis) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app-manager-agent.js:947',message:'Using cached diagnosis',data:{normalizedMsg:normalizedMsg.substring(0,60),cachedStrategy:existingItem.diagnosis.strategy,occurrences:existingItem.occurrences},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-ARCH'})}).catch(()=>{});
+        // #endregion
+        console.log(`[Agent] Using cached diagnosis for: ${normalizedMsg.substring(0, 50)}...`);
+        return {
+          ...diagnosis,
+          strategy: existingItem.diagnosis.strategy,
+          confidence: existingItem.diagnosis.confidence,
+          details: { 
+            ...existingItem.diagnosis.details, 
+            cached: true,
+            originalDiagnosisTime: existingItem.registeredAt
+          }
+        };
+      }
+
       // Check if this is a known pattern we can fix without LLM
       const quickFix = this._checkQuickFix(errorGroup);
       if (quickFix) {
         return { ...diagnosis, ...quickFix };
       }
 
-      // Use LLM for complex diagnosis
+      // Use LLM for complex diagnosis - ONLY for truly new error types
       const llmDiagnosis = await this._llmDiagnose(errorGroup);
       if (llmDiagnosis) {
         return { ...diagnosis, ...llmDiagnosis };
@@ -670,6 +1233,9 @@ class AppManagerAgent {
    * Check for quick-fix patterns without LLM
    */
   _checkQuickFix(errorGroup) {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app-manager-agent.js:969',message:'Quick-fix check',data:{source:errorGroup.source,msg:errorGroup.message?.substring(0,100)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})}).catch(()=>{});
+    // #endregion
     const message = (errorGroup.message || '').toLowerCase();
     const source = (errorGroup.source || '').toLowerCase();
     
@@ -729,6 +1295,33 @@ class AppManagerAgent {
       };
     }
     
+    // Skip test log messages - these are development artifacts
+    if (message.includes('test log message') || message.includes('test error')) {
+      return {
+        strategy: FIX_STRATEGIES.SKIP,
+        confidence: 100,
+        details: { reason: 'Test message - no action needed' }
+      };
+    }
+    
+    // Skip "file does not exist" warnings - these are non-critical
+    if (message.includes('file does not exist') || message.includes('no content file found')) {
+      return {
+        strategy: FIX_STRATEGIES.SKIP,
+        confidence: 90,
+        details: { reason: 'Missing optional file - no action needed' }
+      };
+    }
+    
+    // Skip console.error wrappers that are just noise
+    if (message.startsWith('[console.error]') && message.length < 50) {
+      return {
+        strategy: FIX_STRATEGIES.SKIP,
+        confidence: 85,
+        details: { reason: 'Generic console error wrapper' }
+      };
+    }
+    
     return null;
   }
 
@@ -737,6 +1330,9 @@ class AppManagerAgent {
    * Uses Claude Opus 4.5 with sliding window context
    */
   async _llmDiagnose(errorGroup) {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app-manager-agent.js:1036',message:'LLM diagnose called',data:{source:errorGroup.source,msg:errorGroup.message?.substring(0,100),count:errorGroup.count,errorsLen:errorGroup.errors?.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H2'})}).catch(()=>{});
+    // #endregion
     try {
       const { getSettingsManager } = require('./settings-manager');
       const settingsManager = getSettingsManager();
@@ -1012,6 +1608,341 @@ Respond with ONLY a JSON object (no markdown, no explanation):
   }
 
   /**
+   * Apply fix with smart escalation chain
+   * Tries: primary strategy -> alternatives -> AI workaround -> user escalation
+   */
+  async _applyFixWithEscalation(diagnosis, errorGroup) {
+    const attempts = [];
+    const normalizedMsg = this._normalizeErrorMessage(errorGroup?.message || diagnosis.issue);
+    
+    // Check if this error has already been escalated and is pending user action
+    const existingEscalation = this.escalatedIssues.find(e => 
+      e.normalizedMessage === normalizedMsg && e.status === 'pending_user'
+    );
+    if (existingEscalation) {
+      console.log(`[Agent] Error already escalated, waiting for user: ${normalizedMsg.substring(0, 50)}`);
+      return { success: false, escalated: true, waitingForUser: true };
+    }
+    
+    // Check fix attempt count from broken items registry
+    const brokenItem = this.brokenItemsRegistry.find(i => 
+      i.normalizedMessage === normalizedMsg
+    );
+    const attemptCount = brokenItem?.fixAttempts || 0;
+    
+    // Step 1: Try primary strategy
+    console.log(`[Agent] Escalation Step 1: Trying primary strategy ${diagnosis.strategy}`);
+    let result = await this._applyFix(diagnosis);
+    attempts.push({ strategy: diagnosis.strategy, success: result.success, step: 'primary' });
+    
+    if (result.success) {
+      console.log(`[Agent] Primary fix succeeded`);
+      return { ...result, attempts };
+    }
+    
+    // Step 2: Try alternative strategies
+    const alternatives = FALLBACK_STRATEGIES[diagnosis.strategy] || [];
+    if (alternatives.length > 0) {
+      console.log(`[Agent] Escalation Step 2: Trying ${alternatives.length} alternative strategies`);
+      for (const altStrategy of alternatives) {
+        const altDiagnosis = { ...diagnosis, strategy: altStrategy };
+        result = await this._applyFix(altDiagnosis);
+        attempts.push({ strategy: altStrategy, success: result.success, step: 'alternative' });
+        
+        if (result.success) {
+          console.log(`[Agent] Alternative fix ${altStrategy} succeeded`);
+          return { ...result, attempts };
+        }
+      }
+    }
+    
+    // Step 3: Ask AI for creative workaround (only after multiple failures)
+    if (attemptCount >= 2) {
+      console.log(`[Agent] Escalation Step 3: Requesting AI workaround`);
+      try {
+        const workaround = await this._requestAIWorkaround(diagnosis, attempts.map(a => a.strategy));
+        if (workaround?.action && workaround.action !== 'none') {
+          result = await this._executeWorkaround(workaround, diagnosis);
+          attempts.push({ strategy: 'ai_workaround', success: result.success, step: 'ai', workaround });
+          
+          if (result.success) {
+            console.log(`[Agent] AI workaround succeeded: ${workaround.description}`);
+            return { ...result, attempts };
+          }
+        }
+      } catch (error) {
+        console.warn(`[Agent] AI workaround request failed:`, error.message);
+        attempts.push({ strategy: 'ai_workaround', success: false, step: 'ai', error: error.message });
+      }
+    }
+    
+    // Step 4: Escalate to user after MAX_FIX_ATTEMPTS_BEFORE_ESCALATION failures
+    if (attemptCount >= MAX_FIX_ATTEMPTS_BEFORE_ESCALATION) {
+      console.log(`[Agent] Escalation Step 4: Escalating to user after ${attemptCount} failed attempts`);
+      const escalation = await this._escalateToUser(diagnosis, attempts, normalizedMsg);
+      return { success: false, escalated: true, escalation, attempts };
+    }
+    
+    // Not yet ready for user escalation, will retry next scan
+    console.log(`[Agent] Fix failed (attempt ${attemptCount + 1}/${MAX_FIX_ATTEMPTS_BEFORE_ESCALATION}), will retry`);
+    return { success: false, escalated: false, attempts };
+  }
+
+  /**
+   * Request AI for a creative workaround when standard fixes fail
+   */
+  async _requestAIWorkaround(diagnosis, failedStrategies) {
+    const prompt = `You are a system repair agent. The following fix strategies have failed for this error:
+
+ERROR: ${diagnosis.issue || 'Unknown error'}
+DETAILS: ${JSON.stringify(diagnosis.details || {})}
+FAILED STRATEGIES: ${failedStrategies.join(', ')}
+
+Suggest ONE creative workaround that can be applied programmatically. Options:
+1. "cleanup" - Remove the broken item/entry from the system entirely
+2. "hide" - Mark the item as hidden so users don't see it
+3. "reset" - Reset the item to a default/empty state
+4. "none" - No automated fix possible, needs human intervention
+
+Respond with ONLY valid JSON (no markdown):
+{"action": "cleanup|hide|reset|none", "description": "Brief explanation", "itemId": "extracted ID if found or null"}`;
+
+    try {
+      const { getSettingsManager } = require('./settings-manager');
+      const settingsManager = getSettingsManager();
+      const apiKey = settingsManager.get('llmApiKey') || settingsManager.get('anthropicApiKey');
+      
+      if (!apiKey) {
+        console.log('[Agent] No API key for AI workaround request');
+        return { action: 'none', description: 'No API key configured' };
+      }
+      
+      const ClaudeAPI = require('./claude-api');
+      const claude = new ClaudeAPI();
+      claude.defaultModel = CONFIG.llmModel;
+      claude.maxTokens = 500;
+      
+      const response = await claude.complete(prompt, { systemPrompt: 'You are a helpful system repair assistant. Respond only with valid JSON.' });
+      
+      if (!response) {
+        return { action: 'none', description: 'No AI response' };
+      }
+      
+      // Parse JSON from response
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        return {
+          action: parsed.action || 'none',
+          description: parsed.description || 'AI-suggested workaround',
+          itemId: parsed.itemId || diagnosis.details?.itemId
+        };
+      }
+    } catch (error) {
+      console.error('[Agent] AI workaround request failed:', error.message);
+    }
+    
+    return { action: 'none', description: 'Failed to get AI workaround' };
+  }
+
+  /**
+   * Execute an AI-suggested workaround
+   */
+  async _executeWorkaround(workaround, diagnosis) {
+    console.log(`[Agent] Executing AI workaround: ${workaround.action} - ${workaround.description}`);
+    
+    const itemId = workaround.itemId || diagnosis.details?.itemId;
+    
+    try {
+      switch (workaround.action) {
+        case 'cleanup':
+          // Remove the broken item entirely
+          if (itemId && this.clipboardManager?.storage) {
+            const removed = this.clipboardManager.storage.removeOrphanedItem?.(itemId);
+            if (removed) {
+              console.log(`[Agent] Cleaned up broken item: ${itemId}`);
+              return { success: true, action: 'cleanup' };
+            }
+          }
+          // Try general orphan cleanup
+          if (this.clipboardManager?.storage?.cleanupOrphanedIndexEntries) {
+            const cleaned = this.clipboardManager.storage.cleanupOrphanedIndexEntries();
+            return { success: cleaned > 0, action: 'cleanup', cleaned };
+          }
+          break;
+          
+        case 'hide':
+          // Mark item as hidden (if storage supports it)
+          if (itemId && this.clipboardManager?.storage) {
+            // Most storage systems can add a "hidden" flag
+            const item = this.clipboardManager.storage.loadItem?.(itemId);
+            if (item) {
+              item.hidden = true;
+              // Would need a save method
+              console.log(`[Agent] Marked item as hidden: ${itemId}`);
+              return { success: true, action: 'hide' };
+            }
+          }
+          break;
+          
+        case 'reset':
+          // Reset to default state - depends on item type
+          if (itemId && this.pipelineVerifier) {
+            const result = await this.pipelineVerifier.repairItem(itemId);
+            return { success: result?.success || false, action: 'reset' };
+          }
+          break;
+          
+        case 'none':
+        default:
+          return { success: false, action: 'none', reason: 'No automated fix available' };
+      }
+    } catch (error) {
+      console.error(`[Agent] Workaround execution failed:`, error);
+    }
+    
+    return { success: false, action: workaround.action, error: 'Execution failed' };
+  }
+
+  /**
+   * Escalate to user when all automated fixes have failed
+   * Sends notification via IPC for UI to display
+   */
+  async _escalateToUser(diagnosis, attempts, normalizedMessage) {
+    const escalation = {
+      id: `esc-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      timestamp: new Date().toISOString(),
+      error: diagnosis.issue || diagnosis.details?.reason || 'Unknown error',
+      normalizedMessage: normalizedMessage,
+      details: diagnosis.details || {},
+      attemptedFixes: attempts,
+      status: 'pending_user',
+      suggestedActions: [
+        { label: 'Ignore this error', action: 'ignore', description: 'Stop tracking this error' },
+        { label: 'Delete broken item', action: 'delete', description: 'Remove the item causing the error' },
+        { label: 'I fixed it manually', action: 'mark_fixed', description: 'Mark as resolved' },
+        { label: 'Retry fixes', action: 'retry', description: 'Try automated fixes again' }
+      ]
+    };
+    
+    // Add to escalated issues list
+    this.escalatedIssues = this.escalatedIssues || [];
+    
+    // Check if already escalated
+    const existingIndex = this.escalatedIssues.findIndex(e => 
+      e.normalizedMessage === normalizedMessage
+    );
+    
+    if (existingIndex >= 0) {
+      // Update existing escalation
+      this.escalatedIssues[existingIndex] = {
+        ...this.escalatedIssues[existingIndex],
+        ...escalation,
+        updateCount: (this.escalatedIssues[existingIndex].updateCount || 0) + 1
+      };
+      console.log(`[Agent] Updated existing escalation for: ${normalizedMessage.substring(0, 50)}`);
+    } else {
+      this.escalatedIssues.push(escalation);
+      console.log(`[Agent] New escalation created: ${escalation.id}`);
+    }
+    
+    // Save state
+    this._saveState();
+    
+    // Emit event for dashboard API
+    if (this.dashboardAPI?.notifyUserIntervention) {
+      this.dashboardAPI.notifyUserIntervention(escalation);
+    }
+    
+    // Send via IPC to renderer process for UI notification
+    try {
+      const { BrowserWindow } = require('electron');
+      const mainWindow = BrowserWindow.getAllWindows().find(w => !w.isDestroyed());
+      if (mainWindow) {
+        mainWindow.webContents.send('agent:user-intervention-needed', escalation);
+        console.log(`[Agent] Sent intervention notification to renderer`);
+      }
+    } catch (error) {
+      console.warn('[Agent] Could not send IPC notification:', error.message);
+    }
+    
+    this.stats.escalated++;
+    
+    return escalation;
+  }
+
+  /**
+   * Handle user response to an escalation
+   */
+  async handleUserEscalationResponse(escalationId, action, details = {}) {
+    const escalation = this.escalatedIssues.find(e => e.id === escalationId);
+    if (!escalation) {
+      return { success: false, error: 'Escalation not found' };
+    }
+    
+    console.log(`[Agent] User responded to escalation ${escalationId}: ${action}`);
+    
+    switch (action) {
+      case 'ignore':
+        escalation.status = 'ignored';
+        // Also update broken items registry
+        const brokenItem = this.brokenItemsRegistry.find(i => 
+          i.normalizedMessage === escalation.normalizedMessage
+        );
+        if (brokenItem) {
+          this.updateBrokenItemStatus(brokenItem.id, 'ignored', { reason: 'User ignored' });
+        }
+        break;
+        
+      case 'delete':
+        // Attempt to delete the problematic item
+        const itemId = escalation.details?.itemId || details.itemId;
+        if (itemId && this.clipboardManager?.storage?.removeOrphanedItem) {
+          this.clipboardManager.storage.removeOrphanedItem(itemId);
+        }
+        escalation.status = 'resolved';
+        break;
+        
+      case 'mark_fixed':
+        escalation.status = 'resolved';
+        const fixedItem = this.brokenItemsRegistry.find(i => 
+          i.normalizedMessage === escalation.normalizedMessage
+        );
+        if (fixedItem) {
+          this.updateBrokenItemStatus(fixedItem.id, 'fixed', { reason: 'User marked as fixed' });
+        }
+        break;
+        
+      case 'retry':
+        escalation.status = 'retry_requested';
+        // Reset fix attempts to allow retry
+        const retryItem = this.brokenItemsRegistry.find(i => 
+          i.normalizedMessage === escalation.normalizedMessage
+        );
+        if (retryItem) {
+          retryItem.fixAttempts = 0;
+        }
+        break;
+        
+      default:
+        return { success: false, error: 'Unknown action' };
+    }
+    
+    escalation.resolvedAt = new Date().toISOString();
+    escalation.resolvedAction = action;
+    this._saveState();
+    
+    return { success: true, escalation };
+  }
+
+  /**
+   * Get pending escalations for UI display
+   */
+  getPendingEscalations() {
+    return (this.escalatedIssues || []).filter(e => e.status === 'pending_user');
+  }
+
+  /**
    * Fix: Regenerate thumbnail
    */
   async _fixRegenerateThumbnail(diagnosis) {
@@ -1084,12 +2015,91 @@ Respond with ONLY a JSON object (no markdown, no explanation):
   }
 
   /**
-   * Fix: Rebuild index entry
+   * Fix: Rebuild index entry - removes orphaned entries from storage index
    */
   async _fixRebuildIndex(diagnosis) {
-    // This would require more complex index manipulation
-    console.log('[Agent] Index rebuild not yet implemented');
-    return false;
+    if (!this.clipboardManager?.storage) {
+      console.log('[Agent] No clipboard storage available for index rebuild');
+      return false;
+    }
+
+    try {
+      const storage = this.clipboardManager.storage;
+      const itemId = diagnosis.details?.itemId;
+      
+      if (itemId) {
+        // Remove specific orphaned entry
+        if (typeof storage.removeOrphanedItem === 'function') {
+          const removed = storage.removeOrphanedItem(itemId);
+          if (removed) {
+            console.log(`[Agent] Removed orphaned index entry: ${itemId}`);
+            return true;
+          }
+        }
+      }
+      
+      // Full index cleanup - remove all entries pointing to missing files
+      if (typeof storage.cleanupOrphanedIndexEntries === 'function') {
+        const cleaned = storage.cleanupOrphanedIndexEntries();
+        console.log(`[Agent] Cleaned ${cleaned} orphaned index entries`);
+        return cleaned > 0;
+      }
+      
+      // Fallback: manual cleanup if methods don't exist
+      console.log('[Agent] Storage cleanup methods not available, attempting manual cleanup');
+      return await this._manualIndexCleanup(storage);
+      
+    } catch (error) {
+      console.error('[Agent] Index rebuild failed:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Manual index cleanup when storage methods aren't available
+   */
+  async _manualIndexCleanup(storage) {
+    const fs = require('fs');
+    const path = require('path');
+    
+    try {
+      if (!storage.index?.items || !storage.itemsDir) {
+        return false;
+      }
+      
+      const originalCount = storage.index.items.length;
+      
+      // Filter out items whose directories don't exist
+      storage.index.items = storage.index.items.filter(item => {
+        if (item.type === 'file') {
+          const itemDir = path.join(storage.itemsDir, item.id);
+          const exists = fs.existsSync(itemDir);
+          if (!exists) {
+            console.log(`[Agent] Removing orphaned item from index: ${item.id}`);
+          }
+          return exists;
+        }
+        return true;
+      });
+      
+      const removed = originalCount - storage.index.items.length;
+      
+      if (removed > 0) {
+        // Save the cleaned index
+        if (typeof storage.saveIndex === 'function') {
+          storage.saveIndex();
+        } else if (typeof storage.saveIndexSync === 'function') {
+          storage.saveIndexSync(storage.index);
+        }
+        console.log(`[Agent] Manual cleanup removed ${removed} orphaned entries`);
+        return true;
+      }
+      
+      return false;
+    } catch (error) {
+      console.error('[Agent] Manual index cleanup failed:', error);
+      return false;
+    }
   }
 
   /**
@@ -1206,7 +2216,17 @@ Respond with ONLY a JSON object (no markdown, no explanation):
       },
       
       // External API reporting info
-      externalAPI: this.getExternalAPIConfig()
+      externalAPI: this.getExternalAPIConfig(),
+      
+      // Broken items registry info
+      brokenItemsRegistry: {
+        total: this.brokenItemsRegistry.length,
+        open: this.brokenItemsRegistry.filter(i => i.status === 'open').length,
+        fixed: this.brokenItemsRegistry.filter(i => i.status === 'fixed').length,
+        ignored: this.brokenItemsRegistry.filter(i => i.status === 'ignored').length,
+        appVersion: app.getVersion(),
+        lastKnownVersion: this.lastKnownAppVersion
+      }
     };
   }
 

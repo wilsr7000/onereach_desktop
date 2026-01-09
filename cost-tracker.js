@@ -1,44 +1,22 @@
 /**
  * Cost Tracker for GSX Create
- * Tracks API costs per space/project with detailed breakdowns
+ * 
+ * Provides per-space cost summaries and tracking.
+ * DELEGATES storage to BudgetManager (primary tracker).
+ * Uses unified pricing from pricing-config.js.
+ * 
+ * This tracker provides space-local summaries while BudgetManager
+ * handles the global cost database.
  */
 
 const fs = require('fs');
 const path = require('path');
-
-// Pricing per 1M tokens (as of late 2024)
-const PRICING = {
-  // Anthropic Claude models (current)
-  'claude-sonnet-4-5-20250929': { input: 3.00, output: 15.00 },
-  'claude-opus-4-5-20251101': { input: 15.00, output: 75.00 },
-  
-  // Legacy Claude models
-  'claude-sonnet-4-20250514': { input: 3.00, output: 15.00 },
-  'claude-opus-4-20250514': { input: 15.00, output: 75.00 },
-  'claude-opus-4-5-20250514': { input: 15.00, output: 75.00 },
-  'claude-3-5-sonnet-20241022': { input: 3.00, output: 15.00 },
-  'claude-3-opus-20240229': { input: 15.00, output: 75.00 },
-  'claude-3-sonnet-20240229': { input: 3.00, output: 15.00 },
-  'claude-3-haiku-20240307': { input: 0.25, output: 1.25 },
-  
-  // OpenAI models
-  'gpt-4o': { input: 2.50, output: 10.00 },
-  'gpt-4o-mini': { input: 0.15, output: 0.60 },
-  'gpt-4-turbo': { input: 10.00, output: 30.00 },
-  'gpt-4': { input: 30.00, output: 60.00 },
-  'gpt-3.5-turbo': { input: 0.50, output: 1.50 },
-  
-  // Vision API calls (per image + tokens)
-  'vision-claude': { perImage: 0.0048, input: 3.00, output: 15.00 },
-  'vision-gpt4o': { perImage: 0.00255, input: 2.50, output: 10.00 },
-  
-  // Default fallback
-  'default': { input: 3.00, output: 15.00 }
-};
+const { calculateCost, formatCost, PRICING } = require('./pricing-config');
 
 class CostTracker {
   constructor(spaceFolder) {
     this.spaceFolder = spaceFolder;
+    this.spaceId = path.basename(spaceFolder);
     this.costFile = path.join(spaceFolder, '.gsx-costs.json');
     this.data = this.load();
   }
@@ -46,7 +24,8 @@ class CostTracker {
   load() {
     try {
       if (fs.existsSync(this.costFile)) {
-        return JSON.parse(fs.readFileSync(this.costFile, 'utf8'));
+        const data = JSON.parse(fs.readFileSync(this.costFile, 'utf8'));
+        return this._migrateData(data);
       }
     } catch (error) {
       console.error('[CostTracker] Error loading costs:', error);
@@ -54,9 +33,17 @@ class CostTracker {
     return this.getDefaultData();
   }
 
+  _migrateData(data) {
+    // Ensure all fields exist
+    return {
+      ...this.getDefaultData(),
+      ...data
+    };
+  }
+
   getDefaultData() {
     return {
-      spaceId: path.basename(this.spaceFolder),
+      spaceId: this.spaceId,
       created: new Date().toISOString(),
       totalCost: 0,
       totalInputTokens: 0,
@@ -70,6 +57,11 @@ class CostTracker {
 
   save() {
     try {
+      // Ensure directory exists
+      const dir = path.dirname(this.costFile);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
       fs.writeFileSync(this.costFile, JSON.stringify(this.data, null, 2));
     } catch (error) {
       console.error('[CostTracker] Error saving costs:', error);
@@ -77,58 +69,24 @@ class CostTracker {
   }
 
   /**
-   * Calculate cost for a given number of tokens
-   * @param {string} model - Model name
-   * @param {number} inputTokens - Number of input tokens
-   * @param {number} outputTokens - Number of output tokens
-   * @param {object} options - Additional options (e.g., imageCount for vision)
-   * @returns {object} Cost breakdown
-   */
-  calculateCost(model, inputTokens, outputTokens, options = {}) {
-    const pricing = PRICING[model] || PRICING['default'];
-    
-    const inputCost = (inputTokens / 1000000) * pricing.input;
-    const outputCost = (outputTokens / 1000000) * pricing.output;
-    let imageCost = 0;
-    
-    if (options.imageCount && pricing.perImage) {
-      imageCost = options.imageCount * pricing.perImage;
-    }
-    
-    const totalCost = inputCost + outputCost + imageCost;
-    
-    return {
-      inputCost: Math.round(inputCost * 1000000) / 1000000,
-      outputCost: Math.round(outputCost * 1000000) / 1000000,
-      imageCost: Math.round(imageCost * 1000000) / 1000000,
-      totalCost: Math.round(totalCost * 1000000) / 1000000,
-      inputTokens,
-      outputTokens,
-      model,
-      pricing: {
-        inputPer1M: pricing.input,
-        outputPer1M: pricing.output
-      }
-    };
-  }
-
-  /**
    * Record an API call
-   * @param {object} callData - Call details
+   * Stores locally AND delegates to BudgetManager
    */
   recordCall(callData) {
     const {
       model,
       inputTokens = 0,
       outputTokens = 0,
-      type = 'prompt', // 'prompt', 'vision', 'embedding'
+      type = 'prompt',
       prompt = '',
       imageCount = 0,
       sessionId = null,
-      success = true
+      success = true,
+      feature = 'gsx-create'
     } = callData;
 
-    const cost = this.calculateCost(model, inputTokens, outputTokens, { imageCount });
+    // Use unified pricing calculation
+    const costResult = calculateCost(model, inputTokens, outputTokens, { imageCount });
     const timestamp = Date.now();
     const date = new Date().toISOString().split('T')[0];
 
@@ -137,18 +95,18 @@ class CostTracker {
       timestamp,
       date,
       type,
-      model,
+      model: costResult.model,
       inputTokens,
       outputTokens,
       imageCount,
-      ...cost,
+      ...costResult,
       promptPreview: prompt.substring(0, 100),
       sessionId,
       success
     };
 
-    // Update totals
-    this.data.totalCost += cost.totalCost;
+    // Update local totals
+    this.data.totalCost += costResult.totalCost;
     this.data.totalInputTokens += inputTokens;
     this.data.totalOutputTokens += outputTokens;
     this.data.totalCalls += 1;
@@ -157,19 +115,20 @@ class CostTracker {
     if (!this.data.dailyCosts[date]) {
       this.data.dailyCosts[date] = { cost: 0, calls: 0, inputTokens: 0, outputTokens: 0 };
     }
-    this.data.dailyCosts[date].cost += cost.totalCost;
+    this.data.dailyCosts[date].cost += costResult.totalCost;
     this.data.dailyCosts[date].calls += 1;
     this.data.dailyCosts[date].inputTokens += inputTokens;
     this.data.dailyCosts[date].outputTokens += outputTokens;
 
     // Update model breakdown
-    if (!this.data.modelBreakdown[model]) {
-      this.data.modelBreakdown[model] = { cost: 0, calls: 0, inputTokens: 0, outputTokens: 0 };
+    const modelKey = costResult.model;
+    if (!this.data.modelBreakdown[modelKey]) {
+      this.data.modelBreakdown[modelKey] = { cost: 0, calls: 0, inputTokens: 0, outputTokens: 0 };
     }
-    this.data.modelBreakdown[model].cost += cost.totalCost;
-    this.data.modelBreakdown[model].calls += 1;
-    this.data.modelBreakdown[model].inputTokens += inputTokens;
-    this.data.modelBreakdown[model].outputTokens += outputTokens;
+    this.data.modelBreakdown[modelKey].cost += costResult.totalCost;
+    this.data.modelBreakdown[modelKey].calls += 1;
+    this.data.modelBreakdown[modelKey].inputTokens += inputTokens;
+    this.data.modelBreakdown[modelKey].outputTokens += outputTokens;
 
     // Add to sessions (keep last 500 calls)
     this.data.sessions.unshift(record);
@@ -177,16 +136,44 @@ class CostTracker {
       this.data.sessions = this.data.sessions.slice(0, 500);
     }
 
+    // Save local file
     this.save();
 
-    console.log(`[CostTracker] Recorded: $${cost.totalCost.toFixed(6)} (${inputTokens} in, ${outputTokens} out) - Total: $${this.data.totalCost.toFixed(4)}`);
+    // Delegate to BudgetManager for centralized tracking
+    this._delegateToBudgetManager({
+      provider: costResult.provider,
+      model: costResult.model,
+      inputTokens,
+      outputTokens,
+      projectId: this.spaceId,
+      spaceId: this.spaceId,
+      feature,
+      operation: type,
+      success,
+      options: { imageCount }
+    });
+
+    console.log(`[CostTracker] Recorded: ${formatCost(costResult.totalCost)} (${inputTokens} in, ${outputTokens} out) - Total: ${formatCost(this.data.totalCost)}`);
 
     return record;
   }
 
   /**
+   * Delegate to BudgetManager for centralized tracking
+   */
+  _delegateToBudgetManager(params) {
+    try {
+      const { getBudgetManager } = require('./budget-manager');
+      const budgetManager = getBudgetManager();
+      budgetManager.trackUsage(params);
+    } catch (error) {
+      // BudgetManager might not be available in all contexts
+      console.warn('[CostTracker] Could not delegate to BudgetManager:', error.message);
+    }
+  }
+
+  /**
    * Parse Aider's cost message to extract tokens
-   * Example: "Tokens: 13k sent, 171 received. Cost: $0.04 message, $0.04 session."
    */
   parseAiderCostMessage(message) {
     const tokenMatch = message.match(/Tokens:\s*([\d.]+)k?\s*sent,\s*([\d.]+)k?\s*received/i);
@@ -215,7 +202,7 @@ class CostTracker {
   }
 
   /**
-   * Get summary statistics
+   * Get summary statistics for this space
    */
   getSummary() {
     const today = new Date().toISOString().split('T')[0];
@@ -234,11 +221,14 @@ class CostTracker {
     }
     
     return {
+      spaceId: this.spaceId,
       totalCost: Math.round(this.data.totalCost * 10000) / 10000,
+      totalCostFormatted: formatCost(this.data.totalCost),
       totalCalls: this.data.totalCalls,
       totalInputTokens: this.data.totalInputTokens,
       totalOutputTokens: this.data.totalOutputTokens,
       todayCost: Math.round(todayCosts.cost * 10000) / 10000,
+      todayCostFormatted: formatCost(todayCosts.cost),
       todayCalls: todayCosts.calls,
       last7Days,
       modelBreakdown: this.data.modelBreakdown,
@@ -260,18 +250,31 @@ class CostTracker {
       }
     });
     
-    return { totalCost, totalCalls, startDate, endDate };
+    return { 
+      totalCost, 
+      totalCostFormatted: formatCost(totalCost),
+      totalCalls, 
+      startDate, 
+      endDate 
+    };
   }
 
   /**
-   * Reset costs (with confirmation)
+   * Reset costs (with backup)
    */
   resetCosts() {
     const backup = { ...this.data };
     this.data = this.getDefaultData();
     this.save();
-    console.log('[CostTracker] Costs reset. Previous total was: $' + backup.totalCost.toFixed(4));
+    console.log('[CostTracker] Costs reset. Previous total was: ' + formatCost(backup.totalCost));
     return backup;
+  }
+
+  /**
+   * Calculate cost using unified pricing
+   */
+  calculateCost(model, inputTokens, outputTokens, options = {}) {
+    return calculateCost(model, inputTokens, outputTokens, options);
   }
 }
 
@@ -285,5 +288,5 @@ function getCostTracker(spaceFolder) {
   return instances.get(spaceFolder);
 }
 
+// Export unified pricing for backward compatibility
 module.exports = { CostTracker, getCostTracker, PRICING };
-

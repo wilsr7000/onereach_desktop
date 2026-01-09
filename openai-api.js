@@ -6,12 +6,15 @@
  * - 256K context window
  * - Improved reasoning and analysis
  * - Better structured output (JSON mode)
+ * 
+ * Uses unified pricing from pricing-config.js
  */
 
 const https = require('https');
 const { getBudgetManager } = require('./budget-manager');
 const getLogger = require('./event-logger');
 const { getLLMUsageTracker } = require('./llm-usage-tracker');
+const { calculateCost } = require('./pricing-config');
 
 class OpenAIAPI {
   constructor() {
@@ -296,9 +299,10 @@ Respond with valid JSON only.`;
       // Estimate cost based on prompt length
       const estimatedInputTokens = Math.ceil(prompt.length / 4);
       const estimatedOutputTokens = this.maxTokens;
-      const pricing = budgetManager.getPricing().openai || { inputCostPer1K: 0.01, outputCostPer1K: 0.03 };
-      const estimatedCost = (estimatedInputTokens / 1000) * pricing.inputCostPer1K + 
-                           (estimatedOutputTokens / 1000) * pricing.outputCostPer1K;
+      // Pricing is per 1M tokens, use the model-specific or default pricing
+      const pricing = budgetManager.getPricing().openai?.[this.defaultModel] || { input: 5.00, output: 15.00 };
+      const estimatedCost = (estimatedInputTokens / 1000000) * pricing.input + 
+                           (estimatedOutputTokens / 1000000) * pricing.output;
       
       const budgetCheck = budgetManager.checkBudgetWithWarning('openai', estimatedCost, trackingOptions.operation || 'api_call');
       
@@ -395,11 +399,18 @@ Respond with valid JSON only.`;
             const usage = response.usage;
             if (usage) {
               try {
-                const budgetManager = getBudgetManager();
-                budgetManager.trackUsage('openai', trackingOptions.projectId || null, {
-                  operation: trackingOptions.operation || 'api_call',
+                // Use LLMUsageTracker as the single entry point
+                // It will delegate to BudgetManager for centralized storage
+                const llmTracker = getLLMUsageTracker();
+                llmTracker.trackOpenAICall({
+                  model: this.defaultModel,
                   inputTokens: usage.prompt_tokens || 0,
-                  outputTokens: usage.completion_tokens || 0
+                  outputTokens: usage.completion_tokens || 0,
+                  feature: this._getFeatureFromOperation(trackingOptions.operation),
+                  purpose: trackingOptions.operation,
+                  projectId: trackingOptions.projectId,
+                  duration: requestDuration,
+                  success: true
                 });
                 
                 logger.logNetworkRequest('POST', '/v1/chat/completions', res.statusCode, requestDuration);
@@ -417,21 +428,6 @@ Respond with valid JSON only.`;
                   outputTokens: usage.completion_tokens,
                   totalTokens: usage.total_tokens
                 };
-                
-                // Track in LLM usage tracker for dashboard
-                try {
-                  const llmTracker = getLLMUsageTracker();
-                  llmTracker.trackOpenAICall({
-                    model: this.defaultModel,
-                    inputTokens: usage.prompt_tokens || 0,
-                    outputTokens: usage.completion_tokens || 0,
-                    feature: this._getFeatureFromOperation(trackingOptions.operation),
-                    purpose: trackingOptions.operation,
-                    duration: requestDuration
-                  });
-                } catch (llmTrackerError) {
-                  // Silent fail - don't break main flow
-                }
               } catch (trackingError) {
                 logger.warn('OpenAI API usage tracking failed', {
                   error: trackingError.message,

@@ -175,6 +175,10 @@ class RealtimeSpeech {
         const finalText = event.transcript;
         if (finalText) {
           console.log('[RealtimeSpeech] Transcription:', finalText);
+          // #region agent log
+          const fs = require('fs');
+          fs.appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'realtime-speech.js:handleEvent',message:'FINAL transcript broadcasting',data:{text:finalText?.substring(0,50),subscriberCount:this.subscribers.size},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A,D'})+'\n');
+          // #endregion
           this.broadcast({ type: 'transcript', text: finalText, isFinal: true });
         }
         break;

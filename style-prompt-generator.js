@@ -1351,6 +1351,323 @@ To generate the full prompt with screenshots:
 
         return data + '\n';
     }
+
+    // ============================================
+    // UI MOCKUP GENERATION FOR GSX CREATE
+    // ============================================
+
+    /**
+     * Generate 4 different design approach prompts for UI mockup generation
+     * Each approach has a distinct visual style for user to choose from
+     * 
+     * @param {string} objective - The app/feature objective from user
+     * @param {Object} options - Additional context
+     * @returns {Array} Array of 4 design approaches with prompts
+     */
+    generateDesignApproaches(objective, options = {}) {
+        const {
+            appType = 'web app',
+            screenSize = '1024x768',
+            includeNav = true,
+            darkModeVariant = false
+        } = options;
+
+        // Base context for all approaches
+        const baseContext = `UI mockup for: ${objective}
+Application type: ${appType}
+Screen size: ${screenSize}
+${includeNav ? 'Include navigation header' : 'No navigation header'}`;
+
+        const approaches = [
+            {
+                id: 'minimal',
+                name: 'Minimal & Clean',
+                icon: '◯',
+                description: 'Lots of whitespace, subtle colors, focus on content',
+                bestFor: 'Tools, productivity apps, dashboards',
+                prompt: `${baseContext}
+
+DESIGN STYLE: Minimal & Clean
+- Abundant whitespace and breathing room
+- Monochromatic or very limited color palette (2-3 colors max)
+- Light backgrounds (#FAFAFA, #FFFFFF, #F5F5F5)
+- Subtle shadows and borders
+- Sans-serif typography (Inter, SF Pro, Helvetica Neue)
+- Clean geometric shapes
+- Thin icons (1.5px stroke)
+- Muted accent color for CTAs only
+- Card-based layout with generous padding (24-32px)
+- No gradients, flat design
+- Visual hierarchy through size and weight, not color
+
+Create a professional, sophisticated UI mockup that feels calm and focused.
+High-fidelity mockup, photorealistic rendering, UI design, Figma style.`
+            },
+            {
+                id: 'bold',
+                name: 'Bold & Vibrant',
+                icon: '◆',
+                description: 'Strong colors, high contrast, energetic feel',
+                bestFor: 'Consumer apps, marketing, creative tools',
+                prompt: `${baseContext}
+
+DESIGN STYLE: Bold & Vibrant
+- Vibrant, saturated colors (electric blue, coral, lime green)
+- High contrast color combinations
+- Gradient backgrounds and accent elements
+- Bold typography with strong hierarchy
+- Rounded corners (12-16px radius)
+- Playful shadows (colored shadows, offset shadows)
+- Thick icons (2-2.5px stroke) with color fills
+- Dynamic, asymmetric layouts
+- Accent colors used generously
+- Hover states and interactive feel
+- Modern, energetic, youthful aesthetic
+- Mix of solid colors and gradients
+
+Create an eye-catching, energetic UI mockup that stands out and excites.
+High-fidelity mockup, photorealistic rendering, UI design, Dribbble style.`
+            },
+            {
+                id: 'professional',
+                name: 'Professional & Corporate',
+                icon: '▣',
+                description: 'Trust-building, structured, business-appropriate',
+                bestFor: 'Enterprise, B2B, financial, healthcare',
+                prompt: `${baseContext}
+
+DESIGN STYLE: Professional & Corporate
+- Conservative color palette (navy, slate gray, white)
+- Primary accent: trustworthy blue (#2563EB or similar)
+- Structured, grid-based layout
+- Clear visual hierarchy
+- Professional typography (Source Sans Pro, Roboto, Open Sans)
+- Standard border radius (4-8px)
+- Subtle shadows for depth
+- Data visualization friendly
+- Clear section separators
+- Status indicators and badges
+- Form-heavy layouts done elegantly
+- Accessibility-first design choices
+- No flashy elements, substance over style
+
+Create a trustworthy, professional UI mockup suitable for enterprise users.
+High-fidelity mockup, photorealistic rendering, UI design, corporate style.`
+            },
+            {
+                id: 'creative',
+                name: 'Creative & Playful',
+                icon: '✦',
+                description: 'Unique typography, artistic, memorable personality',
+                bestFor: 'Portfolio, creative tools, entertainment, games',
+                prompt: `${baseContext}
+
+DESIGN STYLE: Creative & Playful
+- Unexpected color combinations (coral + mint, purple + yellow)
+- Custom, distinctive typography (display fonts for headers)
+- Organic shapes and irregular borders
+- Illustration elements and custom graphics
+- Animated feel (show motion through design)
+- Micro-interactions implied in static design
+- Personality and character throughout
+- Breaking the grid intentionally
+- Textured backgrounds or patterns
+- Hand-drawn or sketch elements
+- Emoji or custom iconography
+- Surprising delightful details
+- Asymmetric balance
+- Story-telling through layout
+
+Create a unique, memorable UI mockup with distinct personality and charm.
+High-fidelity mockup, photorealistic rendering, UI design, award-winning style.`
+            }
+        ];
+
+        // Add dark mode variants if requested
+        if (darkModeVariant) {
+            approaches.forEach(approach => {
+                approach.prompt = approach.prompt.replace(
+                    'High-fidelity mockup',
+                    'DARK MODE VARIANT with dark backgrounds (#0D1117, #1A1A2E, #121212). High-fidelity mockup'
+                );
+            });
+        }
+
+        return approaches;
+    }
+
+    /**
+     * Generate a single UI mockup prompt with full context
+     * Used after user selects an approach
+     * 
+     * @param {string} objective - The app objective
+     * @param {Object} approach - Selected approach from generateDesignApproaches
+     * @param {Object} options - Additional options
+     * @returns {string} Complete prompt for image generation
+     */
+    generateUIMockupPrompt(objective, approach, options = {}) {
+        const {
+            screenSize = '1024x768',
+            additionalInstructions = '',
+            components = []
+        } = options;
+
+        let prompt = approach.prompt;
+
+        // Add specific components if requested
+        if (components.length > 0) {
+            prompt += `\n\nMUST INCLUDE THESE UI COMPONENTS:\n`;
+            components.forEach(comp => {
+                prompt += `- ${comp}\n`;
+            });
+        }
+
+        // Add any additional instructions
+        if (additionalInstructions) {
+            prompt += `\n\nADDITIONAL REQUIREMENTS:\n${additionalInstructions}`;
+        }
+
+        // Final quality instructions
+        prompt += `\n\nIMPORTANT:
+- This is a UI mockup, not a real screenshot
+- Show realistic placeholder content (not lorem ipsum)
+- Include realistic data/text that matches the app purpose
+- Render at ${screenSize} resolution
+- Professional quality, ready for development handoff`;
+
+        return prompt;
+    }
+
+    /**
+     * Extract design tokens from a mockup image for the two-pass approach
+     * Returns a prompt that asks Claude to analyze the image
+     * 
+     * @returns {string} Analysis prompt for Claude vision
+     */
+    getDesignTokenExtractionPrompt() {
+        return `Analyze this UI mockup image and extract the design tokens as JSON.
+
+Return ONLY valid JSON with this exact structure:
+{
+  "colors": {
+    "background": "#hex",
+    "backgroundSecondary": "#hex",
+    "text": "#hex",
+    "textSecondary": "#hex",
+    "primary": "#hex",
+    "primaryHover": "#hex",
+    "accent": "#hex",
+    "border": "#hex",
+    "shadow": "rgba(...)"
+  },
+  "typography": {
+    "fontFamily": "font name",
+    "headingWeight": "number",
+    "bodyWeight": "number",
+    "h1Size": "px",
+    "h2Size": "px",
+    "bodySize": "px",
+    "smallSize": "px"
+  },
+  "spacing": {
+    "xs": "px",
+    "sm": "px",
+    "md": "px",
+    "lg": "px",
+    "xl": "px",
+    "containerPadding": "px",
+    "cardPadding": "px",
+    "sectionGap": "px"
+  },
+  "borders": {
+    "radius": "px",
+    "radiusLarge": "px",
+    "width": "px",
+    "style": "solid|dashed|none"
+  },
+  "effects": {
+    "shadowSmall": "CSS shadow value",
+    "shadowMedium": "CSS shadow value",
+    "shadowLarge": "CSS shadow value",
+    "blur": "px or none"
+  },
+  "layout": {
+    "type": "grid|flex|mixed",
+    "columns": "number if grid",
+    "maxWidth": "px",
+    "headerHeight": "px"
+  },
+  "components": [
+    "list of UI components visible: header, card, button, form, table, etc."
+  ]
+}
+
+Be precise with color hex codes - use a color picker mentally.
+Estimate spacing values based on visual proportions.`;
+    }
+
+    /**
+     * Generate code implementation prompt using extracted design tokens
+     * This is the second pass of the two-pass approach
+     * 
+     * @param {string} objective - The app objective
+     * @param {Object} designTokens - Extracted tokens from first pass
+     * @param {Object} options - Additional options
+     * @returns {string} Code generation prompt
+     */
+    getCodeFromDesignPrompt(objective, designTokens, options = {}) {
+        const {
+            framework = 'vanilla', // vanilla, tailwind, react
+            includeJS = true,
+            responsive = true
+        } = options;
+
+        let frameworkInstructions = '';
+        if (framework === 'tailwind') {
+            frameworkInstructions = `
+Use Tailwind CSS classes. Define custom colors in a <style> block:
+:root {
+  --color-primary: ${designTokens.colors?.primary || '#4f8cff'};
+  /* etc */
+}`;
+        } else if (framework === 'react') {
+            frameworkInstructions = 'Generate a React component with styled-components or CSS modules.';
+        } else {
+            frameworkInstructions = 'Generate vanilla HTML with embedded <style> CSS.';
+        }
+
+        return `Generate production-ready code that EXACTLY matches the attached design mockup.
+
+## OBJECTIVE
+${objective}
+
+## DESIGN TOKENS (Use these EXACT values)
+\`\`\`json
+${JSON.stringify(designTokens, null, 2)}
+\`\`\`
+
+## REQUIREMENTS
+${frameworkInstructions}
+
+1. **Colors**: Use the EXACT hex codes from design tokens
+2. **Typography**: Match font sizes and weights precisely
+3. **Spacing**: Use the extracted spacing values consistently
+4. **Borders**: Match border radius and styles exactly
+5. **Shadows**: Replicate shadow effects as specified
+6. **Layout**: Follow the layout type (${designTokens.layout?.type || 'flex'})
+
+${responsive ? '7. **Responsive**: Include mobile breakpoints (@media max-width: 768px)' : ''}
+${includeJS ? '8. **Interactivity**: Add basic JavaScript for buttons, forms, toggles' : ''}
+
+## OUTPUT FORMAT
+Generate a single, complete HTML file with:
+- All CSS in a <style> block
+- All JS in a <script> block (if needed)
+- Realistic placeholder content matching the app purpose
+- Clean, well-commented code
+
+The rendered output should be pixel-perfect compared to the design mockup.`;
+    }
 }
 
 // Singleton

@@ -73,6 +73,93 @@ class ClipboardStorageV2 {
     }
   }
   
+  /**
+   * Remove a specific orphaned item from the index
+   * Used by the agent to clean up entries pointing to missing files
+   * @param {string} itemId - ID of the item to remove
+   * @returns {boolean} - Whether the item was found and removed
+   */
+  removeOrphanedItem(itemId) {
+    if (!this.index?.items) return false;
+    
+    const index = this.index.items.findIndex(item => item.id === itemId);
+    if (index >= 0) {
+      const removed = this.index.items.splice(index, 1);
+      console.log(`[Storage] Removed orphaned item from index: ${itemId}`);
+      this.saveIndex();
+      
+      // Also remove from cache if present
+      this.cache.delete(itemId);
+      
+      return true;
+    }
+    return false;
+  }
+  
+  /**
+   * Clean up all orphaned index entries (items pointing to missing files)
+   * @returns {number} - Number of entries removed
+   */
+  cleanupOrphanedIndexEntries() {
+    if (!this.index?.items) return 0;
+    
+    const originalCount = this.index.items.length;
+    const removedItems = [];
+    
+    this.index.items = this.index.items.filter(item => {
+      // For file-type items, check if the directory exists
+      if (item.type === 'file') {
+        const itemDir = path.join(this.itemsDir, item.id);
+        if (!fs.existsSync(itemDir)) {
+          removedItems.push(item.id);
+          console.log(`[Storage] Orphan cleanup: removing ${item.id} (directory missing)`);
+          return false;
+        }
+        
+        // Check if directory has any content files
+        try {
+          const files = fs.readdirSync(itemDir).filter(f => 
+            !f.endsWith('.json') && !f.endsWith('.png') && !f.endsWith('.svg') && !f.startsWith('.')
+          );
+          if (files.length === 0) {
+            removedItems.push(item.id);
+            console.log(`[Storage] Orphan cleanup: removing ${item.id} (no content files)`);
+            return false;
+          }
+        } catch (e) {
+          removedItems.push(item.id);
+          console.log(`[Storage] Orphan cleanup: removing ${item.id} (read error: ${e.message})`);
+          return false;
+        }
+      } else if (item.contentPath) {
+        // For other types with contentPath, verify the file exists
+        const fullPath = path.join(this.storageRoot, item.contentPath);
+        if (!fs.existsSync(fullPath)) {
+          removedItems.push(item.id);
+          console.log(`[Storage] Orphan cleanup: removing ${item.id} (contentPath missing)`);
+          return false;
+        }
+      }
+      
+      return true;
+    });
+    
+    const removed = originalCount - this.index.items.length;
+    
+    if (removed > 0) {
+      this.saveIndex();
+      
+      // Clear removed items from cache
+      for (const id of removedItems) {
+        this.cache.delete(id);
+      }
+      
+      console.log(`[Storage] Orphan cleanup complete: removed ${removed} entries`);
+    }
+    
+    return removed;
+  }
+  
   ensureDirectories() {
     fs.mkdirSync(this.storageRoot, { recursive: true });
     fs.mkdirSync(this.itemsDir, { recursive: true });
@@ -322,6 +409,10 @@ class ClipboardStorageV2 {
       indexEntry.fileCategory = item.fileCategory;
       indexEntry.fileExt = item.fileExt;
       indexEntry.isScreenshot = item.isScreenshot || false;
+      // JSON subtype (style-guide, journey-map, or null)
+      if (item.jsonSubtype) {
+        indexEntry.jsonSubtype = item.jsonSubtype;
+      }
     }
     
     // Add to index

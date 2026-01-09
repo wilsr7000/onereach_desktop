@@ -5,10 +5,15 @@
  * This module wraps ClipboardStorageV2 and provides a consistent interface
  * for all apps (GSX Create, Black Hole, Clipboard Viewer, external windows, etc.)
  * 
+ * IMPORTANT: All item additions should go through items.add() which routes
+ * through the clipboard manager for proper validation, retry logic, 
+ * in-memory sync, and space metadata updates.
+ * 
  * @module SpacesAPI
  */
 
 const ClipboardStorageV2 = require('./clipboard-storage-v2');
+const { getContentIngestionService, VALID_TYPES } = require('./content-ingestion');
 const path = require('path');
 const fs = require('fs');
 
@@ -300,20 +305,74 @@ class SpacesAPI {
 
       /**
        * Add a new item to a space
+       * 
+       * This method routes through the clipboard manager for proper:
+       * - Input validation
+       * - Retry logic for transient disk errors
+       * - In-memory history sync
+       * - Space metadata updates
+       * - Context capture
+       * 
        * @param {string} spaceId - The space ID
        * @param {Object} item - The item to add
-       * @param {string} item.type - Type: text, image, file, html
+       * @param {string} item.type - Type: text, image, file, html, code
        * @param {string} item.content - The content (text, base64, or file path)
        * @param {Object} item.metadata - Additional metadata
        * @param {string} item.source - Source identifier
        * @param {boolean} item.skipAutoMetadata - Skip auto-generation even if enabled
-       * @returns {Promise<Object>} Created item
+       * @returns {Promise<Object>} Created item with id, type, spaceId, etc.
        */
       add: async (spaceId, item) => {
         try {
+          // Validate type
+          const type = item.type || 'text';
+          if (!VALID_TYPES.includes(type)) {
+            throw new Error(`Invalid content type: ${type}. Must be one of: ${VALID_TYPES.join(', ')}`);
+          }
+          
+          // Validate spaceId exists (unless unclassified)
+          if (spaceId && spaceId !== 'unclassified') {
+            const spaceExists = this.storage.index.spaces.some(s => s.id === spaceId);
+            if (!spaceExists) {
+              throw new Error(`Space not found: ${spaceId}`);
+            }
+          }
+          
+          // Route through clipboard manager if available for proper sync
+          if (global.clipboardManager) {
+            const itemData = {
+              ...item,
+              type,
+              spaceId: spaceId || 'unclassified',
+              timestamp: Date.now(),
+              source: item.source || 'spaces-api'
+            };
+            
+            // Use addToHistory for proper in-memory sync and space metadata updates
+            await global.clipboardManager.addToHistory(itemData);
+            
+            // Get the newly added item from history
+            const newItem = global.clipboardManager.history?.[0];
+            
+            if (newItem) {
+              console.log('[SpacesAPI] Added item via clipboardManager:', spaceId, newItem.id);
+              this._emit('item:added', { spaceId, item: newItem });
+              
+              // Auto-generate metadata if incomplete and enabled
+              if (!item.skipAutoMetadata && this._shouldAutoGenerateMetadata(item)) {
+                this._queueMetadataGeneration(newItem.id, spaceId, type);
+              }
+              
+              return newItem;
+            }
+          }
+          
+          // Fallback to direct storage (less ideal but still works)
+          console.warn('[SpacesAPI] clipboardManager not available, using direct storage (may cause sync issues)');
           const newItem = this.storage.addItem({
             ...item,
-            spaceId,
+            type,
+            spaceId: spaceId || 'unclassified',
             timestamp: Date.now()
           });
           
@@ -322,7 +381,7 @@ class SpacesAPI {
           
           // Auto-generate metadata if incomplete and enabled
           if (!item.skipAutoMetadata && this._shouldAutoGenerateMetadata(item)) {
-            this._queueMetadataGeneration(newItem.id, spaceId, item.type);
+            this._queueMetadataGeneration(newItem.id, spaceId, type);
           }
           
           return newItem;

@@ -30,10 +30,16 @@ async function init() {
         console.log('window.clipboard available?', !!window.clipboard);
         console.log('window.clipboard methods:', window.clipboard ? Object.keys(window.clipboard) : 'N/A');
         
-        // Wait a bit for preload to fully initialize if needed
+        // Wait for preload with exponential backoff (much faster than fixed 500ms wait)
         if (!window.clipboard) {
-            console.log('Clipboard API not ready, waiting...');
-            await new Promise(resolve => setTimeout(resolve, 500));
+            console.log('Clipboard API not ready, waiting with backoff...');
+            let delay = 10;
+            const maxDelay = 200;
+            const maxAttempts = 10;
+            for (let attempt = 0; attempt < maxAttempts && !window.clipboard; attempt++) {
+                await new Promise(resolve => setTimeout(resolve, delay));
+                delay = Math.min(delay * 2, maxDelay);
+            }
         }
         
         // If clipboard API is still not available, show a helpful error
@@ -41,50 +47,49 @@ async function init() {
             throw new Error('The clipboard manager is not initialized. Please close this window and try again.');
         }
         
-        // Test the getHistory method directly
-        if (window.clipboard && window.clipboard.getHistory) {
-            console.log('Testing getHistory method...');
-            try {
-                const testData = await window.clipboard.getHistory();
-                console.log('Test getHistory result:', testData);
-            } catch (testErr) {
-                console.error('Test getHistory failed:', testErr);
-            }
-        }
-        
-        // Get spaces enabled state
-        spacesEnabled = await window.clipboard.getSpacesEnabled();
-        console.log('Spaces enabled:', spacesEnabled);
-        updateSpacesVisibility();
-        
-        // Get screenshot capture state
-        screenshotCaptureEnabled = await window.clipboard.getScreenshotCaptureEnabled();
-        console.log('Screenshot capture enabled:', screenshotCaptureEnabled);
-        updateScreenshotIndicator();
-        
-        // Get active space
-        await updateActiveSpace();
-        console.log('Active space ID:', activeSpaceId);
-        
-        await loadSpaces();
-        console.log('Loaded spaces:', spacesData.length);
-        
-        await loadHistory();
-        console.log('Loaded history items:', history.length);
-        
-        setupEventListeners();
-        setupPreviewEventListeners();
-        
-        // Set default view
-        setView('list');
-        
-        // Focus search on load
-        document.getElementById('searchInput').focus();
-        
-        // Hide loading overlay on success
+        // PERFORMANCE: Hide loading overlay immediately to show UI shell
+        // This makes the app feel much more responsive
         if (loadingOverlay) {
             loadingOverlay.style.display = 'none';
         }
+        
+        // Set up event listeners immediately so UI is interactive
+        setupEventListeners();
+        setupPreviewEventListeners();
+        setView('list');
+        document.getElementById('searchInput').focus();
+        
+        // PERFORMANCE: Parallelize independent API calls
+        console.log('Loading data in parallel...');
+        const [spacesEnabledResult, screenshotResult, activeSpaceResult, spacesResult] = await Promise.all([
+            window.clipboard.getSpacesEnabled(),
+            window.clipboard.getScreenshotCaptureEnabled(),
+            window.clipboard.getActiveSpace(),
+            window.clipboard.getSpaces()
+        ]);
+        
+        // Apply results
+        spacesEnabled = spacesEnabledResult;
+        console.log('Spaces enabled:', spacesEnabled);
+        updateSpacesVisibility();
+        
+        screenshotCaptureEnabled = screenshotResult;
+        console.log('Screenshot capture enabled:', screenshotCaptureEnabled);
+        updateScreenshotIndicator();
+        
+        // Set active space from result
+        activeSpaceId = activeSpaceResult?.spaceId || null;
+        updateActiveSpaceIndicator();
+        console.log('Active space ID:', activeSpaceId);
+        
+        // Set spaces data and render
+        spacesData = spacesResult || [];
+        renderSpaces();
+        console.log('Loaded spaces:', spacesData.length);
+        
+        // Load history (depends on currentSpace which may be set by spaces data)
+        await loadHistory();
+        console.log('Loaded history items:', history.length);
         
         // Listen for history updates to automatically refresh when documents are saved
         window.clipboard.onHistoryUpdate(async (updatedHistory) => {
@@ -737,35 +742,12 @@ function renderSpaces() {
 }
 
 // Render history list
-function renderHistory(items = history) {
-    console.log('renderHistory called with', items ? items.length : 0, 'items');
-    const historyList = document.getElementById('historyList');
-    const itemCount = document.getElementById('itemCount');
-    
-    if (!historyList) {
-        console.error('historyList element not found!');
-        return;
-    }
-    
-    if (!items || items.length === 0) {
-        console.log('No items to render, showing empty state');
-        historyList.innerHTML = `
-            <div class="empty-state">
-                <img src="${getAssetPath('or-logo.png')}" class="empty-logo" alt="OneReach Logo">
-                <div class="empty-icon">📋</div>
-                <div class="empty-text">No items in this space</div>
-                <div class="empty-hint">Copy something to add it here</div>
-            </div>
-        `;
-        if (itemCount) itemCount.textContent = '0 items';
-        return;
-    }
-    
-    console.log('Rendering', items.length, 'items');
-    
+// PERFORMANCE: Batch size for chunked rendering
+const RENDER_BATCH_SIZE = 50;
+
+// Helper function to render a single history item to HTML
+function renderHistoryItemToHtml(item) {
     try {
-        historyList.innerHTML = items.map(item => {
-          try {
             // Check if item is downloading FIRST - render special placeholder
             const isDownloading = item.metadata?.downloadStatus === 'downloading';
             const downloadError = item.metadata?.downloadStatus === 'error';
@@ -837,7 +819,7 @@ function renderHistory(items = history) {
                 `;
             }
             
-            const icon = getTypeIcon(item.type, item.source, item.fileType, item.fileCategory, item.metadata);
+            const icon = getTypeIcon(item.type, item.source, item.fileType, item.fileCategory, item.metadata, item.jsonSubtype);
             const timeAgo = formatTimeAgo(item.timestamp);
             
             let contentHtml = '';
@@ -1164,10 +1146,75 @@ function renderHistory(items = history) {
                     </div>
                 </div>
             `;
-          }
-        }).join('');
+    }
+}
+
+// Main render function with chunked rendering for large lists
+function renderHistory(items = history) {
+    console.log('renderHistory called with', items ? items.length : 0, 'items');
+    const historyList = document.getElementById('historyList');
+    const itemCount = document.getElementById('itemCount');
+    
+    if (!historyList) {
+        console.error('historyList element not found!');
+        return;
+    }
+    
+    if (!items || items.length === 0) {
+        console.log('No items to render, showing empty state');
+        historyList.innerHTML = `
+            <div class="empty-state">
+                <img src="${getAssetPath('or-logo.png')}" class="empty-logo" alt="OneReach Logo">
+                <div class="empty-icon">📋</div>
+                <div class="empty-text">No items in this space</div>
+                <div class="empty-hint">Copy something to add it here</div>
+            </div>
+        `;
+        if (itemCount) itemCount.textContent = '0 items';
+        return;
+    }
+    
+    console.log('Rendering', items.length, 'items');
+    
+    try {
+        // PERFORMANCE: For small lists, render all at once (fast path)
+        if (items.length <= RENDER_BATCH_SIZE) {
+            historyList.innerHTML = items.map(item => renderHistoryItemToHtml(item)).join('');
+            itemCount.textContent = `${items.length} item${items.length !== 1 ? 's' : ''}`;
+            return;
+        }
         
+        // PERFORMANCE: For large lists, render in chunks to avoid jank
+        console.log('Using chunked rendering for', items.length, 'items');
+        
+        // Render first batch immediately for fast initial paint
+        const firstBatch = items.slice(0, RENDER_BATCH_SIZE);
+        historyList.innerHTML = firstBatch.map(item => renderHistoryItemToHtml(item)).join('');
         itemCount.textContent = `${items.length} item${items.length !== 1 ? 's' : ''}`;
+        
+        // Render remaining items in chunks via requestAnimationFrame
+        let currentIndex = RENDER_BATCH_SIZE;
+        
+        function renderNextBatch() {
+            if (currentIndex >= items.length) return;
+            
+            const batch = items.slice(currentIndex, currentIndex + RENDER_BATCH_SIZE);
+            const batchHtml = batch.map(item => renderHistoryItemToHtml(item)).join('');
+            
+            // Append to existing content
+            historyList.insertAdjacentHTML('beforeend', batchHtml);
+            
+            currentIndex += RENDER_BATCH_SIZE;
+            
+            // Schedule next batch if more items remain
+            if (currentIndex < items.length) {
+                requestAnimationFrame(renderNextBatch);
+            }
+        }
+        
+        // Start rendering remaining batches on next frame
+        requestAnimationFrame(renderNextBatch);
+        
     } catch (error) {
         console.error('Error rendering history:', error);
         console.error('Error stack:', error.stack);
@@ -1223,9 +1270,12 @@ async function updateItemCounts() {
 }
 
 // Get icon for content type
-function getTypeIcon(type, source, fileType, fileCategory, metadata) {
+function getTypeIcon(type, source, fileType, fileCategory, metadata, jsonSubtype) {
     if (type === 'generated-document' || (metadata && metadata.type === 'generated-document')) return '✨';
     if (type === 'file') {
+        // Check JSON subtypes first (style-guide, journey-map)
+        if (jsonSubtype === 'style-guide') return '🎨';
+        if (jsonSubtype === 'journey-map') return '🗺️';
         if (fileType === 'pdf') return '▥';
         if (fileType === 'flow') return '⧉';
         if (fileType === 'notebook') return '◉';
@@ -1308,6 +1358,68 @@ function getFileIcon(category, ext) {
     if (category === 'flow') return '⧉';
     
     return '◎';
+}
+
+/**
+ * Open specialized editor for style guides or journey maps
+ * @param {Object} item - The clipboard item with jsonSubtype property
+ */
+async function openSpecializedEditor(item) {
+    if (!item || !item.jsonSubtype) {
+        console.warn('[SpecializedEditor] Item does not have a JSON subtype');
+        await showMetadataModal(item.id);
+        return;
+    }
+    
+    console.log('[SpecializedEditor] Opening editor for:', item.jsonSubtype, item.fileName);
+    
+    try {
+        let result;
+        
+        if (item.jsonSubtype === 'style-guide') {
+            // Open Style Guide Editor
+            result = await window.clipboard.openStyleGuideEditor(item.id);
+            if (!result.success) {
+                // Fallback: Show in Finder if editor not available
+                console.warn('[SpecializedEditor] Style Guide Editor not available:', result.error);
+                showNotification({
+                    type: 'warning',
+                    title: 'Style Guide Editor',
+                    message: 'Opening file location. Style Guide Editor app may not be configured.',
+                    duration: 3000
+                });
+                await window.clipboard.showItemInFinder(item.id);
+            }
+        } else if (item.jsonSubtype === 'journey-map') {
+            // Open Journey Map Editor
+            result = await window.clipboard.openJourneyMapEditor(item.id);
+            if (!result.success) {
+                // Fallback: Show in Finder if editor not available
+                console.warn('[SpecializedEditor] Journey Map Editor not available:', result.error);
+                showNotification({
+                    type: 'warning',
+                    title: 'Journey Map Editor',
+                    message: 'Opening file location. Journey Map Editor app may not be configured.',
+                    duration: 3000
+                });
+                await window.clipboard.showItemInFinder(item.id);
+            }
+        } else {
+            // Unknown subtype, fall back to metadata modal
+            console.warn('[SpecializedEditor] Unknown JSON subtype:', item.jsonSubtype);
+            await showMetadataModal(item.id);
+        }
+    } catch (error) {
+        console.error('[SpecializedEditor] Error opening editor:', error);
+        showNotification({
+            type: 'error',
+            title: 'Editor Error',
+            message: `Could not open ${item.jsonSubtype} editor: ${error.message}`,
+            duration: 5000
+        });
+        // Fall back to metadata modal
+        await showMetadataModal(item.id);
+    }
 }
 
 function formatFileSize(bytes) {
@@ -1559,6 +1671,9 @@ function filterItems() {
             if (currentFilter === 'flow') return item.type === 'file' && (item.fileType === 'flow' || item.fileCategory === 'flow');
             if (currentFilter === 'notebook') return item.type === 'file' && (item.fileType === 'notebook' || item.fileCategory === 'notebook');
             if (currentFilter === 'data') return item.source === 'data' || (item.type === 'file' && item.fileCategory === 'data');
+            // Style-guide and journey-map can be either file type or text type (pasted JSON)
+            if (currentFilter === 'style-guide') return item.jsonSubtype === 'style-guide';
+            if (currentFilter === 'journey-map') return item.jsonSubtype === 'journey-map';
             if (currentFilter === 'spreadsheet') return item.source === 'spreadsheet' || (item.type === 'file' && (item.fileExt === '.xls' || item.fileExt === '.xlsx' || item.fileExt === '.ods'));
             if (currentFilter === 'pdf') return item.type === 'file' && item.fileType === 'pdf';
             if (currentFilter === 'url') return item.source === 'url';
@@ -1603,6 +1718,9 @@ async function searchItems(query) {
             if (currentFilter === 'flow') return item.type === 'file' && (item.fileType === 'flow' || item.fileCategory === 'flow');
             if (currentFilter === 'notebook') return item.type === 'file' && (item.fileType === 'notebook' || item.fileCategory === 'notebook');
             if (currentFilter === 'data') return item.source === 'data' || (item.type === 'file' && item.fileCategory === 'data');
+            // Style-guide and journey-map can be either file type or text type (pasted JSON)
+            if (currentFilter === 'style-guide') return item.jsonSubtype === 'style-guide';
+            if (currentFilter === 'journey-map') return item.jsonSubtype === 'journey-map';
             if (currentFilter === 'spreadsheet') return item.source === 'spreadsheet' || (item.type === 'file' && (item.fileExt === '.xls' || item.fileExt === '.xlsx' || item.fileExt === '.ods'));
             if (currentFilter === 'pdf') return item.type === 'file' && item.fileType === 'pdf';
             if (currentFilter === 'url') return item.source === 'url';
@@ -1822,24 +1940,62 @@ function hideSpaceModal() {
     document.getElementById('spaceModal').style.display = 'none';
 }
 
-// Handle PDF export - now opens preview window
+// Handle export - opens format selection modal
 async function handlePDFExport(space) {
     try {
-        // Show loading notification
+        // Open the new multi-format export modal
+        if (window.clipboard.openFormatModal) {
+            await window.clipboard.openFormatModal(space.id);
+        } else {
+            // Fallback to old export preview
+            showNotification({
+                title: 'Export Preview',
+                body: 'Opening export preview...',
+                type: 'info'
+            });
+            await window.clipboard.openExportPreview(space.id, { useAI: false });
+        }
+        
+    } catch (error) {
+        console.error('Error opening export modal:', error);
         showNotification({
-            title: 'Export Preview',
-            body: 'Opening export preview...',
+            title: 'Error',
+            body: error.message || 'Failed to open export options',
+            type: 'error'
+        });
+    }
+}
+
+// Handle direct format export (called from format modal)
+async function handleFormatExport(spaceId, format, options = {}) {
+    try {
+        showNotification({
+            title: 'Generating Export',
+            body: `Creating ${format.toUpperCase()} document...`,
             type: 'info'
         });
         
-        // Open the preview window with basic HTML (no AI)
-        await window.clipboard.openExportPreview(space.id, { useAI: false });
+        const result = await window.clipboard.generateExport({
+            format,
+            spaceId,
+            options
+        });
+        
+        if (result.success) {
+            showNotification({
+                title: 'Export Complete',
+                body: `Document saved successfully`,
+                type: 'success'
+            });
+        } else if (!result.canceled) {
+            throw new Error(result.error || 'Export failed');
+        }
         
     } catch (error) {
-        console.error('Error opening export preview:', error);
+        console.error('Error generating export:', error);
         showNotification({
-            title: 'Error',
-            body: error.message || 'Failed to open export preview',
+            title: 'Export Failed',
+            body: error.message || 'Failed to generate document',
             type: 'error'
         });
     }
@@ -2752,24 +2908,13 @@ function toggleTranscriptSection() {
 
 // Save metadata from DYNAMIC fields
 async function saveMetadata() {
-    // #region agent log
-    fetch('http://127.0.0.1:7246/ingest/135f91ed-6c73-4b7b-94fb-e5a12a4650b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:saveMetadata:start',message:'Starting metadata save',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'SAVE'})}).catch(()=>{});
-    // #endregion
-    
     const modal = document.getElementById('metadataModal');
     const itemId = modal.dataset.itemId;
-    
-    // #region agent log
-    fetch('http://127.0.0.1:7246/ingest/135f91ed-6c73-4b7b-94fb-e5a12a4650b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:saveMetadata:itemId',message:'Got itemId',data:{itemId,hasModal:!!modal,datasetSchema:modal?.dataset?.schema?.substring(0,100)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'SAVE'})}).catch(()=>{});
-    // #endregion
     
     let schema;
     try {
         schema = JSON.parse(modal.dataset.schema || '{"fields":[]}');
     } catch (parseError) {
-        // #region agent log
-        fetch('http://127.0.0.1:7246/ingest/135f91ed-6c73-4b7b-94fb-e5a12a4650b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:saveMetadata:schemaParseError',message:'Schema parse failed',data:{error:parseError.message,schemaString:modal?.dataset?.schema?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'SAVE'})}).catch(()=>{});
-        // #endregion
         schema = {fields: []};
     }
 
@@ -2794,10 +2939,6 @@ async function saveMetadata() {
     });
 
     console.log('[SaveMetadata] Saving dynamic fields:', updates);
-    
-    // #region agent log
-    fetch('http://127.0.0.1:7246/ingest/135f91ed-6c73-4b7b-94fb-e5a12a4650b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:saveMetadata:dynamicFields',message:'Collected dynamic fields',data:{fieldCount:Object.keys(updates).length,fields:Object.keys(updates)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'SAVE'})}).catch(()=>{});
-    // #endregion
 
     // Legacy field fallback (if no dynamic fields)
     if (Object.keys(updates).length === 0) {
@@ -2815,23 +2956,11 @@ async function saveMetadata() {
         updates.source = document.getElementById('metaSource')?.value || '';
         if (speakersInput.length > 0) updates.speakers = speakersInput;
         if (storyBeatsInput.length > 0) updates.storyBeats = storyBeatsInput;
-        
-        // #region agent log
-        fetch('http://127.0.0.1:7246/ingest/135f91ed-6c73-4b7b-94fb-e5a12a4650b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:saveMetadata:legacyFields',message:'Using legacy fields',data:{fieldCount:Object.keys(updates).length,fields:Object.keys(updates)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'SAVE'})}).catch(()=>{});
-        // #endregion
     }
-    
-    // #region agent log
-    fetch('http://127.0.0.1:7246/ingest/135f91ed-6c73-4b7b-94fb-e5a12a4650b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:saveMetadata:beforeSave',message:'About to call updateMetadata',data:{itemId,updateKeys:Object.keys(updates)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'SAVE'})}).catch(()=>{});
-    // #endregion
     
     // Save to backend
     try {
         const result = await window.clipboard.updateMetadata(itemId, updates);
-        
-        // #region agent log
-        fetch('http://127.0.0.1:7246/ingest/135f91ed-6c73-4b7b-94fb-e5a12a4650b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:saveMetadata:result',message:'updateMetadata result',data:{success:result?.success,error:result?.error},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'SAVE'})}).catch(()=>{});
-        // #endregion
         
         if (result.success) {
             hideMetadataModal();
@@ -2841,9 +2970,6 @@ async function saveMetadata() {
             alert('Failed to save metadata: ' + (result.error || 'Unknown error'));
         }
     } catch (saveError) {
-        // #region agent log
-        fetch('http://127.0.0.1:7246/ingest/135f91ed-6c73-4b7b-94fb-e5a12a4650b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:saveMetadata:exception',message:'Save threw exception',data:{error:saveError.message,stack:saveError.stack?.substring(0,500)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'SAVE'})}).catch(()=>{});
-        // #endregion
         alert('Error saving metadata: ' + saveError.message);
     }
 }
@@ -3178,31 +3304,17 @@ function setupEventListeners() {
     
     // History item actions
     document.getElementById('historyList').addEventListener('click', async (e) => {
-        // #region agent log
-        fetch('http://127.0.0.1:7246/ingest/135f91ed-6c73-4b7b-94fb-e5a12a4650b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:historyList:click',message:'Click event fired',data:{targetTag:e.target.tagName,targetClass:e.target.className,targetDataAction:e.target.dataset?.action},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'CLICK'})}).catch(()=>{});
-        // #endregion
-        
         const item = e.target.closest('.history-item');
         if (!item) {
-            // #region agent log
-            fetch('http://127.0.0.1:7246/ingest/135f91ed-6c73-4b7b-94fb-e5a12a4650b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:historyList:noItem',message:'No history-item found',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'CLICK'})}).catch(()=>{});
-            // #endregion
             return;
         }
 
         const action = e.target.closest('[data-action]');
-        // #region agent log
-        fetch('http://127.0.0.1:7246/ingest/135f91ed-6c73-4b7b-94fb-e5a12a4650b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:historyList:actionCheck',message:'Action button check',data:{hasAction:!!action,actionType:action?.dataset?.action,itemId:item.dataset.id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'CLICK'})}).catch(()=>{});
-        // #endregion
         
         if (action) {
             e.stopPropagation();
             const actionType = action.dataset.action;
             const itemId = item.dataset.id;
-            
-            // #region agent log
-            fetch('http://127.0.0.1:7246/ingest/135f91ed-6c73-4b7b-94fb-e5a12a4650b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:historyList:actionDispatch',message:'Dispatching action',data:{actionType,itemId},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'CLICK'})}).catch(()=>{});
-            // #endregion
             
             if (actionType === 'preview') {
                 await showPreviewModal(itemId);
@@ -3252,18 +3364,15 @@ function setupEventListeners() {
                 // Show a brief notification that item was copied
                 showCopyNotification();
             } else if (actionType === 'edit-metadata') {
-                // #region agent log
-                fetch('http://127.0.0.1:7246/ingest/135f91ed-6c73-4b7b-94fb-e5a12a4650b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:edit-metadata:before',message:'About to call showMetadataModal',data:{itemId},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'META'})}).catch(()=>{});
-                // #endregion
                 try {
-                    await showMetadataModal(itemId);
-                    // #region agent log
-                    fetch('http://127.0.0.1:7246/ingest/135f91ed-6c73-4b7b-94fb-e5a12a4650b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:edit-metadata:after',message:'showMetadataModal completed',data:{itemId},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'META'})}).catch(()=>{});
-                    // #endregion
+                    // Check if item is a style-guide or journey-map to open specialized editor
+                    const item = history.find(h => h.id === itemId);
+                    if (item && item.jsonSubtype) {
+                        await openSpecializedEditor(item);
+                    } else {
+                        await showMetadataModal(itemId);
+                    }
                 } catch (err) {
-                    // #region agent log
-                    fetch('http://127.0.0.1:7246/ingest/135f91ed-6c73-4b7b-94fb-e5a12a4650b9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:edit-metadata:error',message:'showMetadataModal FAILED',data:{itemId,error:err.message,stack:err.stack?.substring(0,500)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'META'})}).catch(()=>{});
-                    // #endregion
                     console.error('Metadata modal error:', err);
                 }
             } else if (actionType === 'menu') {
@@ -3457,7 +3566,13 @@ function setupEventListeners() {
             // Show a custom space selection modal instead of using prompt
             showMoveToSpaceModal(contextMenuItem);
         } else if (action.dataset.action === 'edit-metadata') {
-            await showMetadataModal(contextMenuItem);
+            // Check if item is a style-guide or journey-map to open specialized editor
+            const item = history.find(h => h.id === contextMenuItem);
+            if (item && item.jsonSubtype) {
+                await openSpecializedEditor(item);
+            } else {
+                await showMetadataModal(contextMenuItem);
+            }
         } else if (action.dataset.action === 'show-in-finder') {
             await window.clipboard.showItemInFinder(contextMenuItem);
         } else if (action.dataset.action === 'pin') {
@@ -3607,23 +3722,26 @@ function setupEventListeners() {
         });
     };
     
-    // Initialize spaces toggle listener
-    window.clipboard.onSpacesToggled();
+    // Initialize spaces toggle listener with proper callback
+    window.clipboard.onSpacesToggled((enabled) => {
+        spacesEnabled = enabled;
+        // Refresh UI if needed when spaces are toggled
+    });
     
     // Listen for active space changes from main process
-    window.clipboard.onActiveSpaceChanged = (callback) => {
-        window.electron.on('clipboard:active-space-changed', (event, data) => {
-            activeSpaceId = data.spaceId;
-            updateActiveSpaceIndicator();
-            updateScreenshotIndicator(); // Update screenshot indicator too
-        });
-    };
+    window.clipboard.onActiveSpaceChanged((data) => {
+        activeSpaceId = data.spaceId;
+        updateActiveSpaceIndicator();
+        updateScreenshotIndicator(); // Update screenshot indicator too
+    });
     
-    // Initialize active space listener
-    window.clipboard.onActiveSpaceChanged();
-    
-    // Initialize spaces update listener
-    window.clipboard.onSpacesUpdate();
+    // Initialize spaces update listener with proper callback
+    window.clipboard.onSpacesUpdate((spaces) => {
+        // Update local spaces list when it changes
+        if (spaces) {
+            renderSpacesList(spaces);
+        }
+    });
     
     // Listen for screenshot capture toggle events
     window.electron.on('clipboard:screenshot-capture-toggled', (event, enabled) => {
@@ -6109,12 +6227,8 @@ function setupHistoryItemDrag() {
 }
 
 // Initialize when DOM is ready
-// Add a small delay to ensure preload script is fully loaded
 document.addEventListener('DOMContentLoaded', () => {
-    // Wait a moment for preload to be ready
-    setTimeout(() => {
-        init();
-        setupVideoModalListeners();
-        setupHistoryItemDrag();
-    }, 100);
+    init();
+    setupVideoModalListeners();
+    setupHistoryItemDrag();
 }); 

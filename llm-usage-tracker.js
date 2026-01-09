@@ -1,132 +1,40 @@
 /**
  * LLM Usage Tracker
  * 
- * Tracks all LLM API calls across the application, including:
- * - Claude API calls
- * - OpenAI API calls
+ * Provides real-time session tracking and dashboard notifications.
+ * DELEGATES storage to BudgetManager (primary tracker).
  * 
- * Provides cost estimation, usage breakdown by feature,
- * and historical tracking.
+ * Responsibilities:
+ * - Session-level usage summaries
+ * - Dashboard badge notifications
+ * - Real-time cost display
+ * 
+ * Storage is handled by BudgetManager for single source of truth.
  */
 
-const fs = require('fs');
-const path = require('path');
-const { app } = require('electron');
-
-// Pricing per 1M tokens (as of 2026)
-const PRICING = {
-  // Claude models
-  'claude-sonnet-4-5-20250929': { input: 3.00, output: 15.00 },
-  'claude-opus-4-5-20250929': { input: 15.00, output: 75.00 },
-  'claude-sonnet-4-20250514': { input: 3.00, output: 15.00 },
-  'claude-3-sonnet': { input: 3.00, output: 15.00 },
-  'claude-3-opus': { input: 15.00, output: 75.00 },
-  'claude-3-haiku': { input: 0.25, output: 1.25 },
-  
-  // OpenAI models
-  'gpt-5.2': { input: 5.00, output: 15.00 },
-  'gpt-4-turbo': { input: 10.00, output: 30.00 },
-  'gpt-4': { input: 30.00, output: 60.00 },
-  'gpt-4o': { input: 2.50, output: 10.00 },
-  'gpt-4o-mini': { input: 0.15, output: 0.60 },
-  'gpt-3.5-turbo': { input: 0.50, output: 1.50 },
-  
-  // Default fallback
-  'default': { input: 3.00, output: 15.00 }
-};
+const { calculateCost, formatCost, getPricingForModel } = require('./pricing-config');
 
 class LLMUsageTracker {
   constructor() {
-    this.dataDir = path.join(app.getPath('userData'), 'llm-usage');
-    this._ensureDataDir();
-    
-    // In-memory cache for current session
+    // In-memory cache for current session only
     this.sessionUsage = {
       claude: { calls: 0, inputTokens: 0, outputTokens: 0, cost: 0 },
       openai: { calls: 0, inputTokens: 0, outputTokens: 0, cost: 0 }
     };
     
-    // Recent operations cache (last 100)
+    // Recent operations cache (last 50 for quick display)
     this.recentOperations = [];
-    this.maxRecentOperations = 100;
+    this.maxRecentOperations = 50;
     
-    // Usage by feature
-    this.usageByFeature = {};
+    // Session start time
+    this.sessionStart = new Date();
     
-    // Load historical data
-    this._loadCurrentMonth();
-  }
-
-  _ensureDataDir() {
-    if (!fs.existsSync(this.dataDir)) {
-      fs.mkdirSync(this.dataDir, { recursive: true });
-    }
-  }
-
-  _getMonthKey() {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  }
-
-  _getMonthFilePath(monthKey = null) {
-    const key = monthKey || this._getMonthKey();
-    return path.join(this.dataDir, `usage-${key}.json`);
-  }
-
-  _loadCurrentMonth() {
-    try {
-      const filePath = this._getMonthFilePath();
-      if (fs.existsSync(filePath)) {
-        const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-        
-        // Merge with session
-        if (data.claude) {
-          this.sessionUsage.claude = { ...this.sessionUsage.claude, ...data.claude };
-        }
-        if (data.openai) {
-          this.sessionUsage.openai = { ...this.sessionUsage.openai, ...data.openai };
-        }
-        if (data.byFeature) {
-          this.usageByFeature = data.byFeature;
-        }
-        if (data.recentOperations) {
-          this.recentOperations = data.recentOperations.slice(0, this.maxRecentOperations);
-        }
-      }
-    } catch (error) {
-      console.error('[LLMTracker] Error loading monthly data:', error);
-    }
-  }
-
-  _saveCurrentMonth() {
-    try {
-      const filePath = this._getMonthFilePath();
-      const data = {
-        month: this._getMonthKey(),
-        claude: this.sessionUsage.claude,
-        openai: this.sessionUsage.openai,
-        byFeature: this.usageByFeature,
-        recentOperations: this.recentOperations,
-        lastUpdated: new Date().toISOString()
-      };
-      fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-    } catch (error) {
-      console.error('[LLMTracker] Error saving monthly data:', error);
-    }
-  }
-
-  /**
-   * Calculate cost for a given model and token counts
-   */
-  calculateCost(model, inputTokens, outputTokens) {
-    const pricing = PRICING[model] || PRICING['default'];
-    const inputCost = (inputTokens / 1000000) * pricing.input;
-    const outputCost = (outputTokens / 1000000) * pricing.output;
-    return Math.round((inputCost + outputCost) * 10000) / 10000; // Round to 4 decimals
+    console.log('[LLMUsageTracker] Initialized (delegates to BudgetManager)');
   }
 
   /**
    * Track a Claude API call
+   * Delegates to BudgetManager for storage, keeps session cache for UI
    */
   trackClaudeCall(data) {
     const {
@@ -136,51 +44,58 @@ class LLMUsageTracker {
       feature = 'other',
       purpose = '',
       success = true,
-      duration = 0
+      duration = 0,
+      projectId = null,
+      spaceId = null
     } = data;
 
-    const cost = this.calculateCost(model, inputTokens, outputTokens);
+    // Calculate cost
+    const costResult = calculateCost(model, inputTokens, outputTokens);
     
     // Update session totals
     this.sessionUsage.claude.calls++;
     this.sessionUsage.claude.inputTokens += inputTokens;
     this.sessionUsage.claude.outputTokens += outputTokens;
-    this.sessionUsage.claude.cost += cost;
+    this.sessionUsage.claude.cost += costResult.totalCost;
     
-    // Update by feature
-    if (!this.usageByFeature[feature]) {
-      this.usageByFeature[feature] = { calls: 0, tokens: 0, cost: 0 };
-    }
-    this.usageByFeature[feature].calls++;
-    this.usageByFeature[feature].tokens += inputTokens + outputTokens;
-    this.usageByFeature[feature].cost += cost;
-    
-    // Add to recent operations
+    // Create operation record
     const operation = {
       id: `op-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
       timestamp: new Date().toISOString(),
-      provider: 'claude',
-      model,
+      provider: 'anthropic',
+      model: costResult.model,
       inputTokens,
       outputTokens,
       totalTokens: inputTokens + outputTokens,
-      cost,
+      cost: costResult.totalCost,
       feature,
       purpose,
       success,
       duration
     };
     
+    // Add to recent operations
     this.recentOperations.unshift(operation);
     if (this.recentOperations.length > this.maxRecentOperations) {
       this.recentOperations = this.recentOperations.slice(0, this.maxRecentOperations);
     }
     
-    // Save to disk
-    this._saveCurrentMonth();
+    // Delegate storage to BudgetManager
+    this._delegateToBudgetManager({
+      provider: 'anthropic',
+      model: costResult.model,
+      inputTokens,
+      outputTokens,
+      projectId: projectId || spaceId,
+      spaceId: spaceId || projectId,
+      feature,
+      operation: purpose || feature,
+      success
+    });
     
-    // Notify dashboard API if available
+    // Send dashboard notifications
     this._notifyDashboard(operation);
+    this._notifyRendererLLMCall(operation);
     
     return operation;
   }
@@ -190,63 +105,83 @@ class LLMUsageTracker {
    */
   trackOpenAICall(data) {
     const {
-      model = 'gpt-5.2',
+      model = 'gpt-4o',
       inputTokens = 0,
       outputTokens = 0,
       feature = 'other',
       purpose = '',
       success = true,
-      duration = 0
+      duration = 0,
+      projectId = null,
+      spaceId = null
     } = data;
 
-    const cost = this.calculateCost(model, inputTokens, outputTokens);
+    // Calculate cost
+    const costResult = calculateCost(model, inputTokens, outputTokens);
     
     // Update session totals
     this.sessionUsage.openai.calls++;
     this.sessionUsage.openai.inputTokens += inputTokens;
     this.sessionUsage.openai.outputTokens += outputTokens;
-    this.sessionUsage.openai.cost += cost;
+    this.sessionUsage.openai.cost += costResult.totalCost;
     
-    // Update by feature
-    if (!this.usageByFeature[feature]) {
-      this.usageByFeature[feature] = { calls: 0, tokens: 0, cost: 0 };
-    }
-    this.usageByFeature[feature].calls++;
-    this.usageByFeature[feature].tokens += inputTokens + outputTokens;
-    this.usageByFeature[feature].cost += cost;
-    
-    // Add to recent operations
+    // Create operation record
     const operation = {
       id: `op-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
       timestamp: new Date().toISOString(),
       provider: 'openai',
-      model,
+      model: costResult.model,
       inputTokens,
       outputTokens,
       totalTokens: inputTokens + outputTokens,
-      cost,
+      cost: costResult.totalCost,
       feature,
       purpose,
       success,
       duration
     };
     
+    // Add to recent operations
     this.recentOperations.unshift(operation);
     if (this.recentOperations.length > this.maxRecentOperations) {
       this.recentOperations = this.recentOperations.slice(0, this.maxRecentOperations);
     }
     
-    // Save to disk
-    this._saveCurrentMonth();
+    // Delegate storage to BudgetManager
+    this._delegateToBudgetManager({
+      provider: 'openai',
+      model: costResult.model,
+      inputTokens,
+      outputTokens,
+      projectId: projectId || spaceId,
+      spaceId: spaceId || projectId,
+      feature,
+      operation: purpose || feature,
+      success
+    });
     
-    // Notify dashboard API
+    // Send notifications
     this._notifyDashboard(operation);
+    this._notifyRendererLLMCall(operation);
     
     return operation;
   }
 
   /**
-   * Notify dashboard of new operation
+   * Delegate to BudgetManager for persistent storage
+   */
+  _delegateToBudgetManager(params) {
+    try {
+      const { getBudgetManager } = require('./budget-manager');
+      const budgetManager = getBudgetManager();
+      budgetManager.trackUsage(params);
+    } catch (error) {
+      console.error('[LLMUsageTracker] Failed to delegate to BudgetManager:', error.message);
+    }
+  }
+
+  /**
+   * Notify Dashboard API
    */
   _notifyDashboard(operation) {
     try {
@@ -263,42 +198,65 @@ class LLMUsageTracker {
       // Dashboard API might not be initialized yet
     }
   }
+  
+  /**
+   * Notify renderer process for badge display
+   */
+  _notifyRendererLLMCall(operation) {
+    try {
+      const { BrowserWindow } = require('electron');
+      const windows = BrowserWindow.getAllWindows();
+      
+      const badgeData = {
+        provider: operation.provider,
+        model: operation.model,
+        feature: operation.feature,
+        tokens: operation.totalTokens,
+        cost: operation.cost,
+        costFormatted: formatCost(operation.cost),
+        timestamp: operation.timestamp,
+        sessionTotal: this.getSessionTotal()
+      };
+      
+      for (const win of windows) {
+        if (!win.isDestroyed()) {
+          win.webContents.send('llm:call-made', badgeData);
+        }
+      }
+    } catch (error) {
+      // Renderer might not be ready
+    }
+  }
 
   /**
-   * Get usage summary
+   * Get session totals
    */
-  getUsageSummary(period = 'month') {
+  getSessionTotal() {
+    return {
+      calls: this.sessionUsage.claude.calls + this.sessionUsage.openai.calls,
+      cost: Math.round((this.sessionUsage.claude.cost + this.sessionUsage.openai.cost) * 100) / 100,
+      costFormatted: formatCost(this.sessionUsage.claude.cost + this.sessionUsage.openai.cost)
+    };
+  }
+
+  /**
+   * Get usage summary (session-level)
+   */
+  getUsageSummary() {
     const claude = this.sessionUsage.claude;
     const openai = this.sessionUsage.openai;
-    
-    // Calculate feature percentages
     const totalCost = claude.cost + openai.cost;
-    const byFeature = {};
-    
-    for (const [feature, data] of Object.entries(this.usageByFeature)) {
-      byFeature[feature] = {
-        ...data,
-        percentage: totalCost > 0 ? Math.round((data.cost / totalCost) * 100) : 0
-      };
-    }
-    
-    // Sort by cost descending
-    const sortedFeatures = Object.entries(byFeature)
-      .sort((a, b) => b[1].cost - a[1].cost)
-      .reduce((obj, [key, val]) => {
-        obj[key] = val;
-        return obj;
-      }, {});
     
     return {
-      period: this._getMonthKey(),
+      period: 'session',
+      sessionStart: this.sessionStart.toISOString(),
       claude: {
         calls: claude.calls,
         tokens: claude.inputTokens + claude.outputTokens,
         inputTokens: claude.inputTokens,
         outputTokens: claude.outputTokens,
         cost: Math.round(claude.cost * 100) / 100,
-        avgCostPerCall: claude.calls > 0 ? Math.round((claude.cost / claude.calls) * 1000) / 1000 : 0
+        costFormatted: formatCost(claude.cost)
       },
       openai: {
         calls: openai.calls,
@@ -306,77 +264,49 @@ class LLMUsageTracker {
         inputTokens: openai.inputTokens,
         outputTokens: openai.outputTokens,
         cost: Math.round(openai.cost * 100) / 100,
-        avgCostPerCall: openai.calls > 0 ? Math.round((openai.cost / openai.calls) * 1000) / 1000 : 0
+        costFormatted: formatCost(openai.cost)
       },
       total: {
         calls: claude.calls + openai.calls,
         tokens: claude.inputTokens + claude.outputTokens + openai.inputTokens + openai.outputTokens,
-        cost: Math.round((claude.cost + openai.cost) * 100) / 100
+        cost: Math.round(totalCost * 100) / 100,
+        costFormatted: formatCost(totalCost)
       },
-      byFeature: sortedFeatures,
       recentOperations: this.recentOperations.slice(0, 20)
     };
   }
 
   /**
-   * Get daily breakdown for charts
+   * Reset session (not persistent data - that's in BudgetManager)
    */
-  getDailyBreakdown(days = 30) {
-    // This would aggregate from stored data
-    // For now, return current session as single day
-    const today = new Date().toISOString().split('T')[0];
-    
-    return [{
-      date: today,
-      claude: this.sessionUsage.claude,
-      openai: this.sessionUsage.openai
-    }];
-  }
-
-  /**
-   * Get historical data for a specific month
-   */
-  getMonthlyData(monthKey) {
-    try {
-      const filePath = this._getMonthFilePath(monthKey);
-      if (fs.existsSync(filePath)) {
-        return JSON.parse(fs.readFileSync(filePath, 'utf8'));
-      }
-    } catch (error) {
-      console.error('[LLMTracker] Error loading monthly data:', error);
-    }
-    return null;
-  }
-
-  /**
-   * Reset current month's data
-   */
-  resetCurrentMonth() {
+  resetSession() {
     this.sessionUsage = {
       claude: { calls: 0, inputTokens: 0, outputTokens: 0, cost: 0 },
       openai: { calls: 0, inputTokens: 0, outputTokens: 0, cost: 0 }
     };
-    this.usageByFeature = {};
     this.recentOperations = [];
-    this._saveCurrentMonth();
+    this.sessionStart = new Date();
   }
 
   /**
-   * Export usage data
+   * Calculate cost (delegates to pricing-config)
+   */
+  calculateCost(model, inputTokens, outputTokens) {
+    return calculateCost(model, inputTokens, outputTokens).totalCost;
+  }
+
+  /**
+   * Export session data (for debugging)
    */
   exportData(format = 'json') {
     const data = {
       exportDate: new Date().toISOString(),
-      currentMonth: this._getMonthKey(),
+      sessionStart: this.sessionStart.toISOString(),
       summary: this.getUsageSummary(),
       allOperations: this.recentOperations
     };
     
-    if (format === 'json') {
-      return JSON.stringify(data, null, 2);
-    }
-    
-    return data;
+    return format === 'json' ? JSON.stringify(data, null, 2) : data;
   }
 }
 
@@ -391,13 +321,13 @@ function getLLMUsageTracker() {
 }
 
 function resetLLMUsageTracker() {
-  instance = null;
+  if (instance) {
+    instance.resetSession();
+  }
 }
 
 module.exports = {
   LLMUsageTracker,
   getLLMUsageTracker,
-  resetLLMUsageTracker,
-  PRICING
+  resetLLMUsageTracker
 };
-

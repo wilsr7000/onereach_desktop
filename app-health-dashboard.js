@@ -92,6 +92,10 @@ function initControls() {
   document.getElementById('agent-pause')?.addEventListener('click', toggleAgentPause);
   document.getElementById('agent-run-now')?.addEventListener('click', runAgentNow);
   
+  // Broken items controls
+  document.getElementById('broken-filter-status')?.addEventListener('change', loadBrokenItems);
+  document.getElementById('broken-clear')?.addEventListener('click', clearAllBrokenItems);
+  
   // Settings controls
   document.getElementById('setting-refresh')?.addEventListener('change', (e) => {
     state.refreshInterval = parseInt(e.target.value);
@@ -182,18 +186,169 @@ async function loadTabData(tabId) {
     case 'agent':
       await loadAgentStatus();
       break;
+    case 'broken':
+      await loadBrokenItems();
+      break;
+  }
+}
+
+// ========================================
+// Health Rings System - Apple Health Style
+// ========================================
+
+function calculateHealthScore(data) {
+  const { todaySummary, pipelineHealth, agentStatus, brokenItems } = data;
+  
+  // 1. Stability Score (error-free operations)
+  // Based on errors vs total operations today
+  const totalOps = (todaySummary?.itemsAdded || 0) + (todaySummary?.aiOperations || 0) + 1;
+  const errors = todaySummary?.errors || 0;
+  const stabilityScore = Math.max(0, Math.min(100, Math.round(((totalOps - errors) / totalOps) * 100)));
+  
+  // 2. Pipeline Score (successful asset processing)
+  // Based on pipeline stage success rates
+  const rates = pipelineHealth?.stageSuccessRates || {};
+  const avgPipelineRate = Object.values(rates).length > 0 
+    ? Object.values(rates).reduce((a, b) => a + b, 0) / Object.values(rates).length 
+    : 100;
+  const pipelineScore = Math.round(avgPipelineRate);
+  
+  // 3. Healing Score (issues auto-fixed vs total issues)
+  // If agent has detected issues, what percentage were fixed?
+  const issuesDetected = agentStatus?.issuesDetected || 0;
+  const fixesApplied = agentStatus?.fixesApplied || 0;
+  const healingScore = issuesDetected > 0 
+    ? Math.min(100, Math.round((fixesApplied / issuesDetected) * 100))
+    : 100; // 100% if no issues (perfect health!)
+  
+  // Overall health score (weighted average)
+  // Stability is most important (50%), Pipeline (30%), Healing (20%)
+  const overallScore = Math.round(
+    stabilityScore * 0.5 + 
+    pipelineScore * 0.3 + 
+    healingScore * 0.2
+  );
+  
+  return {
+    stability: stabilityScore,
+    pipeline: pipelineScore,
+    healing: healingScore,
+    overall: overallScore,
+    details: {
+      stabilityDetail: `${totalOps - errors}/${totalOps} ops`,
+      pipelineDetail: `${Object.values(rates).filter(r => r === 100).length}/${Object.values(rates).length} stages`,
+      healingDetail: issuesDetected > 0 ? `${fixesApplied}/${issuesDetected} fixed` : 'No issues'
+    }
+  };
+}
+
+function updateHealthRings(healthData) {
+  const { stability, pipeline, healing, overall, details } = healthData;
+  
+  // Update ring progress (circumference calculations)
+  // stability ring: r=85, circumference = 2πr = 534
+  // pipeline ring: r=65, circumference = 408
+  // healing ring: r=45, circumference = 283
+  
+  const stabilityRing = document.getElementById('ring-stability');
+  const pipelineRing = document.getElementById('ring-pipeline');
+  const healingRing = document.getElementById('ring-healing');
+  
+  if (stabilityRing) {
+    const offset = 534 - (534 * stability / 100);
+    stabilityRing.style.strokeDashoffset = offset;
+    if (stability >= 100) stabilityRing.classList.add('complete');
+  }
+  
+  if (pipelineRing) {
+    const offset = 408 - (408 * pipeline / 100);
+    pipelineRing.style.strokeDashoffset = offset;
+    if (pipeline >= 100) pipelineRing.classList.add('complete');
+  }
+  
+  if (healingRing) {
+    const offset = 283 - (283 * healing / 100);
+    healingRing.style.strokeDashoffset = offset;
+    if (healing >= 100) healingRing.classList.add('complete');
+  }
+  
+  // Update values
+  setText('ring-stability-value', `${stability}%`);
+  setText('ring-pipeline-value', `${pipeline}%`);
+  setText('ring-healing-value', `${healing}%`);
+  
+  // Update details
+  setText('ring-stability-detail', details.stabilityDetail);
+  setText('ring-pipeline-detail', details.pipelineDetail);
+  setText('ring-healing-detail', details.healingDetail);
+  
+  // Update overall score badge
+  const scoreBadge = document.getElementById('overall-health-score');
+  if (scoreBadge) {
+    scoreBadge.textContent = `${overall}%`;
+    scoreBadge.className = 'health-score-badge';
+    if (overall >= 90) scoreBadge.classList.add('excellent');
+    else if (overall >= 70) scoreBadge.classList.add('good');
+    else if (overall >= 50) scoreBadge.classList.add('fair');
+    else scoreBadge.classList.add('poor');
+  }
+  
+  // Update emoji based on health
+  const emojiEl = document.getElementById('health-emoji');
+  if (emojiEl) {
+    if (overall >= 95) emojiEl.textContent = '🏆';
+    else if (overall >= 90) emojiEl.textContent = '💪';
+    else if (overall >= 80) emojiEl.textContent = '😊';
+    else if (overall >= 70) emojiEl.textContent = '👍';
+    else if (overall >= 50) emojiEl.textContent = '🤔';
+    else if (overall >= 30) emojiEl.textContent = '😰';
+    else emojiEl.textContent = '🆘';
+  }
+  
+  // Update motivational message
+  const messageEl = document.getElementById('rings-message');
+  if (messageEl) {
+    const ringsComplete = [stability >= 100, pipeline >= 100, healing >= 100].filter(Boolean).length;
+    let message = '';
+    let icon = '✨';
+    
+    if (ringsComplete === 3) {
+      message = 'All rings closed! Your app is in perfect health today! 🎉';
+      icon = '🏆';
+    } else if (ringsComplete === 2) {
+      message = 'Two rings closed! One more to go for perfect health!';
+      icon = '🔥';
+    } else if (ringsComplete === 1) {
+      message = 'One ring closed! Keep it up, two more to go!';
+      icon = '💪';
+    } else if (overall >= 80) {
+      message = 'Good progress! Your app is running smoothly.';
+      icon = '👍';
+    } else if (overall >= 50) {
+      message = 'Some issues detected. The agent is working on it.';
+      icon = '🔧';
+    } else {
+      message = 'Multiple issues detected. Check the Agent tab for details.';
+      icon = '⚠️';
+    }
+    
+    messageEl.innerHTML = `
+      <span class="message-icon">${icon}</span>
+      <span class="message-text">${message}</span>
+    `;
   }
 }
 
 // Overview Tab
 async function loadOverviewData() {
   try {
-    const [appStatus, todaySummary, spacesHealth, llmUsage, agentStatus] = await Promise.all([
+    const [appStatus, todaySummary, spacesHealth, llmUsage, agentStatus, pipelineHealth] = await Promise.all([
       window.dashboard.getAppStatus(),
       window.dashboard.getTodaySummary(),
       window.dashboard.getSpacesHealth(),
       window.dashboard.getLLMUsage(),
-      window.dashboard.getAgentStatus()
+      window.dashboard.getAgentStatus(),
+      window.dashboard.getPipelineHealth()
     ]);
     
     state.data.appStatus = appStatus;
@@ -201,6 +356,15 @@ async function loadOverviewData() {
     state.data.spacesHealth = spacesHealth;
     state.data.llmUsage = llmUsage;
     state.data.agentStatus = agentStatus;
+    state.data.pipelineHealth = pipelineHealth;
+    
+    // Calculate and update health rings
+    const healthScore = calculateHealthScore({
+      todaySummary,
+      pipelineHealth,
+      agentStatus
+    });
+    updateHealthRings(healthScore);
     
     updateOverview();
   } catch (error) {
@@ -208,17 +372,18 @@ async function loadOverviewData() {
   }
 }
 
+// Update overview display (called after data load)
 function updateOverview() {
   const { appStatus, todaySummary, spacesHealth, llmUsage, agentStatus } = state.data;
   
-  // App Status
+  // App status
   if (appStatus) {
-    setText('stat-uptime', appStatus.uptime || '--');
-    setText('stat-memory', appStatus.memory?.formatted || '--');
-    setText('stat-cpu', appStatus.cpu?.formatted || '--');
+    setText('stat-uptime', appStatus.uptime);
+    setText('stat-memory', appStatus.memory?.formatted);
+    setText('stat-cpu', appStatus.cpu?.formatted);
   }
   
-  // Today's Summary
+  // Today's summary
   if (todaySummary) {
     setText('stat-items-added', todaySummary.itemsAdded || 0);
     setText('stat-ai-ops', todaySummary.aiOperations || 0);
@@ -226,15 +391,20 @@ function updateOverview() {
     setText('stat-fixes', todaySummary.autoFixes || 0);
   }
   
-  // Spaces Health
+  // Spaces health
   if (spacesHealth) {
     setText('stat-spaces-count', spacesHealth.totalSpaces || 0);
     setText('stat-total-items', spacesHealth.totalItems || 0);
-    setText('spaces-utilization-text', `${spacesHealth.utilization || 0}% utilized`);
-    setWidth('spaces-utilization', `${spacesHealth.utilization || 0}%`);
+    
+    const utilization = spacesHealth.utilization || 0;
+    const utilizationEl = document.getElementById('spaces-utilization');
+    if (utilizationEl) {
+      utilizationEl.style.width = `${utilization}%`;
+    }
+    setText('spaces-utilization-text', `${utilization}% utilized`);
   }
   
-  // LLM Costs
+  // LLM costs
   if (llmUsage) {
     setText('cost-claude', `$${(llmUsage.claude?.cost || 0).toFixed(2)}`);
     setText('cost-claude-calls', `(${llmUsage.claude?.calls || 0} calls)`);
@@ -243,12 +413,10 @@ function updateOverview() {
     setText('cost-total', `$${(llmUsage.total?.cost || 0).toFixed(2)}`);
   }
   
-  // Agent Status
+  // Agent status banner
   if (agentStatus) {
     const indicator = document.getElementById('agent-indicator');
     const statusText = document.getElementById('agent-status-text');
-    const lastScan = document.getElementById('agent-last-scan');
-    const fixesToday = document.getElementById('agent-fixes-today');
     
     if (indicator) {
       indicator.className = 'agent-indicator';
@@ -261,16 +429,11 @@ function updateOverview() {
     
     if (statusText) {
       statusText.textContent = agentStatus.paused ? 'Agent Paused' : 
-                              agentStatus.active ? 'Agent Active' : 'Agent Inactive';
+                               agentStatus.active ? 'Agent Active' : 'Agent Inactive';
     }
     
-    if (lastScan) {
-      lastScan.textContent = `Last scan: ${agentStatus.lastScanAgo || 'Never'}`;
-    }
-    
-    if (fixesToday) {
-      fixesToday.textContent = `Fixes today: ${agentStatus.fixesApplied || 0}`;
-    }
+    setText('agent-last-scan', `Last scan: ${agentStatus.lastScanAgo || '--'}`);
+    setText('agent-fixes-today', `Fixes today: ${agentStatus.fixesApplied || 0}`);
   }
   
   // Load activity feed
@@ -673,6 +836,191 @@ async function ignoreIssue(issueId) {
   } catch (error) {
     console.error('Error ignoring issue:', error);
   }
+}
+
+// ========================================
+// Broken Items Tab
+// ========================================
+
+async function loadBrokenItems() {
+  try {
+    // Get filter value
+    const filterEl = document.getElementById('broken-filter-status');
+    const statusFilter = filterEl?.value || 'all';
+    
+    // Fetch broken items from current version
+    const result = await window.dashboard.getBrokenItems({ status: statusFilter });
+    
+    if (!result.success) {
+      console.warn('Failed to load broken items:', result.error);
+      return;
+    }
+    
+    // Update summary stats
+    setText('broken-total', result.totalItems || 0);
+    setText('broken-open', result.openItems || 0);
+    setText('broken-fixed', (result.totalItems || 0) - (result.openItems || 0));
+    setText('broken-version', result.appVersion || '-');
+    
+    // Render broken items list
+    const listEl = document.getElementById('broken-items-list');
+    if (listEl) {
+      const items = result.items || [];
+      if (items.length === 0) {
+        listEl.innerHTML = `
+          <div class="broken-empty">
+            <span class="empty-icon">✓</span>
+            <span>No broken items recorded for this version</span>
+          </div>
+        `;
+      } else {
+        listEl.innerHTML = items.map(item => renderBrokenItem(item)).join('');
+      }
+    }
+    
+    // Fetch and render archived items
+    await loadArchivedBrokenItems();
+    
+  } catch (error) {
+    console.error('Error loading broken items:', error);
+  }
+}
+
+function renderBrokenItem(item) {
+  const statusClass = item.status || 'open';
+  const timeAgo = formatTimeAgo(item.lastSeen || item.registeredAt);
+  
+  return `
+    <div class="broken-item ${statusClass}">
+      <div class="broken-item-header">
+        <div class="broken-item-info">
+          <span class="broken-item-source">${escapeHtml(item.source || 'unknown')}</span>
+          <span class="broken-item-message">${escapeHtml(item.message || 'Unknown error')}</span>
+        </div>
+        <div class="broken-item-actions">
+          ${item.status !== 'fixed' ? `
+            <button class="fix" onclick="markBrokenItemFixed('${item.id}')">Mark Fixed</button>
+          ` : ''}
+          ${item.status !== 'ignored' ? `
+            <button class="ignore" onclick="markBrokenItemIgnored('${item.id}')">Ignore</button>
+          ` : ''}
+        </div>
+      </div>
+      <div class="broken-item-meta">
+        <span>📅 ${timeAgo}</span>
+        <span>🔄 ${item.occurrences || 1} occurrences</span>
+        <span>🔧 ${item.fixAttempts || 0} fix attempts</span>
+        ${item.diagnosis ? `<span>💡 Strategy: ${item.diagnosis.strategy}</span>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+async function loadArchivedBrokenItems() {
+  try {
+    const result = await window.dashboard.getArchivedBrokenItems();
+    
+    const archivesEl = document.getElementById('archives-list');
+    if (!archivesEl) return;
+    
+    const archives = result.archives || [];
+    
+    if (archives.length === 0) {
+      archivesEl.innerHTML = '<div class="archive-empty">No archived issues from previous versions</div>';
+      // Hide notice if no archives
+      const noticeEl = document.getElementById('broken-notice');
+      if (noticeEl) noticeEl.style.display = 'none';
+      return;
+    }
+    
+    // Show notice
+    const noticeEl = document.getElementById('broken-notice');
+    if (noticeEl) noticeEl.style.display = 'flex';
+    
+    archivesEl.innerHTML = archives.map((archive, idx) => `
+      <div class="archive-group" id="archive-${idx}">
+        <div class="archive-header" onclick="toggleArchive(${idx})">
+          <div>
+            <span class="archive-version">Version </span>
+            <span class="archive-version-badge">${archive.version}</span>
+          </div>
+          <span class="archive-info">${archive.itemCount} issues • Archived ${formatTimeAgo(archive.archivedAt)}</span>
+        </div>
+        <div class="archive-items">
+          ${(archive.items || []).map(item => `
+            <div class="archive-item">
+              <span class="archive-item-message">${escapeHtml(item.message || 'Unknown')}</span>
+              <div class="archive-item-time">
+                ${item.occurrences || 1} occurrences • 
+                Last seen: ${formatTimeAgo(item.lastSeen || item.registeredAt)}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `).join('');
+    
+  } catch (error) {
+    console.error('Error loading archived broken items:', error);
+  }
+}
+
+function toggleArchive(idx) {
+  const el = document.getElementById(`archive-${idx}`);
+  if (el) {
+    el.classList.toggle('expanded');
+  }
+}
+
+async function markBrokenItemFixed(itemId) {
+  try {
+    await window.dashboard.updateBrokenItemStatus(itemId, 'fixed', { fixedManually: true });
+    await loadBrokenItems();
+  } catch (error) {
+    console.error('Error marking item as fixed:', error);
+  }
+}
+
+async function markBrokenItemIgnored(itemId) {
+  try {
+    await window.dashboard.updateBrokenItemStatus(itemId, 'ignored', {});
+    await loadBrokenItems();
+  } catch (error) {
+    console.error('Error ignoring item:', error);
+  }
+}
+
+async function clearAllBrokenItems() {
+  if (!confirm('This will archive all current broken items and clear the registry. Continue?')) {
+    return;
+  }
+  
+  try {
+    const result = await window.dashboard.clearBrokenItems(true);
+    if (result.success) {
+      alert(`Archived and cleared ${result.cleared} items.`);
+      await loadBrokenItems();
+    } else {
+      alert(`Error: ${result.error}`);
+    }
+  } catch (error) {
+    console.error('Error clearing broken items:', error);
+  }
+}
+
+function formatTimeAgo(timestamp) {
+  if (!timestamp) return 'Unknown';
+  
+  const date = new Date(timestamp);
+  const now = new Date();
+  const seconds = Math.floor((now - date) / 1000);
+  
+  if (seconds < 60) return 'Just now';
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`;
+  if (seconds < 604800) return `${Math.floor(seconds / 86400)} days ago`;
+  
+  return date.toLocaleDateString();
 }
 
 // Pipeline Controls

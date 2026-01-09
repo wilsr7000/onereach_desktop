@@ -1578,15 +1578,15 @@
         video.addEventListener('loadedmetadata', () => this.onVideoLoaded());
         video.addEventListener('play', () => {
           this.isPlaying = true;
-          document.getElementById('playBtn').textContent = '⏸';
+          this.updatePlayButtonIcon(true);
         });
         video.addEventListener('pause', () => {
           this.isPlaying = false;
-          document.getElementById('playBtn').textContent = '▶';
+          this.updatePlayButtonIcon(false);
         });
         video.addEventListener('ended', () => {
           this.isPlaying = false;
-          document.getElementById('playBtn').textContent = '▶';
+          this.updatePlayButtonIcon(false);
         });
         
         // Sync seek to detached window when timeline is clicked/scrubbed
@@ -8792,17 +8792,17 @@
         
         audioEl.addEventListener('play', () => {
           this.isPlaying = true;
-          this.updatePlayButton();
+          this.updatePlayButtonIcon(true);
         });
         
         audioEl.addEventListener('pause', () => {
           this.isPlaying = false;
-          this.updatePlayButton();
+          this.updatePlayButtonIcon(false);
         });
         
         audioEl.addEventListener('ended', () => {
           this.isPlaying = false;
-          this.updatePlayButton();
+          this.updatePlayButtonIcon(false);
         });
       },
       
@@ -9498,6 +9498,20 @@
           muteBtn.textContent = '🔉';
         } else {
           muteBtn.textContent = '🔊';
+        }
+      },
+
+      // Update play button icon (SVG-based to match HTML)
+      updatePlayButtonIcon(isPlaying) {
+        const playBtn = document.getElementById('playBtn');
+        if (!playBtn) return;
+        
+        if (isPlaying) {
+          // Pause icon (two vertical bars)
+          playBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>';
+        } else {
+          // Play icon (triangle pointing right)
+          playBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
         }
       },
 

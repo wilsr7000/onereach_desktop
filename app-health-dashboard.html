@@ -57,6 +57,10 @@
         <span class="tab-icon">◎</span>
         <span class="tab-label">Agent</span>
       </button>
+      <button class="tab-btn" data-tab="broken">
+        <span class="tab-icon">⚠</span>
+        <span class="tab-label">Broken Items</span>
+      </button>
       <button class="tab-btn" data-tab="settings">
         <span class="tab-icon">⚙</span>
         <span class="tab-label">Settings</span>
@@ -69,6 +73,67 @@
       <!-- Overview Tab -->
       <section class="tab-panel active" id="panel-overview">
         <div class="panel-grid overview-grid">
+          
+          <!-- Health Rings Card - Apple Health Style -->
+          <div class="card health-rings-card">
+            <h3 class="card-title">
+              <span class="title-icon">◎</span>
+              Today's Health
+              <span class="health-score-badge" id="overall-health-score">--</span>
+            </h3>
+            <div class="rings-container">
+              <div class="rings-visual">
+                <svg class="health-rings-svg" viewBox="0 0 200 200">
+                  <!-- Background rings -->
+                  <circle class="ring-bg" cx="100" cy="100" r="85" />
+                  <circle class="ring-bg" cx="100" cy="100" r="65" />
+                  <circle class="ring-bg" cx="100" cy="100" r="45" />
+                  
+                  <!-- Progress rings (will be animated via JS) -->
+                  <circle class="ring stability-ring" cx="100" cy="100" r="85" 
+                          stroke-dasharray="534" stroke-dashoffset="534" id="ring-stability" />
+                  <circle class="ring pipeline-ring" cx="100" cy="100" r="65" 
+                          stroke-dasharray="408" stroke-dashoffset="408" id="ring-pipeline" />
+                  <circle class="ring healing-ring" cx="100" cy="100" r="45" 
+                          stroke-dasharray="283" stroke-dashoffset="283" id="ring-healing" />
+                </svg>
+                <div class="rings-center">
+                  <span class="rings-emoji" id="health-emoji">💪</span>
+                </div>
+              </div>
+              <div class="rings-legend">
+                <div class="ring-legend-item">
+                  <span class="ring-dot stability"></span>
+                  <div class="ring-info">
+                    <span class="ring-name">Stability</span>
+                    <span class="ring-value" id="ring-stability-value">--%</span>
+                  </div>
+                  <span class="ring-detail" id="ring-stability-detail">Error-free ops</span>
+                </div>
+                <div class="ring-legend-item">
+                  <span class="ring-dot pipeline"></span>
+                  <div class="ring-info">
+                    <span class="ring-name">Pipeline</span>
+                    <span class="ring-value" id="ring-pipeline-value">--%</span>
+                  </div>
+                  <span class="ring-detail" id="ring-pipeline-detail">Assets processed</span>
+                </div>
+                <div class="ring-legend-item">
+                  <span class="ring-dot healing"></span>
+                  <div class="ring-info">
+                    <span class="ring-name">Healing</span>
+                    <span class="ring-value" id="ring-healing-value">--%</span>
+                  </div>
+                  <span class="ring-detail" id="ring-healing-detail">Issues auto-fixed</span>
+                </div>
+              </div>
+            </div>
+            <div class="rings-message" id="rings-message">
+              <span class="message-icon">✨</span>
+              <span class="message-text">Loading health data...</span>
+            </div>
+          </div>
+
           <!-- App Status Card -->
           <div class="card status-card">
             <h3 class="card-title">
@@ -564,6 +629,63 @@
               <span class="attention-icon">✓</span>
               <span>No issues requiring manual intervention</span>
             </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Broken Items Tab -->
+      <section class="tab-panel" id="panel-broken">
+        <div class="panel-header">
+          <h2>Broken Items Registry</h2>
+          <div class="panel-controls">
+            <select id="broken-filter-status" class="filter-select">
+              <option value="all">All Status</option>
+              <option value="open">Open</option>
+              <option value="fixed">Fixed</option>
+              <option value="ignored">Ignored</option>
+            </select>
+            <button class="btn-secondary" id="broken-clear">Clear All (Archive)</button>
+          </div>
+        </div>
+
+        <div class="broken-summary">
+          <div class="broken-stat-card">
+            <span class="broken-stat-value" id="broken-total">0</span>
+            <span class="broken-stat-label">Total Issues</span>
+          </div>
+          <div class="broken-stat-card open">
+            <span class="broken-stat-value" id="broken-open">0</span>
+            <span class="broken-stat-label">Open</span>
+          </div>
+          <div class="broken-stat-card fixed">
+            <span class="broken-stat-value" id="broken-fixed">0</span>
+            <span class="broken-stat-label">Fixed</span>
+          </div>
+          <div class="broken-stat-card">
+            <span class="broken-stat-value" id="broken-version"></span>
+            <span class="broken-stat-label">Current Version</span>
+          </div>
+        </div>
+
+        <div class="broken-notice" id="broken-notice" style="display: none;">
+          <span class="notice-icon">ℹ</span>
+          <span class="notice-text">Items with a line through were from a previous version and are archived after update.</span>
+        </div>
+
+        <div class="broken-items-section">
+          <h3>Current Version Issues</h3>
+          <div class="broken-items-list" id="broken-items-list">
+            <div class="broken-empty">
+              <span class="empty-icon">✓</span>
+              <span>No broken items recorded for this version</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="broken-archives-section">
+          <h3>Archived Issues (Previous Versions)</h3>
+          <div class="archives-list" id="archives-list">
+            <div class="archive-empty">No archived issues from previous versions</div>
           </div>
         </div>
       </section>

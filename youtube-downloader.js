@@ -681,32 +681,16 @@ class YouTubeDownloader {
         tags: result.videoInfo.tags?.slice(0, 10) || [], // Limit to 10 tags
       };
 
-      console.log('[YouTubeDownloader] Adding item to storage with filePath:', item.filePath);
+      console.log('[YouTubeDownloader] Adding item via clipboardManager with filePath:', item.filePath);
       
-      // Add to storage (storage will copy the file)
-      const indexEntry = clipboardManager.storage.addItem(item);
+      // Use addToHistory for proper in-memory sync, space metadata updates, and UI notifications
+      // This handles: storage.addItem, history sync, space counts, and UI notification
+      await clipboardManager.addToHistory(item);
       
-      console.log('[YouTubeDownloader] Item added with id:', indexEntry.id);
-      
-      // Also add to in-memory history so UI updates immediately
-      if (clipboardManager.history) {
-        const historyItem = {
-          ...item,
-          id: indexEntry.id,
-          _needsContent: true, // Mark as needing content load
-        };
-        clipboardManager.history.unshift(historyItem);
-        console.log('[YouTubeDownloader] Added to in-memory history');
-        
-        // Update space counts and notify UI
-        if (clipboardManager.updateSpaceCounts) {
-          clipboardManager.updateSpaceCounts();
-        }
-        if (clipboardManager.notifyHistoryUpdate) {
-          clipboardManager.notifyHistoryUpdate();
-          console.log('[YouTubeDownloader] Notified UI of history update');
-        }
-      }
+      // Get the newly added item from history
+      const addedItem = clipboardManager.history?.[0];
+      const itemId = addedItem?.id || 'unknown';
+      console.log('[YouTubeDownloader] Item added with id:', itemId);
       
       // Clean up temp file AFTER storage has copied it
       try {
@@ -718,7 +702,7 @@ class YouTubeDownloader {
 
       return {
         success: true,
-        itemId: indexEntry.id,
+        itemId: itemId,
         videoInfo: result.videoInfo,
         message: `Downloaded "${result.videoInfo.title}" to Spaces`,
       };

@@ -2,6 +2,7 @@ const { app, net } = require('electron');
 const getLogger = require('./event-logger');
 const { getBudgetManager } = require('./budget-manager');
 const { getLLMUsageTracker } = require('./llm-usage-tracker');
+const { calculateCost } = require('./pricing-config');
 
 class ClaudeAPI {
   constructor() {
@@ -12,6 +13,7 @@ class ClaudeAPI {
 
   /**
    * Check budget before making an API call and emit warning if exceeded
+   * Uses unified pricing from pricing-config.js
    * @param {string} operation - Operation name for tracking
    * @param {number} estimatedInputTokens - Estimated input tokens
    * @param {number} estimatedOutputTokens - Estimated output tokens
@@ -21,19 +23,35 @@ class ClaudeAPI {
     const logger = getLogger();
     try {
       const budgetManager = getBudgetManager();
-      const pricing = budgetManager.getPricing().anthropic || { inputCostPer1K: 0.015, outputCostPer1K: 0.075 };
-      const estimatedCost = (estimatedInputTokens / 1000) * pricing.inputCostPer1K + 
-                           (estimatedOutputTokens / 1000) * pricing.outputCostPer1K;
       
-      const budgetCheck = budgetManager.checkBudgetWithWarning('anthropic', estimatedCost, operation);
+      // Use unified pricing from pricing-config.js
+      const costResult = calculateCost(this.defaultModel, estimatedInputTokens, estimatedOutputTokens);
       
-      if (budgetCheck.exceeded) {
-        logger.warn('Claude API call proceeding despite budget exceeded', {
-          event: 'budget:exceeded',
+      const budgetCheck = budgetManager.preCheckBudget(
+        'anthropic', 
+        this.defaultModel, 
+        estimatedInputTokens, 
+        estimatedOutputTokens, 
+        projectId
+      );
+      
+      if (budgetCheck.blocked) {
+        logger.warn('Claude API call blocked by hard budget limit', {
+          event: 'budget:blocked',
           provider: 'anthropic',
           operation,
-          estimatedCost,
-          remaining: budgetCheck.remaining
+          estimatedCost: costResult.totalCost
+        });
+        return { exceeded: true, blocked: true, warning: budgetCheck.warnings };
+      }
+      
+      if (budgetCheck.warnings?.length > 0) {
+        logger.warn('Claude API call proceeding with budget warning', {
+          event: 'budget:warning',
+          provider: 'anthropic',
+          operation,
+          estimatedCost: costResult.totalCost,
+          warnings: budgetCheck.warnings
         });
       }
       
@@ -42,12 +60,13 @@ class ClaudeAPI {
       logger.warn('Claude budget check failed, proceeding with call', {
         error: budgetError.message
       });
-      return { exceeded: false, warning: null };
+      return { exceeded: false, blocked: false, warning: null };
     }
   }
 
   /**
    * Track usage after a successful API call
+   * Delegates to LLMUsageTracker which handles BudgetManager integration
    * @param {string} operation - Operation name
    * @param {Object} usage - Usage data from API response
    * @param {string} projectId - Optional project ID
@@ -55,11 +74,17 @@ class ClaudeAPI {
   trackUsage(operation, usage, projectId = null) {
     const logger = getLogger();
     try {
-      const budgetManager = getBudgetManager();
-      budgetManager.trackUsage('anthropic', projectId, {
-        operation,
+      // Use LLMUsageTracker as the single entry point
+      // It will delegate to BudgetManager for centralized storage
+      const llmTracker = getLLMUsageTracker();
+      llmTracker.trackClaudeCall({
+        model: usage.model || this.defaultModel,
         inputTokens: usage.input_tokens || 0,
-        outputTokens: usage.output_tokens || 0
+        outputTokens: usage.output_tokens || 0,
+        feature: this._getFeatureFromOperation(operation),
+        purpose: operation,
+        projectId,
+        success: true
       });
       
       logger.info('Claude API usage tracked', {
@@ -69,20 +94,6 @@ class ClaudeAPI {
         outputTokens: usage.output_tokens,
         operation
       });
-      
-      // Track in LLM usage tracker for dashboard
-      try {
-        const llmTracker = getLLMUsageTracker();
-        llmTracker.trackClaudeCall({
-          model: usage.model || this.defaultModel,
-          inputTokens: usage.input_tokens || 0,
-          outputTokens: usage.output_tokens || 0,
-          feature: this._getFeatureFromOperation(operation),
-          purpose: operation
-        });
-      } catch (llmTrackerError) {
-        // Silent fail - don't break main flow
-      }
     } catch (trackingError) {
       logger.warn('Claude API usage tracking failed', {
         error: trackingError.message,

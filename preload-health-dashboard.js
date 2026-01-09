@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('dashboard', {
   getSpacesHealth: () => ipcRenderer.invoke('dashboard:get-spaces-health'),
   getLLMUsage: () => ipcRenderer.invoke('dashboard:get-llm-usage'),
   getPipelineHealth: () => ipcRenderer.invoke('dashboard:get-pipeline-health'),
+  getHealthScore: () => ipcRenderer.invoke('dashboard:get-health-score'),
   getActivity: (options) => ipcRenderer.invoke('dashboard:get-activity', options),
   getLogs: (options) => ipcRenderer.invoke('dashboard:get-logs', options),
   getAgentStatus: () => ipcRenderer.invoke('dashboard:get-agent-status'),
@@ -30,6 +31,12 @@ contextBridge.exposeInMainWorld('dashboard', {
   configureExternalAPI: (config) => ipcRenderer.invoke('dashboard:agent-configure-external-api', config),
   getExternalAPIConfig: () => ipcRenderer.invoke('dashboard:agent-get-external-api-config'),
   reportStatusNow: () => ipcRenderer.invoke('dashboard:agent-report-status-now'),
+  
+  // Broken Items Registry
+  getBrokenItems: (options) => ipcRenderer.invoke('dashboard:get-broken-items', options),
+  getArchivedBrokenItems: () => ipcRenderer.invoke('dashboard:get-archived-broken-items'),
+  updateBrokenItemStatus: (itemId, status, details) => ipcRenderer.invoke('dashboard:update-broken-item-status', itemId, status, details),
+  clearBrokenItems: (archive) => ipcRenderer.invoke('dashboard:clear-broken-items', archive),
   
   // Issue management
   resolveIssue: (issueId) => ipcRenderer.invoke('dashboard:resolve-issue', issueId),

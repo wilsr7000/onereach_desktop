@@ -1514,3 +1514,576 @@ html, body {
   }
 }
 
+/* ========================================
+   HEALTH RINGS - Apple Health Style
+   ======================================== */
+
+.health-rings-card {
+  grid-column: span 2;
+  background: linear-gradient(135deg, var(--bg-card) 0%, rgba(30, 30, 35, 1) 100%);
+  border: 1px solid var(--border-primary);
+  position: relative;
+  overflow: hidden;
+}
+
+.health-rings-card::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle at 30% 30%, rgba(255, 59, 48, 0.05) 0%, transparent 50%),
+              radial-gradient(circle at 70% 70%, rgba(48, 209, 88, 0.05) 0%, transparent 50%),
+              radial-gradient(circle at 50% 50%, rgba(0, 122, 255, 0.05) 0%, transparent 50%);
+  pointer-events: none;
+}
+
+.health-score-badge {
+  background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+  color: var(--bg-primary);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 12px;
+  margin-left: auto;
+}
+
+.rings-container {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xl);
+  padding: var(--space-md) 0;
+  position: relative;
+  z-index: 1;
+}
+
+.rings-visual {
+  position: relative;
+  width: 180px;
+  height: 180px;
+  flex-shrink: 0;
+}
+
+.health-rings-svg {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.ring-bg {
+  fill: none;
+  stroke: var(--bg-tertiary);
+  stroke-width: 14;
+  opacity: 0.4;
+}
+
+.ring {
+  fill: none;
+  stroke-width: 14;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 1s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.stability-ring {
+  stroke: #FF3B30; /* Apple red */
+  filter: drop-shadow(0 0 8px rgba(255, 59, 48, 0.5));
+}
+
+.pipeline-ring {
+  stroke: #30D158; /* Apple green */
+  filter: drop-shadow(0 0 8px rgba(48, 209, 88, 0.5));
+}
+
+.healing-ring {
+  stroke: #007AFF; /* Apple blue */
+  filter: drop-shadow(0 0 8px rgba(0, 122, 255, 0.5));
+}
+
+.rings-center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+}
+
+.rings-emoji {
+  font-size: 36px;
+  animation: pulse-emoji 2s ease-in-out infinite;
+}
+
+@keyframes pulse-emoji {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+}
+
+.rings-legend {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.ring-legend-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  transition: all 0.2s ease;
+}
+
+.ring-legend-item:hover {
+  background: var(--bg-hover);
+  transform: translateX(4px);
+}
+
+.ring-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ring-dot.stability {
+  background: #FF3B30;
+  box-shadow: 0 0 8px rgba(255, 59, 48, 0.5);
+}
+
+.ring-dot.pipeline {
+  background: #30D158;
+  box-shadow: 0 0 8px rgba(48, 209, 88, 0.5);
+}
+
+.ring-dot.healing {
+  background: #007AFF;
+  box-shadow: 0 0 8px rgba(0, 122, 255, 0.5);
+}
+
+.ring-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 80px;
+}
+
+.ring-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ring-value {
+  font-size: 18px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+.ring-detail {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-left: auto;
+}
+
+.rings-message {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  background: linear-gradient(90deg, rgba(255, 215, 0, 0.1), transparent);
+  border-radius: var(--radius-md);
+  border-left: 3px solid var(--accent-primary);
+  position: relative;
+  z-index: 1;
+}
+
+.message-icon {
+  font-size: 16px;
+}
+
+.message-text {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* Ring animation states */
+.ring.complete {
+  animation: ring-glow 2s ease-in-out infinite;
+}
+
+@keyframes ring-glow {
+  0%, 100% { filter: drop-shadow(0 0 8px currentColor); }
+  50% { filter: drop-shadow(0 0 16px currentColor) drop-shadow(0 0 24px currentColor); }
+}
+
+/* Health score colors */
+.health-score-badge.excellent {
+  background: linear-gradient(135deg, #30D158, #34C759);
+}
+
+.health-score-badge.good {
+  background: linear-gradient(135deg, #007AFF, #5AC8FA);
+}
+
+.health-score-badge.fair {
+  background: linear-gradient(135deg, #FF9500, #FFCC00);
+}
+
+.health-score-badge.poor {
+  background: linear-gradient(135deg, #FF3B30, #FF6961);
+}
+
+/* ========================================
+   BROKEN ITEMS PANEL
+   ======================================== */
+
+.broken-summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-md);
+  margin-bottom: var(--space-xl);
+}
+
+.broken-stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  text-align: center;
+  transition: all 0.2s ease;
+}
+
+.broken-stat-card.open {
+  border-color: var(--status-error);
+  background: rgba(248, 113, 113, 0.1);
+}
+
+.broken-stat-card.fixed {
+  border-color: var(--status-success);
+  background: rgba(74, 222, 128, 0.1);
+}
+
+.broken-stat-value {
+  display: block;
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  margin-bottom: var(--space-xs);
+}
+
+.broken-stat-card.open .broken-stat-value {
+  color: var(--status-error);
+}
+
+.broken-stat-card.fixed .broken-stat-value {
+  color: var(--status-success);
+}
+
+.broken-stat-label {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.broken-notice {
+  background: linear-gradient(135deg, rgba(96, 165, 250, 0.15), rgba(147, 51, 234, 0.1));
+  border: 1px solid rgba(96, 165, 250, 0.3);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  margin-bottom: var(--space-lg);
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.notice-icon {
+  color: var(--status-info);
+  font-size: 16px;
+}
+
+.notice-text {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.broken-items-section,
+.broken-archives-section {
+  margin-bottom: var(--space-xl);
+}
+
+.broken-items-section h3,
+.broken-archives-section h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-md);
+}
+
+.broken-items-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.broken-empty,
+.archive-empty {
+  background: var(--bg-card);
+  border: 1px dashed var(--border-primary);
+  border-radius: var(--radius-lg);
+  padding: var(--space-xl);
+  text-align: center;
+  color: var(--text-tertiary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.empty-icon {
+  font-size: 24px;
+  color: var(--status-success);
+}
+
+/* Broken Item Entry */
+.broken-item {
+  background: var(--bg-card);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  transition: all 0.2s ease;
+}
+
+.broken-item:hover {
+  border-color: var(--accent-primary);
+}
+
+.broken-item.archived {
+  opacity: 0.6;
+  background: var(--bg-tertiary);
+}
+
+.broken-item.archived .broken-item-message {
+  text-decoration: line-through;
+  color: var(--text-tertiary);
+}
+
+.broken-item.fixed {
+  border-left: 3px solid var(--status-success);
+}
+
+.broken-item.open {
+  border-left: 3px solid var(--status-error);
+}
+
+.broken-item.ignored {
+  border-left: 3px solid var(--text-tertiary);
+  opacity: 0.7;
+}
+
+.broken-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.broken-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.broken-item-source {
+  font-size: 11px;
+  color: var(--accent-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.broken-item-message {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.broken-item-meta {
+  display: flex;
+  gap: var(--space-md);
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.broken-item-meta span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.broken-item-actions {
+  display: flex;
+  gap: var(--space-xs);
+}
+
+.broken-item-actions button {
+  padding: 4px 8px;
+  font-size: 11px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.broken-item-actions button:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent-primary);
+  color: var(--text-primary);
+}
+
+.broken-item-actions button.fix {
+  background: rgba(74, 222, 128, 0.2);
+  border-color: var(--status-success);
+  color: var(--status-success);
+}
+
+.broken-item-actions button.ignore {
+  background: rgba(148, 163, 184, 0.2);
+}
+
+/* Archives Section */
+.archives-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.archive-group {
+  background: var(--bg-card);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.archive-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-md);
+  background: var(--bg-tertiary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.archive-header:hover {
+  background: var(--bg-hover);
+}
+
+.archive-version {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.archive-version-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: rgba(148, 163, 184, 0.2);
+  color: var(--text-tertiary);
+  border-radius: 10px;
+  text-decoration: line-through;
+}
+
+.archive-info {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.archive-items {
+  padding: var(--space-md);
+  display: none;
+  flex-direction: column;
+  gap: var(--space-sm);
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.archive-group.expanded .archive-items {
+  display: flex;
+}
+
+.archive-item {
+  padding: var(--space-sm);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.archive-item-message {
+  text-decoration: line-through;
+  color: var(--text-tertiary);
+}
+
+.archive-item-time {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  margin-top: 4px;
+}
+
+/* Broken Items Responsive */
+@media (max-width: 900px) {
+  .broken-summary {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Health Rings Responsive */
+@media (max-width: 1200px) {
+  .health-rings-card {
+    grid-column: span 2;
+  }
+  
+  .rings-container {
+    flex-direction: column;
+    align-items: center;
+  }
+  
+  .rings-visual {
+    width: 160px;
+    height: 160px;
+  }
+  
+  .rings-legend {
+    width: 100%;
+  }
+}
+
+@media (max-width: 600px) {
+  .health-rings-card {
+    grid-column: span 1;
+  }
+  
+  .rings-visual {
+    width: 140px;
+    height: 140px;
+  }
+  
+  .ring-legend-item {
+    flex-wrap: wrap;
+  }
+  
+  .ring-detail {
+    width: 100%;
+    margin-left: calc(12px + var(--space-md));
+    margin-top: 4px;
+  }
+}
+

@@ -521,19 +521,64 @@ class DashboardAPI {
   }
 
   /**
+   * Calculate overall health score (Apple Health-style)
+   */
+  getHealthScore(todaySummary, pipelineHealth, agentStatus) {
+    // 1. Stability Score (error-free operations)
+    const totalOps = (todaySummary?.itemsAdded || 0) + (todaySummary?.aiOperations || 0) + 1;
+    const errors = todaySummary?.errors || 0;
+    const stabilityScore = Math.max(0, Math.min(100, Math.round(((totalOps - errors) / totalOps) * 100)));
+    
+    // 2. Pipeline Score (successful asset processing)
+    const rates = pipelineHealth?.stageSuccessRates || {};
+    const avgPipelineRate = Object.values(rates).length > 0 
+      ? Object.values(rates).reduce((a, b) => a + b, 0) / Object.values(rates).length 
+      : 100;
+    const pipelineScore = Math.round(avgPipelineRate);
+    
+    // 3. Healing Score (issues auto-fixed vs total issues)
+    const issuesDetected = agentStatus?.issuesDetected || 0;
+    const fixesApplied = agentStatus?.fixesApplied || 0;
+    const healingScore = issuesDetected > 0 
+      ? Math.min(100, Math.round((fixesApplied / issuesDetected) * 100))
+      : 100;
+    
+    // Overall health score (weighted average)
+    const overallScore = Math.round(
+      stabilityScore * 0.5 + 
+      pipelineScore * 0.3 + 
+      healingScore * 0.2
+    );
+    
+    return {
+      stability: stabilityScore,
+      pipeline: pipelineScore,
+      healing: healingScore,
+      overall: overallScore,
+      ringsComplete: [stabilityScore >= 100, pipelineScore >= 100, healingScore >= 100].filter(Boolean).length,
+      grade: overallScore >= 90 ? 'A' : overallScore >= 80 ? 'B' : overallScore >= 70 ? 'C' : overallScore >= 60 ? 'D' : 'F'
+    };
+  }
+
+  /**
    * Get complete dashboard data
    */
   async getDashboardData(dependencies = {}) {
     const { clipboardManager, llmTracker, agent } = dependencies;
     
+    const todaySummary = this.getTodaySummary();
+    const pipelineHealth = this.getPipelineHealth();
+    const agentStatus = this.getAgentStatus(agent);
+    
     return {
       appStatus: this.getAppStatus(),
-      todaySummary: this.getTodaySummary(),
+      todaySummary,
       spacesHealth: await this.getSpacesHealth(clipboardManager),
       llmUsage: await this.getLLMUsage(llmTracker),
-      pipelineHealth: this.getPipelineHealth(),
+      pipelineHealth,
       recentActivity: this.getRecentActivity({ limit: 10 }),
-      agentStatus: this.getAgentStatus(agent),
+      agentStatus,
+      healthScore: this.getHealthScore(todaySummary, pipelineHealth, agentStatus),
       timestamp: new Date().toISOString()
     };
   }
@@ -572,6 +617,14 @@ class DashboardAPI {
     // Get pipeline health
     ipcMain.handle('dashboard:get-pipeline-health', () => {
       return this.getPipelineHealth();
+    });
+    
+    // Get health score
+    ipcMain.handle('dashboard:get-health-score', () => {
+      const todaySummary = this.getTodaySummary();
+      const pipelineHealth = this.getPipelineHealth();
+      const agentStatus = this.getAgentStatus(agent);
+      return this.getHealthScore(todaySummary, pipelineHealth, agentStatus);
     });
     
     // Get recent activity
@@ -632,6 +685,36 @@ class DashboardAPI {
     ipcMain.handle('dashboard:agent-report-status-now', async () => {
       if (agent) {
         return agent.reportStatus();
+      }
+      return { success: false, error: 'Agent not available' };
+    });
+    
+    // Broken Items Registry
+    ipcMain.handle('dashboard:get-broken-items', (event, options = {}) => {
+      if (agent) {
+        return { success: true, ...agent.getBrokenItemsRegistry(options) };
+      }
+      return { success: false, error: 'Agent not available', items: [] };
+    });
+    
+    ipcMain.handle('dashboard:get-archived-broken-items', () => {
+      if (agent) {
+        return { success: true, archives: agent.getArchivedBrokenItems() };
+      }
+      return { success: false, error: 'Agent not available', archives: [] };
+    });
+    
+    ipcMain.handle('dashboard:update-broken-item-status', (event, itemId, status, details = {}) => {
+      if (agent) {
+        const updated = agent.updateBrokenItemStatus(itemId, status, details);
+        return { success: updated };
+      }
+      return { success: false, error: 'Agent not available' };
+    });
+    
+    ipcMain.handle('dashboard:clear-broken-items', (event, archive = true) => {
+      if (agent) {
+        return { success: true, ...agent.clearBrokenItemsRegistry(archive) };
       }
       return { success: false, error: 'Agent not available' };
     });

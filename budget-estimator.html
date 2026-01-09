@@ -648,8 +648,9 @@ Additional details..."
   <div class="toast" id="toast"></div>
 
   <script>
-    // Pricing constants
-    const PRICING = {
+    // Pricing - loaded from unified pricing-config.js via IPC
+    // Fallback values in case pricing API is not available
+    let PRICING = {
       elevenlabs: {
         costPer1KChars: 0.30
       },
@@ -657,10 +658,47 @@ Additional details..."
         costPerMinute: 0.006
       },
       claude: {
-        inputCostPer1K: 0.015,
-        outputCostPer1K: 0.075
+        inputCostPer1K: 0.003,  // Updated: per 1K tokens (sonnet pricing / 1000)
+        outputCostPer1K: 0.015  // Updated: per 1K tokens (sonnet pricing / 1000)
       }
     };
+    
+    // Load unified pricing from main process on init
+    async function loadUnifiedPricing() {
+      try {
+        if (window.electronAPI && window.electronAPI.pricingGetAll) {
+          const result = await window.electronAPI.pricingGetAll();
+          if (result && result.pricing) {
+            // Update PRICING with values from unified config
+            const pricing = result.pricing;
+            
+            // ElevenLabs
+            if (pricing['elevenlabs']?.per1KChars) {
+              PRICING.elevenlabs.costPer1KChars = pricing['elevenlabs'].per1KChars;
+            }
+            
+            // Whisper
+            if (pricing['whisper-1']?.perMinute) {
+              PRICING.whisper.costPerMinute = pricing['whisper-1'].perMinute;
+            }
+            
+            // Claude (use sonnet as default for estimations)
+            if (pricing['claude-sonnet-4-5-20250929']) {
+              // Convert from per-1M to per-1K
+              PRICING.claude.inputCostPer1K = pricing['claude-sonnet-4-5-20250929'].input / 1000;
+              PRICING.claude.outputCostPer1K = pricing['claude-sonnet-4-5-20250929'].output / 1000;
+            }
+            
+            console.log('[BudgetEstimator] Loaded unified pricing:', PRICING);
+          }
+        }
+      } catch (error) {
+        console.warn('[BudgetEstimator] Could not load unified pricing, using fallbacks:', error);
+      }
+    }
+    
+    // Initialize pricing on load
+    loadUnifiedPricing();
 
     // State
     let currentEstimate = {
@@ -1121,6 +1159,9 @@ See right panel for calculated estimate →`
   </script>
 </body>
 </html>
+
+
+
 
 
 

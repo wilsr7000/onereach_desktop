@@ -150,6 +150,14 @@ class AiderBridge:
         Returns:
             Success status and repo info
         """
+        # Check if aider is available
+        if not AIDER_AVAILABLE:
+            return {
+                "success": False,
+                "error": f"Aider is not installed. {AIDER_IMPORT_ERROR or 'Run: pip install aider-chat'}",
+                "install_instructions": "pip install aider-chat"
+            }
+        
         try:
             self.repo_path = Path(repo_path).resolve()
             
@@ -243,6 +251,13 @@ class AiderBridge:
         print(f"[GSX-Python] >>> run_prompt called", file=sys.stderr, flush=True)
         print(f"[GSX-Python]     Message length: {len(message)} chars", file=sys.stderr, flush=True)
         print(f"[GSX-Python]     Message preview: {message[:100]}...", file=sys.stderr, flush=True)
+        
+        if not AIDER_AVAILABLE:
+            print(f"[GSX-Python] !!! ERROR: Aider not installed", file=sys.stderr, flush=True)
+            return {
+                "success": False,
+                "error": f"Aider is not installed. {AIDER_IMPORT_ERROR or 'Run: pip install aider-chat'}"
+            }
         
         if not self.coder:
             print(f"[GSX-Python] !!! ERROR: Not initialized", file=sys.stderr, flush=True)
@@ -348,6 +363,12 @@ class AiderBridge:
         Returns:
             Success status and updated file list
         """
+        if not AIDER_AVAILABLE:
+            return {
+                "success": False,
+                "error": f"Aider is not installed. {AIDER_IMPORT_ERROR or 'Run: pip install aider-chat'}"
+            }
+        
         if not self.coder:
             return {
                 "success": False,
@@ -405,6 +426,12 @@ class AiderBridge:
         Returns:
             Success status and updated file list
         """
+        if not AIDER_AVAILABLE:
+            return {
+                "success": False,
+                "error": f"Aider is not installed. {AIDER_IMPORT_ERROR or 'Run: pip install aider-chat'}"
+            }
+        
         if not self.coder:
             return {
                 "success": False,
@@ -442,6 +469,12 @@ class AiderBridge:
         Returns:
             Repository structure and file information
         """
+        if not AIDER_AVAILABLE:
+            return {
+                "success": False,
+                "error": f"Aider is not installed. {AIDER_IMPORT_ERROR or 'Run: pip install aider-chat'}"
+            }
+        
         if not self.coder:
             return {
                 "success": False,
@@ -555,9 +588,9 @@ class AiderBridge:
                 f"const {symbol}",         # JS const
                 f"let {symbol}",           # JS let
                 f"var {symbol}",           # JS var
-                f"{symbol}\s*=\s*function",  # JS function expression
-                f"{symbol}\s*:\s*function",  # JS object method
-                f"async\s+{symbol}",      # Async function
+                rf"{symbol}\s*=\s*function",  # JS function expression
+                rf"{symbol}\s*:\s*function",  # JS object method
+                rf"async\s+{symbol}",      # Async function
             ]
             
             all_matches = []
@@ -691,6 +724,12 @@ class AiderBridge:
         Returns:
             Success status
         """
+        if not AIDER_AVAILABLE:
+            return {
+                "success": False,
+                "error": f"Aider is not installed. {AIDER_IMPORT_ERROR or 'Run: pip install aider-chat'}"
+            }
+        
         if not self.coder:
             return {
                 "success": False,
@@ -722,6 +761,12 @@ class AiderBridge:
         Returns:
             Success status
         """
+        if not AIDER_AVAILABLE:
+            return {
+                "success": False,
+                "error": f"Aider is not installed. {AIDER_IMPORT_ERROR or 'Run: pip install aider-chat'}"
+            }
+        
         if not self.coder:
             return {
                 "success": False,

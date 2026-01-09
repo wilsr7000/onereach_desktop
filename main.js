@@ -18,9 +18,13 @@ const { AiderBridgeClient } = require('./aider-bridge-client');
 const VideoEditor = require('./video-editor');
 const { getRecorder } = require('./recorder');
 const { getBudgetManager } = require('./budget-manager');
+const AuthManager = require('./auth-manager');
 
 // Global Budget Manager instance
 let budgetManager = null;
+
+// Global Auth Manager instance
+let authManager = null;
 
 // Enable Speech Recognition API in Electron
 // These must be set before app.whenReady()
@@ -39,6 +43,11 @@ class BranchAiderManager {
   }
   
   async initialize(spacePath) {
+    // Validate spacePath before any path operations
+    if (!spacePath || typeof spacePath !== 'string') {
+      throw new Error(`[BranchManager] Invalid spacePath: ${JSON.stringify(spacePath)} (type: ${typeof spacePath})`);
+    }
+    
     const fs = require('fs');
     const path = require('path');
     
@@ -86,6 +95,17 @@ class BranchAiderManager {
   }
   
   async initBranch(branchPath, branchId, model, readOnlyFiles = []) {
+    // Validate required paths before any operations
+    if (!branchPath || typeof branchPath !== 'string') {
+      throw new Error(`[BranchManager] Invalid branchPath: ${JSON.stringify(branchPath)} (type: ${typeof branchPath})`);
+    }
+    if (!branchId || typeof branchId !== 'string') {
+      throw new Error(`[BranchManager] Invalid branchId: ${JSON.stringify(branchId)} (type: ${typeof branchId})`);
+    }
+    if (!this.logsDir) {
+      throw new Error('[BranchManager] logsDir is not set. Call initialize() first before initBranch().');
+    }
+    
     const { AiderBridgeClient } = require('./aider-bridge-client');
     const { getSettingsManager } = require('./settings-manager');
     const path = require('path');
@@ -102,8 +122,12 @@ class BranchAiderManager {
     const apiKey = settings.getLLMApiKey();
     const provider = settings.getLLMProvider();
     
-    // Use pipx-installed Python
-    const aiderPythonPath = '/Users/richardwilson/.local/pipx/venvs/aider-chat/bin/python3';
+    // Get Python path dynamically using DependencyManager
+    const { getDependencyManager } = require('./dependency-manager');
+    const depManager = getDependencyManager();
+    const aiderPythonPath = depManager.getAiderPythonPath();
+    
+    this.logOrchestration('BRANCH', `Using Python path: ${aiderPythonPath}`);
     
     const aider = new AiderBridgeClient(aiderPythonPath, apiKey, provider);
     await aider.start();
@@ -784,6 +808,11 @@ app.whenReady().then(() => {
   // Set up module manager IPC handlers
   setupModuleManagerIPC();
   
+  // Initialize Auth Manager for IDW credential management
+  authManager = new AuthManager(app);
+  global.authManager = authManager;
+  console.log('[Main] Auth Manager initialized for IDW credential management');
+  
   // CRITICAL: Register menu-action handler EARLY (before menu is created)
   console.log('[Main] Registering menu-action handler early...');
   // REMOVED: Early menu-action handler for IDW URLs
@@ -833,6 +862,18 @@ app.whenReady().then(() => {
   global.menuDataManager = getMenuDataManager();
   global.menuDataManager.initialize();
   console.log('Menu Data Manager initialized');
+  
+  // Initialize Spaces API Server for browser extension communication
+  const { getSpacesAPIServer } = require('./spaces-api-server');
+  global.spacesAPIServer = getSpacesAPIServer();
+  global.spacesAPIServer.start().then(() => {
+    console.log('Spaces API Server started');
+  }).catch(err => {
+    console.error('Failed to start Spaces API Server:', err);
+  });
+  
+  // Set up Tab Picker IPC handlers
+  setupTabPickerIPC();
   
   // Add keyboard shortcuts to open dev tools (only in development mode)
   const isDevelopment = process.env.NODE_ENV === 'development' || !app.isPackaged;
@@ -932,6 +973,31 @@ app.whenReady().then(() => {
           console.log('[App] App Manager Agent started');
         }, 5000);
         
+        // Set up Agent Escalation IPC handlers
+        ipcMain.handle('agent:respond-to-escalation', async (event, escalationId, action, details) => {
+          if (!global.appManagerAgent) {
+            return { success: false, error: 'Agent not initialized' };
+          }
+          try {
+            return await global.appManagerAgent.handleUserEscalationResponse(escalationId, action, details);
+          } catch (error) {
+            console.error('[Agent] Error handling escalation response:', error);
+            return { success: false, error: error.message };
+          }
+        });
+        
+        ipcMain.handle('agent:get-pending-escalations', async () => {
+          if (!global.appManagerAgent) {
+            return [];
+          }
+          try {
+            return global.appManagerAgent.getPendingEscalations();
+          } catch (error) {
+            console.error('[Agent] Error getting pending escalations:', error);
+            return [];
+          }
+        });
+        
         console.log('[App] Dashboard API and components initialized');
       } catch (dashboardError) {
         console.error('[App] Error initializing dashboard components:', dashboardError);
@@ -1001,6 +1067,9 @@ app.whenReady().then(() => {
     } catch (error) {
       console.error('[Startup] Error initializing realtime speech:', error);
     }
+
+    // Initialize Voice TTS (ElevenLabs Text-to-Speech for voice mode)
+    setupVoiceTTS();
 
     console.log('[Startup] Deferred managers initialized');
   });
@@ -1555,6 +1624,230 @@ function setupSpacesAPI() {
   console.log('[SpacesAPI] ✅ All IPC handlers registered (including tags and smart folders)');
 }
 
+// Tab picker window reference
+let tabPickerWindow = null;
+let tabPickerCallback = null;
+
+// Set up Tab Picker IPC handlers
+function setupTabPickerIPC() {
+  // Get API server status
+  ipcMain.handle('tab-picker:get-status', async () => {
+    const server = global.spacesAPIServer;
+    return {
+      extensionConnected: server ? server.isExtensionConnected() : false,
+      serverRunning: !!server
+    };
+  });
+
+  // Get tabs from extension
+  ipcMain.handle('tab-picker:get-tabs', async () => {
+    const server = global.spacesAPIServer;
+    if (!server || !server.isExtensionConnected()) {
+      throw new Error('Extension not connected');
+    }
+    return server.getTabs();
+  });
+
+  // Capture specific tab
+  ipcMain.handle('tab-picker:capture-tab', async (event, tabId) => {
+    const server = global.spacesAPIServer;
+    if (!server || !server.isExtensionConnected()) {
+      throw new Error('Extension not connected');
+    }
+    return server.captureTab(tabId);
+  });
+
+  // Fetch URL as fallback (server-side capture)
+  ipcMain.handle('tab-picker:fetch-url', async (event, url) => {
+    return fetchUrlContent(url);
+  });
+
+  // Handle result from tab picker
+  ipcMain.on('tab-picker:result', (event, result) => {
+    console.log('[TabPicker] Received result:', result.type);
+    if (tabPickerCallback) {
+      tabPickerCallback(result);
+      tabPickerCallback = null;
+    }
+  });
+
+  // Close tab picker
+  ipcMain.on('tab-picker:close', () => {
+    if (tabPickerWindow) {
+      tabPickerWindow.close();
+      tabPickerWindow = null;
+    }
+  });
+
+  // Open setup guide
+  ipcMain.on('tab-picker:open-setup', () => {
+    openExtensionSetupGuide();
+  });
+
+  // Handler to open tab picker (called from renderer)
+  ipcMain.handle('open-tab-picker', async (event) => {
+    return new Promise((resolve) => {
+      tabPickerCallback = resolve;
+      createTabPickerWindow();
+    });
+  });
+
+  // Get auth token for setup
+  ipcMain.handle('get-extension-auth-token', async () => {
+    const server = global.spacesAPIServer;
+    return server ? server.getAuthToken() : null;
+  });
+
+  console.log('[TabPicker] IPC handlers registered');
+}
+
+// Create Tab Picker window
+function createTabPickerWindow() {
+  if (tabPickerWindow) {
+    tabPickerWindow.focus();
+    return;
+  }
+
+  tabPickerWindow = new BrowserWindow({
+    width: 480,
+    height: 600,
+    minWidth: 380,
+    minHeight: 400,
+    frame: false,
+    transparent: false,
+    resizable: true,
+    alwaysOnTop: true,
+    backgroundColor: '#0d0d14',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload-tab-picker.js')
+    }
+  });
+
+  tabPickerWindow.loadFile('tab-picker.html');
+
+  tabPickerWindow.on('closed', () => {
+    tabPickerWindow = null;
+    if (tabPickerCallback) {
+      tabPickerCallback(null);
+      tabPickerCallback = null;
+    }
+  });
+}
+
+// Open extension setup guide window
+function openExtensionSetupGuide() {
+  const setupWindow = new BrowserWindow({
+    width: 600,
+    height: 700,
+    backgroundColor: '#0d0d14',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload-minimal.js')
+    }
+  });
+
+  setupWindow.loadFile('extension-setup.html');
+}
+
+// Fetch URL content server-side (fallback when extension not available)
+async function fetchUrlContent(url) {
+  return new Promise((resolve, reject) => {
+    // Create hidden window to load URL
+    const captureWindow = new BrowserWindow({
+      width: 1280,
+      height: 900,
+      show: false,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        offscreen: true
+      }
+    });
+
+    let resolved = false;
+
+    const cleanup = () => {
+      if (!captureWindow.isDestroyed()) {
+        captureWindow.close();
+      }
+    };
+
+    // Timeout after 30 seconds
+    const timeout = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        cleanup();
+        reject(new Error('Timeout loading URL'));
+      }
+    }, 30000);
+
+    captureWindow.webContents.on('did-finish-load', async () => {
+      if (resolved) return;
+      
+      try {
+        // Wait a bit for dynamic content
+        await new Promise(r => setTimeout(r, 1000));
+
+        // Capture screenshot
+        const image = await captureWindow.webContents.capturePage();
+        const screenshot = image.toDataURL();
+
+        // Extract text content
+        const textContent = await captureWindow.webContents.executeJavaScript(`
+          (function() {
+            const article = document.querySelector('article');
+            const main = document.querySelector('main');
+            const body = document.body;
+            const container = article || main || body;
+            
+            const clone = container.cloneNode(true);
+            ['script', 'style', 'nav', 'footer', 'aside', 'header'].forEach(tag => {
+              clone.querySelectorAll(tag).forEach(el => el.remove());
+            });
+            
+            let text = clone.textContent || '';
+            text = text.replace(/\\s+/g, ' ').trim();
+            return text.substring(0, 100000);
+          })()
+        `);
+
+        const title = await captureWindow.webContents.executeJavaScript('document.title');
+
+        resolved = true;
+        clearTimeout(timeout);
+        cleanup();
+
+        resolve({
+          url,
+          title,
+          screenshot,
+          textContent,
+          capturedAt: Date.now()
+        });
+      } catch (error) {
+        resolved = true;
+        clearTimeout(timeout);
+        cleanup();
+        reject(error);
+      }
+    });
+
+    captureWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        cleanup();
+        reject(new Error(`Failed to load: ${errorDescription}`));
+      }
+    });
+
+    captureWindow.loadURL(url);
+  });
+}
+
 // Set up module manager IPC handlers
 function setupModuleManagerIPC() {
   const ModuleEvaluator = require('./module-evaluator');
@@ -1919,9 +2212,447 @@ function setupModuleManagerIPC() {
   console.log('[setupModuleManagerIPC] All handlers registered');
 }
 
+// Set up Dependency Management IPC handlers
+function setupDependencyIPC() {
+  console.log('[setupDependencyIPC] Setting up Dependency Management handlers');
+  
+  const { getDependencyManager } = require('./dependency-manager');
+  
+  // Check all dependencies
+  ipcMain.handle('deps:check-all', async () => {
+    try {
+      const depManager = getDependencyManager();
+      const status = depManager.checkAllDependencies();
+      console.log('[DependencyManager] Check result:', status.allInstalled ? 'All installed' : `Missing: ${status.missing.map(d => d.name).join(', ')}`);
+      return { success: true, ...status };
+    } catch (error) {
+      console.error('[DependencyManager] Check failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Install a specific dependency
+  ipcMain.handle('deps:install', async (event, depName) => {
+    try {
+      const depManager = getDependencyManager();
+      
+      // Stream output back to renderer
+      const result = await depManager.installDependency(depName, (output) => {
+        event.sender.send('deps:install-output', { depName, ...output });
+      });
+      
+      return { success: true, ...result };
+    } catch (error) {
+      console.error('[DependencyManager] Install failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Install all missing dependencies
+  ipcMain.handle('deps:install-all', async (event) => {
+    try {
+      const depManager = getDependencyManager();
+      
+      // Stream output back to renderer
+      const result = await depManager.installAllMissing((output) => {
+        event.sender.send('deps:install-output', output);
+      });
+      
+      return { success: result.allSuccessful, ...result };
+    } catch (error) {
+      console.error('[DependencyManager] Install all failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Cancel an ongoing installation
+  ipcMain.handle('deps:cancel-install', async (event, depName) => {
+    try {
+      const depManager = getDependencyManager();
+      const cancelled = depManager.cancelInstall(depName);
+      return { success: true, cancelled };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Get the aider Python path
+  ipcMain.handle('deps:get-aider-python', async () => {
+    try {
+      const depManager = getDependencyManager();
+      const pythonPath = depManager.getAiderPythonPath();
+      return { success: true, pythonPath };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+  
+  console.log('[setupDependencyIPC] All handlers registered');
+}
+
 // Set up Aider Bridge IPC handlers
 function setupAiderIPC() {
   console.log('[setupAiderIPC] Setting up Aider Bridge handlers');
+  
+  // Start Aider
+  ipcMain.handle('aider:start', async () => {
+    try {
+      if (!aiderBridge) {
+        // Get API key from settings
+        const { getSettingsManager } = require('./settings-manager');
+        const settings = getSettingsManager();
+        const apiKey = settings.getLLMApiKey();
+        const provider = settings.getLLMProvider();
+        
+        console.log(`[Aider] Starting with provider: ${provider}, API key present: ${!!apiKey}`);
+        
+        // Find the correct Python path - check pipx first, then system python
+        const { execSync } = require('child_process');
+        const os = require('os');
+        let pythonPath = 'python3';
+        
+        // Check for pipx aider installation
+        const pipxAiderPython = path.join(os.homedir(), '.local', 'pipx', 'venvs', 'aider-chat', 'bin', 'python');
+        if (fs.existsSync(pipxAiderPython)) {
+          console.log('[Aider] Found pipx aider installation at:', pipxAiderPython);
+          pythonPath = pipxAiderPython;
+        } else {
+          // Check if system python has aider
+          try {
+            execSync('python3 -c "import aider"', { encoding: 'utf-8', stdio: 'pipe' });
+            console.log('[Aider] Using system python3 with aider');
+          } catch (e) {
+            // Try to find aider command and extract its Python
+            try {
+              const aiderPath = execSync('which aider', { encoding: 'utf-8' }).trim();
+              if (aiderPath) {
+                const aiderScript = fs.readFileSync(aiderPath, 'utf-8');
+                const shebangMatch = aiderScript.match(/^#!(.+)$/m);
+                if (shebangMatch && shebangMatch[1]) {
+                  const extractedPython = shebangMatch[1].trim();
+                  if (fs.existsSync(extractedPython)) {
+                    console.log('[Aider] Extracted Python from aider shebang:', extractedPython);
+                    pythonPath = extractedPython;
+                  }
+                }
+              }
+            } catch (e2) {
+              console.log('[Aider] Could not find aider command, using python3');
+            }
+          }
+        }
+        
+        console.log('[Aider] Using Python path:', pythonPath);
+        aiderBridge = new AiderBridgeClient(pythonPath, apiKey, provider);
+        await aiderBridge.start();
+        console.log('[Aider] Bridge started successfully');
+      }
+      return { success: true };
+    } catch (error) {
+      console.error('[Aider] Failed to start:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Initialize with repo
+  ipcMain.handle('aider:initialize', async (event, repoPath, modelName) => {
+    try {
+      if (!aiderBridge) {
+        throw new Error('Aider not started');
+      }
+      // GSX Create should honor the selected model; default to Claude Opus 4.5 if none provided.
+      const result = await aiderBridge.initialize(repoPath, modelName || 'claude-opus-4-5-20250929');
+      console.log('[Aider] Initialized:', result);
+      return result;
+    } catch (error) {
+      console.error('[Aider] Initialize failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Run prompt
+  ipcMain.handle('aider:run-prompt', async (event, message) => {
+    try {
+      if (!aiderBridge) {
+        throw new Error('Aider not started');
+      }
+      console.log('[Aider] Running prompt:', message.substring(0, 100) + '...');
+      const result = await aiderBridge.runPrompt(message);
+      console.log('[Aider] Prompt result:', result.success ? 'Success' : 'Failed');
+      return result;
+    } catch (error) {
+      console.error('[Aider] Run prompt failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // ========== HUD ACTIVITY BROADCASTING ==========
+  // Helper to broadcast HUD activity updates to all windows
+  function broadcastHUDActivity(data) {
+    const { BrowserWindow } = require('electron');
+    BrowserWindow.getAllWindows().forEach(win => {
+      if (win && win.webContents && !win.webContents.isDestroyed()) {
+        win.webContents.send('hud:activity', data);
+      }
+    });
+  }
+  
+  // Expose broadcast function globally for Agent to use
+  global.broadcastHUDActivity = broadcastHUDActivity;
+  
+  // Run prompt with streaming
+  ipcMain.handle('aider:run-prompt-streaming', async (event, message, channel) => {
+    try {
+      if (!aiderBridge) {
+        throw new Error('Aider not started');
+      }
+      console.log('[Aider] Running streaming prompt:', message.substring(0, 100) + '...');
+      
+      // Broadcast HUD: stream starting
+      broadcastHUDActivity({
+        type: 'aider',
+        phase: 'Execute',
+        action: 'Processing prompt...',
+        task: message.substring(0, 60) + (message.length > 60 ? '...' : '')
+      });
+      
+      let currentFile = null;
+      let tokenBuffer = '';
+      
+      const result = await aiderBridge.runPromptStreaming(message, (token) => {
+        event.sender.send(channel, { type: 'token', token });
+        
+        // Accumulate tokens to detect patterns
+        tokenBuffer += token;
+        
+        // Detect file being edited from SEARCH/REPLACE blocks
+        const fileMatch = tokenBuffer.match(/(?:<<<<<<< SEARCH|SEARCH\/REPLACE)\s*(?:in\s+)?([^\n]+\.[a-zA-Z]+)/i);
+        if (fileMatch && fileMatch[1] !== currentFile) {
+          currentFile = fileMatch[1].trim();
+          broadcastHUDActivity({
+            type: 'aider',
+            action: 'Writing code...',
+            file: currentFile
+          });
+        }
+        
+        // Detect file writes
+        const wroteMatch = token.match(/(?:Wrote|Applied edit to)\s+([^\s\n]+)/);
+        if (wroteMatch) {
+          broadcastHUDActivity({
+            type: 'aider',
+            action: 'File saved',
+            file: wroteMatch[1],
+            recent: `Updated ${wroteMatch[1].split('/').pop()}`
+          });
+        }
+        
+        // Keep buffer manageable
+        if (tokenBuffer.length > 2000) {
+          tokenBuffer = tokenBuffer.slice(-1000);
+        }
+      });
+      
+      // Broadcast HUD: complete
+      broadcastHUDActivity({
+        type: 'aider',
+        action: 'Complete!',
+        phase: 'Execute'
+      });
+      
+      event.sender.send(channel, { type: 'done', result });
+      return result;
+    } catch (error) {
+      console.error('[Aider] Streaming prompt failed:', error);
+      
+      // Broadcast HUD: error
+      broadcastHUDActivity({
+        type: 'aider',
+        action: 'Error: ' + error.message.substring(0, 40),
+        phase: 'Execute'
+      });
+      
+      event.sender.send(channel, { type: 'error', error: error.message });
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Add files
+  ipcMain.handle('aider:add-files', async (event, filePaths) => {
+    try {
+      if (!aiderBridge) {
+        throw new Error('Aider not started');
+      }
+      const result = await aiderBridge.addFiles(filePaths);
+      console.log('[Aider] Added files:', result);
+      return result;
+    } catch (error) {
+      console.error('[Aider] Add files failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Remove files
+  ipcMain.handle('aider:remove-files', async (event, filePaths) => {
+    try {
+      if (!aiderBridge) {
+        throw new Error('Aider not started');
+      }
+      const result = await aiderBridge.removeFiles(filePaths);
+      console.log('[Aider] Removed files:', result);
+      return result;
+    } catch (error) {
+      console.error('[Aider] Remove files failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Get repo map
+  ipcMain.handle('aider:get-repo-map', async () => {
+    try {
+      if (!aiderBridge) {
+        throw new Error('Aider not started');
+      }
+      const result = await aiderBridge.getRepoMap();
+      console.log('[Aider] Got repo map');
+      return result;
+    } catch (error) {
+      console.error('[Aider] Get repo map failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Set test command
+  ipcMain.handle('aider:set-test-cmd', async (event, command) => {
+    try {
+      if (!aiderBridge) {
+        throw new Error('Aider not started');
+      }
+      const result = await aiderBridge.setTestCmd(command);
+      console.log('[Aider] Set test command:', result);
+      return result;
+    } catch (error) {
+      console.error('[Aider] Set test command failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Set lint command
+  ipcMain.handle('aider:set-lint-cmd', async (event, command) => {
+    try {
+      if (!aiderBridge) {
+        throw new Error('Aider not started');
+      }
+      const result = await aiderBridge.setLintCmd(command);
+      console.log('[Aider] Set lint command:', result);
+      return result;
+    } catch (error) {
+      console.error('[Aider] Set lint command failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Shutdown Aider
+  ipcMain.handle('aider:shutdown', async () => {
+    try {
+      if (aiderBridge) {
+        await aiderBridge.shutdown();
+        aiderBridge = null;
+        console.log('[Aider] Shutdown complete');
+      }
+      return { success: true };
+    } catch (error) {
+      console.error('[Aider] Shutdown failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Get app path
+  ipcMain.handle('aider:get-app-path', async () => {
+    return app.getAppPath();
+  });
+  
+  // Select folder dialog
+  ipcMain.handle('aider:select-folder', async () => {
+    const { dialog } = require('electron');
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory']
+    });
+    if (result.canceled) {
+      return null;
+    }
+    return result.filePaths[0];
+  });
+  
+  // Create a new space
+  ipcMain.handle('aider:create-space', async (event, name) => {
+    try {
+      const spacesDir = path.join(app.getPath('userData'), 'spaces');
+      const spaceId = `space-${Date.now()}`;
+      const spacePath = path.join(spacesDir, spaceId);
+      
+      fs.mkdirSync(spacePath, { recursive: true });
+      
+      // Create initial metadata
+      const metadata = {
+        id: spaceId,
+        name: name || 'New Space',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      
+      fs.writeFileSync(
+        path.join(spacePath, 'space-metadata.json'),
+        JSON.stringify(metadata, null, 2)
+      );
+      
+      console.log('[Aider] Created space:', spaceId);
+      return { success: true, spaceId, spacePath };
+    } catch (error) {
+      console.error('[Aider] Create space failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Initialize the Branch Aider Manager for parallel exploration
+  ipcMain.handle('aider:init-branch-manager', async (event, spacePath) => {
+    try {
+      // Create the branch manager instance
+      branchAiderManager = new BranchAiderManager();
+      
+      // Call initialize() to set up the logs directory
+      await branchAiderManager.initialize(spacePath);
+      
+      console.log('[BranchManager] Initialized for space:', spacePath);
+      return { success: true, logsDir: branchAiderManager.logsDir };
+    } catch (error) {
+      console.error('[BranchManager] Init failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Initialize a branch-specific Aider instance
+  ipcMain.handle('aider:init-branch', async (event, branchPath, branchId, model, readOnlyFiles) => {
+    try {
+      console.log('[BranchManager] init-branch called with:', {
+        branchPath: branchPath || '<null>',
+        branchId: branchId || '<null>',
+        model: model || '<null>',
+        readOnlyFiles: readOnlyFiles?.length || 0
+      });
+      
+      if (!branchAiderManager) {
+        throw new Error('Branch manager not initialized. Call init-branch-manager first.');
+      }
+      
+      const result = await branchAiderManager.initBranch(branchPath, branchId, model, readOnlyFiles);
+      return result;
+    } catch (error) {
+      console.error('[BranchManager] Init branch failed:', error);
+      console.error('[BranchManager] Failed params:', { branchPath, branchId, model });
+      return { success: false, error: error.message };
+    }
+  });
   
   // Run prompt on a specific branch's Aider (with streaming)
   ipcMain.handle('aider:branch-prompt', async (event, branchId, prompt, channel) => {
@@ -2124,8 +2855,26 @@ function setupAiderIPC() {
   });
   
   // Evaluate content using LLM (runs in main process with access to API key)
-  ipcMain.handle('aider:evaluate', async (event, systemPrompt, userPrompt, modelName) => {
-    console.log('[GSX Create] Evaluation request received, model:', modelName);
+  ipcMain.handle('aider:evaluate', async (event, arg1, arg2, arg3) => {
+    // Support both old style (systemPrompt, userPrompt, model) and new style ({ systemPrompt, userPrompt, image, model, maxTokens })
+    let systemPrompt, userPrompt, modelName, imageBase64, maxTokens;
+    
+    if (typeof arg1 === 'object' && arg1 !== null) {
+      // New object-style call
+      systemPrompt = arg1.systemPrompt;
+      userPrompt = arg1.userPrompt;
+      modelName = arg1.model;
+      imageBase64 = arg1.image;
+      maxTokens = arg1.maxTokens || 4096;
+    } else {
+      // Old positional style call
+      systemPrompt = arg1;
+      userPrompt = arg2;
+      modelName = arg3;
+      maxTokens = 4096;
+    }
+    
+    console.log('[GSX Create] Evaluation request received, model:', modelName, 'hasImage:', !!imageBase64);
     try {
       const { getSettingsManager } = require('./settings-manager');
       const settings = getSettingsManager();
@@ -2142,7 +2891,7 @@ function setupAiderIPC() {
       
       // Use the passed model, or fall back to settings - GSX Create only uses Claude 4.5 models
       const provider = isOpenAI ? 'openai' : (isAnthropic ? 'anthropic' : (settings.getLLMProvider() || 'anthropic'));
-      const model = modelName || 'claude-opus-4-5-20251101';
+      let model = modelName || 'claude-opus-4-5-20251101';
       
       console.log('[GSX Create] Using provider:', provider, 'model:', model);
       
@@ -2200,12 +2949,42 @@ function setupAiderIPC() {
           model = 'claude-opus-4-5-20251101';
         }
         
+        // Build the user message content - support both text-only and image+text
+        let userContent;
+        if (imageBase64) {
+          // Vision request with image
+          // Remove data URL prefix if present (e.g., "data:image/png;base64,")
+          let imageData = imageBase64;
+          if (imageBase64.includes(',')) {
+            imageData = imageBase64.split(',')[1];
+          }
+          
+          userContent = [
+            {
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: 'image/png',
+                data: imageData
+              }
+            },
+            {
+              type: 'text',
+              text: userPrompt || 'Analyze this image.'
+            }
+          ];
+          console.log('[GSX Create] Including image in request (vision mode)');
+        } else {
+          // Text-only request
+          userContent = userPrompt;
+        }
+        
         const requestBody = {
           model: model,
-          max_tokens: 4096,
-          system: systemPrompt,
+          max_tokens: maxTokens || 4096,
+          system: systemPrompt || 'You are a helpful assistant.',
           messages: [
-            { role: 'user', content: userPrompt }
+            { role: 'user', content: userContent }
           ]
         };
         
@@ -2295,6 +3074,649 @@ function setupAiderIPC() {
       
     } catch (error) {
       console.error('[GSX Create] Evaluation error:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // ============================================
+  // DESIGN-FIRST WORKFLOW - UI Mockup Generation
+  // ============================================
+
+  // Generate 4 design mockup choices using DALL-E 3
+  ipcMain.handle('design:generate-choices', async (event, { objective, approaches }) => {
+    console.log('[Design] Generating 4 design choices for:', objective?.substring(0, 50));
+    // #region agent log
+    try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'main.js:design:generate-choices',message:'IPC handler called',data:{objective:objective?.substring(0,50),approachCount:approaches?.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})+'\n'); } catch(e){}
+    // #endregion
+    
+    try {
+      const { getSettingsManager } = require('./settings-manager');
+      const settings = getSettingsManager();
+      const openaiKey = settings.get('openaiApiKey');
+      
+      if (!openaiKey) {
+        // #region agent log
+        try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'main.js:design:generate-choices',message:'No OpenAI key',data:{hasKey:false},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})+'\n'); } catch(e){}
+        // #endregion
+        throw new Error('OpenAI API key required for design generation. Please add it in Settings.');
+      }
+      // #region agent log
+      try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'main.js:design:generate-choices',message:'OpenAI key found, calling API',data:{hasKey:true},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})+'\n'); } catch(e){}
+      // #endregion
+      
+      const https = require('https');
+      
+      // Generate image with better error handling
+      const generateImage = async (approach, attemptNum = 1) => {
+        const maxRetries = 2;
+        
+        return new Promise((resolve, reject) => {
+          const requestBody = JSON.stringify({
+            model: 'dall-e-3',
+            prompt: approach.prompt,
+            n: 1,
+            size: '1024x1024',
+            quality: 'standard', // standard for faster generation, hd for final
+            response_format: 'b64_json'
+          });
+          
+          console.log(`[Design] Starting image generation for ${approach.id} (attempt ${attemptNum})`);
+          
+          const req = https.request({
+            hostname: 'api.openai.com',
+            path: '/v1/images/generations',
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${openaiKey}`,
+              'Content-Length': Buffer.byteLength(requestBody)
+            },
+            timeout: 120000 // 2 minute timeout for image generation
+          }, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+              try {
+                const response = JSON.parse(data);
+                
+                // Log response status
+                console.log(`[Design] Response for ${approach.id}: status=${res.statusCode}`);
+                
+                if (response.error) {
+                  const errorMsg = response.error.message || JSON.stringify(response.error);
+                  console.error(`[Design] OpenAI API error for ${approach.id}:`, errorMsg);
+                  
+                  // Rate limit handling - retry after delay
+                  if (res.statusCode === 429 && attemptNum < maxRetries) {
+                    console.log(`[Design] Rate limited, will retry ${approach.id} after delay...`);
+                    setTimeout(() => {
+                      generateImage(approach, attemptNum + 1).then(resolve).catch(reject);
+                    }, 10000); // Wait 10 seconds before retry
+                    return;
+                  }
+                  
+                  reject(new Error(errorMsg));
+                  return;
+                }
+                
+                if (response.data && response.data[0]) {
+                  console.log(`[Design] Successfully generated image for ${approach.id}`);
+                  resolve({
+                    id: approach.id,
+                    name: approach.name,
+                    icon: approach.icon,
+                    description: approach.description,
+                    imageData: `data:image/png;base64,${response.data[0].b64_json}`,
+                    prompt: approach.prompt,
+                    revisedPrompt: response.data[0].revised_prompt // DALL-E 3 sometimes modifies prompts
+                  });
+                } else {
+                  console.error(`[Design] No image data in response for ${approach.id}:`, JSON.stringify(response).substring(0, 200));
+                  reject(new Error('No image data in response'));
+                }
+              } catch (e) {
+                console.error(`[Design] Parse error for ${approach.id}:`, e.message);
+                reject(new Error('Failed to parse response: ' + e.message));
+              }
+            });
+          });
+          
+          req.on('timeout', () => {
+            req.destroy();
+            console.error(`[Design] Request timeout for ${approach.id}`);
+            reject(new Error('Request timeout - image generation took too long'));
+          });
+          
+          req.on('error', (err) => {
+            console.error(`[Design] Network error for ${approach.id}:`, err.message);
+            reject(new Error('Network error: ' + err.message));
+          });
+          
+          req.write(requestBody);
+          req.end();
+        });
+      };
+      
+      // Generate images - stagger requests to avoid rate limits
+      console.log('[Design] Generating 4 design images with DALL-E 3...');
+      const startTime = Date.now();
+      
+      // Generate with staggered start times to reduce rate limit issues
+      const staggeredGenerate = async () => {
+        const results = [];
+        for (let i = 0; i < approaches.length; i++) {
+          // Small delay between requests to avoid rate limits
+          if (i > 0) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+          
+          const approach = approaches[i];
+          console.log(`[Design] Generating design ${i + 1}/4: ${approach.id}`);
+          
+          try {
+            const result = await generateImage(approach);
+            results.push({ status: 'fulfilled', value: result });
+          } catch (error) {
+            results.push({ status: 'rejected', reason: error });
+          }
+        }
+        return results;
+      };
+      
+      const results = await staggeredGenerate();
+      
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      const successCount = results.filter(r => r.status === 'fulfilled').length;
+      console.log(`[Design] Generated ${successCount}/4 images in ${elapsed}s`);
+      
+      // Return successful generations, with placeholders for failures
+      const designs = results.map((result, index) => {
+        if (result.status === 'fulfilled') {
+          return result.value;
+        } else {
+          console.error('[Design] Failed to generate', approaches[index].id, ':', result.reason);
+          return {
+            id: approaches[index].id,
+            name: approaches[index].name,
+            icon: approaches[index].icon,
+            description: approaches[index].description,
+            error: result.reason.message,
+            imageData: null
+          };
+        }
+      });
+      
+      return { success: true, designs };
+      
+    } catch (error) {
+      console.error('[Design] Generation failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Regenerate a single design mockup
+  ipcMain.handle('design:regenerate-single', async (event, { approach }) => {
+    console.log('[Design] Regenerating single design:', approach.id);
+    
+    try {
+      const { getSettingsManager } = require('./settings-manager');
+      const settings = getSettingsManager();
+      const openaiKey = settings.get('openaiApiKey');
+      
+      if (!openaiKey) {
+        throw new Error('OpenAI API key required');
+      }
+      
+      const https = require('https');
+      
+      const requestBody = JSON.stringify({
+        model: 'dall-e-3',
+        prompt: approach.prompt,
+        n: 1,
+        size: '1024x1024',
+        quality: 'standard',
+        response_format: 'b64_json'
+      });
+      
+      const result = await new Promise((resolve, reject) => {
+        const req = https.request({
+          hostname: 'api.openai.com',
+          path: '/v1/images/generations',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${openaiKey}`,
+            'Content-Length': Buffer.byteLength(requestBody)
+          }
+        }, (res) => {
+          let data = '';
+          res.on('data', chunk => data += chunk);
+          res.on('end', () => {
+            try {
+              const response = JSON.parse(data);
+              if (response.error) {
+                reject(new Error(response.error.message));
+                return;
+              }
+              if (response.data && response.data[0]) {
+                resolve({
+                  id: approach.id,
+                  name: approach.name,
+                  icon: approach.icon,
+                  description: approach.description,
+                  imageData: `data:image/png;base64,${response.data[0].b64_json}`,
+                  prompt: approach.prompt
+                });
+              } else {
+                reject(new Error('No image data in response'));
+              }
+            } catch (e) {
+              reject(new Error('Failed to parse response'));
+            }
+          });
+        });
+        
+        req.on('error', reject);
+        req.write(requestBody);
+        req.end();
+      });
+      
+      return { success: true, design: result };
+      
+    } catch (error) {
+      console.error('[Design] Regeneration failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Extract design tokens from selected mockup image (two-pass approach)
+  ipcMain.handle('design:extract-tokens', async (event, { imageData }) => {
+    console.log('[Design] Extracting design tokens from mockup...');
+    
+    try {
+      const { getSettingsManager } = require('./settings-manager');
+      const settings = getSettingsManager();
+      const apiKey = settings.getLLMApiKey();
+      
+      if (!apiKey) {
+        throw new Error('Anthropic API key required for design analysis');
+      }
+      
+      const https = require('https');
+      const { getStylePromptGenerator } = require('./style-prompt-generator');
+      const styleGen = getStylePromptGenerator();
+      
+      // Get the extraction prompt
+      const extractionPrompt = styleGen.getDesignTokenExtractionPrompt();
+      
+      // Extract base64 from data URL
+      let base64Data = imageData;
+      let mediaType = 'image/png';
+      if (imageData.startsWith('data:')) {
+        const matches = imageData.match(/^data:([^;]+);base64,(.+)$/);
+        if (matches) {
+          mediaType = matches[1];
+          base64Data = matches[2];
+        }
+      }
+      
+      const requestBody = JSON.stringify({
+        model: 'claude-sonnet-4-5-20250929',
+        max_tokens: 2000,
+        messages: [{
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: mediaType,
+                data: base64Data
+              }
+            },
+            {
+              type: 'text',
+              text: extractionPrompt
+            }
+          ]
+        }]
+      });
+      
+      const response = await new Promise((resolve, reject) => {
+        const req = https.request({
+          hostname: 'api.anthropic.com',
+          path: '/v1/messages',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': apiKey,
+            'anthropic-version': '2023-06-01',
+            'Content-Length': Buffer.byteLength(requestBody)
+          }
+        }, (res) => {
+          let data = '';
+          res.on('data', chunk => data += chunk);
+          res.on('end', () => {
+            try {
+              resolve(JSON.parse(data));
+            } catch (e) {
+              reject(new Error('Failed to parse response'));
+            }
+          });
+        });
+        
+        req.on('error', reject);
+        req.write(requestBody);
+        req.end();
+      });
+      
+      if (response.error) {
+        throw new Error(response.error.message);
+      }
+      
+      // Extract JSON from Claude's response
+      const content = response.content?.[0]?.text;
+      if (!content) {
+        throw new Error('No content in response');
+      }
+      
+      // Parse the JSON tokens
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error('Could not find JSON in response');
+      }
+      
+      const tokens = JSON.parse(jsonMatch[0]);
+      console.log('[Design] Extracted design tokens:', Object.keys(tokens));
+      
+      return { success: true, tokens };
+      
+    } catch (error) {
+      console.error('[Design] Token extraction failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Generate code from design using two-pass approach
+  ipcMain.handle('design:generate-code', async (event, { objective, imageData, tokens, options = {} }) => {
+    console.log('[Design] Generating code from design mockup...');
+    
+    try {
+      const { getSettingsManager } = require('./settings-manager');
+      const settings = getSettingsManager();
+      const apiKey = settings.getLLMApiKey();
+      
+      if (!apiKey) {
+        throw new Error('Anthropic API key required');
+      }
+      
+      const https = require('https');
+      const { getStylePromptGenerator } = require('./style-prompt-generator');
+      const styleGen = getStylePromptGenerator();
+      
+      // Get the code generation prompt with tokens
+      const codePrompt = styleGen.getCodeFromDesignPrompt(objective, tokens, options);
+      
+      // Extract base64 from data URL
+      let base64Data = imageData;
+      let mediaType = 'image/png';
+      if (imageData.startsWith('data:')) {
+        const matches = imageData.match(/^data:([^;]+);base64,(.+)$/);
+        if (matches) {
+          mediaType = matches[1];
+          base64Data = matches[2];
+        }
+      }
+      
+      const requestBody = JSON.stringify({
+        model: 'claude-opus-4-5-20251101', // Use Opus for code generation
+        max_tokens: 8000,
+        messages: [{
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: mediaType,
+                data: base64Data
+              }
+            },
+            {
+              type: 'text',
+              text: codePrompt
+            }
+          ]
+        }]
+      });
+      
+      console.log('[Design] Calling Claude Opus for code generation...');
+      
+      const response = await new Promise((resolve, reject) => {
+        const req = https.request({
+          hostname: 'api.anthropic.com',
+          path: '/v1/messages',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': apiKey,
+            'anthropic-version': '2023-06-01',
+            'Content-Length': Buffer.byteLength(requestBody)
+          }
+        }, (res) => {
+          let data = '';
+          res.on('data', chunk => data += chunk);
+          res.on('end', () => {
+            try {
+              resolve(JSON.parse(data));
+            } catch (e) {
+              reject(new Error('Failed to parse response'));
+            }
+          });
+        });
+        
+        req.on('error', reject);
+        req.write(requestBody);
+        req.end();
+      });
+      
+      if (response.error) {
+        throw new Error(response.error.message);
+      }
+      
+      const content = response.content?.[0]?.text;
+      if (!content) {
+        throw new Error('No content in response');
+      }
+      
+      // Extract HTML code from response
+      let code = content;
+      
+      // Try to extract just the HTML if it's wrapped in markdown
+      const htmlMatch = content.match(/```html\s*([\s\S]*?)```/);
+      if (htmlMatch) {
+        code = htmlMatch[1].trim();
+      } else {
+        // Check if it starts with <!DOCTYPE or <html
+        const docMatch = content.match(/(<!DOCTYPE[\s\S]*|<html[\s\S]*)/i);
+        if (docMatch) {
+          code = docMatch[1].trim();
+        }
+      }
+      
+      console.log('[Design] Code generated, length:', code.length);
+      
+      return { success: true, code };
+      
+    } catch (error) {
+      console.error('[Design] Code generation failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Get design approaches (for UI to display options)
+  ipcMain.handle('design:get-approaches', async (event, { objective, options = {} }) => {
+    // #region agent log
+    try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'main.js:design:get-approaches',message:'Getting design approaches',data:{objective:objective?.substring(0,50)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})+'\n'); } catch(e){}
+    // #endregion
+    try {
+      const { getStylePromptGenerator } = require('./style-prompt-generator');
+      const styleGen = getStylePromptGenerator();
+      const approaches = styleGen.generateDesignApproaches(objective, options);
+      // #region agent log
+      try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'main.js:design:get-approaches',message:'Approaches generated',data:{count:approaches?.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})+'\n'); } catch(e){}
+      // #endregion
+      return { success: true, approaches };
+    } catch (error) {
+      console.error('[Design] Failed to get approaches:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // ========== MULTI-AGENT DIRECT API CALL ==========
+  // Direct AI call for parallel Q&A and agent operations (bypasses Aider bridge)
+  ipcMain.handle('ai:direct-call', async (event, { model, messages, max_tokens, response_format }) => {
+    console.log('[MultiAgent] Direct API call:', model, 'messages:', messages?.length);
+    
+    try {
+      const { getSettingsManager } = require('./settings-manager');
+      const settings = getSettingsManager();
+      const https = require('https');
+      
+      // Determine which API to use based on model
+      const isOpenAI = model.startsWith('gpt-') || model.includes('o1') || model.includes('o3');
+      const isClaude = model.startsWith('claude');
+      
+      if (isOpenAI) {
+        const openaiKey = settings.get('openaiApiKey');
+        if (!openaiKey) {
+          throw new Error('OpenAI API key required. Please add it in Settings.');
+        }
+        
+        const requestBody = {
+          model: model,
+          messages: messages,
+          max_tokens: max_tokens || 2000
+        };
+        
+        if (response_format) {
+          requestBody.response_format = response_format;
+        }
+        
+        const result = await new Promise((resolve, reject) => {
+          const req = https.request({
+            hostname: 'api.openai.com',
+            path: '/v1/chat/completions',
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${openaiKey}`
+            }
+          }, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+              try {
+                const parsed = JSON.parse(data);
+                if (parsed.error) {
+                  reject(new Error(parsed.error.message || 'OpenAI API error'));
+                } else {
+                  resolve(parsed);
+                }
+              } catch (e) {
+                reject(new Error('Failed to parse OpenAI response'));
+              }
+            });
+          });
+          
+          req.on('error', reject);
+          req.setTimeout(120000, () => {
+            req.destroy();
+            reject(new Error('Request timeout'));
+          });
+          
+          req.write(JSON.stringify(requestBody));
+          req.end();
+        });
+        
+        return {
+          success: true,
+          content: result.choices[0].message.content,
+          usage: result.usage,
+          model: result.model
+        };
+        
+      } else if (isClaude) {
+        const anthropicKey = settings.getLLMApiKey();
+        if (!anthropicKey) {
+          throw new Error('Anthropic API key required. Please add it in Settings.');
+        }
+        
+        const requestBody = {
+          model: model,
+          max_tokens: max_tokens || 2000,
+          messages: messages.filter(m => m.role !== 'system').map(m => ({
+            role: m.role === 'assistant' ? 'assistant' : 'user',
+            content: m.content
+          }))
+        };
+        
+        // Add system prompt if present
+        const systemMsg = messages.find(m => m.role === 'system');
+        if (systemMsg) {
+          requestBody.system = systemMsg.content;
+        }
+        
+        const result = await new Promise((resolve, reject) => {
+          const req = https.request({
+            hostname: 'api.anthropic.com',
+            path: '/v1/messages',
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': anthropicKey,
+              'anthropic-version': '2023-06-01'
+            }
+          }, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+              try {
+                const parsed = JSON.parse(data);
+                if (parsed.error) {
+                  reject(new Error(parsed.error.message || 'Anthropic API error'));
+                } else {
+                  resolve(parsed);
+                }
+              } catch (e) {
+                reject(new Error('Failed to parse Anthropic response'));
+              }
+            });
+          });
+          
+          req.on('error', reject);
+          req.setTimeout(120000, () => {
+            req.destroy();
+            reject(new Error('Request timeout'));
+          });
+          
+          req.write(JSON.stringify(requestBody));
+          req.end();
+        });
+        
+        return {
+          success: true,
+          content: result.content[0].text,
+          usage: result.usage,
+          model: result.model
+        };
+        
+      } else {
+        throw new Error(`Unsupported model: ${model}. Use gpt-* or claude-* models.`);
+      }
+      
+    } catch (error) {
+      console.error('[MultiAgent] Direct API call error:', error);
       return { success: false, error: error.message };
     }
   });
@@ -3034,15 +4456,34 @@ function setupAiderIPC() {
   
   // Create a new git branch
   ipcMain.handle('aider:git-create-branch', async (event, repoPath, branchName, baseBranch = 'main') => {
+    // #region agent log
+    try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'main.js:git-create-branch',message:'Handler called',data:{repoPath,branchName,baseBranch},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-BRANCH'})+'\n'); } catch(e){}
+    // #endregion
     try {
       const { execSync } = require('child_process');
+      const fs = require('fs');
       
       if (!repoPath || !branchName) {
         return { success: false, error: 'Missing required parameters' };
       }
       
-      // Create and switch to new branch
-      execSync(`git checkout -b ${branchName} ${baseBranch}`, { 
+      // Check if directory exists and is a git repo
+      const gitDir = require('path').join(repoPath, '.git');
+      const isGitRepo = fs.existsSync(gitDir);
+      // #region agent log
+      try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'main.js:git-create-branch',message:'Checking git repo',data:{repoPath,isGitRepo,gitDirExists:fs.existsSync(gitDir)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-BRANCH'})+'\n'); } catch(e){}
+      // #endregion
+      
+      // Sanitize branch name - replace spaces and special chars with dashes
+      const safeBranchName = branchName.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/-+/g, '-');
+      const safeBaseBranch = baseBranch.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/-+/g, '-');
+      
+      // #region agent log
+      try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'main.js:git-create-branch',message:'Sanitized names',data:{original:branchName,safe:safeBranchName,baseOriginal:baseBranch,baseSafe:safeBaseBranch},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-BRANCH-FIX'})+'\n'); } catch(e){}
+      // #endregion
+      
+      // Create and switch to new branch (using quotes for safety)
+      execSync(`git checkout -b "${safeBranchName}" "${safeBaseBranch}"`, { 
         cwd: repoPath,
         encoding: 'utf-8'
       });
@@ -3051,7 +4492,60 @@ function setupAiderIPC() {
       return { success: true, branch: branchName };
       
     } catch (error) {
+      // #region agent log
+      try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'main.js:git-create-branch',message:'Git command failed',data:{error:error?.message,stderr:error?.stderr?.toString?.()},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-BRANCH'})+'\n'); } catch(e){}
+      // #endregion
       console.error('[GSX Create] Git create branch failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Create an orphan branch (starts from scratch with no files)
+  ipcMain.handle('aider:git-create-orphan-branch', async (event, repoPath, branchName) => {
+    try {
+      const { execSync } = require('child_process');
+      const fs = require('fs');
+      const path = require('path');
+      
+      if (!repoPath || !branchName) {
+        return { success: false, error: 'Missing required parameters' };
+      }
+      
+      // Sanitize branch name
+      const safeBranchName = branchName.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/-+/g, '-');
+      
+      // Create orphan branch (no parent commits, empty tree)
+      execSync(`git checkout --orphan "${safeBranchName}"`, { 
+        cwd: repoPath,
+        encoding: 'utf-8'
+      });
+      
+      // Remove all files from the index (but not .git)
+      execSync('git rm -rf --cached .', { 
+        cwd: repoPath,
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'] // Suppress errors if no files
+      });
+      
+      // Remove all files from working directory except .git
+      const files = fs.readdirSync(repoPath);
+      for (const file of files) {
+        if (file === '.git') continue;
+        const filePath = path.join(repoPath, file);
+        fs.rmSync(filePath, { recursive: true, force: true });
+      }
+      
+      // Create initial commit so the branch is valid
+      execSync('git commit --allow-empty -m "Initial empty branch"', { 
+        cwd: repoPath,
+        encoding: 'utf-8'
+      });
+      
+      console.log('[GSX Create] Orphan branch created:', branchName);
+      return { success: true, branch: branchName };
+      
+    } catch (error) {
+      console.error('[GSX Create] Git create orphan branch failed:', error);
       return { success: false, error: error.message };
     }
   });
@@ -3212,6 +4706,105 @@ function setupAiderIPC() {
       
     } catch (error) {
       console.error('[GSX Create] Git diff failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Merge a branch into target branch (typically main)
+  ipcMain.handle('aider:git-merge-branch', async (event, repoPath, sourceBranch, targetBranch = 'main') => {
+    try {
+      const { execSync } = require('child_process');
+      
+      if (!repoPath || !sourceBranch) {
+        return { success: false, error: 'Missing required parameters' };
+      }
+      
+      // Sanitize branch names
+      const safeSourceBranch = sourceBranch.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/-+/g, '-');
+      const safeTargetBranch = targetBranch.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/-+/g, '-');
+      
+      // Get current branch to restore later if needed
+      const currentBranch = execSync('git branch --show-current', { 
+        cwd: repoPath,
+        encoding: 'utf-8'
+      }).trim();
+      
+      // Switch to target branch
+      execSync(`git checkout "${safeTargetBranch}"`, { 
+        cwd: repoPath,
+        encoding: 'utf-8'
+      });
+      
+      // Merge source branch into target
+      try {
+        execSync(`git merge "${safeSourceBranch}" -m "Merge branch '${safeSourceBranch}' into ${safeTargetBranch}"`, { 
+          cwd: repoPath,
+          encoding: 'utf-8'
+        });
+      } catch (mergeError) {
+        // Check if it's a merge conflict
+        if (mergeError.message && mergeError.message.includes('CONFLICT')) {
+          // Abort the merge
+          execSync('git merge --abort', { cwd: repoPath, encoding: 'utf-8' });
+          // Switch back to original branch
+          if (currentBranch && currentBranch !== safeTargetBranch) {
+            execSync(`git checkout "${currentBranch}"`, { cwd: repoPath, encoding: 'utf-8' });
+          }
+          return { 
+            success: false, 
+            error: 'Merge conflict detected. Please resolve conflicts manually or use a different merge strategy.',
+            hasConflict: true 
+          };
+        }
+        throw mergeError;
+      }
+      
+      console.log('[GSX Create] Merged branch:', sourceBranch, 'into', targetBranch);
+      return { success: true, sourceBranch, targetBranch };
+      
+    } catch (error) {
+      console.error('[GSX Create] Git merge failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Get merge preview (files that will change)
+  ipcMain.handle('aider:git-merge-preview', async (event, repoPath, sourceBranch, targetBranch = 'main') => {
+    try {
+      const { execSync } = require('child_process');
+      
+      if (!repoPath || !sourceBranch) {
+        return { success: false, error: 'Missing required parameters' };
+      }
+      
+      // Get list of files that differ between branches
+      const diffStat = execSync(`git diff --stat ${targetBranch}..${sourceBranch}`, { 
+        cwd: repoPath,
+        encoding: 'utf-8',
+        maxBuffer: 10 * 1024 * 1024
+      });
+      
+      // Get commit count difference
+      const commitCount = execSync(`git rev-list --count ${targetBranch}..${sourceBranch}`, { 
+        cwd: repoPath,
+        encoding: 'utf-8'
+      }).trim();
+      
+      // Get list of changed files
+      const changedFiles = execSync(`git diff --name-only ${targetBranch}..${sourceBranch}`, { 
+        cwd: repoPath,
+        encoding: 'utf-8'
+      }).trim().split('\n').filter(f => f);
+      
+      return { 
+        success: true, 
+        diffStat, 
+        commitCount: parseInt(commitCount) || 0,
+        changedFiles 
+      };
+      
+    } catch (error) {
+      console.error('[GSX Create] Git merge preview failed:', error);
       return { success: false, error: error.message };
     }
   });
@@ -3544,10 +5137,12 @@ function setupAiderIPC() {
       
       // Use global clipboard manager to ensure both storage and in-memory history are updated
       if (global.clipboardManager) {
-        global.clipboardManager.addToHistory(item);
+        await global.clipboardManager.addToHistory(item);
         console.log(`[GSX Create] Registered file via clipboard manager: ${fileName} in space ${spaceId}`);
       } else {
         // Fallback to direct storage if clipboard manager not available
+        // WARNING: This bypasses in-memory sync and space metadata updates
+        console.warn('[GSX Create] clipboardManager not available, using direct storage (may cause sync issues)');
         const ClipboardStorage = require('./clipboard-storage-v2');
         const storage = new ClipboardStorage();
         storage.addItem(item);
@@ -3652,8 +5247,10 @@ function setupAiderIPC() {
         
         // Use global clipboard manager to ensure both storage and in-memory history are updated
         if (global.clipboardManager) {
-          global.clipboardManager.addToHistory(item);
+          await global.clipboardManager.addToHistory(item);
         } else {
+          // WARNING: This bypasses in-memory sync and space metadata updates
+          console.warn('[GSX Create] clipboardManager not available, using direct storage (may cause sync issues)');
           storage.addItem(item);
         }
         console.log(`[GSX Create] Registered new file as clipboard item: ${fileName}`);
@@ -3843,6 +5440,9 @@ function setupAiderIPC() {
 // Set up IPC handlers for communication with renderer process
 function setupIPC() {
   console.log('[setupIPC] Function called');
+  
+  // Initialize Dependency Management handlers (before Aider so we can check deps first)
+  setupDependencyIPC();
   
   // Initialize Aider Bridge handlers
   setupAiderIPC();
@@ -4649,6 +6249,344 @@ function setupIPC() {
     }
   });
   
+  // ============================================
+  // MULTI-FORMAT SMART EXPORT HANDLERS
+  // ============================================
+  
+  // Get available export formats
+  ipcMain.handle('smart-export:get-formats', async () => {
+    try {
+      const { getAllFormats } = require('./format-generators');
+      return getAllFormats();
+    } catch (error) {
+      console.error('[SmartExport] Error getting formats:', error);
+      return [];
+    }
+  });
+
+  // Generate export in specified format
+  ipcMain.handle('smart-export:generate', async (event, { format, spaceId, options = {} }) => {
+    try {
+      console.log(`[SmartExport] Generating ${format} export for space:`, spaceId);
+      
+      // Get space and items
+      const spacesAPI = require('./spaces-api');
+      const api = spacesAPI.getSpacesAPI();
+      
+      const space = await api.get(spaceId);
+      if (!space) {
+        return { success: false, error: 'Space not found' };
+      }
+      
+      const items = await api.items.list(spaceId, { includeContent: true });
+      
+      // Route to appropriate generator
+      let result;
+      
+      switch (format) {
+        case 'pdf': {
+          // Use existing PDF generator with smart export
+          const PDFGenerator = require('./pdf-generator');
+          const generator = new PDFGenerator();
+          
+          // Generate HTML first using SmartExport if AI-enhanced
+          let html;
+          if (options.aiEnhanced) {
+            const SmartExport = require('./smart-export');
+            const smartExport = new SmartExport();
+            const exportResult = await smartExport.generateSmartExport(space, items, options);
+            html = exportResult.html;
+          } else {
+            html = generator.generateSpaceHTML(space, items, {
+              includeMetadata: options.includeMetadata !== false,
+              includeTimestamps: true,
+              includeTags: true,
+              embedStyles: true
+            });
+          }
+          
+          // Save dialog
+          const { dialog } = require('electron');
+          const saveResult = await dialog.showSaveDialog({
+            title: 'Export as PDF',
+            defaultPath: `${space.name.replace(/[^a-z0-9]/gi, '_')}.pdf`,
+            filters: [{ name: 'PDF Files', extensions: ['pdf'] }]
+          });
+          
+          if (saveResult.canceled) {
+            return { success: false, canceled: true };
+          }
+          
+          await generator.generatePDFFromHTML(html, saveResult.filePath);
+          await generator.cleanup();
+          
+          shell.showItemInFolder(saveResult.filePath);
+          result = { success: true, path: saveResult.filePath };
+          break;
+        }
+        
+        case 'docx': {
+          const { DocxGenerator } = require('./format-generators');
+          const generator = new DocxGenerator();
+          const genResult = await generator.generate(space, items, options);
+          
+          if (!genResult.success) {
+            return genResult;
+          }
+          
+          // Save dialog
+          const { dialog } = require('electron');
+          const saveResult = await dialog.showSaveDialog({
+            title: 'Export as Word Document',
+            defaultPath: genResult.filename,
+            filters: [{ name: 'Word Documents', extensions: ['docx'] }]
+          });
+          
+          if (saveResult.canceled) {
+            return { success: false, canceled: true };
+          }
+          
+          fs.writeFileSync(saveResult.filePath, genResult.buffer);
+          shell.showItemInFolder(saveResult.filePath);
+          result = { success: true, path: saveResult.filePath };
+          break;
+        }
+        
+        case 'pptx': {
+          const { PptxGenerator } = require('./format-generators');
+          const generator = new PptxGenerator();
+          const genResult = await generator.generate(space, items, options);
+          
+          if (!genResult.success) {
+            return genResult;
+          }
+          
+          const { dialog } = require('electron');
+          const saveResult = await dialog.showSaveDialog({
+            title: 'Export as PowerPoint',
+            defaultPath: genResult.filename,
+            filters: [{ name: 'PowerPoint Presentations', extensions: ['pptx'] }]
+          });
+          
+          if (saveResult.canceled) {
+            return { success: false, canceled: true };
+          }
+          
+          fs.writeFileSync(saveResult.filePath, genResult.buffer);
+          shell.showItemInFolder(saveResult.filePath);
+          result = { success: true, path: saveResult.filePath };
+          break;
+        }
+        
+        case 'xlsx': {
+          const { XlsxGenerator } = require('./format-generators');
+          const generator = new XlsxGenerator();
+          const genResult = await generator.generate(space, items, options);
+          
+          if (!genResult.success) {
+            return genResult;
+          }
+          
+          const { dialog } = require('electron');
+          const saveResult = await dialog.showSaveDialog({
+            title: 'Export as Excel Spreadsheet',
+            defaultPath: genResult.filename,
+            filters: [{ name: 'Excel Spreadsheets', extensions: ['xlsx'] }]
+          });
+          
+          if (saveResult.canceled) {
+            return { success: false, canceled: true };
+          }
+          
+          fs.writeFileSync(saveResult.filePath, genResult.buffer);
+          shell.showItemInFolder(saveResult.filePath);
+          result = { success: true, path: saveResult.filePath };
+          break;
+        }
+        
+        case 'markdown': {
+          const { MarkdownGenerator } = require('./format-generators');
+          const generator = new MarkdownGenerator();
+          const genResult = await generator.generate(space, items, options);
+          
+          if (!genResult.success) {
+            return genResult;
+          }
+          
+          const { dialog } = require('electron');
+          const saveResult = await dialog.showSaveDialog({
+            title: 'Export as Markdown',
+            defaultPath: genResult.filename,
+            filters: [{ name: 'Markdown Files', extensions: ['md'] }]
+          });
+          
+          if (saveResult.canceled) {
+            return { success: false, canceled: true };
+          }
+          
+          fs.writeFileSync(saveResult.filePath, genResult.content, 'utf8');
+          shell.showItemInFolder(saveResult.filePath);
+          result = { success: true, path: saveResult.filePath };
+          break;
+        }
+        
+        case 'csv': {
+          const { CsvGenerator } = require('./format-generators');
+          const generator = new CsvGenerator();
+          const genResult = await generator.generate(space, items, options);
+          
+          if (!genResult.success) {
+            return genResult;
+          }
+          
+          const { dialog } = require('electron');
+          const saveResult = await dialog.showSaveDialog({
+            title: 'Export as CSV',
+            defaultPath: genResult.filename,
+            filters: [{ name: 'CSV Files', extensions: ['csv'] }]
+          });
+          
+          if (saveResult.canceled) {
+            return { success: false, canceled: true };
+          }
+          
+          fs.writeFileSync(saveResult.filePath, genResult.content, 'utf8');
+          shell.showItemInFolder(saveResult.filePath);
+          result = { success: true, path: saveResult.filePath };
+          break;
+        }
+        
+        case 'txt': {
+          const { TxtGenerator } = require('./format-generators');
+          const generator = new TxtGenerator();
+          const genResult = await generator.generate(space, items, options);
+          
+          if (!genResult.success) {
+            return genResult;
+          }
+          
+          const { dialog } = require('electron');
+          const saveResult = await dialog.showSaveDialog({
+            title: 'Export as Plain Text',
+            defaultPath: genResult.filename,
+            filters: [{ name: 'Text Files', extensions: ['txt'] }]
+          });
+          
+          if (saveResult.canceled) {
+            return { success: false, canceled: true };
+          }
+          
+          fs.writeFileSync(saveResult.filePath, genResult.content, 'utf8');
+          shell.showItemInFolder(saveResult.filePath);
+          result = { success: true, path: saveResult.filePath };
+          break;
+        }
+        
+        case 'slides': {
+          const { SlidesGenerator } = require('./format-generators');
+          const generator = new SlidesGenerator();
+          const genResult = await generator.generate(space, items, options);
+          
+          if (!genResult.success) {
+            return genResult;
+          }
+          
+          const { dialog } = require('electron');
+          const saveResult = await dialog.showSaveDialog({
+            title: 'Export as Web Slides',
+            defaultPath: genResult.filename,
+            filters: [{ name: 'HTML Files', extensions: ['html'] }]
+          });
+          
+          if (saveResult.canceled) {
+            return { success: false, canceled: true };
+          }
+          
+          fs.writeFileSync(saveResult.filePath, genResult.content, 'utf8');
+          shell.showItemInFolder(saveResult.filePath);
+          result = { success: true, path: saveResult.filePath };
+          break;
+        }
+        
+        case 'html': {
+          // Use existing smart export for HTML
+          const SmartExport = require('./smart-export');
+          const smartExport = new SmartExport();
+          const exportResult = await smartExport.generateSmartExport(space, items, options);
+          
+          const { dialog } = require('electron');
+          const saveResult = await dialog.showSaveDialog({
+            title: 'Export as HTML',
+            defaultPath: `${space.name.replace(/[^a-z0-9]/gi, '_')}.html`,
+            filters: [{ name: 'HTML Files', extensions: ['html'] }]
+          });
+          
+          if (saveResult.canceled) {
+            return { success: false, canceled: true };
+          }
+          
+          fs.writeFileSync(saveResult.filePath, exportResult.html, 'utf8');
+          shell.showItemInFolder(saveResult.filePath);
+          result = { success: true, path: saveResult.filePath };
+          break;
+        }
+        
+        default:
+          return { success: false, error: `Unsupported format: ${format}` };
+      }
+      
+      return result;
+      
+    } catch (error) {
+      console.error('[SmartExport] Error generating export:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Open format selection modal
+  ipcMain.handle('smart-export:open-modal', async (event, spaceId) => {
+    try {
+      // Get space data for the modal
+      const spacesAPI = require('./spaces-api');
+      const api = spacesAPI.getSpacesAPI();
+      
+      const space = await api.get(spaceId);
+      const items = await api.items.list(spaceId);
+      
+      // Create modal window
+      const modalWindow = new BrowserWindow({
+        width: 780,
+        height: 720,
+        parent: BrowserWindow.getFocusedWindow(),
+        modal: true,
+        show: false,
+        resizable: false,
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          preload: path.join(__dirname, 'preload-smart-export.js')
+        }
+      });
+      
+      modalWindow.loadFile('smart-export-format-modal.html');
+      
+      modalWindow.once('ready-to-show', () => {
+        modalWindow.show();
+        // Send space data to modal
+        modalWindow.webContents.send('space-data', {
+          id: spaceId,
+          name: space?.name || 'Unnamed Space',
+          itemCount: items?.length || 0
+        });
+      });
+      
+      return { success: true };
+    } catch (error) {
+      console.error('[SmartExport] Error opening modal:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
   ipcMain.handle('analyze-website-styles', async (event, urls, options) => {
     try {
       console.log('Analyzing website styles for URLs:', urls);
@@ -5675,6 +7613,10 @@ function setupIPC() {
   
   // Handle trigger paste in black hole widget
   ipcMain.on('black-hole:trigger-paste', () => {
+    // #region agent log
+    const fs = require('fs');
+    fs.appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'main.js:black-hole:trigger-paste',message:'Received trigger-paste IPC',data:{hasClipboardManager:!!global.clipboardManager,hasBlackHoleWindow:!!(global.clipboardManager&&global.clipboardManager.blackHoleWindow),isDestroyed:global.clipboardManager?.blackHoleWindow?.isDestroyed?.()},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H5'})+'\n');
+    // #endregion
     console.log('Received request to trigger paste in black hole widget');
     if (global.clipboardManager && global.clipboardManager.blackHoleWindow) {
       if (!global.clipboardManager.blackHoleWindow.isDestroyed()) {
@@ -5822,10 +7764,10 @@ function setupIPC() {
         return;
       }
       
-      // Add context menu handler for this webview
+      // Add context menu handler for this webview with standard editing options and "Send to Space"
       console.log(`[Main] Adding context menu handler for webview ${data.tabId}`);
       contents.on('context-menu', (event, params) => {
-        console.log(`[Webview ${data.tabId}] Context menu requested at:`, params.x, params.y);
+        console.log(`[Webview ${data.tabId}] Context menu requested at:`, params.x, params.y, 'selectionText:', params.selectionText);
         
         // Allow native DevTools context menu to work (only when right-clicking IN DevTools)
         const url = contents.getURL();
@@ -5836,16 +7778,66 @@ function setupIPC() {
         
         event.preventDefault();
         
-        // Create context menu with "Paste to Black Hole" option
-        const contextMenu = Menu.buildFromTemplate([
-          {
-            label: 'Paste to Black Hole',
+        // Build context menu template with standard editing options
+        const menuTemplate = [];
+        
+        // Add Cut option if text is selected and editable
+        if (params.editFlags.canCut) {
+          menuTemplate.push({
+            label: 'Cut',
+            accelerator: 'CmdOrCtrl+X',
             click: () => {
-              console.log(`[Webview ${data.tabId}] Paste to Black Hole clicked`);
+              contents.cut();
+            }
+          });
+        }
+        
+        // Add Copy option if text is selected
+        if (params.editFlags.canCopy) {
+          menuTemplate.push({
+            label: 'Copy',
+            accelerator: 'CmdOrCtrl+C',
+            click: () => {
+              contents.copy();
+            }
+          });
+        }
+        
+        // Add Paste option if paste is available
+        if (params.editFlags.canPaste) {
+          menuTemplate.push({
+            label: 'Paste',
+            accelerator: 'CmdOrCtrl+V',
+            click: () => {
+              contents.paste();
+            }
+          });
+        }
+        
+        // Add Select All option
+        if (params.editFlags.canSelectAll) {
+          menuTemplate.push({
+            label: 'Select All',
+            accelerator: 'CmdOrCtrl+A',
+            click: () => {
+              contents.selectAll();
+            }
+          });
+        }
+        
+        // Add separator if we have any standard options
+        if (params.editFlags.canCut || params.editFlags.canCopy || params.editFlags.canPaste || params.editFlags.canSelectAll) {
+          menuTemplate.push({ type: 'separator' });
+        }
+        
+        // Add "Send to Space" option if text is selected
+        if (params.selectionText && params.selectionText.trim().length > 0) {
+          menuTemplate.push({
+            label: 'Send to Space',
+            click: () => {
+              console.log(`[Webview ${data.tabId}] Send to Space clicked with selection:`, params.selectionText.substring(0, 50));
               
-              // Get clipboard manager from global
               if (global.clipboardManager) {
-                // Get the browser window that contains this webview
                 const win = BrowserWindow.fromWebContents(event.sender);
                 if (win) {
                   const bounds = win.getBounds();
@@ -5854,25 +7846,164 @@ function setupIPC() {
                     y: bounds.y + params.y
                   };
                   
-                  // Pass true as second parameter to show in expanded mode with space chooser
-                  global.clipboardManager.createBlackHoleWindow(position, true);
+                  const selectionData = {
+                    hasText: true,
+                    hasHtml: false,
+                    hasImage: false,
+                    text: params.selectionText,
+                    html: null
+                  };
                   
-                  // Send clipboard content after a delay
-                  setTimeout(() => {
-                    const { clipboard } = require('electron');
-                    const text = clipboard.readText();
-                    if (text && global.clipboardManager && global.clipboardManager.blackHoleWindow) {
-                      global.clipboardManager.blackHoleWindow.webContents.send('paste-content', {
-                        type: 'text',
-                        content: text
-                      });
-                    }
-                  }, 300);
+                  // Create window with selection data - will show modal directly
+                  global.clipboardManager.createBlackHoleWindow(position, true, selectionData);
                 }
               }
             }
+          });
+        }
+        
+        // Add "Send Image to Space" option if right-clicking on an image
+        if (params.mediaType === 'image' && params.srcURL) {
+          menuTemplate.push({
+            label: 'Send Image to Space',
+            click: async () => {
+              console.log(`[Webview ${data.tabId}] Send Image to Space clicked:`, params.srcURL);
+              
+              if (global.clipboardManager) {
+                const win = BrowserWindow.fromWebContents(event.sender);
+                if (win) {
+                  try {
+                    const { net } = require('electron');
+                    
+                    // Download the image
+                    const imageData = await new Promise((resolve, reject) => {
+                      const request = net.request(params.srcURL);
+                      const chunks = [];
+                      
+                      request.on('response', (response) => {
+                        const contentType = response.headers['content-type'] || 'image/png';
+                        
+                        response.on('data', (chunk) => {
+                          chunks.push(chunk);
+                        });
+                        
+                        response.on('end', () => {
+                          const buffer = Buffer.concat(chunks);
+                          const base64 = buffer.toString('base64');
+                          const mimeType = Array.isArray(contentType) ? contentType[0] : contentType;
+                          resolve(`data:${mimeType};base64,${base64}`);
+                        });
+                        
+                        response.on('error', reject);
+                      });
+                      
+                      request.on('error', reject);
+                      request.end();
+                    });
+                    
+                    const bounds = win.getBounds();
+                    const position = {
+                      x: bounds.x + params.x,
+                      y: bounds.y + params.y
+                    };
+                    
+                    const imageDataObj = {
+                      hasText: false,
+                      hasHtml: false,
+                      hasImage: true,
+                      text: null,
+                      html: null,
+                      imageDataUrl: imageData,
+                      sourceUrl: params.srcURL
+                    };
+                    
+                    console.log(`[Webview ${data.tabId}] Image data ready from:`, params.srcURL);
+                    global.clipboardManager.createBlackHoleWindow(position, true, imageDataObj);
+                  } catch (error) {
+                    console.error(`[Webview ${data.tabId}] Error downloading image:`, error);
+                    // Fallback: just send the URL as text
+                    const bounds = win.getBounds();
+                    const position = {
+                      x: bounds.x + params.x,
+                      y: bounds.y + params.y
+                    };
+                    
+                    const fallbackData = {
+                      hasText: true,
+                      hasHtml: false,
+                      hasImage: false,
+                      text: params.srcURL,
+                      html: null
+                    };
+                    
+                    global.clipboardManager.createBlackHoleWindow(position, true, fallbackData);
+                  }
+                }
+              }
+            }
+          });
+          
+          // Also add "Copy Image" option for convenience
+          menuTemplate.push({
+            label: 'Copy Image',
+            click: () => {
+              contents.copyImageAt(params.x, params.y);
+            }
+          });
+        }
+        
+        // Add "Paste to Space" option (for clipboard content)
+        menuTemplate.push({
+          label: 'Paste to Space',
+          click: () => {
+            console.log(`[Webview ${data.tabId}] Paste to Space clicked`);
+            
+            // Get clipboard manager from global
+            if (global.clipboardManager) {
+              // Get the browser window that contains this webview
+              const win = BrowserWindow.fromWebContents(event.sender);
+              if (win) {
+                const bounds = win.getBounds();
+                const position = {
+                  x: bounds.x + params.x,
+                  y: bounds.y + params.y
+                };
+                
+                const { clipboard } = require('electron');
+                const text = clipboard.readText();
+                const html = clipboard.readHTML();
+                const image = clipboard.readImage();
+                
+                // Check if HTML is really meaningful
+                let isRealHtml = false;
+                if (html && text) {
+                  const hasBlocks = /<(div|p|br|table|ul|ol|li|h[1-6])\b/i.test(html);
+                  const hasLinks = /<a\s+[^>]*href\s*=/i.test(html);
+                  const hasImages = /<img\s+[^>]*src\s*=/i.test(html);
+                  const hasFormatting = /<(strong|em|b|i|u)\b/i.test(html);
+                  isRealHtml = hasBlocks || hasLinks || hasImages || hasFormatting;
+                }
+                
+                const clipboardData = {
+                  hasText: !!text,
+                  hasHtml: isRealHtml,
+                  hasImage: !image.isEmpty(),
+                  text: text,
+                  html: isRealHtml ? html : null
+                };
+                
+                if (!image.isEmpty()) {
+                  clipboardData.imageDataUrl = image.toDataURL();
+                }
+                
+                // Create window with clipboard data - will show modal directly
+                global.clipboardManager.createBlackHoleWindow(position, true, clipboardData);
+              }
+            }
           }
-        ]);
+        });
+        
+        const contextMenu = Menu.buildFromTemplate(menuTemplate);
         
         // Use setImmediate to ensure the menu shows after all other handlers
         setImmediate(() => {
@@ -9651,14 +11782,63 @@ ipcMain.handle('budget:checkBudget', async (event, provider, estimatedCost) => {
   return budgetManager.checkBudget(provider, estimatedCost);
 });
 
-// Track usage (called from API services)
+// Track usage (called from API services and GSX Create)
+// Uses LLMUsageTracker as single entry point - it delegates to BudgetManager
 ipcMain.handle('budget:trackUsage', async (event, provider, projectId, usage) => {
-  const entry = budgetManager.trackUsage(provider, projectId, usage);
-  // Notify budget dashboard if open
-  if (budgetDashboardWindow && !budgetDashboardWindow.isDestroyed()) {
-    budgetDashboardWindow.webContents.send('budget:updated', entry);
+  try {
+    const { getLLMUsageTracker } = require('./llm-usage-tracker');
+    const llmTracker = getLLMUsageTracker();
+    
+    const feature = usage.operation?.includes('gsx') ? 'gsx-create' : 
+                    usage.operation?.includes('chat') ? 'chat' : 'other';
+    
+    let result;
+    if (provider === 'anthropic' || provider === 'claude') {
+      result = llmTracker.trackClaudeCall({
+        model: usage.model || 'claude-sonnet-4-5-20250929',
+        inputTokens: usage.inputTokens || 0,
+        outputTokens: usage.outputTokens || 0,
+        feature,
+        purpose: usage.operation || 'api-call',
+        projectId,
+        spaceId: projectId,
+        success: true
+      });
+    } else if (provider === 'openai') {
+      result = llmTracker.trackOpenAICall({
+        model: usage.model || 'gpt-5.2',
+        inputTokens: usage.inputTokens || 0,
+        outputTokens: usage.outputTokens || 0,
+        feature,
+        purpose: usage.operation || 'api-call',
+        projectId,
+        spaceId: projectId,
+        success: true
+      });
+    } else {
+      // Fallback for other providers - track directly to BudgetManager
+      result = budgetManager.trackUsage({
+        provider,
+        model: usage.model || 'unknown',
+        inputTokens: usage.inputTokens || 0,
+        outputTokens: usage.outputTokens || 0,
+        projectId,
+        feature,
+        operation: usage.operation || 'api-call',
+        success: true
+      });
+    }
+    
+    // Notify budget dashboard if open
+    if (budgetDashboardWindow && !budgetDashboardWindow.isDestroyed()) {
+      budgetDashboardWindow.webContents.send('budget:updated', result);
+    }
+    
+    return result;
+  } catch (trackingError) {
+    console.error('[BudgetManager] Usage tracking failed:', trackingError.message);
+    return null;
   }
-  return entry;
 });
 
 // Register project
@@ -9740,6 +11920,60 @@ ipcMain.handle('budget:listBackups', async () => {
 // Restore from a backup
 ipcMain.handle('budget:restoreFromBackup', async (event, backupPath) => {
   return budgetManager.restoreFromBackup(backupPath);
+});
+
+// ==================== BUDGET QUERY (Chat/Voice) ====================
+
+// Get budget status for chat/voice responses
+ipcMain.handle('budget:getStatus', async (event, projectId = null) => {
+  return budgetManager.getBudgetStatus(projectId);
+});
+
+// Answer a budget question (natural language)
+ipcMain.handle('budget:answerQuestion', async (event, question, projectId = null) => {
+  return budgetManager.answerBudgetQuestion(question, projectId);
+});
+
+// Get stats by feature
+ipcMain.handle('budget:getStatsByFeature', async () => {
+  return budgetManager.getStatsByFeature();
+});
+
+// Get stats by provider
+ipcMain.handle('budget:getStatsByProvider', async () => {
+  return budgetManager.getStatsByProvider();
+});
+
+// Get stats by model
+ipcMain.handle('budget:getStatsByModel', async () => {
+  return budgetManager.getStatsByModel();
+});
+
+// Get daily costs chart data
+ipcMain.handle('budget:getDailyCosts', async (event, days = 30) => {
+  return budgetManager.getDailyCosts(days);
+});
+
+// Set hard limit enforcement
+ipcMain.handle('budget:setHardLimitEnabled', async (event, enabled) => {
+  return budgetManager.setHardLimitEnabled(enabled);
+});
+
+// Set project-specific budget
+ipcMain.handle('budget:setProjectBudget', async (event, projectId, limit, alertAt, hardLimit) => {
+  return budgetManager.setProjectBudget(projectId, limit, alertAt, hardLimit);
+});
+
+// Get unified pricing from pricing-config.js
+ipcMain.handle('pricing:getAll', async () => {
+  const { PRICING, getPricingSummary } = require('./pricing-config');
+  return { pricing: PRICING, summary: getPricingSummary() };
+});
+
+// Calculate cost using unified pricing
+ipcMain.handle('pricing:calculate', async (event, model, inputTokens, outputTokens, options = {}) => {
+  const { calculateCost } = require('./pricing-config');
+  return calculateCost(model, inputTokens, outputTokens, options);
 });
 
 // ==================== BUDGET SETUP WIZARD ====================
@@ -9872,6 +12106,76 @@ ipcMain.on('open-budget-estimator', () => {
   console.log('Opening budget estimator via IPC');
   openBudgetEstimator();
 });
+
+// ==================== VOICE TTS (ElevenLabs) ====================
+
+let voiceTTSAudio = null;
+
+function setupVoiceTTS() {
+  console.log('[VoiceTTS] Setting up voice TTS handlers...');
+  
+  // Speak text using ElevenLabs TTS
+  ipcMain.handle('voice:speak', async (event, text, voice = 'Rachel') => {
+    try {
+      // Import ElevenLabsService dynamically
+      const { ElevenLabsService } = await import('./src/video/audio/ElevenLabsService.js');
+      const elevenLabs = new ElevenLabsService();
+      
+      // Check if API key is configured
+      const apiKey = elevenLabs.getApiKey();
+      if (!apiKey) {
+        console.warn('[VoiceTTS] ElevenLabs API key not configured');
+        return null;
+      }
+      
+      // Generate audio
+      console.log('[VoiceTTS] Generating speech:', text.substring(0, 50) + '...');
+      const audioPath = await elevenLabs.generateAudio(text, voice, {
+        projectId: 'voice-mode',
+        operation: 'tts'
+      });
+      
+      console.log('[VoiceTTS] Audio generated:', audioPath);
+      return audioPath;
+      
+    } catch (error) {
+      console.error('[VoiceTTS] Error generating speech:', error);
+      return null;
+    }
+  });
+  
+  // Stop TTS playback (handled client-side, but we can track state)
+  ipcMain.handle('voice:stop', async () => {
+    console.log('[VoiceTTS] Stop requested');
+    return true;
+  });
+  
+  // Check if TTS is available
+  ipcMain.handle('voice:is-available', async () => {
+    try {
+      const { ElevenLabsService } = await import('./src/video/audio/ElevenLabsService.js');
+      const elevenLabs = new ElevenLabsService();
+      const apiKey = elevenLabs.getApiKey();
+      return { available: !!apiKey };
+    } catch (e) {
+      return { available: false, error: e.message };
+    }
+  });
+  
+  // List available voices
+  ipcMain.handle('voice:list-voices', async () => {
+    try {
+      const { ElevenLabsService } = await import('./src/video/audio/ElevenLabsService.js');
+      const elevenLabs = new ElevenLabsService();
+      const voices = await elevenLabs.listVoices();
+      return { success: true, voices };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
+  
+  console.log('[VoiceTTS] Voice TTS handlers registered');
+}
 
 // Export functions for use in other modules
 module.exports = {
