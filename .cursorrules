@@ -1,0 +1,87 @@
+# Onereach.ai Project Rules
+
+## Constitutional Documents
+
+These documents are the source of truth for project planning and must be kept current:
+
+### PUNCH-LIST.md
+- **Purpose**: Master list of bugs, fixes, and small features
+- **When to update**: 
+  - After fixing any bug (mark complete, move to "Recently Completed")
+  - When discovering new issues (add to appropriate priority section)
+  - When completing features (mark complete with version number)
+- **Before starting work**: Check if the task is already tracked here
+
+### ROADMAP.md  
+- **Purpose**: Strategic product roadmap for all app products
+- **When to update**:
+  - After completing major features (update status)
+  - When product direction changes (update roadmap items)
+  - Quarterly review of timeline accuracy
+- **Products covered**: GSX Create, Video Editor, Spaces, Clipboard Manager, Smart Export, IDW Hub, AI Agents, Budget Manager, App Health
+
+## Development Workflow
+
+### Before Making Changes
+1. Check PUNCH-LIST.md for related known issues
+2. Check ROADMAP.md for strategic context
+3. Understand which product area is affected
+
+### After Completing Work
+1. Update PUNCH-LIST.md:
+   - Mark completed items with [x]
+   - Move to "Recently Completed" section with version
+   - Add any new issues discovered
+2. Update ROADMAP.md if:
+   - Major feature completed
+   - Timeline needs adjustment
+   - New capability added
+
+### Versioning
+- Current version tracked in package.json
+- Use semantic versioning: MAJOR.MINOR.PATCH
+- Reference version in PUNCH-LIST.md completions
+
+## Code Conventions
+
+### File Organization
+- Main products: Individual HTML files (aider-ui.html, video-editor.html, etc.)
+- Backend logic: Corresponding JS files
+- Preload scripts: preload-*.js for IPC bridges
+- Documentation: Markdown files in root
+
+### Key Files by Product
+- **GSX Create**: aider-ui.html, aider-bridge-client.js, app-manager-agent.js
+- **Video Editor**: video-editor.html, video-editor.js, video-editor-app.js
+- **Spaces**: spaces-api.js, clipboard-storage-v2.js
+- **Release**: scripts/release-master.sh (hardened with checksum verification)
+
+### State Persistence
+- Use localStorage for UI state (positions, preferences)
+- Use Spaces API for content storage
+- Save state on beforeunload for graceful shutdown
+
+## Release Process
+
+Use `npm run release` which runs `scripts/release-master.sh`:
+1. Prompts for version bump
+2. Builds for ARM64 and x64
+3. Generates verified checksums from actual files
+4. Creates latest-mac.yml with correct checksums
+5. Publishes to GitHub releases
+
+**Never use electron-builder's generated checksums directly** - always regenerate from built files.
+
+## Known Constraints
+
+- Notarization not yet implemented (users must bypass Gatekeeper)
+- Windows signing not implemented
+- TypeScript migration incomplete (only aider-bridge-client.ts)
+- 12+ preload scripts (consolidation needed)
+
+## Communication
+
+- Don't ask about GitHub token - it's configured and working
+- Reference file paths when discussing changes
+- Update constitutional documents as part of completing work
+
