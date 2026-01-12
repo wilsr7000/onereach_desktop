@@ -372,6 +372,8 @@ class SpacesAPIServer {
    * - In-memory history sync
    * - Space metadata updates
    * - Context capture
+   * 
+   * Accepts tags either at root level or in metadata.tags
    */
   async handleSendToSpace(req, res) {
     let body = '';
@@ -380,7 +382,11 @@ class SpacesAPIServer {
     req.on('end', async () => {
       try {
         const data = JSON.parse(body);
-        const { spaceId, content, type, title, sourceUrl } = data;
+        const { spaceId, content, type, title, sourceUrl, tags, metadata } = data;
+
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'spaces-api-server.js:handleSendToSpace:entry',message:'Request received',data:{spaceId,type,hasTags:!!tags,tagsValue:tags,hasMetadataTags:!!metadata?.tags,metadataTagsValue:metadata?.tags},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
 
         if (!spaceId || !content) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -395,6 +401,13 @@ class SpacesAPIServer {
           return;
         }
 
+        // Extract tags from either root level or metadata.tags
+        const itemTags = tags || metadata?.tags || [];
+
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'spaces-api-server.js:handleSendToSpace:tagsExtracted',message:'Tags extracted',data:{itemTags,tagsLength:itemTags.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
+
         // Route through clipboardManager for proper sync
         if (global.clipboardManager) {
           const item = {
@@ -402,10 +415,19 @@ class SpacesAPIServer {
             content: content,
             preview: title || (type === 'image' ? 'Image from browser' : content.substring(0, 50)),
             source: sourceUrl ? `browser:${sourceUrl}` : 'browser-extension',
-            metadata: sourceUrl ? { sourceUrl } : undefined,
+            metadata: {
+              ...(metadata || {}),
+              sourceUrl: sourceUrl || metadata?.sourceUrl,
+              title: title || metadata?.title
+            },
+            tags: itemTags,
             spaceId: spaceId,
             timestamp: Date.now()
           };
+
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'spaces-api-server.js:handleSendToSpace:itemCreated',message:'Item object created before addToHistory',data:{itemTags:item.tags,itemType:item.type,itemSpaceId:item.spaceId},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+          // #endregion
 
           // Use addToHistory for proper in-memory sync and space metadata updates
           await global.clipboardManager.addToHistory(item);

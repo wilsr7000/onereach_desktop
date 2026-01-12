@@ -383,6 +383,10 @@ class ClipboardStorageV2 {
       ...item.metadata
     };
     
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-storage-v2.js:addItem:savingMetadata',message:'Saving metadata with tags',data:{itemId,inputTags:item.tags,metadataTags:metadata.tags,metadataHasTags:!!metadata.tags,tagsLength:metadata.tags?.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
+    
     fs.writeFileSync(
       path.join(itemDir, 'metadata.json'),
       JSON.stringify(metadata, null, 2)

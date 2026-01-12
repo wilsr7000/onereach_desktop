@@ -259,13 +259,15 @@ Content-Type: application/json
   "content": "Meeting notes from today's sync...",
   "title": "Team Sync Notes",
   "sourceUrl": "https://notion.so/meeting-123",
+  "tags": ["meeting", "weekly"],
   "metadata": {
     "description": "Weekly team sync meeting",
-    "tags": ["meeting", "weekly"],
     "author": "My Tool App"
   }
 }
 ```
+
+**Note:** Tags can be passed either at the root level (`"tags": [...]`) or inside metadata (`"metadata": { "tags": [...] }`). Root-level tags take precedence.
 
 **Response:**
 ```json

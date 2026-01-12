@@ -121,6 +121,10 @@
 
 ## ✅ Recently Completed
 
+- [x] **Spaces API tags not saving/retrieving** - Fixed tag handling in HTTP API
+  - `handleSendToSpace` now extracts tags from request (root level or metadata.tags)
+  - `items.get` now returns tags at root level consistently
+  - Updated API documentation
 - [x] Hardened release script with checksum verification (v3.7.0)
 - [x] Task queue persistence for GSX Create (v3.7.0)
 - [x] Graceful shutdown with state save (v3.7.0)

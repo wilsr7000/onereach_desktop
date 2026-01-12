@@ -288,13 +288,28 @@ class SpacesAPI {
        * Get a single item by ID
        * @param {string} spaceId - The space ID (for validation)
        * @param {string} itemId - The item ID
-       * @returns {Promise<Object|null>} Item with full content or null
+       * @returns {Promise<Object|null>} Item with full content and tags or null
        */
       get: async (spaceId, itemId) => {
         try {
           const item = this.storage.loadItem(itemId);
           if (item && item.spaceId !== spaceId) {
             console.warn('[SpacesAPI] Item found but in different space');
+          }
+          if (item) {
+            // Ensure tags are at root level (from metadata or separate lookup)
+            const tagsFromMetadata = item.metadata?.tags;
+            const tagsFromFile = this._getItemTags(itemId);
+            const finalTags = tagsFromMetadata || tagsFromFile;
+            
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'spaces-api.js:items.get',message:'Getting item with tags',data:{itemId,tagsFromMetadata,tagsFromFile,finalTags,hasMetadata:!!item.metadata},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'D'})}).catch(()=>{});
+            // #endregion
+            
+            return {
+              ...item,
+              tags: finalTags
+            };
           }
           return item;
         } catch (error) {
@@ -1447,8 +1462,19 @@ class SpacesAPI {
   _getItemTags(itemId) {
     try {
       const metaPath = path.join(this.storage.itemsDir, itemId, 'metadata.json');
-      if (fs.existsSync(metaPath)) {
+      const fileExists = fs.existsSync(metaPath);
+      
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'spaces-api.js:_getItemTags',message:'Reading tags from metadata file',data:{itemId,metaPath,fileExists},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'E'})}).catch(()=>{});
+      // #endregion
+      
+      if (fileExists) {
         const metadata = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+        
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'spaces-api.js:_getItemTags:read',message:'Read metadata file',data:{itemId,tags:metadata.tags,hasTags:!!metadata.tags},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
+        
         return metadata.tags || [];
       }
     } catch (error) {
