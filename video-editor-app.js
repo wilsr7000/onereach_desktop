@@ -1,3 +1,28 @@
+    // Cross-platform helper to convert file path to file:// URL
+    // Works on both Windows (C:\path\to\file) and Unix (/path/to/file)
+    function pathToFileUrl(filePath) {
+      if (!filePath) return '';
+      // Already a file:// URL
+      if (filePath.startsWith('file://')) return filePath;
+      // Already a data: URL
+      if (filePath.startsWith('data:')) return filePath;
+      
+      // Normalize backslashes to forward slashes (Windows paths)
+      let normalized = filePath.replace(/\\/g, '/');
+      
+      // Handle Windows drive letters (C: -> /C:)
+      if (/^[a-zA-Z]:/.test(normalized)) {
+        normalized = '/' + normalized;
+      }
+      
+      // Encode special characters in path components, but preserve slashes
+      const encoded = normalized.split('/').map(component => 
+        encodeURIComponent(component).replace(/%3A/g, ':') // Keep colons for drive letters
+      ).join('/');
+      
+      return 'file://' + encoded;
+    }
+
     // Video Editor Application
     const app = {
       videoPath: null,
@@ -1927,7 +1952,7 @@
         // Build grid HTML
         grid.innerHTML = frames.map((frame, i) => `
           <div class="screengrab-item" onclick="app.showScreengrabFull(${i})" title="Click to view full size">
-            <img src="file://${frame.path}" alt="Frame ${frame.index}">
+            <img src="${pathToFileUrl(frame.path)}" alt="Frame ${frame.index}">
             <div class="screengrab-time">${frame.timeFormatted}</div>
           </div>
         `).join('');
@@ -1945,7 +1970,7 @@
         modal.className = 'screengrab-modal';
         modal.innerHTML = `
           <button class="screengrab-modal-close" onclick="this.parentElement.remove()">✕</button>
-          <img src="file://${frame.path}" alt="Frame ${frame.index}">
+          <img src="${pathToFileUrl(frame.path)}" alt="Frame ${frame.index}">
           <div class="screengrab-modal-info">Frame ${frame.index} at ${frame.timeFormatted}</div>
         `;
         
@@ -3387,7 +3412,7 @@
         list.innerHTML = this.markers.map((marker, index) => {
           const thumbnailSrc = this.sceneThumbnails[marker.id];
           const thumbnailHtml = thumbnailSrc 
-            ? `<img src="file://${thumbnailSrc}" alt="${marker.name}">`
+            ? `<img src="${pathToFileUrl(thumbnailSrc)}" alt="${marker.name}">`
             : `<span class="scene-thumbnail-placeholder"><svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" stroke-width="1.5"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg></span>`;
           
           const typeIcon = marker.type === 'range' ? '↔️' : '📍';
@@ -3458,9 +3483,9 @@
                 if (card) {
                   const img = card.querySelector('img');
                   if (img) {
-                    img.src = `file://${result.outputPath}?t=${Date.now()}`;
+                    img.src = `${pathToFileUrl(result.outputPath)}?t=${Date.now()}`;
                   } else {
-                    card.innerHTML = `<img src="file://${result.outputPath}"><span class="scene-type-badge">${marker.type === 'range' ? '↔️' : '📍'}</span>`;
+                    card.innerHTML = `<img src="${pathToFileUrl(result.outputPath)}"><span class="scene-type-badge">${marker.type === 'range' ? '↔️' : '📍'}</span>`;
                   }
                 }
               }
@@ -3522,7 +3547,7 @@
         // Thumbnail
         const thumbnailSrc = this.sceneThumbnails[marker.id];
         const thumbnailHtml = thumbnailSrc 
-          ? `<img src="file://${thumbnailSrc}" alt="${marker.name}">`
+          ? `<img src="${pathToFileUrl(thumbnailSrc)}" alt="${marker.name}">`
           : `<div style="display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-muted);">No thumbnail</div>`;
         
         // Tags
@@ -8189,7 +8214,7 @@
           
           // Load video player
           const video = document.getElementById('videoPlayer');
-          video.src = `file://${filePath}`;
+          video.src = pathToFileUrl(filePath);
           
           // Show video player, hide placeholder
           document.getElementById('videoPlaceholder').classList.add('hidden');
@@ -8685,7 +8710,7 @@
             audioEl.style.display = 'none';
             document.body.appendChild(audioEl);
           }
-          audioEl.src = `file://${filePath}`;
+          audioEl.src = pathToFileUrl(filePath);
           
           // Sync audio element with video controls
           this.setupAudioOnlyControls(audioEl);
@@ -9225,7 +9250,7 @@
           const img = new Image();
           img.onload = () => resolve(img);
           img.onerror = reject;
-          img.src = `file://${src}`;
+          img.src = pathToFileUrl(src);
         });
         
         for (let i = 0; i < thumbnailPaths.length; i++) {
@@ -9580,7 +9605,7 @@
           
           // Detach to new window
           // Use video.src which has the proper file:// protocol
-          const videoSrc = video.src || `file://${this.videoPath}`;
+          const videoSrc = video.src || pathToFileUrl(this.videoPath);
           const wasPlaying = !video.paused;
           const playbackRate = video.playbackRate || 1;
           const result = await window.videoEditor.detachVideoPlayer(videoSrc, video.currentTime, wasPlaying, playbackRate);
@@ -14149,7 +14174,7 @@
           
           if (!sourceBuffer && this.extractedAudioPath) {
             // Load audio buffer from extracted file
-            const response = await fetch(`file://${this.extractedAudioPath}`);
+            const response = await fetch(pathToFileUrl(this.extractedAudioPath));
             const arrayBuffer = await response.arrayBuffer();
             const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             sourceBuffer = await audioCtx.decodeAudioData(arrayBuffer);
@@ -14978,7 +15003,7 @@
             
             // Show preview
             const audio = document.getElementById('translationAudioPreview');
-            audio.src = `file://${result.audioPath}`;
+            audio.src = pathToFileUrl(result.audioPath);
             document.getElementById('audioPreviewSection').style.display = 'block';
 
             // Update duration info

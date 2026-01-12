@@ -129,7 +129,7 @@ class SpacesAPIServer {
   handleHTTPRequest(req, res) {
     // CORS headers for local requests
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
     if (req.method === 'OPTIONS') {
@@ -139,31 +139,184 @@ class SpacesAPIServer {
     }
 
     const url = new URL(req.url, `http://127.0.0.1:${PORT}`);
+    const pathname = url.pathname;
+    const method = req.method;
     
-    // Route handlers
-    switch (url.pathname) {
-      case '/api/status':
-        this.handleStatus(req, res);
-        break;
-      case '/api/spaces':
-        this.handleGetSpaces(req, res);
-        break;
-      case '/api/send-to-space':
-        this.handleSendToSpace(req, res);
-        break;
-      case '/api/tabs':
-        this.handleGetTabs(req, res);
-        break;
-      case '/api/capture-tab':
-        this.handleCaptureTab(req, res);
-        break;
-      case '/api/token':
-        this.handleGetToken(req, res);
-        break;
-      default:
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Not found' }));
+    // Route handlers with dynamic path matching
+    // Static routes first
+    if (pathname === '/api/status' && method === 'GET') {
+      return this.handleStatus(req, res);
     }
+    if (pathname === '/api/token' && method === 'GET') {
+      return this.handleGetToken(req, res);
+    }
+    if (pathname === '/api/tabs' && method === 'GET') {
+      return this.handleGetTabs(req, res);
+    }
+    if (pathname === '/api/capture-tab' && method === 'POST') {
+      return this.handleCaptureTab(req, res);
+    }
+    if (pathname === '/api/send-to-space' && method === 'POST') {
+      return this.handleSendToSpace(req, res);
+    }
+    if (pathname === '/api/search' && method === 'GET') {
+      return this.handleSearch(req, res, url);
+    }
+    
+    // Spaces routes
+    if (pathname === '/api/spaces') {
+      if (method === 'GET') return this.handleGetSpaces(req, res);
+      if (method === 'POST') return this.handleCreateSpace(req, res);
+    }
+    
+    // Smart folders routes
+    if (pathname === '/api/smart-folders') {
+      if (method === 'GET') return this.handleListSmartFolders(req, res);
+      if (method === 'POST') return this.handleCreateSmartFolder(req, res);
+    }
+    
+    // Tags search
+    if (pathname === '/api/tags/search' && method === 'GET') {
+      return this.handleSearchByTags(req, res, url);
+    }
+    
+    // Dynamic routes - parse path segments
+    const pathParts = pathname.split('/').filter(Boolean);
+    
+    // /api/smart-folders/:folderId
+    if (pathParts.length === 3 && pathParts[0] === 'api' && pathParts[1] === 'smart-folders') {
+      const folderId = pathParts[2];
+      if (method === 'GET') return this.handleGetSmartFolder(req, res, folderId);
+      if (method === 'PUT') return this.handleUpdateSmartFolder(req, res, folderId);
+      if (method === 'DELETE') return this.handleDeleteSmartFolder(req, res, folderId);
+    }
+    
+    // /api/smart-folders/:folderId/items
+    if (pathParts.length === 4 && pathParts[0] === 'api' && pathParts[1] === 'smart-folders' && pathParts[3] === 'items') {
+      const folderId = pathParts[2];
+      if (method === 'GET') return this.handleGetSmartFolderItems(req, res, folderId, url);
+    }
+    
+    // /api/spaces/:spaceId
+    if (pathParts.length === 3 && pathParts[0] === 'api' && pathParts[1] === 'spaces') {
+      const spaceId = decodeURIComponent(pathParts[2]);
+      if (method === 'GET') return this.handleGetSpace(req, res, spaceId);
+      if (method === 'PUT') return this.handleUpdateSpace(req, res, spaceId);
+      if (method === 'DELETE') return this.handleDeleteSpace(req, res, spaceId);
+    }
+    
+    // /api/spaces/:spaceId/items
+    if (pathParts.length === 4 && pathParts[0] === 'api' && pathParts[1] === 'spaces' && pathParts[3] === 'items') {
+      const spaceId = decodeURIComponent(pathParts[2]);
+      if (method === 'GET') return this.handleListItems(req, res, spaceId, url);
+    }
+    
+    // /api/spaces/:spaceId/tags
+    if (pathParts.length === 4 && pathParts[0] === 'api' && pathParts[1] === 'spaces' && pathParts[3] === 'tags') {
+      const spaceId = decodeURIComponent(pathParts[2]);
+      if (method === 'GET') return this.handleListSpaceTags(req, res, spaceId);
+    }
+    
+    // /api/spaces/:spaceId/items/:itemId
+    if (pathParts.length === 5 && pathParts[0] === 'api' && pathParts[1] === 'spaces' && pathParts[3] === 'items') {
+      const spaceId = decodeURIComponent(pathParts[2]);
+      const itemId = decodeURIComponent(pathParts[4]);
+      if (method === 'GET') return this.handleGetItem(req, res, spaceId, itemId);
+      if (method === 'PUT') return this.handleUpdateItem(req, res, spaceId, itemId);
+      if (method === 'DELETE') return this.handleDeleteItem(req, res, spaceId, itemId);
+    }
+    
+    // /api/spaces/:spaceId/items/:itemId/tags
+    if (pathParts.length === 6 && pathParts[0] === 'api' && pathParts[1] === 'spaces' && pathParts[3] === 'items' && pathParts[5] === 'tags') {
+      const spaceId = decodeURIComponent(pathParts[2]);
+      const itemId = decodeURIComponent(pathParts[4]);
+      if (method === 'GET') return this.handleGetItemTags(req, res, spaceId, itemId);
+      if (method === 'PUT') return this.handleSetItemTags(req, res, spaceId, itemId);
+      if (method === 'POST') return this.handleAddItemTag(req, res, spaceId, itemId);
+    }
+    
+    // /api/spaces/:spaceId/items/:itemId/tags/:tagName
+    if (pathParts.length === 7 && pathParts[0] === 'api' && pathParts[1] === 'spaces' && pathParts[3] === 'items' && pathParts[5] === 'tags') {
+      const spaceId = decodeURIComponent(pathParts[2]);
+      const itemId = decodeURIComponent(pathParts[4]);
+      const tagName = decodeURIComponent(pathParts[6]);
+      if (method === 'DELETE') return this.handleRemoveItemTag(req, res, spaceId, itemId, tagName);
+    }
+    
+    // /api/spaces/:spaceId/items/:itemId/move
+    if (pathParts.length === 6 && pathParts[0] === 'api' && pathParts[1] === 'spaces' && pathParts[3] === 'items' && pathParts[5] === 'move') {
+      const spaceId = decodeURIComponent(pathParts[2]);
+      const itemId = decodeURIComponent(pathParts[4]);
+      if (method === 'POST') return this.handleMoveItem(req, res, spaceId, itemId);
+    }
+    
+    // /api/spaces/:spaceId/items/:itemId/pin
+    if (pathParts.length === 6 && pathParts[0] === 'api' && pathParts[1] === 'spaces' && pathParts[3] === 'items' && pathParts[5] === 'pin') {
+      const spaceId = decodeURIComponent(pathParts[2]);
+      const itemId = decodeURIComponent(pathParts[4]);
+      if (method === 'POST') return this.handleTogglePin(req, res, spaceId, itemId);
+    }
+    
+    // ============================================
+    // METADATA ROUTES
+    // ============================================
+    
+    // /api/spaces/:spaceId/metadata
+    if (pathParts.length === 4 && pathParts[0] === 'api' && pathParts[1] === 'spaces' && pathParts[3] === 'metadata') {
+      const spaceId = decodeURIComponent(pathParts[2]);
+      if (method === 'GET') return this.handleGetSpaceMetadata(req, res, spaceId);
+      if (method === 'PUT') return this.handleUpdateSpaceMetadata(req, res, spaceId);
+    }
+    
+    // /api/spaces/:spaceId/metadata/files/:filePath (filePath can contain slashes, so handle specially)
+    if (pathParts.length >= 5 && pathParts[0] === 'api' && pathParts[1] === 'spaces' && pathParts[3] === 'metadata' && pathParts[4] === 'files') {
+      const spaceId = decodeURIComponent(pathParts[2]);
+      const filePath = pathParts.slice(5).map(decodeURIComponent).join('/');
+      if (method === 'GET') return this.handleGetFileMetadata(req, res, spaceId, filePath);
+      if (method === 'PUT') return this.handleSetFileMetadata(req, res, spaceId, filePath);
+    }
+    
+    // /api/spaces/:spaceId/metadata/assets/:assetType
+    if (pathParts.length === 6 && pathParts[0] === 'api' && pathParts[1] === 'spaces' && pathParts[3] === 'metadata' && pathParts[4] === 'assets') {
+      const spaceId = decodeURIComponent(pathParts[2]);
+      const assetType = decodeURIComponent(pathParts[5]);
+      if (method === 'GET') return this.handleGetAssetMetadata(req, res, spaceId, assetType);
+      if (method === 'PUT') return this.handleSetAssetMetadata(req, res, spaceId, assetType);
+    }
+    
+    // /api/spaces/:spaceId/metadata/approvals/:itemType/:itemId
+    if (pathParts.length === 7 && pathParts[0] === 'api' && pathParts[1] === 'spaces' && pathParts[3] === 'metadata' && pathParts[4] === 'approvals') {
+      const spaceId = decodeURIComponent(pathParts[2]);
+      const itemType = decodeURIComponent(pathParts[5]);
+      const itemId = decodeURIComponent(pathParts[6]);
+      if (method === 'PUT') return this.handleSetApproval(req, res, spaceId, itemType, itemId);
+    }
+    
+    // /api/spaces/:spaceId/metadata/versions
+    if (pathParts.length === 5 && pathParts[0] === 'api' && pathParts[1] === 'spaces' && pathParts[3] === 'metadata' && pathParts[4] === 'versions') {
+      const spaceId = decodeURIComponent(pathParts[2]);
+      if (method === 'POST') return this.handleAddVersion(req, res, spaceId);
+      if (method === 'GET') return this.handleGetVersions(req, res, spaceId);
+    }
+    
+    // /api/spaces/:spaceId/metadata/project-config
+    if (pathParts.length === 5 && pathParts[0] === 'api' && pathParts[1] === 'spaces' && pathParts[3] === 'metadata' && pathParts[4] === 'project-config') {
+      const spaceId = decodeURIComponent(pathParts[2]);
+      if (method === 'GET') return this.handleGetProjectConfig(req, res, spaceId);
+      if (method === 'PUT') return this.handleUpdateProjectConfig(req, res, spaceId);
+    }
+    
+    // Debug logging for unmatched routes
+    console.log('[SpacesAPI] Unmatched route:', {
+      pathname,
+      method,
+      pathParts,
+      pathPartsLength: pathParts.length
+    });
+    
+    // 404 - Not found
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Not found', code: 'NOT_FOUND' }));
   }
 
   /**
@@ -200,15 +353,11 @@ class SpacesAPIServer {
    */
   async handleGetSpaces(req, res) {
     try {
-      // Get spaces from clipboard manager
-      if (global.clipboardManager && global.clipboardManager.storage) {
-        const spaces = await global.clipboardManager.storage.getSpaces();
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ spaces }));
-      } else {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ spaces: [] }));
-      }
+      const { getSpacesAPI } = require('./spaces-api');
+      const api = getSpacesAPI();
+      const spaces = await api.list();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ spaces }));
     } catch (error) {
       console.error('[SpacesAPI] Error getting spaces:', error);
       res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -332,6 +481,852 @@ class SpacesAPIServer {
       }
     });
   }
+
+  // ============================================
+  // SPACES CRUD HANDLERS
+  // ============================================
+
+  /**
+   * GET /api/spaces/:spaceId - Get single space
+   */
+  async handleGetSpace(req, res, spaceId) {
+    try {
+      const { getSpacesAPI } = require('./spaces-api');
+      const api = getSpacesAPI();
+      const space = await api.get(spaceId);
+      
+      if (!space) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Space not found', code: 'NOT_FOUND' }));
+        return;
+      }
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(space));
+    } catch (error) {
+      console.error('[SpacesAPI] Error getting space:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Failed to get space', code: 'SERVER_ERROR' }));
+    }
+  }
+
+  /**
+   * POST /api/spaces - Create new space
+   */
+  async handleCreateSpace(req, res) {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body);
+        const { name, icon, color } = data;
+        
+        if (!name) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing name', code: 'MISSING_REQUIRED_FIELD' }));
+          return;
+        }
+        
+        const { getSpacesAPI } = require('./spaces-api');
+        const api = getSpacesAPI();
+        const space = await api.create(name, { icon, color });
+        
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, space }));
+      } catch (error) {
+        console.error('[SpacesAPI] Error creating space:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Failed to create space', code: 'SERVER_ERROR' }));
+      }
+    });
+  }
+
+  /**
+   * PUT /api/spaces/:spaceId - Update space
+   */
+  async handleUpdateSpace(req, res, spaceId) {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body);
+        const { getSpacesAPI } = require('./spaces-api');
+        const api = getSpacesAPI();
+        const success = await api.update(spaceId, data);
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success }));
+      } catch (error) {
+        console.error('[SpacesAPI] Error updating space:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Failed to update space', code: 'SERVER_ERROR' }));
+      }
+    });
+  }
+
+  /**
+   * DELETE /api/spaces/:spaceId - Delete space
+   */
+  async handleDeleteSpace(req, res, spaceId) {
+    try {
+      if (spaceId === 'unclassified') {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Cannot delete Unclassified space', code: 'INVALID_OPERATION' }));
+        return;
+      }
+      
+      const { getSpacesAPI } = require('./spaces-api');
+      const api = getSpacesAPI();
+      const success = await api.delete(spaceId);
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success }));
+    } catch (error) {
+      console.error('[SpacesAPI] Error deleting space:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Failed to delete space', code: 'SERVER_ERROR' }));
+    }
+  }
+
+  // ============================================
+  // ITEMS CRUD HANDLERS
+  // ============================================
+
+  /**
+   * GET /api/spaces/:spaceId/items - List items
+   */
+  async handleListItems(req, res, spaceId, url) {
+    try {
+      const { getSpacesAPI } = require('./spaces-api');
+      const api = getSpacesAPI();
+      
+      const options = {
+        limit: url.searchParams.get('limit') ? parseInt(url.searchParams.get('limit')) : undefined,
+        offset: url.searchParams.get('offset') ? parseInt(url.searchParams.get('offset')) : undefined,
+        type: url.searchParams.get('type') || undefined,
+        pinned: url.searchParams.has('pinned') ? url.searchParams.get('pinned') === 'true' : undefined,
+        tags: url.searchParams.get('tags') ? url.searchParams.get('tags').split(',') : undefined,
+        includeContent: url.searchParams.get('includeContent') === 'true'
+      };
+      
+      // Remove undefined values
+      Object.keys(options).forEach(key => options[key] === undefined && delete options[key]);
+      
+      const items = await api.items.list(spaceId, options);
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ items, total: items.length }));
+    } catch (error) {
+      console.error('[SpacesAPI] Error listing items:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Failed to list items', code: 'SERVER_ERROR' }));
+    }
+  }
+
+  /**
+   * GET /api/spaces/:spaceId/items/:itemId - Get single item
+   */
+  async handleGetItem(req, res, spaceId, itemId) {
+    try {
+      const { getSpacesAPI } = require('./spaces-api');
+      const api = getSpacesAPI();
+      const item = await api.items.get(spaceId, itemId);
+      
+      if (!item) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Item not found', code: 'NOT_FOUND' }));
+        return;
+      }
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(item));
+    } catch (error) {
+      console.error('[SpacesAPI] Error getting item:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Failed to get item', code: 'SERVER_ERROR' }));
+    }
+  }
+
+  /**
+   * PUT /api/spaces/:spaceId/items/:itemId - Update item
+   */
+  async handleUpdateItem(req, res, spaceId, itemId) {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body);
+        const { getSpacesAPI } = require('./spaces-api');
+        const api = getSpacesAPI();
+        const success = await api.items.update(spaceId, itemId, data);
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success }));
+      } catch (error) {
+        console.error('[SpacesAPI] Error updating item:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Failed to update item', code: 'SERVER_ERROR' }));
+      }
+    });
+  }
+
+  /**
+   * DELETE /api/spaces/:spaceId/items/:itemId - Delete item
+   */
+  async handleDeleteItem(req, res, spaceId, itemId) {
+    try {
+      const { getSpacesAPI } = require('./spaces-api');
+      const api = getSpacesAPI();
+      const success = await api.items.delete(spaceId, itemId);
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success }));
+    } catch (error) {
+      console.error('[SpacesAPI] Error deleting item:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Failed to delete item', code: 'SERVER_ERROR' }));
+    }
+  }
+
+  /**
+   * POST /api/spaces/:spaceId/items/:itemId/move - Move item
+   */
+  async handleMoveItem(req, res, spaceId, itemId) {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body);
+        const { toSpaceId } = data;
+        
+        if (!toSpaceId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing toSpaceId', code: 'MISSING_REQUIRED_FIELD' }));
+          return;
+        }
+        
+        const { getSpacesAPI } = require('./spaces-api');
+        const api = getSpacesAPI();
+        const success = await api.items.move(itemId, spaceId, toSpaceId);
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success }));
+      } catch (error) {
+        console.error('[SpacesAPI] Error moving item:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Failed to move item', code: 'SERVER_ERROR' }));
+      }
+    });
+  }
+
+  /**
+   * POST /api/spaces/:spaceId/items/:itemId/pin - Toggle pin
+   */
+  async handleTogglePin(req, res, spaceId, itemId) {
+    try {
+      const { getSpacesAPI } = require('./spaces-api');
+      const api = getSpacesAPI();
+      const pinned = await api.items.togglePin(spaceId, itemId);
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, pinned }));
+    } catch (error) {
+      console.error('[SpacesAPI] Error toggling pin:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Failed to toggle pin', code: 'SERVER_ERROR' }));
+    }
+  }
+
+  // ============================================
+  // METADATA HANDLERS
+  // ============================================
+
+  /**
+   * GET /api/spaces/:spaceId/metadata - Get space metadata
+   */
+  async handleGetSpaceMetadata(req, res, spaceId) {
+    try {
+      const { getSpacesAPI } = require('./spaces-api');
+      const api = getSpacesAPI();
+      const metadata = await api.metadata.getSpace(spaceId);
+      
+      if (!metadata) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Space metadata not found', code: 'NOT_FOUND' }));
+        return;
+      }
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(metadata));
+    } catch (error) {
+      console.error('[SpacesAPI] Error getting space metadata:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Failed to get space metadata', code: 'SERVER_ERROR' }));
+    }
+  }
+
+  /**
+   * PUT /api/spaces/:spaceId/metadata - Update space metadata
+   */
+  async handleUpdateSpaceMetadata(req, res, spaceId) {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body);
+        const { getSpacesAPI } = require('./spaces-api');
+        const api = getSpacesAPI();
+        const updated = await api.metadata.updateSpace(spaceId, data);
+        
+        if (!updated) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Space not found', code: 'NOT_FOUND' }));
+          return;
+        }
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, metadata: updated }));
+      } catch (error) {
+        console.error('[SpacesAPI] Error updating space metadata:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Failed to update space metadata', code: 'SERVER_ERROR' }));
+      }
+    });
+  }
+
+  /**
+   * GET /api/spaces/:spaceId/metadata/files/:filePath - Get file metadata
+   */
+  async handleGetFileMetadata(req, res, spaceId, filePath) {
+    try {
+      const { getSpacesAPI } = require('./spaces-api');
+      const api = getSpacesAPI();
+      const metadata = await api.metadata.getFile(spaceId, filePath);
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(metadata || {}));
+    } catch (error) {
+      console.error('[SpacesAPI] Error getting file metadata:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Failed to get file metadata', code: 'SERVER_ERROR' }));
+    }
+  }
+
+  /**
+   * PUT /api/spaces/:spaceId/metadata/files/:filePath - Set file metadata
+   */
+  async handleSetFileMetadata(req, res, spaceId, filePath) {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body);
+        const { getSpacesAPI } = require('./spaces-api');
+        const api = getSpacesAPI();
+        const result = await api.metadata.setFile(spaceId, filePath, data);
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, metadata: result }));
+      } catch (error) {
+        console.error('[SpacesAPI] Error setting file metadata:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Failed to set file metadata', code: 'SERVER_ERROR' }));
+      }
+    });
+  }
+
+  /**
+   * GET /api/spaces/:spaceId/metadata/assets/:assetType - Get asset metadata
+   */
+  async handleGetAssetMetadata(req, res, spaceId, assetType) {
+    try {
+      const { getSpacesAPI } = require('./spaces-api');
+      const api = getSpacesAPI();
+      const spaceMetadata = await api.metadata.getSpace(spaceId);
+      const assetData = spaceMetadata?.assets?.[assetType] || null;
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(assetData || {}));
+    } catch (error) {
+      console.error('[SpacesAPI] Error getting asset metadata:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Failed to get asset metadata', code: 'SERVER_ERROR' }));
+    }
+  }
+
+  /**
+   * PUT /api/spaces/:spaceId/metadata/assets/:assetType - Set asset metadata
+   */
+  async handleSetAssetMetadata(req, res, spaceId, assetType) {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body);
+        const { getSpacesAPI } = require('./spaces-api');
+        const api = getSpacesAPI();
+        const result = await api.metadata.setAsset(spaceId, assetType, data);
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, metadata: result }));
+      } catch (error) {
+        console.error('[SpacesAPI] Error setting asset metadata:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Failed to set asset metadata', code: 'SERVER_ERROR' }));
+      }
+    });
+  }
+
+  /**
+   * PUT /api/spaces/:spaceId/metadata/approvals/:itemType/:itemId - Set approval status
+   */
+  async handleSetApproval(req, res, spaceId, itemType, itemId) {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const { approved } = JSON.parse(body);
+        
+        if (typeof approved !== 'boolean') {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'approved must be a boolean', code: 'INVALID_INPUT' }));
+          return;
+        }
+        
+        const { getSpacesAPI } = require('./spaces-api');
+        const api = getSpacesAPI();
+        const result = await api.metadata.setApproval(spaceId, itemType, itemId, approved);
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, metadata: result }));
+      } catch (error) {
+        console.error('[SpacesAPI] Error setting approval:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Failed to set approval', code: 'SERVER_ERROR' }));
+      }
+    });
+  }
+
+  /**
+   * GET /api/spaces/:spaceId/metadata/versions - Get version history
+   */
+  async handleGetVersions(req, res, spaceId) {
+    try {
+      const { getSpacesAPI } = require('./spaces-api');
+      const api = getSpacesAPI();
+      const spaceMetadata = await api.metadata.getSpace(spaceId);
+      const versions = spaceMetadata?.versions || [];
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ versions }));
+    } catch (error) {
+      console.error('[SpacesAPI] Error getting versions:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Failed to get versions', code: 'SERVER_ERROR' }));
+    }
+  }
+
+  /**
+   * POST /api/spaces/:spaceId/metadata/versions - Add a version
+   */
+  async handleAddVersion(req, res, spaceId) {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const versionData = JSON.parse(body);
+        const { getSpacesAPI } = require('./spaces-api');
+        const api = getSpacesAPI();
+        const result = await api.metadata.addVersion(spaceId, versionData);
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, metadata: result }));
+      } catch (error) {
+        console.error('[SpacesAPI] Error adding version:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Failed to add version', code: 'SERVER_ERROR' }));
+      }
+    });
+  }
+
+  /**
+   * GET /api/spaces/:spaceId/metadata/project-config - Get project configuration
+   */
+  async handleGetProjectConfig(req, res, spaceId) {
+    try {
+      const { getSpacesAPI } = require('./spaces-api');
+      const api = getSpacesAPI();
+      const spaceMetadata = await api.metadata.getSpace(spaceId);
+      const projectConfig = spaceMetadata?.projectConfig || {};
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(projectConfig));
+    } catch (error) {
+      console.error('[SpacesAPI] Error getting project config:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Failed to get project config', code: 'SERVER_ERROR' }));
+    }
+  }
+
+  /**
+   * PUT /api/spaces/:spaceId/metadata/project-config - Update project configuration
+   */
+  async handleUpdateProjectConfig(req, res, spaceId) {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const config = JSON.parse(body);
+        const { getSpacesAPI } = require('./spaces-api');
+        const api = getSpacesAPI();
+        const result = await api.metadata.updateProjectConfig(spaceId, config);
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, metadata: result }));
+      } catch (error) {
+        console.error('[SpacesAPI] Error updating project config:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Failed to update project config', code: 'SERVER_ERROR' }));
+      }
+    });
+  }
+
+  // ============================================
+  // TAGS HANDLERS
+  // ============================================
+
+  /**
+   * GET /api/spaces/:spaceId/items/:itemId/tags - Get item tags
+   */
+  async handleGetItemTags(req, res, spaceId, itemId) {
+    try {
+      const { getSpacesAPI } = require('./spaces-api');
+      const api = getSpacesAPI();
+      const tags = await api.items.getTags(spaceId, itemId);
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ tags }));
+    } catch (error) {
+      console.error('[SpacesAPI] Error getting tags:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Failed to get tags', code: 'SERVER_ERROR' }));
+    }
+  }
+
+  /**
+   * PUT /api/spaces/:spaceId/items/:itemId/tags - Set item tags
+   */
+  async handleSetItemTags(req, res, spaceId, itemId) {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body);
+        const { tags } = data;
+        
+        const { getSpacesAPI } = require('./spaces-api');
+        const api = getSpacesAPI();
+        const success = await api.items.setTags(spaceId, itemId, tags || []);
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success }));
+      } catch (error) {
+        console.error('[SpacesAPI] Error setting tags:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Failed to set tags', code: 'SERVER_ERROR' }));
+      }
+    });
+  }
+
+  /**
+   * POST /api/spaces/:spaceId/items/:itemId/tags - Add tag to item
+   */
+  async handleAddItemTag(req, res, spaceId, itemId) {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body);
+        const { tag } = data;
+        
+        if (!tag) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing tag', code: 'MISSING_REQUIRED_FIELD' }));
+          return;
+        }
+        
+        const { getSpacesAPI } = require('./spaces-api');
+        const api = getSpacesAPI();
+        const tags = await api.items.addTag(spaceId, itemId, tag);
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, tags }));
+      } catch (error) {
+        console.error('[SpacesAPI] Error adding tag:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Failed to add tag', code: 'SERVER_ERROR' }));
+      }
+    });
+  }
+
+  /**
+   * DELETE /api/spaces/:spaceId/items/:itemId/tags/:tagName - Remove tag
+   */
+  async handleRemoveItemTag(req, res, spaceId, itemId, tagName) {
+    try {
+      const { getSpacesAPI } = require('./spaces-api');
+      const api = getSpacesAPI();
+      const tags = await api.items.removeTag(spaceId, itemId, tagName);
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, tags }));
+    } catch (error) {
+      console.error('[SpacesAPI] Error removing tag:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Failed to remove tag', code: 'SERVER_ERROR' }));
+    }
+  }
+
+  /**
+   * GET /api/spaces/:spaceId/tags - List all tags in space
+   */
+  async handleListSpaceTags(req, res, spaceId) {
+    try {
+      const { getSpacesAPI } = require('./spaces-api');
+      const api = getSpacesAPI();
+      const tags = await api.tags.list(spaceId);
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ tags }));
+    } catch (error) {
+      console.error('[SpacesAPI] Error listing space tags:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Failed to list tags', code: 'SERVER_ERROR' }));
+    }
+  }
+
+  /**
+   * GET /api/tags/search - Search items by tags
+   */
+  async handleSearchByTags(req, res, url) {
+    try {
+      const tags = url.searchParams.get('tags')?.split(',') || [];
+      const matchAll = url.searchParams.get('matchAll') === 'true';
+      const spaceId = url.searchParams.get('spaceId') || undefined;
+      const limit = url.searchParams.get('limit') ? parseInt(url.searchParams.get('limit')) : undefined;
+      
+      if (tags.length === 0) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Missing tags parameter', code: 'MISSING_REQUIRED_FIELD' }));
+        return;
+      }
+      
+      const { getSpacesAPI } = require('./spaces-api');
+      const api = getSpacesAPI();
+      const items = await api.tags.findItems(tags, { spaceId, matchAll, limit });
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ items, total: items.length }));
+    } catch (error) {
+      console.error('[SpacesAPI] Error searching by tags:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Failed to search by tags', code: 'SERVER_ERROR' }));
+    }
+  }
+
+  // ============================================
+  // SEARCH HANDLER
+  // ============================================
+
+  /**
+   * GET /api/search - Search across spaces
+   */
+  async handleSearch(req, res, url) {
+    try {
+      const query = url.searchParams.get('q');
+      
+      if (!query) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Missing q parameter', code: 'MISSING_REQUIRED_FIELD' }));
+        return;
+      }
+      
+      const options = {
+        spaceId: url.searchParams.get('spaceId') || undefined,
+        type: url.searchParams.get('type') || undefined,
+        searchTags: url.searchParams.get('searchTags') !== 'false',
+        limit: url.searchParams.get('limit') ? parseInt(url.searchParams.get('limit')) : undefined
+      };
+      
+      // Remove undefined values
+      Object.keys(options).forEach(key => options[key] === undefined && delete options[key]);
+      
+      const { getSpacesAPI } = require('./spaces-api');
+      const api = getSpacesAPI();
+      const results = await api.search(query, options);
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ results, total: results.length }));
+    } catch (error) {
+      console.error('[SpacesAPI] Error searching:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Failed to search', code: 'SERVER_ERROR' }));
+    }
+  }
+
+  // ============================================
+  // SMART FOLDERS HANDLERS
+  // ============================================
+
+  /**
+   * GET /api/smart-folders - List smart folders
+   */
+  async handleListSmartFolders(req, res) {
+    try {
+      const { getSpacesAPI } = require('./spaces-api');
+      const api = getSpacesAPI();
+      const folders = await api.smartFolders.list();
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ folders }));
+    } catch (error) {
+      console.error('[SpacesAPI] Error listing smart folders:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Failed to list smart folders', code: 'SERVER_ERROR' }));
+    }
+  }
+
+  /**
+   * POST /api/smart-folders - Create smart folder
+   */
+  async handleCreateSmartFolder(req, res) {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body);
+        const { name, criteria, icon, color } = data;
+        
+        if (!name || !criteria) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing name or criteria', code: 'MISSING_REQUIRED_FIELD' }));
+          return;
+        }
+        
+        const { getSpacesAPI } = require('./spaces-api');
+        const api = getSpacesAPI();
+        const folder = await api.smartFolders.create(name, criteria, { icon, color });
+        
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, folder }));
+      } catch (error) {
+        console.error('[SpacesAPI] Error creating smart folder:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Failed to create smart folder', code: 'SERVER_ERROR' }));
+      }
+    });
+  }
+
+  /**
+   * GET /api/smart-folders/:folderId - Get smart folder
+   */
+  async handleGetSmartFolder(req, res, folderId) {
+    try {
+      const { getSpacesAPI } = require('./spaces-api');
+      const api = getSpacesAPI();
+      const folder = await api.smartFolders.get(folderId);
+      
+      if (!folder) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Smart folder not found', code: 'NOT_FOUND' }));
+        return;
+      }
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(folder));
+    } catch (error) {
+      console.error('[SpacesAPI] Error getting smart folder:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Failed to get smart folder', code: 'SERVER_ERROR' }));
+    }
+  }
+
+  /**
+   * PUT /api/smart-folders/:folderId - Update smart folder
+   */
+  async handleUpdateSmartFolder(req, res, folderId) {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const updates = JSON.parse(body);
+        const { getSpacesAPI } = require('./spaces-api');
+        const api = getSpacesAPI();
+        const folder = await api.smartFolders.update(folderId, updates);
+        
+        if (!folder) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Smart folder not found', code: 'NOT_FOUND' }));
+          return;
+        }
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, folder }));
+      } catch (error) {
+        console.error('[SpacesAPI] Error updating smart folder:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Failed to update smart folder', code: 'SERVER_ERROR' }));
+      }
+    });
+  }
+
+  /**
+   * DELETE /api/smart-folders/:folderId - Delete smart folder
+   */
+  async handleDeleteSmartFolder(req, res, folderId) {
+    try {
+      const { getSpacesAPI } = require('./spaces-api');
+      const api = getSpacesAPI();
+      const success = await api.smartFolders.delete(folderId);
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success }));
+    } catch (error) {
+      console.error('[SpacesAPI] Error deleting smart folder:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Failed to delete smart folder', code: 'SERVER_ERROR' }));
+    }
+  }
+
+  /**
+   * GET /api/smart-folders/:folderId/items - Get smart folder items
+   */
+  async handleGetSmartFolderItems(req, res, folderId, url) {
+    try {
+      const options = {
+        limit: url.searchParams.get('limit') ? parseInt(url.searchParams.get('limit')) : undefined,
+        offset: url.searchParams.get('offset') ? parseInt(url.searchParams.get('offset')) : undefined,
+        includeContent: url.searchParams.get('includeContent') === 'true'
+      };
+      
+      Object.keys(options).forEach(key => options[key] === undefined && delete options[key]);
+      
+      const { getSpacesAPI } = require('./spaces-api');
+      const api = getSpacesAPI();
+      const items = await api.smartFolders.getItems(folderId, options);
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ items, total: items.length }));
+    } catch (error) {
+      console.error('[SpacesAPI] Error getting smart folder items:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Failed to get smart folder items', code: 'SERVER_ERROR' }));
+    }
+  }
+
+  // ============================================
+  // WEBSOCKET HANDLERS
+  // ============================================
 
   /**
    * Handle WebSocket upgrade requests

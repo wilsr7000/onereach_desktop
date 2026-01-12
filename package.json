@@ -21,7 +21,13 @@
     "publish:mac": "npx electron-builder build --mac --publish always",
     "publish:win": "npx electron-builder build --win --publish always",
     "publish:github": "npx electron-builder build --mac --win --publish always --publish-config publish.json",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:unit": "vitest run --exclude='**/*.eval.*'",
+    "test:evals": "vitest run --include='**/*.eval.*'",
+    "test:e2e": "playwright test",
+    "test:coverage": "vitest run --coverage",
+    "test:all": "npm run test && npm run test:e2e",
     "test:wizard": "electron test/setup-wizard-test-suite.js",
     "test:external-ai": "electron test/external-ai-test-suite.js",
     "test:external-ai-interactive": "electron test/external-ai-interactive-test.js",
@@ -137,8 +143,13 @@
   },
   "devDependencies": {
     "@electron/notarize": "^3.0.1",
+    "@vitest/coverage-v8": "^4.0.16",
     "electron": "^39.2.7",
-    "electron-builder": "^24.9.1"
+    "electron-builder": "^24.9.1",
+    "husky": "^9.1.7",
+    "promptfoo": "^0.120.11",
+    "vitest": "^4.0.16",
+    "vitest-evals": "^0.5.0"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.0",

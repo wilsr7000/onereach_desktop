@@ -1,3 +1,28 @@
+// Cross-platform helper to convert file path to file:// URL
+// Works on both Windows (C:\path\to\file) and Unix (/path/to/file)
+function pathToFileUrl(filePath) {
+    if (!filePath) return '';
+    // Already a file:// URL
+    if (filePath.startsWith('file://')) return filePath;
+    // Already a data: URL
+    if (filePath.startsWith('data:')) return filePath;
+    
+    // Normalize backslashes to forward slashes (Windows paths)
+    let normalized = filePath.replace(/\\/g, '/');
+    
+    // Handle Windows drive letters (C: -> /C:)
+    if (/^[a-zA-Z]:/.test(normalized)) {
+        normalized = '/' + normalized;
+    }
+    
+    // Encode special characters in path components, but preserve slashes
+    const encoded = normalized.split('/').map(component => 
+        encodeURIComponent(component).replace(/%3A/g, ':') // Keep colons for drive letters
+    ).join('/');
+    
+    return 'file://' + encoded;
+}
+
 // Global state
 let currentFilter = 'all';
 let currentSpace = null;
@@ -158,7 +183,7 @@ function updateSpacesVisibility() {
     
     if (spacesEnabled) {
         sidebar.style.display = 'flex';
-        mainLayout.style.gridTemplateColumns = '280px 1fr';
+        mainLayout.style.gridTemplateColumns = '300px 1fr';
     } else {
         sidebar.style.display = 'none';
         mainLayout.style.gridTemplateColumns = '1fr';
@@ -868,7 +893,7 @@ function renderHistoryItemToHtml(item) {
                     
                     // Get thumbnail - prefer local extracted, fallback to YouTube thumbnail
                     const thumbnail = item.metadata?.localThumbnail 
-                        ? `file://${item.metadata.localThumbnail}`
+                        ? pathToFileUrl(item.metadata.localThumbnail)
                         : (item.metadata?.thumbnail || item.thumbnail || '');
                     
                     // Check for additional features
@@ -1095,7 +1120,7 @@ function renderHistoryItemToHtml(item) {
                 }
             }
             
-            const typeClass = item.type === 'file' ? `type-${item.fileCategory || 'file'}` : `type-${item.source || item.type}`;
+            const typeClass = item.metadata?.riffNoteId ? 'type-riff' : (item.type === 'file' ? `type-${item.fileCategory || 'file'}` : `type-${item.source || item.type}`);
             
             return `
                 <div class="history-item ${item.pinned ? 'pinned' : ''}" data-id="${item.id}" draggable="true">
@@ -1272,6 +1297,8 @@ async function updateItemCounts() {
 // Get icon for content type
 function getTypeIcon(type, source, fileType, fileCategory, metadata, jsonSubtype) {
     if (type === 'generated-document' || (metadata && metadata.type === 'generated-document')) return '✨';
+    // Check for Riff notes (notes created in Riff app)
+    if (metadata?.riffNoteId) return '📝';
     if (type === 'file') {
         // Check JSON subtypes first (style-guide, journey-map)
         if (jsonSubtype === 'style-guide') return '🎨';
@@ -1659,6 +1686,7 @@ function filterItems() {
                 if (item.type === 'file' && item.fileExt === '.md') return true;
                 return false;
             }
+            if (currentFilter === 'riff') return !!item.metadata?.riffNoteId;
             if (currentFilter === 'html') {
                 // HTML type items and .html files
                 if (item.type === 'html') return true;
@@ -1733,6 +1761,7 @@ async function searchItems(query) {
                 if (item.type === 'file' && item.fileExt === '.md') return true;
                 return false;
             }
+            if (currentFilter === 'riff') return !!item.metadata?.riffNoteId;
             if (currentFilter === 'html') {
                 if (item.type === 'html') return true;
                 if (item.type === 'generated-document' || item.metadata?.type === 'generated-document') return true;
@@ -4370,8 +4399,8 @@ async function loadMediaForPreview(item) {
             if (result.isVideo && result.filePath) {
                 console.log('[Media] Using file path directly for video:', result.filePath);
                 
-                // Use file:// protocol for local files
-                mediaPlayer.src = `file://${result.filePath}`;
+                // Use file:// protocol for local files (cross-platform)
+                mediaPlayer.src = pathToFileUrl(result.filePath);
                 mediaPlayer.load();
                 
                 // Wait for metadata to load
@@ -5736,7 +5765,7 @@ async function showVideoPreviewModal(itemId) {
     if (videoPath) {
         // Ensure file:// protocol
         if (!videoPath.startsWith('file://')) {
-            videoPath = `file://${videoPath}`;
+            videoPath = pathToFileUrl(videoPath);
         }
         videoPlayer.src = videoPath;
         
@@ -5744,7 +5773,7 @@ async function showVideoPreviewModal(itemId) {
         if (metadata.localThumbnail) {
             let thumbnailPath = metadata.localThumbnail;
             if (!thumbnailPath.startsWith('file://')) {
-                thumbnailPath = `file://${thumbnailPath}`;
+                thumbnailPath = pathToFileUrl(thumbnailPath);
             }
             videoPlayer.poster = thumbnailPath;
             console.log('[VideoModal] Poster image set to:', thumbnailPath);

@@ -11,6 +11,7 @@
 const { chromium, firefox, webkit } = require('playwright');
 const path = require('path');
 const fs = require('fs');
+const { pathToFileURL } = require('url');
 
 class TestAgent {
     constructor() {
@@ -316,7 +317,7 @@ ${JSON.stringify(testableElements, null, 2)}`;
             }
 
             // Load the HTML file
-            const fileUrl = `file://${htmlFilePath}`;
+            const fileUrl = pathToFileURL(htmlFilePath).href;
             this.log('log', `Navigating to: ${fileUrl}`);
             await this.page.goto(fileUrl, { waitUntil: 'networkidle' });
             this.log('log', 'Page loaded successfully');
@@ -563,7 +564,7 @@ ${JSON.stringify(testableElements, null, 2)}`;
             await this.init(options.browser || 'chromium');
             this.page = await this.context.newPage();
             
-            await this.page.goto(`file://${htmlFilePath}`, { waitUntil: 'networkidle' });
+            await this.page.goto(pathToFileURL(htmlFilePath).href, { waitUntil: 'networkidle' });
 
             const currentScreenshot = await this.page.screenshot({
                 type: 'png',
@@ -614,7 +615,7 @@ ${JSON.stringify(testableElements, null, 2)}`;
                 await this.init(browser);
                 this.page = await this.context.newPage();
                 
-                await this.page.goto(`file://${htmlFilePath}`, { waitUntil: 'networkidle' });
+                await this.page.goto(pathToFileURL(htmlFilePath).href, { waitUntil: 'networkidle' });
                 
                 const screenshot = await this.page.screenshot({
                     type: 'png',
@@ -673,8 +674,8 @@ ${JSON.stringify(testableElements, null, 2)}`;
                 pageErrors.push(error.message);
             });
 
-            this.log('log', `Navigating to file://${htmlFilePath}`);
-            await this.page.goto(`file://${htmlFilePath}`, { waitUntil: 'networkidle' });
+            this.log('log', `Navigating to ${pathToFileURL(htmlFilePath).href}`);
+            await this.page.goto(pathToFileURL(htmlFilePath).href, { waitUntil: 'networkidle' });
             this.log('log', 'Page loaded');
 
             // Get page content and screenshot
@@ -744,7 +745,7 @@ ${JSON.stringify(testableElements, null, 2)}`;
             this.page = await this.context.newPage();
             
             this.log('log', 'Loading page...');
-            await this.page.goto(`file://${htmlFilePath}`, { waitUntil: 'networkidle' });
+            await this.page.goto(pathToFileURL(htmlFilePath).href, { waitUntil: 'networkidle' });
 
             // Run accessibility checks
             const issues = await this.page.evaluate(() => {
@@ -924,7 +925,7 @@ ${JSON.stringify(testableElements, null, 2)}`;
             
             // Navigate and measure
             this.log('log', 'Loading page and measuring performance...');
-            const response = await this.page.goto(`file://${htmlFilePath}`, { 
+            const response = await this.page.goto(pathToFileURL(htmlFilePath).href, { 
                 waitUntil: 'networkidle' 
             });
             
@@ -1052,7 +1053,7 @@ ${JSON.stringify(testableElements, null, 2)}`;
             });
             
             this.page = await videoContext.newPage();
-            await this.page.goto(`file://${htmlFilePath}`, { waitUntil: 'networkidle' });
+            await this.page.goto(pathToFileURL(htmlFilePath).href, { waitUntil: 'networkidle' });
             
             // Run tests
             for (const test of testPlan.tests) {

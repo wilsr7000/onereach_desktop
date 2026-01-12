@@ -1053,6 +1053,7 @@ function createSetupWizardWindow(options = {}) {
     resizable: true,
     minimizable: false,
     maximizable: false,
+    backgroundColor: '#141414', // Match setup-wizard.html body background
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,

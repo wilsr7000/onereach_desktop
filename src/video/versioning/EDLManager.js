@@ -6,6 +6,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { pathToFileURL } from 'url';
 
 /**
  * EDL segment types
@@ -323,7 +324,7 @@ export class EDLManager {
       xml += `            <in>${inFrame}</in>\n`;
       xml += `            <out>${outFrame}</out>\n`;
       xml += `            <file>\n`;
-      xml += `              <pathurl>file://${edl.sourceVideo}</pathurl>\n`;
+      xml += `              <pathurl>${pathToFileURL(edl.sourceVideo).href}</pathurl>\n`;
       xml += `            </file>\n`;
       xml += `          </clipitem>\n`;
 
@@ -483,6 +484,7 @@ export class EDLManager {
     }, 0);
   }
 }
+
 
 
 

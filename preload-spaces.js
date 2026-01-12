@@ -512,8 +512,160 @@ ipcRenderer.on('close-window', () => {
   window.dispatchEvent(new Event('electron-window-closing'));
 });
 
+// ============================================
+// SPEECH RECOGNITION APIS
+// (Web Speech API doesn't work in Electron - use these instead)
+// ============================================
+
+// Expose Speech Recognition Bridge (ElevenLabs Scribe API)
+// Use this instead of webkitSpeechRecognition which doesn't work in Electron
+contextBridge.exposeInMainWorld('speechBridge', {
+  // Check if speech bridge is available and has API key
+  isAvailable: () => ipcRenderer.invoke('speech:is-available'),
+  
+  // Transcribe audio data (base64 encoded)
+  // Usage: const result = await speechBridge.transcribe({ audioData: base64, language: 'en', format: 'webm' })
+  transcribe: (options) => ipcRenderer.invoke('speech:transcribe', options),
+  
+  // Transcribe from file path
+  transcribeFile: (options) => ipcRenderer.invoke('speech:transcribe-file', options),
+  
+  // Helper: Convert Blob to base64 for transcription
+  blobToBase64: async (blob) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64 = reader.result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  },
+  
+  // Request microphone permission from macOS
+  requestMicPermission: () => ipcRenderer.invoke('speech:request-mic-permission')
+});
+
+// Expose Realtime Speech API (OpenAI Realtime API for streaming transcription)
+// This provides low-latency real-time speech-to-text as you speak
+contextBridge.exposeInMainWorld('realtimeSpeech', {
+  // Connect to OpenAI Realtime API
+  connect: () => ipcRenderer.invoke('realtime-speech:connect'),
+  
+  // Disconnect from the API
+  disconnect: () => ipcRenderer.invoke('realtime-speech:disconnect'),
+  
+  // Check connection status
+  isConnected: () => ipcRenderer.invoke('realtime-speech:is-connected'),
+  
+  // Send audio chunk (base64 encoded PCM16, 24kHz, mono)
+  sendAudio: (base64Audio) => ipcRenderer.invoke('realtime-speech:send-audio', base64Audio),
+  
+  // Commit audio buffer (signal end of speech)
+  commit: () => ipcRenderer.invoke('realtime-speech:commit'),
+  
+  // Clear audio buffer
+  clear: () => ipcRenderer.invoke('realtime-speech:clear'),
+  
+  // Listen for transcription events
+  // Events: transcript_delta (partial), transcript (final), speech_started, speech_stopped, error
+  onEvent: (callback) => {
+    const handler = (event, data) => callback(data);
+    ipcRenderer.on('realtime-speech:event', handler);
+    return () => ipcRenderer.removeListener('realtime-speech:event', handler);
+  },
+  
+  // Helper: Start streaming from microphone with automatic audio processing
+  // Returns { stop: Function }
+  startStreaming: async function(onTranscript, options = {}) {
+    // Request mic permission first
+    await ipcRenderer.invoke('speech:request-mic-permission');
+    
+    // Connect to Realtime API
+    const connectResult = await this.connect();
+    if (!connectResult.success) {
+      throw new Error(connectResult.error || 'Failed to connect');
+    }
+    
+    // Set up event listener
+    const removeListener = this.onEvent((event) => {
+      if (event.type === 'transcript' || event.type === 'transcript_delta') {
+        onTranscript(event.text, event.isFinal);
+      }
+    });
+    
+    // Set up audio capture with AudioContext for proper format
+    const stream = await navigator.mediaDevices.getUserMedia({ 
+      audio: {
+        channelCount: 1,
+        sampleRate: 24000,
+        echoCancellation: true,
+        noiseSuppression: true
+      }
+    });
+    
+    const audioContext = new AudioContext({ sampleRate: 24000 });
+    const source = audioContext.createMediaStreamSource(stream);
+    const processor = audioContext.createScriptProcessor(4096, 1, 1);
+    
+    const sendAudio = this.sendAudio.bind(this);
+    
+    processor.onaudioprocess = (e) => {
+      const inputData = e.inputBuffer.getChannelData(0);
+      // Convert Float32 to Int16
+      const int16Data = new Int16Array(inputData.length);
+      for (let i = 0; i < inputData.length; i++) {
+        const s = Math.max(-1, Math.min(1, inputData[i]));
+        int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      }
+      // Convert to base64
+      const uint8Array = new Uint8Array(int16Data.buffer);
+      let binary = '';
+      for (let i = 0; i < uint8Array.length; i++) {
+        binary += String.fromCharCode(uint8Array[i]);
+      }
+      const base64 = btoa(binary);
+      sendAudio(base64);
+    };
+    
+    source.connect(processor);
+    processor.connect(audioContext.destination);
+    
+    console.log('🎤 Realtime speech streaming started');
+    
+    // Return stop function
+    return {
+      stop: async () => {
+        processor.disconnect();
+        source.disconnect();
+        audioContext.close();
+        stream.getTracks().forEach(t => t.stop());
+        removeListener();
+        await this.disconnect();
+        console.log('🎤 Realtime speech streaming stopped');
+      }
+    };
+  }
+});
+
+// Expose Voice TTS API (ElevenLabs Text-to-Speech)
+contextBridge.exposeInMainWorld('voiceTTS', {
+  // Speak text using ElevenLabs TTS
+  speak: (text, voice = 'Rachel') => ipcRenderer.invoke('voice:speak', text, voice),
+  
+  // Stop any currently playing TTS audio
+  stop: () => ipcRenderer.invoke('voice:stop'),
+  
+  // Check if TTS is available (has API key)
+  isAvailable: () => ipcRenderer.invoke('voice:is-available'),
+  
+  // List available voices
+  listVoices: () => ipcRenderer.invoke('voice:list-voices')
+});
+
 // Debug flag to verify preload loaded (check with window.__preloadSpacesLoaded)
 contextBridge.exposeInMainWorld('__preloadSpacesLoaded', true);
 
-console.log('[preload-spaces] Spaces API loaded');
+console.log('[preload-spaces] Spaces API loaded (with speech support)');
 

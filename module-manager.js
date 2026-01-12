@@ -529,6 +529,226 @@ class ModuleManager {
       window.center();
     }
     
+    // Define the speech polyfill code once, inject it multiple times to ensure it's available
+    const speechPolyfillCode = `
+      (function() {
+        // Skip if already installed
+        if (window._speechPolyfillInstalled) return;
+        
+        // Only inject if speechBridge is available
+        if (!window.speechBridge) {
+          console.log('[Speech Polyfill] speechBridge not available yet, will retry...');
+          return;
+        }
+        
+        window._speechPolyfillInstalled = true;
+        console.log('[Speech Polyfill] Installing Web Speech API polyfill...');
+        
+        // Create a polyfill that mimics SpeechRecognition API
+        class SpeechRecognitionPolyfill {
+          constructor() {
+            this.continuous = false;
+            this.interimResults = false;
+            this.lang = 'en-US';
+            this.maxAlternatives = 1;
+            this._isRunning = false;
+            this._mediaRecorder = null;
+            this._audioChunks = [];
+            this._stream = null;
+            
+            // Event handlers
+            this.onstart = null;
+            this.onend = null;
+            this.onresult = null;
+            this.onerror = null;
+            this.onnomatch = null;
+            this.onaudiostart = null;
+            this.onaudioend = null;
+            this.onsoundstart = null;
+            this.onsoundend = null;
+            this.onspeechstart = null;
+            this.onspeechend = null;
+          }
+          
+          async start() {
+            if (this._isRunning) return;
+            
+            try {
+              // Request microphone permission first
+              await window.speechBridge.requestMicPermission();
+              
+              // Get microphone stream
+              this._stream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                  channelCount: 1,
+                  sampleRate: 16000,
+                  echoCancellation: true,
+                  noiseSuppression: true
+                }
+              });
+              
+              this._isRunning = true;
+              this._audioChunks = [];
+              
+              // Create MediaRecorder
+              this._mediaRecorder = new MediaRecorder(this._stream, {
+                mimeType: 'audio/webm;codecs=opus'
+              });
+              
+              this._mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                  this._audioChunks.push(event.data);
+                }
+              };
+              
+              this._mediaRecorder.onstop = async () => {
+                if (this._audioChunks.length === 0) {
+                  this._triggerEnd();
+                  return;
+                }
+                
+                try {
+                  // Combine chunks and convert to base64
+                  const audioBlob = new Blob(this._audioChunks, { type: 'audio/webm' });
+                  const base64 = await window.speechBridge.blobToBase64(audioBlob);
+                  
+                  // Transcribe using speechBridge
+                  const result = await window.speechBridge.transcribe({
+                    audioData: base64,
+                    language: this.lang.split('-')[0],
+                    format: 'webm'
+                  });
+                  
+                  if (result && result.text) {
+                    this._triggerResult(result.text, true);
+                  } else {
+                    this._triggerNoMatch();
+                  }
+                } catch (err) {
+                  console.error('[Speech Polyfill] Transcription error:', err);
+                  this._triggerError('network');
+                }
+                
+                this._triggerEnd();
+              };
+              
+              // Fire start event
+              this._triggerStart();
+              
+              // Start recording
+              this._mediaRecorder.start(1000); // Collect chunks every second
+              
+              // If not continuous, auto-stop after silence detection or timeout
+              if (!this.continuous) {
+                setTimeout(() => {
+                  if (this._isRunning) {
+                    this.stop();
+                  }
+                }, 5000); // 5 second timeout for non-continuous mode
+              }
+              
+            } catch (err) {
+              console.error('[Speech Polyfill] Start error:', err);
+              this._triggerError(err.name === 'NotAllowedError' ? 'not-allowed' : 'audio-capture');
+              this._triggerEnd();
+            }
+          }
+          
+          stop() {
+            if (!this._isRunning) return;
+            
+            this._isRunning = false;
+            
+            if (this._mediaRecorder && this._mediaRecorder.state !== 'inactive') {
+              this._mediaRecorder.stop();
+            }
+            
+            if (this._stream) {
+              this._stream.getTracks().forEach(t => t.stop());
+              this._stream = null;
+            }
+          }
+          
+          abort() {
+            this._audioChunks = [];
+            this.stop();
+          }
+          
+          _triggerStart() {
+            if (this.onstart) this.onstart(new Event('start'));
+            if (this.onaudiostart) this.onaudiostart(new Event('audiostart'));
+            if (this.onsoundstart) this.onsoundstart(new Event('soundstart'));
+            if (this.onspeechstart) this.onspeechstart(new Event('speechstart'));
+          }
+          
+          _triggerEnd() {
+            if (this.onspeechend) this.onspeechend(new Event('speechend'));
+            if (this.onsoundend) this.onsoundend(new Event('soundend'));
+            if (this.onaudioend) this.onaudioend(new Event('audioend'));
+            if (this.onend) this.onend(new Event('end'));
+          }
+          
+          _triggerResult(text, isFinal) {
+            if (!this.onresult) return;
+            
+            const result = {
+              results: [[{
+                transcript: text,
+                confidence: 0.95
+              }]],
+              resultIndex: 0
+            };
+            
+            result.results[0].isFinal = isFinal;
+            result.results.length = 1;
+            
+            // Add item() method to match Web Speech API
+            result.results.item = function(i) { return this[i]; };
+            result.results[0].item = function(i) { return this[i]; };
+            
+            this.onresult(result);
+          }
+          
+          _triggerError(type) {
+            if (!this.onerror) return;
+            
+            const event = new Event('error');
+            event.error = type;
+            event.message = 'Speech recognition error: ' + type;
+            this.onerror(event);
+          }
+          
+          _triggerNoMatch() {
+            if (this.onnomatch) {
+              this.onnomatch(new Event('nomatch'));
+            }
+          }
+        }
+        
+        // Override the native SpeechRecognition with our polyfill
+        window.SpeechRecognition = SpeechRecognitionPolyfill;
+        window.webkitSpeechRecognition = SpeechRecognitionPolyfill;
+        
+        console.log('[Speech Polyfill] Web Speech API polyfill installed successfully');
+      })();
+    `;
+    
+    // Inject Web Speech API polyfill as early as possible
+    // Try multiple times to ensure it's available before page scripts run
+    window.webContents.on('did-start-loading', () => {
+      // Initial attempt (speechBridge might not be ready yet)
+      setTimeout(() => {
+        window.webContents.executeJavaScript(speechPolyfillCode)
+          .catch(err => console.log('[WebTool] Early speech polyfill injection pending...'));
+      }, 50);
+    });
+    
+    // Also try at dom-ready to ensure speechBridge is available
+    window.webContents.on('dom-ready', () => {
+      window.webContents.executeJavaScript(speechPolyfillCode)
+        .catch(err => console.error('[WebTool] Error injecting speech polyfill:', err));
+    });
+    
     // Inject the minimal toolbar after page loads
     window.webContents.on('did-finish-load', () => {
       window.webContents.executeJavaScript(`

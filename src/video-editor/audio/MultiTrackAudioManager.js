@@ -8,6 +8,16 @@
  * - Seamless seeking across all tracks
  */
 
+// Cross-platform helper to convert file path to file:// URL
+function pathToFileUrl(filePath) {
+  if (!filePath) return '';
+  if (filePath.startsWith('file://') || filePath.startsWith('data:')) return filePath;
+  let normalized = filePath.replace(/\\/g, '/');
+  if (/^[a-zA-Z]:/.test(normalized)) normalized = '/' + normalized;
+  const encoded = normalized.split('/').map(c => encodeURIComponent(c).replace(/%3A/g, ':')).join('/');
+  return 'file://' + encoded;
+}
+
 export class MultiTrackAudioManager {
   constructor(appContext) {
     this.app = appContext;
@@ -199,7 +209,7 @@ export class MultiTrackAudioManager {
    * For long videos (>10min), uses chunked loading for better performance
    */
   async _loadAudioFromFile(filePath) {
-    const response = await fetch(`file://${filePath}`);
+    const response = await fetch(pathToFileUrl(filePath));
     if (!response.ok) throw new Error('Failed to fetch audio file');
     
     const arrayBuffer = await response.arrayBuffer();
@@ -801,6 +811,7 @@ export class MultiTrackAudioManager {
     return this.trackAudio.size;
   }
 }
+
 
 
 

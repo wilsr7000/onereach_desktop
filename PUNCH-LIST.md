@@ -92,7 +92,9 @@
 
 ### Documentation
 - [ ] **User guide** - No end-user documentation
-- [ ] **API documentation** - IPC API not fully documented
+- [x] **API documentation** - IPC API not fully documented
+  - ✅ Created `TOOL-APP-SPACES-API-GUIDE.md` - Full CRUD HTTP API for external tools
+  - Extended `spaces-api-server.js` with complete REST endpoints
 - [ ] **Video tutorials** - None exist
 
 ---

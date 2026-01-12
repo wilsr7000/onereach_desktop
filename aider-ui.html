@@ -4255,7 +4255,7 @@
 
     <!-- Header -->
     <div class="header">
-        <h1>GSX Create</h1>
+        <h1>GSX Create <span id="appVersion" style="font-size: 12px; font-weight: 400; color: var(--text-muted, #666); margin-left: 6px;">v1.5.0</span></h1>
         <div class="header-right">
             <div class="cost-display" id="costDisplay" onclick="GSXCreate.showBudgetModal()">
                 <span class="cost-badge" id="costBadge">$0.00</span>
@@ -5425,6 +5425,7 @@
                     <button class="btn btn-sm test-tab" data-test="accessibility" onclick="GSXCreate.selectTestTab('accessibility')">♿ Accessibility</button>
                     <button class="btn btn-sm test-tab" data-test="performance" onclick="GSXCreate.selectTestTab('performance')">⚡ Performance</button>
                     <button class="btn btn-sm test-tab" data-test="interactive" onclick="GSXCreate.selectTestTab('interactive')">🤖 AI Interactive</button>
+                    <button class="btn btn-sm test-tab" data-test="ai-evals" onclick="GSXCreate.selectTestTab('ai-evals')" style="background: linear-gradient(135deg, #8b5cf6, #6366f1);">🧠 AI Evals</button>
                 </div>
                 
                 <!-- Functional Tests Panel -->
@@ -5509,6 +5510,37 @@
                         <button class="btn btn-success" onclick="GSXCreate.implementTestFixes()" id="implementFixesBtn" disabled>🔧 Implement Fixes</button>
                     </div>
                     <div id="interactiveResults"></div>
+                </div>
+                
+                <!-- AI Evals Panel -->
+                <div id="testPanelAi-evals" class="test-panel">
+                    <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">
+                        Run LLM-based evaluations using vitest-evals and promptfoo. Validate tool calls, code quality, and plan accuracy.
+                    </p>
+                    <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
+                        <select id="evalProfileSelect" style="padding: 8px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);">
+                            <option value="quick">⚡ Quick (2-3 agents, ~5s)</option>
+                            <option value="standard" selected>📊 Standard (4-5 agents, ~15s)</option>
+                            <option value="deep">🔬 Deep (All agents, ~45s)</option>
+                        </select>
+                        <button class="btn btn-primary" onclick="GSXCreate.runAIEvals()">🧠 Run AI Evals</button>
+                        <button class="btn btn-secondary" onclick="GSXCreate.runMultiAgentEval()">👥 Multi-Agent Eval</button>
+                        <button class="btn btn-success" onclick="GSXCreate.toggleEvalHUD()">📊 Show Eval HUD</button>
+                    </div>
+                    
+                    <!-- Eval Results -->
+                    <div id="aiEvalsResults" style="display: none;">
+                        <h4 style="font-size: 13px; margin-bottom: 8px; color: var(--text-primary);">📊 Evaluation Results</h4>
+                        <div id="aiEvalsResultsList" style="background: var(--bg-tertiary); border-radius: 6px; padding: 12px; max-height: 300px; overflow-y: auto;"></div>
+                    </div>
+                    
+                    <!-- Run History -->
+                    <div id="aiEvalsHistory" style="margin-top: 16px;">
+                        <h4 style="font-size: 13px; margin-bottom: 8px; color: var(--text-primary);">📜 Recent Evals</h4>
+                        <div id="aiEvalsHistoryList" style="font-size: 12px; color: var(--text-secondary);">
+                            No evaluations run yet
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -6674,7 +6706,12 @@
         }
         
         // ==================== GSX CREATE ====================
+        const GSX_CREATE_VERSION = '1.5.0';
+        
         const GSXCreate = {
+            // Version
+            version: GSX_CREATE_VERSION,
+            
             // State
             currentSpace: null,
             currentSpaceId: null,
@@ -6935,7 +6972,14 @@
             
             // Initialize
             async init() {
-                console.log('[GSX Create] Initializing...');
+                console.log(`[GSX Create] v${this.version} Initializing...`);
+                
+                // Update version display in UI
+                const versionEl = document.getElementById('appVersion');
+                if (versionEl) {
+                    versionEl.textContent = `v${this.version}`;
+                }
+                
                 try {
                     await this.checkApiConfig();
                     await this.loadSpaces();
@@ -12538,10 +12582,199 @@ Be specific about what you see in the image.`;
                 }
             },
             
+            // ==================== AI EVALS ====================
+            aiEvalsHistory: [],
+            
+            async runAIEvals() {
+                const resultsDisplay = document.getElementById('aiEvalsResults');
+                const resultsList = document.getElementById('aiEvalsResultsList');
+                const profile = document.getElementById('evalProfileSelect')?.value || 'standard';
+                
+                resultsDisplay.style.display = 'block';
+                resultsList.innerHTML = '<p style="color: var(--text-muted);">🧠 Running AI evaluations...</p>';
+                
+                try {
+                    // Get current content (either preview file or active input)
+                    const content = this.currentPreviewFile 
+                        ? await this.getFileContent(this.currentPreviewFile)
+                        : document.getElementById('messageInput')?.value || '';
+                    
+                    if (!content || content.length < 10) {
+                        resultsList.innerHTML = '<p style="color: var(--error);">No content to evaluate. Preview a file or enter some code.</p>';
+                        return;
+                    }
+                    
+                    const result = await this.runEvaluation(content, {
+                        profile,
+                        filePath: this.currentPreviewFile,
+                        context: { source: 'ai-evals-tab' }
+                    });
+                    
+                    if (result && !result.error) {
+                        // Add to history
+                        this.aiEvalsHistory.unshift({
+                            timestamp: new Date().toISOString(),
+                            score: result.aggregateScore,
+                            profile,
+                            agentCount: result.agentScores?.length || 0
+                        });
+                        this.updateAIEvalsHistory();
+                        
+                        // Display results
+                        resultsList.innerHTML = this.formatEvalResults(result);
+                    } else {
+                        resultsList.innerHTML = `<p style="color: var(--error);">Evaluation failed: ${result?.error || 'Unknown error'}</p>`;
+                    }
+                } catch (error) {
+                    console.error('[AI Evals] Error:', error);
+                    resultsList.innerHTML = `<p style="color: var(--error);">Error: ${error.message}</p>`;
+                }
+            },
+            
+            async runMultiAgentEval() {
+                const content = this.currentPreviewFile 
+                    ? await this.getFileContent(this.currentPreviewFile)
+                    : document.getElementById('messageInput')?.value || '';
+                
+                if (!content || content.length < 10) {
+                    this.addMessage('error', 'No content to evaluate. Preview a file or enter some code.');
+                    return;
+                }
+                
+                this.addMessage('system', '👥 Starting multi-agent evaluation...');
+                
+                try {
+                    const result = await this.runEvaluation(content, {
+                        profile: 'deep',
+                        filePath: this.currentPreviewFile,
+                        weightingStrategy: 'contextual'
+                    });
+                    
+                    if (result) {
+                        this.addMessage('system', `✅ Evaluation complete: Score ${Math.round(result.aggregateScore)}/100 (${result.confidence} confidence)`);
+                        
+                        // Show conflicts if any
+                        if (result.conflicts?.length > 0) {
+                            this.addMessage('info', `⚡ ${result.conflicts.length} agent conflicts detected`);
+                        }
+                        
+                        // Show top suggestions
+                        if (result.suggestions?.length > 0) {
+                            const topSuggestions = result.suggestions.slice(0, 3).map(s => `• ${s.text}`).join('\n');
+                            this.addMessage('info', `💡 Top suggestions:\n${topSuggestions}`);
+                        }
+                    }
+                } catch (error) {
+                    this.addMessage('error', `Multi-agent evaluation failed: ${error.message}`);
+                }
+            },
+            
+            formatEvalResults(result) {
+                const scoreColor = result.aggregateScore >= 70 ? 'var(--success)' : 
+                                   result.aggregateScore >= 50 ? '#f59e0b' : 'var(--error)';
+                
+                let html = `
+                    <div style="display: flex; gap: 16px; margin-bottom: 16px;">
+                        <div style="text-align: center; padding: 12px; background: var(--bg-secondary); border-radius: 8px;">
+                            <div style="font-size: 32px; font-weight: 700; color: ${scoreColor};">${Math.round(result.aggregateScore)}</div>
+                            <div style="font-size: 11px; color: var(--text-muted);">Overall Score</div>
+                        </div>
+                        <div style="flex: 1;">
+                            <div style="font-size: 12px; margin-bottom: 8px;">
+                                <strong>Confidence:</strong> 
+                                <span style="color: ${result.confidence === 'high' ? 'var(--success)' : result.confidence === 'medium' ? '#f59e0b' : 'var(--error)'};">
+                                    ${result.confidence}
+                                </span>
+                            </div>
+                            <div style="font-size: 12px;"><strong>Agents:</strong> ${result.agentScores?.length || 0}</div>
+                            ${result.epistemicFraming?.recommendsHumanReview ? 
+                                '<div style="font-size: 11px; color: #f59e0b; margin-top: 4px;">⚠️ Human review recommended</div>' : ''}
+                        </div>
+                    </div>
+                `;
+                
+                // Agent scores
+                if (result.agentScores?.length > 0) {
+                    html += `<div style="font-size: 11px; font-weight: 600; margin-bottom: 8px; color: var(--text-secondary);">AGENT SCORES</div>`;
+                    html += '<div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;">';
+                    result.agentScores.forEach(agent => {
+                        const agentColor = agent.score >= 70 ? 'rgba(34, 197, 94, 0.2)' : 
+                                          agent.score >= 50 ? 'rgba(245, 158, 11, 0.2)' : 'rgba(239, 68, 68, 0.2)';
+                        html += `
+                            <div style="padding: 6px 10px; background: ${agentColor}; border-radius: 6px; font-size: 11px;">
+                                ${agent.agentType}: <strong>${Math.round(agent.score)}</strong>
+                            </div>
+                        `;
+                    });
+                    html += '</div>';
+                }
+                
+                // Rationale
+                if (result.epistemicFraming?.rationale) {
+                    html += `
+                        <div style="font-size: 11px; font-weight: 600; margin-bottom: 6px; color: var(--text-secondary);">RATIONALE</div>
+                        <div style="font-size: 12px; padding: 10px; background: rgba(99, 102, 241, 0.1); border-left: 3px solid rgba(99, 102, 241, 0.5); border-radius: 0 6px 6px 0; margin-bottom: 12px;">
+                            ${result.epistemicFraming.rationale}
+                        </div>
+                    `;
+                }
+                
+                // Top suggestions
+                if (result.suggestions?.length > 0) {
+                    html += `<div style="font-size: 11px; font-weight: 600; margin-bottom: 6px; color: var(--text-secondary);">SUGGESTIONS</div>`;
+                    result.suggestions.slice(0, 5).forEach(s => {
+                        const priorityColor = s.priority === 'high' ? 'var(--error)' : s.priority === 'medium' ? '#f59e0b' : 'var(--success)';
+                        html += `
+                            <div style="display: flex; align-items: flex-start; gap: 8px; padding: 8px; background: var(--bg-secondary); border-radius: 6px; margin-bottom: 4px; font-size: 11px;">
+                                <span style="width: 6px; height: 6px; border-radius: 50%; background: ${priorityColor}; margin-top: 4px; flex-shrink: 0;"></span>
+                                <span style="flex: 1;">${s.text}</span>
+                            </div>
+                        `;
+                    });
+                }
+                
+                return html;
+            },
+            
+            updateAIEvalsHistory() {
+                const historyList = document.getElementById('aiEvalsHistoryList');
+                if (!historyList) return;
+                
+                if (this.aiEvalsHistory.length === 0) {
+                    historyList.innerHTML = 'No evaluations run yet';
+                    return;
+                }
+                
+                historyList.innerHTML = this.aiEvalsHistory.slice(0, 5).map(h => {
+                    const date = new Date(h.timestamp);
+                    const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    const scoreColor = h.score >= 70 ? 'var(--success)' : h.score >= 50 ? '#f59e0b' : 'var(--error)';
+                    return `
+                        <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border);">
+                            <span>${time} - ${h.profile}</span>
+                            <span style="color: ${scoreColor}; font-weight: 600;">${Math.round(h.score)}</span>
+                        </div>
+                    `;
+                }).join('');
+            },
+            
+            async getFileContent(filePath) {
+                try {
+                    if (window.electronAPI?.invoke) {
+                        const result = await window.electronAPI.invoke('read-file', filePath);
+                        return result?.content || '';
+                    }
+                } catch (error) {
+                    console.error('[AI Evals] Failed to read file:', error);
+                }
+                return '';
+            },
+            
             // Store last test results for fixing
             lastTestResults: null,
             lastAccessibilityResults: null,
             lastPerformanceResults: null,
+            lastInteractiveAnalysis: null,
             
             // Test state
             testPlan: null,
@@ -21949,5 +22182,203 @@ Respond with ONLY the objective, no other text.`;
             </div>
         </div>
     </div>
+    
+    <!-- Evaluation HUD Components -->
+    <script src="js/evaluation-hud.js"></script>
+    <script src="js/outcome-feedback-ui.js"></script>
+    <script>
+        // Initialize Evaluation HUD and Outcome Feedback UI
+        (function() {
+            'use strict';
+            
+            // Wait for GSXCreate to be available
+            const initEvalComponents = () => {
+                if (typeof EvaluationHUD === 'undefined' || typeof OutcomeFeedbackUI === 'undefined') {
+                    console.log('[Eval HUD] Components not loaded, skipping initialization');
+                    return;
+                }
+                
+                // Create Evaluation HUD instance
+                window.evalHUD = new EvaluationHUD({
+                    position: { bottom: 20, right: 340 }
+                });
+                
+                // Create Outcome Feedback UI instance
+                window.outcomeFeedback = new OutcomeFeedbackUI({
+                    onSubmit: async (outcome) => {
+                        console.log('[Outcome Feedback] Submitting:', outcome);
+                        try {
+                            if (window.electronAPI?.invoke) {
+                                await window.electronAPI.invoke('meta:record-outcome', outcome);
+                            }
+                        } catch (error) {
+                            console.error('[Outcome Feedback] Failed to record:', error);
+                        }
+                    }
+                });
+                
+                // Listen for evaluation results
+                document.addEventListener('eval:display', (e) => {
+                    if (e.detail && window.evalHUD) {
+                        window.evalHUD.displayEvaluation(e.detail);
+                    }
+                });
+                
+                // Listen for apply suggestion events
+                document.addEventListener('eval:apply-suggestion', async (e) => {
+                    const suggestion = e.detail?.suggestion;
+                    if (suggestion && typeof GSXCreate !== 'undefined' && GSXCreate.addTask) {
+                        await GSXCreate.addTask({
+                            type: 'improvement',
+                            description: suggestion,
+                            source: 'evaluation',
+                            priority: 4
+                        });
+                        console.log('[Eval HUD] Suggestion added to task queue:', suggestion);
+                    }
+                });
+                
+                // Listen for weighting mode changes
+                document.addEventListener('eval:weighting-change', (e) => {
+                    console.log('[Eval HUD] Weighting mode changed to:', e.detail?.mode);
+                });
+
+                // Listen for run evaluation requests from HUD
+                document.addEventListener('eval:run', async (e) => {
+                    const weightingMode = e.detail?.weightingMode || 
+                                          window.evalHUD?.getWeightingMode?.() || 
+                                          'contextual';
+                    
+                    // Get current preview file content if available
+                    if (typeof GSXCreate !== 'undefined' && GSXCreate.currentPreviewFile) {
+                        try {
+                            const content = await window.electronAPI.invoke('read-file', GSXCreate.currentPreviewFile);
+                            if (content) {
+                                await GSXCreate.runEvaluation(content, {
+                                    filePath: GSXCreate.currentPreviewFile,
+                                    weightingMode
+                                });
+                            }
+                        } catch (error) {
+                            console.error('[Eval] Failed to read file for evaluation:', error);
+                        }
+                    }
+                });
+
+                // Listen for view dashboard requests
+                document.addEventListener('eval:view-dashboard', () => {
+                    console.log('[Eval HUD] View dashboard requested');
+                    // Could open a separate dashboard window or modal in the future
+                    if (typeof GSXCreate !== 'undefined' && GSXCreate.addMessage) {
+                        GSXCreate.addMessage('system', 'Learning dashboard coming soon!');
+                    }
+                });
+
+                // Add method to GSXCreate for triggering evaluations
+                if (typeof GSXCreate !== 'undefined') {
+                    GSXCreate.runEvaluation = async function(content, options = {}) {
+                        try {
+                            if (!window.electronAPI?.invoke) {
+                                console.warn('[Eval] electronAPI not available');
+                                return;
+                            }
+
+                            // Get weighting mode from HUD if not specified
+                            const weightingMode = options.weightingMode || 
+                                                  window.evalHUD?.getWeightingMode?.() || 
+                                                  localStorage.getItem('eval.weightingMode') ||
+                                                  'contextual';
+
+                            // Show loading state in HUD
+                            if (window.evalHUD) {
+                                window.evalHUD.displayLoading({ agentCount: 'multiple' });
+                            }
+                            
+                            // Generate agents
+                            const agentConfigs = await window.electronAPI.invoke('eval:generate-agents', {
+                                content,
+                                filePath: options.filePath || 'unknown',
+                                userOverrideTypes: options.documentTypes,
+                                weightingMode
+                            });
+                            
+                            if (agentConfigs.error) {
+                                console.error('[Eval] Error generating agents:', agentConfigs.error);
+                                if (window.evalHUD) {
+                                    window.evalHUD.displayError({ message: agentConfigs.error });
+                                }
+                                return;
+                            }
+                            
+                            // Run evaluations
+                            const evaluations = await window.electronAPI.invoke('eval:run-evaluation', {
+                                agentConfigs,
+                                content,
+                                context: { weightingMode, ...options.context }
+                            });
+                            
+                            if (evaluations.error) {
+                                console.error('[Eval] Error running evaluations:', evaluations.error);
+                                if (window.evalHUD) {
+                                    window.evalHUD.displayError({ message: evaluations.error });
+                                }
+                                return;
+                            }
+                            
+                            // Get consolidated result with weighting mode
+                            const consolidated = await window.electronAPI.invoke('eval:get-consolidated', {
+                                evaluations,
+                                weightingStrategy: weightingMode,
+                                context: { weightingMode }
+                            });
+                            
+                            if (consolidated.error) {
+                                console.error('[Eval] Error consolidating:', consolidated.error);
+                                if (window.evalHUD) {
+                                    window.evalHUD.displayError({ message: consolidated.error });
+                                }
+                                return;
+                            }
+                            
+                            // Display in HUD
+                            document.dispatchEvent(new CustomEvent('eval:display', { detail: consolidated }));
+                            
+                            return consolidated;
+                        } catch (error) {
+                            console.error('[Eval] Evaluation failed:', error);
+                            if (window.evalHUD) {
+                                window.evalHUD.displayError({ message: error.message });
+                            }
+                        }
+                    };
+                    
+                    GSXCreate.showOutcomeFeedback = function(evaluation) {
+                        if (window.outcomeFeedback) {
+                            window.outcomeFeedback.show(evaluation);
+                        }
+                    };
+                    
+                    GSXCreate.toggleEvalHUD = function() {
+                        if (window.evalHUD) {
+                            if (window.evalHUD.isVisible) {
+                                window.evalHUD.hide();
+                            } else {
+                                window.evalHUD.show();
+                            }
+                        }
+                    };
+                }
+                
+                console.log('[Eval HUD] Evaluation components initialized - HUD v' + (window.evalHUD?.version || 'unknown') + ', Feedback v' + (window.outcomeFeedback?.version || 'unknown'));
+            };
+            
+            // Initialize when DOM is ready
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', initEvalComponents);
+            } else {
+                setTimeout(initEvalComponents, 100);
+            }
+        })();
+    </script>
 </body>
 </html>

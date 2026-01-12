@@ -11,6 +11,16 @@
 (function() {
   'use strict';
 
+  // Cross-platform helper to convert file path to file:// URL
+  function pathToFileUrl(filePath) {
+    if (!filePath) return '';
+    if (filePath.startsWith('file://') || filePath.startsWith('data:')) return filePath;
+    let normalized = filePath.replace(/\\/g, '/');
+    if (/^[a-zA-Z]:/.test(normalized)) normalized = '/' + normalized;
+    const encoded = normalized.split('/').map(c => encodeURIComponent(c).replace(/%3A/g, ':')).join('/');
+    return 'file://' + encoded;
+  }
+
   // Asset types and their properties
   const ASSET_TYPES = {
     transcript: {
@@ -813,7 +823,7 @@
               const img = new Image();
               img.onload = () => resolve(img);
               img.onerror = reject;
-              img.src = `file://${src}`;
+              img.src = pathToFileUrl(src);
             });
             
             for (let j = 0; j < paths.length; j++) {

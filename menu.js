@@ -2234,6 +2234,37 @@ Right-click anywhere: Paste to Black Hole`;
             }
           ]
         },
+        {
+          label: 'Developer Docs',
+          submenu: [
+            {
+              label: 'Spaces API Guide',
+              click: () => {
+                const { BrowserWindow } = require('electron');
+                const path = require('path');
+                
+                // Create Spaces API documentation window
+                const apiDocWindow = new BrowserWindow({
+                  width: 1100,
+                  height: 900,
+                  webPreferences: {
+                    nodeIntegration: false,
+                    contextIsolation: true,
+                    preload: path.join(__dirname, 'preload.js'),
+                    webSecurity: true
+                  }
+                });
+                
+                // Load the Spaces API guide HTML file
+                try {
+                  apiDocWindow.loadFile('docs-spaces-api.html');
+                } catch (error) {
+                  console.error('Error loading Spaces API documentation:', error);
+                }
+              }
+            }
+          ]
+        },
         { type: 'separator' },
         {
           label: '🐛 Report a Bug',

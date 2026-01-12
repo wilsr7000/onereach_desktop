@@ -7249,6 +7249,12 @@ ${chunks[i]}`;
   
   // Get PDF page count with multiple fallback methods
   async getPDFPageCount(filePath) {
+    // Windows/Linux compatibility: Return default page count
+    if (process.platform !== 'darwin') {
+      console.log('[V2-PDF] Non-macOS platform detected, returning default page count');
+      return 1;
+    }
+    
     const { exec } = require('child_process');
     const { promisify } = require('util');
     const execAsync = promisify(exec);
@@ -7315,16 +7321,8 @@ ${chunks[i]}`;
   
   // Generate PDF thumbnail for specific page
   async generatePDFPageThumbnail(filePath, pageNumber = 1) {
-    const { exec } = require('child_process');
-    const { promisify } = require('util');
-    const execAsync = promisify(exec);
-    
     // This method handles page-specific thumbnail requests
     console.log('[V2-PDF-PAGE] Generating thumbnail for page:', pageNumber);
-    
-    // Since macOS tools can only generate page 1 thumbnails,
-    // we'll return the existing thumbnail from the history item
-    // The UI will show an overlay for pages other than 1
     
     // Try to find the item by file path
     const item = this.history.find(h => h.filePath === filePath);
@@ -7332,6 +7330,20 @@ ${chunks[i]}`;
       console.log('[V2-PDF-PAGE] Returning existing thumbnail from history');
       return item.thumbnail;
     }
+    
+    // Windows/Linux compatibility: Return placeholder
+    if (process.platform !== 'darwin') {
+      console.log('[V2-PDF-PAGE] Non-macOS platform detected, using placeholder');
+      return this.generatePDFThumbnail(path.basename(filePath), 0);
+    }
+    
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    
+    // Since macOS tools can only generate page 1 thumbnails,
+    // we'll return the existing thumbnail from the history item
+    // The UI will show an overlay for pages other than 1
     
     // If no existing thumbnail, try to generate one
     try {
@@ -7749,11 +7761,17 @@ ${chunks[i]}`;
   
   // Generate text file preview using Quick Look
   async generateTextPreview(filePath, item) {
+    console.log('[V2-TEXT] Starting text preview generation for:', filePath);
+    
+    // Windows/Linux compatibility: Use custom preview directly
+    if (process.platform !== 'darwin') {
+      console.log('[V2-TEXT] Non-macOS platform detected, using custom preview');
+      return this.createCustomTextPreview(filePath, item);
+    }
+    
     const { exec } = require('child_process');
     const { promisify } = require('util');
     const execAsync = promisify(exec);
-    
-    console.log('[V2-TEXT] Starting text preview generation for:', filePath);
     
     try {
       // For text files, we'll use qlmanage to generate a preview

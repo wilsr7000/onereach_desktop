@@ -8,6 +8,16 @@
  * - Import/export beat links
  */
 
+// Cross-platform helper to convert file path to file:// URL
+function pathToFileUrl(filePath) {
+  if (!filePath) return '';
+  if (filePath.startsWith('file://') || filePath.startsWith('data:')) return filePath;
+  let normalized = filePath.replace(/\\/g, '/');
+  if (/^[a-zA-Z]:/.test(normalized)) normalized = '/' + normalized;
+  const encoded = normalized.split('/').map(c => encodeURIComponent(c).replace(/%3A/g, ':')).join('/');
+  return 'file://' + encoded;
+}
+
 // Link type definitions
 export const LINK_TYPES = {
   RELATED: 'related',      // Same topic
@@ -411,8 +421,8 @@ export class BeatLinker {
       const nameEl = this.previewMiniPlayer.querySelector('#beatPreviewName');
       const timeEl = this.previewMiniPlayer.querySelector('#beatPreviewTime');
 
-      // Set video source
-      video.src = `file://${videoPath}`;
+      // Set video source (cross-platform)
+      video.src = pathToFileUrl(videoPath);
       video.currentTime = link.target.time || 0;
       
       // Update info
@@ -747,6 +757,7 @@ export class BeatLinker {
 }
 
 export default BeatLinker;
+
 
 
 

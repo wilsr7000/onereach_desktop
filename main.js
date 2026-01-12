@@ -1,6 +1,7 @@
 const { app, ipcMain, Tray, Menu, MenuItem, BrowserWindow, desktopCapturer, dialog, globalShortcut } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { pathToFileURL } = require('url');
 const { setApplicationMenu, registerTestMenuShortcut, refreshGSXLinks } = require('./menu');
 const { shell } = require('electron');
 const browserWindow = require('./browserWindow');
@@ -1121,6 +1122,15 @@ app.whenReady().then(() => {
     console.log('[Main] Spaces API initialized');
   } catch (error) {
     console.error('[Main] Error setting up Spaces API:', error);
+  }
+  
+  // Setup Evaluation and Meta-Learning IPC handlers
+  try {
+    const { setupEvaluationIPC } = require('./lib/ipc');
+    setupEvaluationIPC();
+    console.log('[Main] Evaluation and Meta-Learning IPC initialized');
+  } catch (error) {
+    console.error('[Main] Error setting up Evaluation IPC:', error);
   }
   
   // Register test menu shortcut
@@ -5329,8 +5339,8 @@ function setupAiderIPC() {
       });
       const page = await context.newPage();
       
-      // Navigate to the file
-      const fileUrl = filePath.startsWith('file://') ? filePath : `file://${filePath}`;
+      // Navigate to the file (cross-platform compatible)
+      const fileUrl = filePath.startsWith('file://') ? filePath : pathToFileURL(filePath).href;
       console.log('[Screenshot] Navigating to:', fileUrl);
       await page.goto(fileUrl, { waitUntil: 'networkidle', timeout: 30000 });
       
@@ -6142,44 +6152,90 @@ function setupIPC() {
     try {
       const ClipboardStorage = require('./clipboard-storage-v2');
       const storage = new ClipboardStorage();
-      const item = storage.loadItem(itemId);
       
-      if (item && item.content) {
-        let filePath;
-        if (path.isAbsolute(item.content)) {
-          filePath = item.content;
-        } else {
-          filePath = path.join(storage.storageRoot, item.content);
-        }
-        
-        // Check if file exists
-        const fs = require('fs');
-        if (!fs.existsSync(filePath)) {
-          console.error('[Clipboard] Video file not found:', filePath);
-          return { success: false, error: 'Video file not found: ' + filePath };
-        }
-        
-        // Load scenes from metadata if available
-        let scenes = [];
+      console.log('[Clipboard] Getting video path for item:', itemId);
+      
+      // Helper to load scenes from metadata
+      const loadScenes = (itemId) => {
         try {
           const metadataPath = path.join(storage.itemsDir, itemId, 'metadata.json');
           if (fs.existsSync(metadataPath)) {
             const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
-            scenes = metadata.scenes || [];
+            return metadata.scenes || [];
           }
         } catch (e) {
           // Ignore metadata errors
         }
+        return [];
+      };
+      
+      // First, try to load item via storage (which scans for actual files)
+      try {
+        const item = storage.loadItem(itemId);
         
-        return { 
-          success: true, 
-          filePath: filePath,
-          fileName: item.fileName || path.basename(filePath),
-          scenes: scenes
-        };
+        if (item && item.content) {
+          let filePath;
+          if (path.isAbsolute(item.content)) {
+            filePath = item.content;
+          } else {
+            filePath = path.join(storage.storageRoot, item.content);
+          }
+          
+          if (fs.existsSync(filePath)) {
+            console.log('[Clipboard] Found video via loadItem:', filePath);
+            return { 
+              success: true, 
+              filePath: filePath,
+              fileName: item.fileName || path.basename(filePath),
+              scenes: loadScenes(itemId)
+            };
+          }
+        }
+      } catch (loadError) {
+        console.log('[Clipboard] loadItem failed, trying fallback:', loadError.message);
       }
       
-      return { success: false, error: 'Video item not found or has no content' };
+      // Fallback: Scan the item directory for video files directly
+      // This handles cases where contentPath in index.json doesn't match actual filename
+      const itemDir = path.join(storage.itemsDir, itemId);
+      console.log('[Clipboard] Checking item directory:', itemDir);
+      
+      if (fs.existsSync(itemDir)) {
+        const files = fs.readdirSync(itemDir);
+        console.log('[Clipboard] Files in item dir:', files);
+        
+        // Filter for video files (excluding metadata, thumbnails, etc.)
+        const videoExtensions = ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm', '.m4v', '.mpg', '.mpeg'];
+        const videoFile = files.find(f => {
+          const lower = f.toLowerCase();
+          // Skip hidden files and non-video files
+          if (f.startsWith('.')) return false;
+          return videoExtensions.some(ext => lower.endsWith(ext));
+        });
+        
+        if (videoFile) {
+          const videoPath = path.join(itemDir, videoFile);
+          console.log('[Clipboard] Found video file in item dir:', videoPath);
+          
+          // Get fileName from index entry if available
+          const indexEntry = storage.index.items.find(i => i.id === itemId);
+          
+          return { 
+            success: true, 
+            filePath: videoPath,
+            fileName: indexEntry?.fileName || videoFile,
+            scenes: loadScenes(itemId)
+          };
+        }
+      }
+      
+      // File not found
+      const indexEntry = storage.index.items.find(i => i.id === itemId);
+      console.error('[Clipboard] Video file not found. Expected:', indexEntry?.contentPath);
+      return { 
+        success: false, 
+        error: `Video file is missing from storage. The file may have been deleted or moved. Expected: ${indexEntry?.fileName || 'unknown'}`
+      };
     } catch (error) {
       console.error('[Clipboard] Error getting video path:', error);
       return { success: false, error: error.message };

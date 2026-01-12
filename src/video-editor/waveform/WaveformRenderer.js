@@ -5,6 +5,16 @@
 import { WaveformCache } from './WaveformCache.js';
 import { WaveformTypes } from './WaveformTypes.js';
 
+// Cross-platform helper to convert file path to file:// URL
+function pathToFileUrl(filePath) {
+  if (!filePath) return '';
+  if (filePath.startsWith('file://') || filePath.startsWith('data:')) return filePath;
+  let normalized = filePath.replace(/\\/g, '/');
+  if (/^[a-zA-Z]:/.test(normalized)) normalized = '/' + normalized;
+  const encoded = normalized.split('/').map(c => encodeURIComponent(c).replace(/%3A/g, ':')).join('/');
+  return 'file://' + encoded;
+}
+
 export class WaveformRenderer {
   constructor(appContext) {
     this.app = appContext;
@@ -680,8 +690,8 @@ export class WaveformRenderer {
         // Load audio file and generate peaks
         await this._initAudioContext();
         
-        // Fetch audio data
-        const response = await fetch(`file://${audioPath}`);
+        // Fetch audio data (cross-platform)
+        const response = await fetch(pathToFileUrl(audioPath));
         const arrayBuffer = await response.arrayBuffer();
         const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
 
