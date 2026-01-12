@@ -876,29 +876,23 @@ app.whenReady().then(() => {
   // Set up Tab Picker IPC handlers
   setupTabPickerIPC();
   
-  // Add keyboard shortcuts to open dev tools (only in development mode)
-  const isDevelopment = process.env.NODE_ENV === 'development' || !app.isPackaged;
-  
-  if (isDevelopment) {
-    const openDevTools = () => {
-      console.log('Opening Developer Tools via shortcut');
-      const focusedWindow = BrowserWindow.getFocusedWindow();
-      if (focusedWindow) {
-        focusedWindow.webContents.openDevTools();
-      } else {
-        const allWindows = BrowserWindow.getAllWindows();
-        if (allWindows.length > 0) {
-          allWindows[0].webContents.openDevTools();
-        }
+  // Add keyboard shortcuts to open dev tools (enabled in both dev and production)
+  const openDevTools = () => {
+    console.log('Opening Developer Tools via shortcut');
+    const focusedWindow = BrowserWindow.getFocusedWindow();
+    if (focusedWindow) {
+      focusedWindow.webContents.openDevTools();
+    } else {
+      const allWindows = BrowserWindow.getAllWindows();
+      if (allWindows.length > 0) {
+        allWindows[0].webContents.openDevTools();
       }
-    };
-    
-    globalShortcut.register('CommandOrControl+Shift+I', openDevTools);
-    globalShortcut.register('F12', openDevTools);
-    console.log('Registered Cmd+Shift+I and F12 shortcuts for Developer Tools (dev mode)');
-  } else {
-    console.log('DevTools shortcuts disabled in production mode');
-  }
+    }
+  };
+  
+  globalShortcut.register('CommandOrControl+Shift+I', openDevTools);
+  globalShortcut.register('F12', openDevTools);
+  console.log('Registered Cmd+Shift+I and F12 shortcuts for Developer Tools');
   
   // PERFORMANCE: Defer heavyweight manager initializations until after window shows
   // This makes the app feel snappier by showing the UI first
