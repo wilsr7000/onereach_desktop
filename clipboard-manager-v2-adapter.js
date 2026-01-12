@@ -2,6 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const ClipboardStorageV2 = require('./clipboard-storage-v2');
+const { getSharedStorage } = require('./clipboard-storage-v2');
 const AppContextCapture = require('./app-context-capture');
 const getLogger = require('./event-logger');
 const { getContentIngestionService, ValidationError, retryOperation } = require('./content-ingestion');
@@ -31,8 +32,10 @@ class ClipboardManagerV2 {
     // Check if migration is needed
     this.checkAndMigrate();
     
-    // Initialize new storage
-    this.storage = new ClipboardStorageV2();
+    // Use shared storage singleton to ensure consistency with SpacesAPI
+    // This fixes issues where items added via ClipboardManager weren't
+    // visible to SpacesAPI (and vice versa) due to separate in-memory indexes
+    this.storage = getSharedStorage();
     
     // Initialize app context capture
     this.contextCapture = new AppContextCapture();

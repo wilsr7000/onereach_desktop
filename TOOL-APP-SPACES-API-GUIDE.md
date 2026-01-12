@@ -52,6 +52,21 @@ GET /api/status
 }
 ```
 
+#### Force Reload Index
+```http
+POST /api/reload
+```
+
+Use this endpoint when external processes have modified the storage and the in-memory index needs to be refreshed.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Index reloaded from disk"
+}
+```
+
 ---
 
 ## 🗂️ Spaces CRUD Operations
@@ -968,6 +983,7 @@ If the request fails, ensure:
 | Operation | Method | Endpoint |
 |-----------|--------|----------|
 | Server Status | GET | `/api/status` |
+| Force Reload Index | POST | `/api/reload` |
 | **Spaces** | | |
 | List Spaces | GET | `/api/spaces` |
 | Get Space | GET | `/api/spaces/:id` |
@@ -1012,6 +1028,25 @@ If the request fails, ensure:
 ---
 
 ## ⚠️ Important Notes
+
+### Known API Behaviors
+
+| Endpoint | Behavior |
+|----------|----------|
+| `GET /api/spaces/:id/items/:itemId` | Always returns full content (no `includeContent` param needed) |
+| `GET /api/spaces/:id/items?includeContent=true` | The `includeContent` param is only for listing multiple items |
+| `POST /api/reload` | Forces index reload from disk - use when external processes modified storage |
+
+### Cache Behavior
+
+The API maintains an in-memory cache for performance. The cache is automatically invalidated when:
+- Items are deleted
+- Items are moved between spaces
+- Index is explicitly reloaded via `POST /api/reload`
+
+If you experience stale data from external modifications, call `POST /api/reload` to refresh.
+
+---
 
 1. **Localhost Only**: The API only accepts connections from `127.0.0.1` for security.
 

@@ -13,22 +13,18 @@
  */
 
 const ClipboardStorageV2 = require('./clipboard-storage-v2');
+const { getSharedStorage } = require('./clipboard-storage-v2');
 const { getContentIngestionService, VALID_TYPES } = require('./content-ingestion');
 const path = require('path');
 const fs = require('fs');
 
-// Singleton storage instance
-let storage = null;
-
 /**
- * Get or create the storage instance
+ * Get the shared storage instance
+ * Uses the same singleton as ClipboardManager for consistency
  * @returns {ClipboardStorageV2}
  */
 function getStorage() {
-  if (!storage) {
-    storage = new ClipboardStorageV2();
-  }
-  return storage;
+  return getSharedStorage();
 }
 
 /**
@@ -1674,6 +1670,22 @@ class SpacesAPI {
    */
   flush() {
     this.storage.flushPendingSaves();
+  }
+
+  /**
+   * Force reload the index from disk
+   * Use this when running external scripts or when you need to sync
+   * with changes made by another process (e.g., the main app).
+   * 
+   * @returns {void}
+   * @example
+   * // Reload before reading to ensure fresh data
+   * api.reload();
+   * const items = await api.items.list('unclassified');
+   */
+  reload() {
+    this.storage.reloadIndex();
+    console.log('[SpacesAPI] Index reloaded from disk');
   }
 }
 

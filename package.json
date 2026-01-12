@@ -157,6 +157,7 @@
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@ffprobe-installer/ffprobe": "^2.1.2",
     "@or-sdk/files-sync-node": "^0.0.4",
+    "7zip-bin": "^5.2.0",
     "archiver": "^7.0.1",
     "docx": "^9.5.1",
     "electron-log": "^5.3.3",

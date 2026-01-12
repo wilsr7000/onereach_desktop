@@ -237,6 +237,26 @@ class ClipboardStorageV2 {
     };
   }
   
+  /**
+   * Force reload the index from disk
+   * Useful for external scripts or when needing to sync with changes
+   * made by other processes
+   * @returns {Object} The reloaded index
+   */
+  reloadIndex() {
+    // Flush any pending saves first
+    this.flushPendingSaves();
+    
+    // Clear the item cache since it may contain stale data
+    this.cache.clear();
+    
+    // Reload from disk
+    this.index = this.loadIndex();
+    
+    console.log('[Storage] Index reloaded from disk');
+    return this.index;
+  }
+  
   // PERFORMANCE: Debounced async save to reduce I/O blocking
   // Saves are batched and written asynchronously after a short delay
   saveIndex(index = this.index) {
@@ -626,6 +646,9 @@ class ClipboardStorageV2 {
       metadata.spaceId = newSpaceId;
       fs.writeFileSync(metaPath, JSON.stringify(metadata, null, 2));
     }
+    
+    // IMPORTANT: Clear from cache so next get() loads fresh data with updated spaceId
+    this.cache.delete(itemId);
     
     // Save index
     this.saveIndex();
@@ -1476,4 +1499,21 @@ class ClipboardStorageV2 {
   }
 }
 
-module.exports = ClipboardStorageV2; 
+// Singleton instance for shared storage across all consumers
+let storageInstance = null;
+
+/**
+ * Get the singleton storage instance
+ * This ensures ClipboardManager, SpacesAPI, and all other consumers
+ * share the same in-memory index for consistency
+ * @returns {ClipboardStorageV2}
+ */
+function getSharedStorage() {
+  if (!storageInstance) {
+    storageInstance = new ClipboardStorageV2();
+  }
+  return storageInstance;
+}
+
+module.exports = ClipboardStorageV2;
+module.exports.getSharedStorage = getSharedStorage; 

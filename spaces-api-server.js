@@ -147,6 +147,9 @@ class SpacesAPIServer {
     if (pathname === '/api/status' && method === 'GET') {
       return this.handleStatus(req, res);
     }
+    if (pathname === '/api/reload' && method === 'POST') {
+      return this.handleReload(req, res);
+    }
     if (pathname === '/api/token' && method === 'GET') {
       return this.handleGetToken(req, res);
     }
@@ -330,6 +333,28 @@ class SpacesAPIServer {
       extensionConnected: this.isExtensionConnected(),
       port: PORT
     }));
+  }
+
+  /**
+   * POST /api/reload - Force reload index from disk
+   * Useful when external processes have modified the storage
+   * and the in-memory index needs to be refreshed
+   */
+  handleReload(req, res) {
+    try {
+      const { getSpacesAPI } = require('./spaces-api');
+      const api = getSpacesAPI();
+      api.reload();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: true,
+        message: 'Index reloaded from disk'
+      }));
+    } catch (error) {
+      console.error('[SpacesAPIServer] Reload error:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: error.message, code: 'RELOAD_ERROR' }));
+    }
   }
 
   /**
