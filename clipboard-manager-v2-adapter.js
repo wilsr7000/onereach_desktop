@@ -665,6 +665,8 @@ class ClipboardManagerV2 {
   }
   
   async deleteItem(id) {
+    console.log('[Clipboard] deleteItem called for:', id);
+    
     // Ensure history is loaded
     this.ensureHistoryLoaded();
     
@@ -672,14 +674,14 @@ class ClipboardManagerV2 {
     if (this.manager && this.manager.pendingOperations) {
       const pendingOps = this.manager.pendingOperations.get(id);
       if (pendingOps && pendingOps.size > 0) {
-        console.log(`Waiting for ${pendingOps.size} pending operations to complete before deleting item ${id}`);
+        console.log(`[Clipboard] Waiting for ${pendingOps.size} pending operations to complete before deleting item ${id}`);
         try {
           await Promise.race([
             Promise.all(Array.from(pendingOps)),
             new Promise((resolve) => setTimeout(resolve, 5000)) // 5 second timeout
           ]);
         } catch (e) {
-          console.error('Error waiting for pending operations:', e);
+          console.error('[Clipboard] Error waiting for pending operations:', e);
         }
       }
     }
@@ -689,38 +691,55 @@ class ClipboardManagerV2 {
     const spaceId = item ? item.spaceId : null;
     const fileName = item ? item.fileName : null;
     
+    console.log('[Clipboard] Attempting storage delete for:', id, 'spaceId:', spaceId);
     const success = this.storage.deleteItem(id);
-    if (success) {
-      // Remove from unified space-metadata.json
-      if (spaceId) {
-        try {
-          const spaceMeta = this.storage.getSpaceMetadata(spaceId);
-          if (spaceMeta) {
-            const fileKey = fileName || `item-${id}`;
-            if (spaceMeta.files[fileKey]) {
-              delete spaceMeta.files[fileKey];
-              this.storage.updateSpaceMetadata(spaceId, { files: spaceMeta.files });
-              console.log('[Clipboard] Removed from space-metadata.json:', fileKey);
-            }
-          }
-        } catch (syncError) {
-          const logger = getLogger();
-          logger.error('Clipboard remove from space failed', {
-            error: syncError.message,
-            operation: 'removeFromSpace',
-            itemId: id
-          });
-        }
+    console.log('[Clipboard] Storage delete result:', success);
+    
+    if (!success) {
+      // Item might still be in history but not in storage index - clean up history anyway
+      const historyIndex = this.history.findIndex(h => h.id === id);
+      if (historyIndex !== -1) {
+        console.log('[Clipboard] Item not in storage index but found in history, removing from history');
+        this.history.splice(historyIndex, 1);
+        this.pinnedItems.delete(id);
+        this.updateSpaceCounts();
+        this.notifyHistoryUpdate();
+        return; // Consider this a success - item is gone from UI
       }
-      
-      this.history = this.history.filter(h => h.id !== id);
-      this.pinnedItems.delete(id);
-      if (this.manager && this.manager.pendingOperations) {
-        this.manager.pendingOperations.delete(id); // Clean up pending operations
-      }
-      this.updateSpaceCounts();
-      this.notifyHistoryUpdate();
+      throw new Error(`Item ${id} not found in storage or history`);
     }
+    
+    // Remove from unified space-metadata.json
+    if (spaceId) {
+      try {
+        const spaceMeta = this.storage.getSpaceMetadata(spaceId);
+        if (spaceMeta) {
+          const fileKey = fileName || `item-${id}`;
+          if (spaceMeta.files && spaceMeta.files[fileKey]) {
+            delete spaceMeta.files[fileKey];
+            this.storage.updateSpaceMetadata(spaceId, { files: spaceMeta.files });
+            console.log('[Clipboard] Removed from space-metadata.json:', fileKey);
+          }
+        }
+      } catch (syncError) {
+        const logger = getLogger();
+        logger.error('Clipboard remove from space failed', {
+          error: syncError.message,
+          operation: 'removeFromSpace',
+          itemId: id
+        });
+        // Don't throw - the main delete succeeded, this is just metadata cleanup
+      }
+    }
+    
+    this.history = this.history.filter(h => h.id !== id);
+    this.pinnedItems.delete(id);
+    if (this.manager && this.manager.pendingOperations) {
+      this.manager.pendingOperations.delete(id); // Clean up pending operations
+    }
+    this.updateSpaceCounts();
+    this.notifyHistoryUpdate();
+    console.log('[Clipboard] Delete completed successfully for:', id);
   }
   
   async clearHistory() {
@@ -2248,8 +2267,14 @@ Respond ONLY with valid JSON, no other text.`;
     });
     
     safeHandle('clipboard:delete-item', async (event, id) => {
-      await this.deleteItem(id);
-      return { success: true };
+      try {
+        await this.deleteItem(id);
+        console.log('[Clipboard] Deleted item:', id);
+        return { success: true };
+      } catch (error) {
+        console.error('[Clipboard] Failed to delete item:', id, error);
+        return { success: false, error: error.message };
+      }
     });
     
     safeHandle('clipboard:toggle-pin', (event, id) => {
@@ -6672,21 +6697,39 @@ ${chunks[i]}`;
       const item = this.storage.loadItem(itemId);
       if (!item) return { success: false, error: 'Item not found' };
       
-      // Update metadata
-      item.metadata = metadata;
-      
-      // Save back to storage
+      // Save back to storage - merge with existing metadata to preserve app-specific fields
       const metadataPath = path.join(this.storage.storageRoot, 'items', itemId, 'metadata.json');
-      fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+      
+      // Read existing metadata from file and merge
+      let existingMetadata = {};
+      if (fs.existsSync(metadataPath)) {
+        try {
+          existingMetadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+        } catch (parseErr) {
+          console.warn('[Clipboard] Could not parse existing metadata, starting fresh:', parseErr.message);
+        }
+      }
+      
+      // Merge: existing fields preserved, new fields added/updated
+      const mergedMetadata = {
+        ...existingMetadata,  // Keep all existing fields (riffNoteId, _prefixed, assets, etc.)
+        ...metadata           // Overlay with new/updated fields
+      };
+      
+      // Update in-memory item
+      item.metadata = mergedMetadata;
+      
+      // Write merged metadata to file
+      fs.writeFileSync(metadataPath, JSON.stringify(mergedMetadata, null, 2));
       
       // Update in history array if present
       const historyItem = this.history.find(h => h.id === itemId);
       if (historyItem) {
-        historyItem.metadata = metadata;
+        historyItem.metadata = mergedMetadata;
         this.notifyHistoryUpdate();
       }
       
-      return { success: true };
+      return { success: true, metadata: mergedMetadata };
     } catch (error) {
       console.error('Error updating metadata:', error);
       return { success: false, error: error.message };

@@ -968,17 +968,44 @@ class ClipboardStorageV2 {
   }
   
   getExtension(type, content = null) {
+    // For image type, determine extension from content data URL or default to png
+    // Don't try to detect from base64 content as text patterns
+    if (type === 'image') {
+      if (content && typeof content === 'string') {
+        // Check for data URL with mime type
+        const match = content.match(/^data:image\/([a-zA-Z0-9+]+);/);
+        if (match) {
+          const mimeExt = match[1].toLowerCase();
+          // Map common mime subtypes to extensions
+          if (mimeExt === 'jpeg') return 'jpg';
+          if (mimeExt === 'svg+xml') return 'svg';
+          return mimeExt; // png, gif, webp, etc.
+        }
+      }
+      return 'png'; // Default for images
+    }
+    
+    // For code type, don't detect - use appropriate extension
+    if (type === 'code') {
+      return 'txt'; // Code snippets saved as text
+    }
+    
     // If we have content, detect the best extension based on the actual content
     if (content && typeof content === 'string') {
-      const detected = this.detectContentType(content);
-      if (detected) return detected;
+      // Skip detection for base64 data (starts with data: or is very long without whitespace)
+      const isBase64 = content.startsWith('data:') || 
+        (content.length > 1000 && !content.includes('\n') && /^[A-Za-z0-9+/=]+$/.test(content.substring(0, 100)));
+      
+      if (!isBase64) {
+        const detected = this.detectContentType(content);
+        if (detected) return detected;
+      }
     }
     
     // Fallback based on type
     switch (type) {
       case 'text': return 'md';
       case 'html': return 'md';  // Default HTML type to md (detectContentType handles real HTML)
-      case 'image': return 'png';
       case 'file': return 'file';
       default: return 'md';
     }
@@ -1145,9 +1172,12 @@ class ClipboardStorageV2 {
       fs.writeFileSync(contentPath, contentToSave, 'utf8');
       console.log(`[Storage] Saved content as .${finalExt} (detected from content)`);
     } else if (item.type === 'image') {
-      const contentPath = path.join(itemDir, 'content.png');
-                  const base64Data = item.content.replace(/^data:image\/[^;]+;base64,/, '');
+      // Determine extension from data URL or default to png
+      const ext = this.getExtension('image', item.content);
+      const contentPath = path.join(itemDir, `content.${ext}`);
+      const base64Data = item.content.replace(/^data:image\/[^;]+;base64,/, '');
       fs.writeFileSync(contentPath, Buffer.from(base64Data, 'base64'));
+      console.log(`[Storage] Saved image as .${ext}`);
     } else if (item.type === 'file' && item.filePath && item.fileName) {
       // Copy file with its original name
       if (fs.existsSync(item.filePath)) {

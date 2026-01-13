@@ -436,3 +436,15 @@ else
     echo "./scripts/publish-to-public.sh"
     exit 1
 fi
+
+# Step 8: Rebuild native modules for local development
+# CRITICAL: The x64 cross-compilation in Step 5 replaces native modules (like keytar)
+# with x64 binaries. Without this rebuild, 'npm start' will fail with architecture
+# mismatch errors on Apple Silicon Macs.
+echo ""
+echo -e "${YELLOW}Rebuilding native modules for local development...${NC}"
+echo "The x64 build cross-compiled native modules - rebuilding for ARM64..."
+npm rebuild
+echo -e "${GREEN}✅ Native modules rebuilt for local development${NC}"
+echo ""
+echo -e "${GREEN}You can now run 'npm start' for local development${NC}"
