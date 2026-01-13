@@ -986,18 +986,17 @@ class BlackHoleWidget {
             }
             document.body.classList.remove('modal-open');
             
-            // Resize to bubble
-            this.sendIPC('black-hole:resize-window', { width: 150, height: 150 });
-            
-            // Show success on bubble
+            // Show success effect briefly, then close directly
+            // Skip the shrink-to-bubble step to avoid position jump
             if (success) {
                 this.showSuccessEffect();
             }
             
             // Close window after brief display of success
+            // Close directly without shrinking to bubble (which caused position jump)
             setTimeout(() => {
                 this.sendIPC('black-hole:inactive', { closeWindow: true });
-            }, 1200);
+            }, 800);  // Reduced from 1200ms since we're not showing bubble
             
             // Clear pending item
             this.pendingItem = null;

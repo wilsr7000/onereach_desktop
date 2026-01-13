@@ -388,11 +388,73 @@ function setupSpaceDragAndDrop() {
             spaceItem.style.borderLeft = '';
             
             try {
-                // Get dropped item ID
+                // Check for external file drop first
+                if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                    console.log('[Drag] External file drop detected:', e.dataTransfer.files.length, 'file(s)');
+                    
+                    const spaceName = spaceItem.querySelector('.space-name')?.textContent || 'space';
+                    let successCount = 0;
+                    
+                    for (const file of e.dataTransfer.files) {
+                        console.log('[Drag] Processing file:', file.name, file.type, file.size);
+                        
+                        try {
+                            // Read file content - always as data URL to preserve binary data
+                            const reader = new FileReader();
+                            const fileContent = await new Promise((resolve, reject) => {
+                                reader.onload = () => resolve(reader.result);
+                                reader.onerror = reject;
+                                reader.readAsDataURL(file);  // Always use data URL for proper binary handling
+                            });
+                            
+                            // Use the appropriate add method based on type
+                            let result;
+                            if (file.type.startsWith('image/')) {
+                                // addImage expects: dataUrl, fileName, fileSize, spaceId
+                                result = await window.clipboard.addImage({
+                                    dataUrl: fileContent,  // This is already a data URL from readAsDataURL
+                                    fileName: file.name,
+                                    fileSize: file.size,
+                                    spaceId: spaceId
+                                });
+                            } else {
+                                // addFile expects: fileData (base64), fileName, fileType, fileSize, spaceId
+                                // Extract base64 from data URL
+                                const fileData = fileContent.split(',')[1] || fileContent;
+                                
+                                result = await window.clipboard.addFile({
+                                    fileData: fileData,
+                                    fileName: file.name,
+                                    fileType: file.type,
+                                    fileSize: file.size,
+                                    spaceId: spaceId
+                                });
+                            }
+                            
+                            if (result && (result.id || result.success)) {
+                                successCount++;
+                                console.log('[Drag] File added successfully:', file.name);
+                            }
+                        } catch (fileError) {
+                            console.error('[Drag] Error processing file:', file.name, fileError);
+                        }
+                    }
+                    
+                    if (successCount > 0) {
+                        showNotification(`✅ Added ${successCount} file${successCount > 1 ? 's' : ''} to ${spaceName}`);
+                        await loadSpaces();
+                        await loadHistory();
+                    } else {
+                        showNotification('❌ Failed to add files');
+                    }
+                    return;
+                }
+                
+                // Check for internal item drag (moving between spaces)
                 const itemId = e.dataTransfer.getData('text/plain');
                 
                 if (!itemId) {
-                    console.log('[Drag] No item ID in drag data');
+                    console.log('[Drag] No item ID or files in drag data');
                     return;
                 }
                 
@@ -410,7 +472,7 @@ function setupSpaceDragAndDrop() {
                 }
                 
             } catch (error) {
-                console.error('[Drag] Error moving item:', error);
+                console.error('[Drag] Error handling drop:', error);
                 showNotification('❌ Error: ' + error.message);
             }
         });
@@ -1190,7 +1252,6 @@ function renderHistory(items = history) {
         historyList.innerHTML = `
             <div class="empty-state">
                 <img src="${getAssetPath('or-logo.png')}" class="empty-logo" alt="OneReach Logo">
-                <div class="empty-icon">📋</div>
                 <div class="empty-text">No items in this space</div>
                 <div class="empty-hint">Copy something to add it here</div>
             </div>
@@ -6210,19 +6271,39 @@ function setupVideoModalListeners() {
 function setupHistoryItemDrag() {
     const historyList = document.getElementById('historyList');
     
-    if (!historyList) return;
+    if (!historyList) {
+        console.error('[Drag] historyList not found!');
+        return;
+    }
+    
+    console.log('[Drag] Setting up drag handlers on historyList');
+    
+    // Debug: capture phase listener to see ALL drag events
+    document.addEventListener('dragstart', (e) => {
+        console.log('[Drag DEBUG] Document dragstart - target:', e.target.tagName, e.target.className);
+    }, true);
     
     // Use event delegation for dynamically created history items
-    historyList.addEventListener('dragstart', async (e) => {
+    // IMPORTANT: Keep this synchronous - async breaks drag in some browsers
+    historyList.addEventListener('dragstart', (e) => {
+        console.log('[Drag] dragstart event fired! target:', e.target.tagName, e.target.className);
+        
         const historyItem = e.target.closest('.history-item');
-        if (!historyItem) return;
+        if (!historyItem) {
+            console.log('[Drag] dragstart fired but no .history-item found in ancestors');
+            console.log('[Drag] Target element:', e.target.outerHTML?.substring(0, 200));
+            return;
+        }
         
         const itemId = historyItem.dataset.id;
-        if (!itemId) return;
+        if (!itemId) {
+            console.log('[Drag] history-item found but no data-id');
+            return;
+        }
         
         console.log('[Drag] Started dragging item:', itemId);
         
-        // Set drag data for internal app use
+        // Set drag data for internal app use - MUST be synchronous
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', itemId);
         
@@ -6232,17 +6313,18 @@ function setupHistoryItemDrag() {
         // Store the item being dragged
         historyItem.classList.add('dragging');
         
-        // Trigger native drag for external apps/web pages
+        // Trigger native drag for external apps/web pages (fire and forget)
         // This allows the item to be dropped onto web upload fields, Finder, etc.
-        try {
-            const result = await window.electron.ipcRenderer.invoke('clipboard:start-native-drag', itemId);
-            if (result && result.success) {
-                console.log('[Drag] Native drag initiated for:', result.filePath);
-            }
-        } catch (err) {
-            // Native drag may not be available for all item types
-            console.log('[Drag] Native drag not available:', err.message);
-        }
+        window.electron?.ipcRenderer?.invoke('clipboard:start-native-drag', itemId)
+            .then(result => {
+                if (result && result.success) {
+                    console.log('[Drag] Native drag initiated for:', result.filePath);
+                }
+            })
+            .catch(err => {
+                // Native drag may not be available for all item types
+                console.log('[Drag] Native drag not available:', err.message);
+            });
     });
     
     historyList.addEventListener('dragend', (e) => {

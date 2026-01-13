@@ -182,6 +182,9 @@ class ClipboardManagerV2 {
     
     // Load all items (without content for performance)
     const items = this.storage.getAllItems();
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-manager-v2-adapter.js:loadFromStorage',message:'Loading from storage',data:{itemsFromStorage:items?.length,currentHistoryLength:this.history?.length,firstFiveIds:items?.slice(0,5).map(i=>i.id)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
+    // #endregion
     
     // Convert to old format for compatibility
     this.history = items.map(item => {
@@ -247,6 +250,9 @@ class ClipboardManagerV2 {
   async addToHistory(item) {
     // Ensure history is loaded before adding
     this.ensureHistoryLoaded();
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-manager-v2-adapter.js:addToHistory:entry',message:'addToHistory called',data:{type:item?.type,spaceId:item?.spaceId,historyLengthBefore:this.history?.length,storageItemCount:this.storage?.index?.items?.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
+    // #endregion
     
     const logger = getLogger();
     
@@ -359,6 +365,9 @@ class ClipboardManagerV2 {
     };
     
     this.history.unshift(historyItem);
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-manager-v2-adapter.js:addToHistory:afterUnshift',message:'After adding to history',data:{addedId:historyItem.id,historyLengthAfter:this.history?.length,storageItemCount:this.storage?.index?.items?.length,historyFirstId:this.history[0]?.id,storageFirstId:this.storage?.index?.items?.[0]?.id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
+    // #endregion
     
     // Maintain max history size
     if (this.history.length > this.maxHistorySize) {
@@ -571,6 +580,9 @@ class ClipboardManagerV2 {
   getHistory() {
     // Ensure history is loaded (lazy loading)
     this.ensureHistoryLoaded();
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-manager-v2-adapter.js:getHistory',message:'getHistory called',data:{historyLength:this.history?.length,storageItemCount:this.storage?.index?.items?.length,historyFirstFiveIds:this.history?.slice(0,5).map(i=>i.id),storageFirstFiveIds:this.storage?.index?.items?.slice(0,5).map(i=>i.id)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
+    // #endregion
     
     // Load content and metadata on demand for items that need it
     return this.history.map(item => {
@@ -1734,14 +1746,23 @@ Respond ONLY with valid JSON, no other text.`;
       }
     });
     
-    // Handle load errors
-    this.clipboardWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
-      console.error('[ClipboardManager] Failed to load:', errorCode, errorDescription);
-      const { dialog } = require('electron');
-      dialog.showErrorBox('Error', `Failed to load clipboard manager: ${errorDescription}`);
-      if (this.clipboardWindow && !this.clipboardWindow.isDestroyed()) {
-        this.clipboardWindow.close();
+    // Handle load errors - only close for critical main frame failures
+    this.clipboardWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      console.warn('[ClipboardManager] Load failed:', { errorCode, errorDescription, validatedURL, isMainFrame });
+      
+      // Only show error and close for main frame failures with real errors
+      // Error codes: -3 = ABORTED (user action), -6 = CONNECTION_FAILED, etc.
+      // See: https://source.chromium.org/chromium/chromium/src/+/main:net/base/net_error_list.h
+      if (isMainFrame && errorCode !== -3) {
+        // Main frame failed to load (not just aborted)
+        console.error('[ClipboardManager] Critical load failure - main frame failed');
+        const { dialog } = require('electron');
+        dialog.showErrorBox('Error', `Failed to load clipboard manager: ${errorDescription || 'Unknown error'}`);
+        if (this.clipboardWindow && !this.clipboardWindow.isDestroyed()) {
+          this.clipboardWindow.close();
+        }
       }
+      // For sub-frame/sub-resource failures, just log - don't close the window
     });
     
     // Show window when ready

@@ -295,6 +295,24 @@
         
         .history-item[draggable="true"] {
             cursor: grab;
+            -webkit-user-drag: element;
+        }
+        
+        /* Make content areas pass drag events to parent, but keep buttons interactive */
+        .history-item .item-content,
+        .history-item .item-preview,
+        .history-item .item-text,
+        .history-item .item-image,
+        .history-item .item-header .item-type,
+        .history-item .item-header .item-timestamp {
+            pointer-events: none;
+        }
+        
+        /* Keep action buttons interactive */
+        .history-item .item-actions,
+        .history-item .item-actions button,
+        .history-item .action-btn {
+            pointer-events: auto;
         }
         
         .space-action {
@@ -1238,6 +1256,7 @@
         
         .empty-text {
             font-size: 16px;
+            margin-top: 150px;
             margin-bottom: 8px;
             position: relative;
             z-index: 1;

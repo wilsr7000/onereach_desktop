@@ -1687,6 +1687,106 @@ class SpacesAPI {
     this.storage.reloadIndex();
     console.log('[SpacesAPI] Index reloaded from disk');
   }
+  
+  // ============================================
+  // DUCKDB-POWERED ASYNC METHODS
+  // ============================================
+  
+  /**
+   * Check if DuckDB is ready for queries
+   * @returns {boolean} Whether DuckDB is initialized
+   */
+  isDatabaseReady() {
+    return this.storage.dbReady || false;
+  }
+  
+  /**
+   * Wait for DuckDB to be ready
+   * @returns {Promise<boolean>} True if ready, false if unavailable
+   */
+  async waitForDatabase() {
+    if (this.storage.ensureDBReady) {
+      return await this.storage.ensureDBReady();
+    }
+    return false;
+  }
+  
+  /**
+   * Rebuild the database index from metadata.json files
+   * Use this for recovery when the database is corrupted
+   * @returns {Promise<number>} Number of items rebuilt
+   */
+  async rebuildIndex() {
+    if (this.storage.rebuildIndexFromFiles) {
+      return await this.storage.rebuildIndexFromFiles();
+    }
+    throw new Error('rebuildIndexFromFiles not available');
+  }
+  
+  /**
+   * Search using DuckDB (faster than JSON-based search for large datasets)
+   * Falls back to regular search if DuckDB is not ready
+   * @param {string} query - Search query
+   * @param {Object} options - Search options
+   * @returns {Promise<Array<Object>>} Matching items
+   */
+  async searchAsync(query, options = {}) {
+    if (this.storage.searchAsync && this.storage.dbReady) {
+      return await this.storage.searchAsync(query, options);
+    }
+    // Fallback to sync search
+    return this.search(query, options);
+  }
+  
+  /**
+   * Get all items with optional filtering using DuckDB
+   * @param {Object} options - Filter options
+   * @param {string} options.type - Filter by type
+   * @param {string} options.spaceId - Filter by space
+   * @param {string} options.tag - Filter by tag
+   * @param {boolean} options.pinned - Filter by pinned status
+   * @param {number} options.limit - Max results
+   * @param {number} options.offset - Skip results
+   * @returns {Promise<Array<Object>>} Matching items
+   */
+  async getAllItemsAsync(options = {}) {
+    if (this.storage.getAllItemsAsync && this.storage.dbReady) {
+      return await this.storage.getAllItemsAsync(options);
+    }
+    // Fallback to sync method
+    let items = this.storage.getAllItems();
+    if (options.type) items = items.filter(i => i.type === options.type);
+    if (options.spaceId) items = items.filter(i => i.spaceId === options.spaceId);
+    if (options.pinned !== undefined) items = items.filter(i => i.pinned === options.pinned);
+    if (options.limit) items = items.slice(options.offset || 0, (options.offset || 0) + options.limit);
+    return items;
+  }
+  
+  /**
+   * Search items by tags using DuckDB
+   * @param {Array<string>} tags - Tags to search for
+   * @param {boolean} matchAll - Require all tags (default: any)
+   * @returns {Promise<Array<Object>>} Matching items
+   */
+  async searchByTags(tags, matchAll = false) {
+    if (this.storage.searchByTags && this.storage.dbReady) {
+      return await this.storage.searchByTags(tags, matchAll);
+    }
+    // Fallback to sync search
+    return this.tags.findItems(tags, { matchAll });
+  }
+  
+  /**
+   * Get database status information
+   * @returns {Object} Database status
+   */
+  getDatabaseStatus() {
+    return {
+      ready: this.storage.dbReady || false,
+      path: this.storage.dbPath || null,
+      hasConnection: !!this.storage.dbConnection
+    };
+  }
 }
 
 // Singleton instance

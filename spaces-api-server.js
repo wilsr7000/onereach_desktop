@@ -150,6 +150,12 @@ class SpacesAPIServer {
     if (pathname === '/api/reload' && method === 'POST') {
       return this.handleReload(req, res);
     }
+    if (pathname === '/api/database/status' && method === 'GET') {
+      return this.handleDatabaseStatus(req, res);
+    }
+    if (pathname === '/api/database/rebuild' && method === 'POST') {
+      return this.handleDatabaseRebuild(req, res);
+    }
     if (pathname === '/api/token' && method === 'GET') {
       return this.handleGetToken(req, res);
     }
@@ -354,6 +360,62 @@ class SpacesAPIServer {
       console.error('[SpacesAPIServer] Reload error:', error);
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: error.message, code: 'RELOAD_ERROR' }));
+    }
+  }
+
+  /**
+   * GET /api/database/status - Get DuckDB status
+   */
+  handleDatabaseStatus(req, res) {
+    try {
+      const { getSpacesAPI } = require('./spaces-api');
+      const api = getSpacesAPI();
+      const status = api.getDatabaseStatus();
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: true,
+        database: status
+      }));
+    } catch (error) {
+      console.error('[SpacesAPIServer] Database status error:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: error.message, code: 'DATABASE_STATUS_ERROR' }));
+    }
+  }
+
+  /**
+   * POST /api/database/rebuild - Rebuild index from metadata files
+   */
+  async handleDatabaseRebuild(req, res) {
+    try {
+      const { getSpacesAPI } = require('./spaces-api');
+      const api = getSpacesAPI();
+      
+      // Wait for database to be ready
+      const ready = await api.waitForDatabase();
+      if (!ready) {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: false,
+          error: 'DuckDB not available',
+          code: 'DATABASE_NOT_AVAILABLE'
+        }));
+        return;
+      }
+      
+      const count = await api.rebuildIndex();
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: true,
+        message: `Rebuilt ${count} items from metadata files`,
+        itemsRebuilt: count
+      }));
+    } catch (error) {
+      console.error('[SpacesAPIServer] Database rebuild error:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: error.message, code: 'DATABASE_REBUILD_ERROR' }));
     }
   }
 

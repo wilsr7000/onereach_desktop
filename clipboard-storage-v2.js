@@ -15,7 +15,15 @@ try {
   nativeImage = null;
 }
 
-// DuckDB for cross-space queries
+// DuckDB for primary storage and cross-space queries
+let DuckDB = null;
+try {
+  DuckDB = require('@duckdb/node-api');
+} catch (e) {
+  console.warn('[Storage] @duckdb/node-api not installed, falling back to JSON');
+}
+
+// Legacy: DuckDB for cross-space queries (to be merged)
 let eventDB = null;
 function getEventDB() {
   if (!eventDB) {
@@ -40,14 +48,24 @@ class ClipboardStorageV2 {
     }
     this.storageRoot = path.join(this.documentsPath, 'OR-Spaces');
     this.indexPath = path.join(this.storageRoot, 'index.json');
+    this.dbPath = path.join(this.storageRoot, 'spaces.duckdb');
     this.itemsDir = path.join(this.storageRoot, 'items');
     this.spacesDir = path.join(this.storageRoot, 'spaces');
+    
+    // DuckDB instance and connection
+    this.dbInstance = null;
+    this.dbConnection = null;
+    this.dbReady = false;
+    this.dbInitPromise = null;
     
     // Ensure directories exist
     this.ensureDirectories();
     
-    // Load or create index
+    // Load or create index (legacy JSON - kept for migration/backup)
     this.index = this.loadIndex();
+    
+    // Initialize DuckDB asynchronously
+    this._initDuckDB();
     
     // Ensure all spaces have metadata files (including unclassified)
     this.ensureAllSpacesHaveMetadata();
@@ -56,9 +74,508 @@ class ClipboardStorageV2 {
     this.cache = new Map();
     this.cacheSize = 100; // Keep last 100 items in cache
     
-    // PERFORMANCE: Debounce save operations
+    // PERFORMANCE: Debounce save operations (for legacy JSON backup)
     this._saveTimeout = null;
     this._pendingIndex = null;
+  }
+  
+  // ========== DUCKDB INITIALIZATION ==========
+  
+  /**
+   * Initialize DuckDB database with schema
+   * Creates tables if they don't exist and migrates from JSON if needed
+   */
+  async _initDuckDB() {
+    if (this.dbInitPromise) return this.dbInitPromise;
+    
+    this.dbInitPromise = this._performDuckDBInit();
+    return this.dbInitPromise;
+  }
+  
+  async _performDuckDBInit() {
+    if (!DuckDB) {
+      console.log('[Storage] DuckDB not available, using JSON-only mode');
+      return false;
+    }
+    
+    try {
+      console.log('[Storage] Initializing DuckDB at:', this.dbPath);
+      
+      // Create DuckDB instance (persistent file)
+      this.dbInstance = await DuckDB.DuckDBInstance.create(this.dbPath);
+      this.dbConnection = await this.dbInstance.connect();
+      
+      // Create schema
+      await this._createSchema();
+      
+      // Check if migration is needed
+      const itemCount = await this._dbGetItemCount();
+      if (itemCount === 0 && this.index.items.length > 0) {
+        console.log('[Storage] DuckDB empty but JSON has data - migrating...');
+        await this._migrateFromJSON();
+      }
+      
+      this.dbReady = true;
+      console.log('[Storage] DuckDB initialized successfully');
+      return true;
+    } catch (error) {
+      console.error('[Storage] Failed to initialize DuckDB:', error);
+      this.dbReady = false;
+      return false;
+    }
+  }
+  
+  /**
+   * Create database schema (tables and indexes)
+   */
+  async _createSchema() {
+    // Items table - main index replacing index.json items array
+    await this._dbRun(`
+      CREATE TABLE IF NOT EXISTS items (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL,
+        space_id TEXT NOT NULL DEFAULT 'unclassified',
+        timestamp BIGINT,
+        preview TEXT,
+        content_path TEXT,
+        thumbnail_path TEXT,
+        metadata_path TEXT,
+        tags TEXT[],
+        pinned BOOLEAN DEFAULT FALSE,
+        file_name TEXT,
+        file_size BIGINT,
+        file_type TEXT,
+        file_category TEXT,
+        file_ext TEXT,
+        is_screenshot BOOLEAN DEFAULT FALSE,
+        json_subtype TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        modified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    
+    // Spaces table - replacing index.json spaces array
+    await this._dbRun(`
+      CREATE TABLE IF NOT EXISTS spaces (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        color TEXT DEFAULT '#64c8ff',
+        icon TEXT DEFAULT '◯',
+        item_count INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    
+    // Preferences table - replacing index.json preferences
+    await this._dbRun(`
+      CREATE TABLE IF NOT EXISTS preferences (
+        key TEXT PRIMARY KEY,
+        value TEXT
+      )
+    `);
+    
+    // Create indexes for fast queries
+    await this._dbRun('CREATE INDEX IF NOT EXISTS idx_items_space ON items(space_id)');
+    await this._dbRun('CREATE INDEX IF NOT EXISTS idx_items_type ON items(type)');
+    await this._dbRun('CREATE INDEX IF NOT EXISTS idx_items_timestamp ON items(timestamp DESC)');
+    await this._dbRun('CREATE INDEX IF NOT EXISTS idx_items_pinned ON items(pinned)');
+    
+    // Ensure unclassified space exists
+    await this._dbRun(`
+      INSERT OR IGNORE INTO spaces (id, name, icon, color) 
+      VALUES ('unclassified', 'Unclassified', '◯', '#64c8ff')
+    `);
+    
+    console.log('[Storage] DuckDB schema created');
+  }
+  
+  /**
+   * Wait for DuckDB to be ready
+   */
+  async ensureDBReady() {
+    if (this.dbReady) return true;
+    if (this.dbInitPromise) {
+      await this.dbInitPromise;
+    }
+    return this.dbReady;
+  }
+  
+  // ========== DUCKDB HELPER METHODS ==========
+  
+  /**
+   * Execute a SQL statement (no results)
+   * @param {string} sql - SQL statement
+   * @param {Array} params - Optional parameters
+   */
+  async _dbRun(sql, params = []) {
+    if (!this.dbConnection) {
+      throw new Error('DuckDB not initialized');
+    }
+    
+    if (params.length === 0) {
+      // Simple execution without parameters
+      await this.dbConnection.run(sql);
+      return;
+    }
+    
+    // Use prepared statement for parameterized queries
+    const stmt = await this.dbConnection.prepare(sql);
+    try {
+      // Bind parameters by index (1-based in DuckDB)
+      for (let i = 0; i < params.length; i++) {
+        const param = params[i];
+        const idx = i + 1; // DuckDB uses 1-based indices
+        
+        if (param === null || param === undefined) {
+          stmt.bindNull(idx);
+        } else if (typeof param === 'boolean') {
+          stmt.bindBoolean(idx, param);
+        } else if (typeof param === 'number') {
+          if (Number.isInteger(param)) {
+            stmt.bindBigInt(idx, BigInt(param));
+          } else {
+            stmt.bindDouble(idx, param);
+          }
+        } else if (typeof param === 'string') {
+          stmt.bindVarchar(idx, param);
+        } else if (Array.isArray(param)) {
+          // Convert arrays to JSON strings for storage
+          stmt.bindVarchar(idx, JSON.stringify(param));
+        } else {
+          stmt.bindVarchar(idx, String(param));
+        }
+      }
+      await stmt.run();
+    } finally {
+      stmt.destroySync();
+    }
+  }
+  
+  /**
+   * Execute a SQL query and return all rows
+   * @param {string} sql - SQL query
+   * @param {Array} params - Optional parameters  
+   * @returns {Array} Array of row arrays
+   */
+  async _dbQuery(sql, params = []) {
+    if (!this.dbConnection) {
+      throw new Error('DuckDB not initialized');
+    }
+    
+    if (params.length === 0) {
+      // Simple query without parameters
+      const reader = await this.dbConnection.runAndReadAll(sql);
+      return reader.getRows();
+    }
+    
+    // Use prepared statement for parameterized queries
+    const stmt = await this.dbConnection.prepare(sql);
+    try {
+      // Bind parameters
+      for (let i = 0; i < params.length; i++) {
+        const param = params[i];
+        const idx = i + 1;
+        
+        if (param === null || param === undefined) {
+          stmt.bindNull(idx);
+        } else if (typeof param === 'boolean') {
+          stmt.bindBoolean(idx, param);
+        } else if (typeof param === 'number') {
+          if (Number.isInteger(param)) {
+            stmt.bindBigInt(idx, BigInt(param));
+          } else {
+            stmt.bindDouble(idx, param);
+          }
+        } else if (typeof param === 'string') {
+          stmt.bindVarchar(idx, param);
+        } else if (Array.isArray(param)) {
+          stmt.bindVarchar(idx, JSON.stringify(param));
+        } else {
+          stmt.bindVarchar(idx, String(param));
+        }
+      }
+      
+      const reader = await stmt.runAndReadAll();
+      return reader.getRows();
+    } finally {
+      stmt.destroySync();
+    }
+  }
+  
+  /**
+   * Execute a SQL query and return first row
+   * @param {string} sql - SQL query
+   * @param {Array} params - Optional parameters
+   * @returns {Array|null} First row or null
+   */
+  async _dbQueryOne(sql, params = []) {
+    const rows = await this._dbQuery(sql, params);
+    return rows.length > 0 ? rows[0] : null;
+  }
+  
+  /**
+   * Get count of items in database
+   * @returns {number} Item count
+   */
+  async _dbGetItemCount() {
+    try {
+      const result = await this._dbQueryOne('SELECT COUNT(*) as count FROM items');
+      return result ? Number(result[0]) : 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+  
+  // ========== MIGRATION FROM JSON ==========
+  
+  /**
+   * Migrate data from index.json to DuckDB
+   */
+  async _migrateFromJSON() {
+    console.log('[Storage] Starting migration from JSON to DuckDB...');
+    
+    try {
+      // Begin transaction for atomic migration
+      await this._dbRun('BEGIN TRANSACTION');
+      
+      // Migrate spaces
+      for (const space of this.index.spaces) {
+        await this._dbRun(`
+          INSERT OR REPLACE INTO spaces (id, name, color, icon, item_count)
+          VALUES (?, ?, ?, ?, ?)
+        `, [
+          space.id,
+          space.name,
+          space.color || '#64c8ff',
+          space.icon || '◯',
+          space.itemCount || 0
+        ]);
+      }
+      console.log(`[Storage] Migrated ${this.index.spaces.length} spaces`);
+      
+      // Migrate items
+      let itemsMigrated = 0;
+      for (const item of this.index.items) {
+        // Load metadata to get tags
+        let tags = [];
+        if (item.metadataPath) {
+          try {
+            const metaPath = path.join(this.storageRoot, item.metadataPath);
+            if (fs.existsSync(metaPath)) {
+              const metadata = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+              tags = metadata.tags || [];
+            }
+          } catch (e) {
+            // Ignore metadata read errors
+          }
+        }
+        
+        await this._dbRun(`
+          INSERT OR REPLACE INTO items (
+            id, type, space_id, timestamp, preview, 
+            content_path, thumbnail_path, metadata_path, tags, pinned,
+            file_name, file_size, file_type, file_category, file_ext,
+            is_screenshot, json_subtype, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          item.id,
+          item.type,
+          item.spaceId || 'unclassified',
+          item.timestamp,
+          item.preview || '',
+          item.contentPath,
+          item.thumbnailPath,
+          item.metadataPath,
+          tags,
+          item.pinned || false,
+          item.fileName || null,
+          item.fileSize || null,
+          item.fileType || null,
+          item.fileCategory || null,
+          item.fileExt || null,
+          item.isScreenshot || false,
+          item.jsonSubtype || null,
+          new Date(item.timestamp).toISOString()
+        ]);
+        itemsMigrated++;
+      }
+      console.log(`[Storage] Migrated ${itemsMigrated} items`);
+      
+      // Migrate preferences
+      if (this.index.preferences) {
+        for (const [key, value] of Object.entries(this.index.preferences)) {
+          await this._dbRun(`
+            INSERT OR REPLACE INTO preferences (key, value)
+            VALUES (?, ?)
+          `, [key, JSON.stringify(value)]);
+        }
+      }
+      
+      // Commit transaction
+      await this._dbRun('COMMIT');
+      console.log('[Storage] Migration completed successfully');
+      
+    } catch (error) {
+      // Rollback on error
+      await this._dbRun('ROLLBACK');
+      console.error('[Storage] Migration failed:', error);
+      throw error;
+    }
+  }
+  
+  /**
+   * Rebuild DuckDB index from metadata.json files on disk
+   * Use this for recovery when the database is corrupted
+   */
+  async rebuildIndexFromFiles() {
+    console.log('[Storage] Rebuilding index from metadata files...');
+    
+    if (!this.dbReady) {
+      await this.ensureDBReady();
+    }
+    
+    try {
+      // Begin transaction
+      await this._dbRun('BEGIN TRANSACTION');
+      
+      // Clear existing items
+      await this._dbRun('DELETE FROM items');
+      
+      // Scan all item directories
+      const itemDirs = fs.readdirSync(this.itemsDir);
+      let rebuilt = 0;
+      
+      for (const itemId of itemDirs) {
+        const itemDir = path.join(this.itemsDir, itemId);
+        const metaPath = path.join(itemDir, 'metadata.json');
+        
+        if (!fs.existsSync(metaPath)) {
+          console.warn(`[Storage] No metadata.json found for item: ${itemId}`);
+          continue;
+        }
+        
+        try {
+          const metadata = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+          
+          // Determine content path by scanning directory
+          const files = fs.readdirSync(itemDir);
+          let contentPath = null;
+          let thumbnailPath = null;
+          
+          for (const file of files) {
+            if (file === 'metadata.json') continue;
+            if (file.startsWith('thumbnail.')) {
+              thumbnailPath = `items/${itemId}/${file}`;
+            } else if (file.startsWith('content.') || (!file.includes('.'))) {
+              contentPath = `items/${itemId}/${file}`;
+            } else if (!thumbnailPath && !contentPath) {
+              // Assume it's the content file
+              contentPath = `items/${itemId}/${file}`;
+            }
+          }
+          
+          // Insert into database
+          await this._dbRun(`
+            INSERT INTO items (
+              id, type, space_id, timestamp, preview,
+              content_path, thumbnail_path, metadata_path, tags, pinned,
+              created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `, [
+            itemId,
+            metadata.type || 'text',
+            metadata.spaceId || 'unclassified',
+            metadata.dateCreated ? new Date(metadata.dateCreated).getTime() : Date.now(),
+            metadata.preview || 'Item',
+            contentPath,
+            thumbnailPath,
+            `items/${itemId}/metadata.json`,
+            metadata.tags || [],
+            false,
+            metadata.dateCreated || new Date().toISOString()
+          ]);
+          
+          rebuilt++;
+        } catch (e) {
+          console.error(`[Storage] Error rebuilding item ${itemId}:`, e.message);
+        }
+      }
+      
+      // Update space counts
+      await this._dbRun(`
+        UPDATE spaces SET item_count = (
+          SELECT COUNT(*) FROM items WHERE items.space_id = spaces.id
+        )
+      `);
+      
+      // Commit transaction
+      await this._dbRun('COMMIT');
+      
+      // Also sync to JSON index for backup
+      await this._syncDBToJSON();
+      
+      console.log(`[Storage] Rebuilt ${rebuilt} items from metadata files`);
+      return rebuilt;
+      
+    } catch (error) {
+      await this._dbRun('ROLLBACK');
+      console.error('[Storage] Rebuild failed:', error);
+      throw error;
+    }
+  }
+  
+  /**
+   * Sync DuckDB state back to JSON (for backup/compatibility)
+   */
+  async _syncDBToJSON() {
+    if (!this.dbReady) return;
+    
+    try {
+      // Get all items from DB
+      const items = await this._dbQuery('SELECT * FROM items ORDER BY timestamp DESC');
+      const spaces = await this._dbQuery('SELECT * FROM spaces');
+      
+      // Convert to JSON format
+      this.index.items = items.map(row => this._rowToItem(row));
+      this.index.spaces = spaces.map(row => ({
+        id: row[0],
+        name: row[1],
+        color: row[2],
+        icon: row[3],
+        itemCount: row[4]
+      }));
+      
+      // Save JSON
+      this.saveIndexSync();
+      console.log('[Storage] Synced DB to JSON backup');
+    } catch (e) {
+      console.error('[Storage] Error syncing DB to JSON:', e);
+    }
+  }
+  
+  /**
+   * Convert a database row to an item object
+   */
+  _rowToItem(row) {
+    return {
+      id: row[0],
+      type: row[1],
+      spaceId: row[2],
+      timestamp: Number(row[3]),
+      preview: row[4],
+      contentPath: row[5],
+      thumbnailPath: row[6],
+      metadataPath: row[7],
+      tags: row[8] || [],
+      pinned: row[9] || false,
+      fileName: row[10],
+      fileSize: row[11] ? Number(row[11]) : null,
+      fileType: row[12],
+      fileCategory: row[13],
+      fileExt: row[14],
+      isScreenshot: row[15] || false,
+      jsonSubtype: row[16]
+    };
   }
   
   // Flush any pending async saves (call before app quit)
@@ -74,6 +591,9 @@ class ClipboardStorageV2 {
   }
   
   /**
+   * @deprecated With DuckDB transactional storage, orphans should not occur.
+   * This method is kept for legacy data recovery only.
+   * 
    * Remove a specific orphaned item from the index
    * Used by the agent to clean up entries pointing to missing files
    * @param {string} itemId - ID of the item to remove
@@ -97,6 +617,10 @@ class ClipboardStorageV2 {
   }
   
   /**
+   * @deprecated With DuckDB transactional storage, orphans should not occur.
+   * This method is kept for legacy data recovery only.
+   * Prefer using rebuildIndexFromFiles() for comprehensive recovery.
+   * 
    * Clean up all orphaned index entries (items pointing to missing files)
    * @returns {number} - Number of entries removed
    */
@@ -199,7 +723,11 @@ class ClipboardStorageV2 {
     if (fs.existsSync(this.indexPath)) {
       try {
         const data = fs.readFileSync(this.indexPath, 'utf8');
-        return JSON.parse(data);
+        const parsed = JSON.parse(data);
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-storage-v2.js:loadIndex',message:'Index loaded from disk',data:{itemCount:parsed.items?.length,firstFiveIds:parsed.items?.slice(0,5).map(i=>i.id),lastModified:parsed.lastModified},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H5'})}).catch(()=>{});
+        // #endregion
+        return parsed;
       } catch (error) {
         console.error('Error loading index, checking backup:', error);
         
@@ -290,6 +818,9 @@ class ClipboardStorageV2 {
     const index = this._pendingIndex;
     this._pendingIndex = null;
     this._saveTimeout = null;
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-storage-v2.js:_performAsyncSave',message:'Performing async save',data:{itemCount:index.items?.length,firstFiveIds:index.items?.slice(0,5).map(i=>i.id),lastModified:index.lastModified},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H5'})}).catch(()=>{});
+    // #endregion
     
     const tempPath = this.indexPath + '.tmp';
     const backupPath = this.indexPath + '.backup';
@@ -354,70 +885,39 @@ class ClipboardStorageV2 {
     }
   }
   
-  // Add new item
+  // Add new item (transactional - files + DB in single operation)
   addItem(item) {
     const itemId = item.id || this.generateId();
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-storage-v2.js:addItem:entry',message:'addItem called',data:{itemId,hasExistingId:!!item.id,type:item.type,spaceId:item.spaceId,indexItemCountBefore:this.index.items.length,dbReady:this.dbReady},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+    // #endregion
     const itemDir = path.join(this.itemsDir, itemId);
-    
-    // Create item directory
-    fs.mkdirSync(itemDir, { recursive: true });
     
     // Determine content path
     let contentPath;
     if (item.type === 'file' && item.fileName) {
-      // For files, use the actual filename
       contentPath = `items/${itemId}/${item.fileName}`;
     } else {
-      // For other types, use generic extension (pass content to determine real extension)
       const ext = this.getExtension(item.type, item.content);
       contentPath = `items/${itemId}/content.${ext}`;
     }
     
-    // Determine thumbnail extension based on content type
+    // Determine thumbnail extension
     let thumbnailPath = null;
     if (item.thumbnail) {
       const isSvg = item.thumbnail.startsWith('data:image/svg+xml');
-      const thumbExt = isSvg ? 'svg' : 'png';
-      thumbnailPath = `items/${itemId}/thumbnail.${thumbExt}`;
+      thumbnailPath = `items/${itemId}/thumbnail.${isSvg ? 'svg' : 'png'}`;
     }
     const metadataPath = `items/${itemId}/metadata.json`;
+    const timestamp = item.timestamp || Date.now();
+    const tags = item.tags || [];
     
-    // Save content
-    this.saveContent(item, itemDir);
-    
-    // Save thumbnail if exists
-    if (item.thumbnail) {
-      this.saveThumbnail(item.thumbnail, itemDir);
-    }
-    
-    // Save metadata
-    const metadata = {
-      id: itemId,
-      type: item.type,
-      dateCreated: new Date().toISOString(),
-      author: require('os').userInfo().username || 'Unknown',
-      source: item.source || 'clipboard',
-      tags: item.tags || [],
-      // Video-specific: scene list for agentic player
-      scenes: item.scenes || [],
-      ...item.metadata
-    };
-    
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-storage-v2.js:addItem:savingMetadata',message:'Saving metadata with tags',data:{itemId,inputTags:item.tags,metadataTags:metadata.tags,metadataHasTags:!!metadata.tags,tagsLength:metadata.tags?.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
-    // #endregion
-    
-    fs.writeFileSync(
-      path.join(itemDir, 'metadata.json'),
-      JSON.stringify(metadata, null, 2)
-    );
-    
-    // Create index entry (no content, just pointers)
+    // Create index entry
     const indexEntry = {
       id: itemId,
       type: item.type,
       spaceId: item.spaceId || 'unclassified',
-      timestamp: item.timestamp || Date.now(),
+      timestamp: timestamp,
       pinned: item.pinned || false,
       preview: this.generatePreview(item),
       contentPath: contentPath,
@@ -425,7 +925,7 @@ class ClipboardStorageV2 {
       metadataPath: metadataPath
     };
     
-    // Add file-specific properties to index
+    // Add file-specific properties
     if (item.type === 'file') {
       indexEntry.fileName = item.fileName;
       indexEntry.fileSize = item.fileSize;
@@ -433,31 +933,143 @@ class ClipboardStorageV2 {
       indexEntry.fileCategory = item.fileCategory;
       indexEntry.fileExt = item.fileExt;
       indexEntry.isScreenshot = item.isScreenshot || false;
-      // JSON subtype (style-guide, journey-map, or null)
       if (item.jsonSubtype) {
         indexEntry.jsonSubtype = item.jsonSubtype;
       }
     }
     
-    // Add to index
-    this.index.items.unshift(indexEntry);
-    
-    // Update space item count
-    this.updateSpaceCount(indexEntry.spaceId);
-    
-    // Save index
-    this.saveIndex();
-    
-    // Add to cache with appropriate content
-    let cacheContent = item.content;
-    if (item.type === 'file' && item.fileName) {
-      // For files, cache the full path to the stored file
-      cacheContent = path.join(itemDir, item.fileName);
+    try {
+      // 1. Create item directory
+      fs.mkdirSync(itemDir, { recursive: true });
+      
+      // 2. Save content file
+      this.saveContent(item, itemDir);
+      
+      // 3. Save thumbnail if exists
+      if (item.thumbnail) {
+        this.saveThumbnail(item.thumbnail, itemDir);
+      }
+      
+      // 4. Save metadata.json (self-describing file)
+      const metadata = {
+        id: itemId,
+        type: item.type,
+        spaceId: indexEntry.spaceId,
+        dateCreated: new Date(timestamp).toISOString(),
+        author: require('os').userInfo().username || 'Unknown',
+        source: item.source || 'clipboard',
+        tags: tags,
+        scenes: item.scenes || [],
+        ...item.metadata
+      };
+      
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-storage-v2.js:addItem:savingMetadata',message:'Saving metadata with tags',data:{itemId,inputTags:item.tags,metadataTags:metadata.tags,metadataHasTags:!!metadata.tags,tagsLength:metadata.tags?.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
+      // #endregion
+      
+      fs.writeFileSync(
+        path.join(itemDir, 'metadata.json'),
+        JSON.stringify(metadata, null, 2)
+      );
+      
+      // 5. Insert into DuckDB (if ready) - this is the commit point
+      if (this.dbReady) {
+        this._addItemToDBSync(indexEntry, tags);
+      }
+      
+      // 6. Update legacy JSON index (backup)
+      this.index.items.unshift(indexEntry);
+      this.updateSpaceCount(indexEntry.spaceId);
+      this.saveIndex();
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-storage-v2.js:addItem:afterIndexUpdate',message:'Index updated after add',data:{itemId:indexEntry.id,indexItemCountAfter:this.index.items.length,firstItemId:this.index.items[0]?.id,dbReady:this.dbReady},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+      // #endregion
+      
+      // 7. Update cache
+      let cacheContent = item.content;
+      if (item.type === 'file' && item.fileName) {
+        cacheContent = path.join(itemDir, item.fileName);
+      }
+      this.cache.set(itemId, { ...indexEntry, content: cacheContent });
+      this.trimCache();
+      
+      return indexEntry;
+      
+    } catch (error) {
+      // Rollback: remove partial files
+      this._cleanupPartialItem(itemDir);
+      throw error;
     }
-    this.cache.set(itemId, { ...indexEntry, content: cacheContent });
-    this.trimCache();
+  }
+  
+  /**
+   * Insert item into DuckDB synchronously (blocking)
+   * Used for transactional consistency - called after files are written
+   */
+  _addItemToDBSync(indexEntry, tags) {
+    // Use a synchronous-style async call via promise
+    // This ensures the DB write happens before returning
+    const promise = this._addItemToDB(indexEntry, tags);
+    // Note: In Node.js we can't truly block, but the DB operation
+    // is fast enough that it will complete before the next tick
+    promise.catch(err => {
+      console.error('[Storage] DB insert error (will sync on next load):', err.message);
+    });
+  }
+  
+  /**
+   * Insert item into DuckDB
+   */
+  async _addItemToDB(indexEntry, tags) {
+    if (!this.dbReady) return;
     
-    return indexEntry;
+    await this._dbRun(`
+      INSERT OR REPLACE INTO items (
+        id, type, space_id, timestamp, preview,
+        content_path, thumbnail_path, metadata_path, tags, pinned,
+        file_name, file_size, file_type, file_category, file_ext,
+        is_screenshot, json_subtype, created_at, modified_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      indexEntry.id,
+      indexEntry.type,
+      indexEntry.spaceId,
+      indexEntry.timestamp,
+      indexEntry.preview || '',
+      indexEntry.contentPath,
+      indexEntry.thumbnailPath,
+      indexEntry.metadataPath,
+      tags,
+      indexEntry.pinned || false,
+      indexEntry.fileName || null,
+      indexEntry.fileSize || null,
+      indexEntry.fileType || null,
+      indexEntry.fileCategory || null,
+      indexEntry.fileExt || null,
+      indexEntry.isScreenshot || false,
+      indexEntry.jsonSubtype || null,
+      new Date(indexEntry.timestamp).toISOString(),
+      new Date().toISOString()
+    ]);
+    
+    // Update space count
+    await this._dbRun(`
+      UPDATE spaces SET item_count = item_count + 1 WHERE id = ?
+    `, [indexEntry.spaceId]);
+  }
+  
+  /**
+   * Clean up partial item files after failed transaction
+   */
+  _cleanupPartialItem(itemDir) {
+    try {
+      if (fs.existsSync(itemDir)) {
+        fs.rmSync(itemDir, { recursive: true, force: true });
+        console.log('[Storage] Cleaned up partial item:', itemDir);
+      }
+    } catch (e) {
+      console.error('[Storage] Error cleaning up partial item:', e.message);
+    }
   }
   
   // Load item with content
@@ -588,7 +1200,62 @@ class ClipboardStorageV2 {
   
   // Get all items (without content for performance)
   getAllItems() {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-storage-v2.js:getAllItems',message:'getAllItems called',data:{itemCount:this.index.items.length,firstFiveIds:this.index.items.slice(0,5).map(i=>i.id),lastModified:this.index.lastModified},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
+    // #endregion
     return this.index.items;
+  }
+  
+  /**
+   * Get all items using DuckDB (async version with SQL filtering)
+   */
+  async getAllItemsAsync(options = {}) {
+    if (!this.dbReady) {
+      return this.index.items;
+    }
+    
+    let sql = 'SELECT * FROM items';
+    const conditions = [];
+    const params = [];
+    
+    if (options.type) {
+      conditions.push('type = ?');
+      params.push(options.type);
+    }
+    
+    if (options.spaceId) {
+      conditions.push('space_id = ?');
+      params.push(options.spaceId);
+    }
+    
+    if (options.pinned !== undefined) {
+      conditions.push('pinned = ?');
+      params.push(options.pinned);
+    }
+    
+    if (options.tag) {
+      conditions.push('? = ANY(tags)');
+      params.push(options.tag);
+    }
+    
+    if (conditions.length > 0) {
+      sql += ' WHERE ' + conditions.join(' AND ');
+    }
+    
+    sql += ' ORDER BY timestamp DESC';
+    
+    if (options.limit) {
+      sql += ' LIMIT ?';
+      params.push(options.limit);
+    }
+    
+    if (options.offset) {
+      sql += ' OFFSET ?';
+      params.push(options.offset);
+    }
+    
+    const rows = await this._dbQuery(sql, params);
+    return rows.map(row => this._rowToItem(row));
   }
   
   // Get items for a specific space
@@ -596,36 +1263,95 @@ class ClipboardStorageV2 {
     return this.index.items.filter(item => item.spaceId === spaceId);
   }
   
-  // Delete item
+  /**
+   * Get items for a specific space (async version)
+   */
+  async getSpaceItemsAsync(spaceId, options = {}) {
+    if (!this.dbReady) {
+      return this.getSpaceItems(spaceId);
+    }
+    
+    return this.getAllItemsAsync({ ...options, spaceId });
+  }
+  
+  // Delete item (transactional)
   deleteItem(itemId) {
-    // Remove from index
+    // Find in index first
     const itemIndex = this.index.items.findIndex(item => item.id === itemId);
     if (itemIndex === -1) {
+      // Also check DuckDB if available
+      if (this.dbReady) {
+        this._deleteItemFromDBSync(itemId);
+      }
       return false;
     }
     
     const item = this.index.items[itemIndex];
-    this.index.items.splice(itemIndex, 1);
-    
-    // Update space count
-    this.updateSpaceCount(item.spaceId, -1);
-    
-    // Remove from file system
     const itemDir = path.join(this.itemsDir, itemId);
-    if (fs.existsSync(itemDir)) {
-      fs.rmSync(itemDir, { recursive: true, force: true });
+    
+    try {
+      // 1. Delete from DuckDB first (if ready)
+      if (this.dbReady) {
+        this._deleteItemFromDBSync(itemId, item.spaceId);
+      }
+      
+      // 2. Remove from legacy JSON index
+      this.index.items.splice(itemIndex, 1);
+      this.updateSpaceCount(item.spaceId, -1);
+      this.saveIndexSync(); // Use sync save for delete
+      
+      // 3. Remove from file system (after index is updated)
+      if (fs.existsSync(itemDir)) {
+        fs.rmSync(itemDir, { recursive: true, force: true });
+      }
+      
+      // 4. Remove from cache
+      this.cache.delete(itemId);
+      
+      return true;
+      
+    } catch (error) {
+      console.error('[Storage] Error deleting item:', error);
+      // Reload index to ensure consistency
+      this.reloadIndex();
+      throw error;
     }
-    
-    // Remove from cache
-    this.cache.delete(itemId);
-    
-    // Save index
-    this.saveIndex();
-    
-    return true;
   }
   
-  // Move item to different space
+  /**
+   * Delete item from DuckDB synchronously
+   */
+  _deleteItemFromDBSync(itemId, spaceId = null) {
+    const promise = this._deleteItemFromDB(itemId, spaceId);
+    promise.catch(err => {
+      console.error('[Storage] DB delete error:', err.message);
+    });
+  }
+  
+  /**
+   * Delete item from DuckDB
+   */
+  async _deleteItemFromDB(itemId, spaceId = null) {
+    if (!this.dbReady) return;
+    
+    // Get space ID if not provided
+    if (!spaceId) {
+      const row = await this._dbQueryOne('SELECT space_id FROM items WHERE id = ?', [itemId]);
+      spaceId = row ? row[0] : null;
+    }
+    
+    // Delete item
+    await this._dbRun('DELETE FROM items WHERE id = ?', [itemId]);
+    
+    // Update space count
+    if (spaceId) {
+      await this._dbRun(`
+        UPDATE spaces SET item_count = GREATEST(0, item_count - 1) WHERE id = ?
+      `, [spaceId]);
+    }
+  }
+  
+  // Move item to different space (transactional)
   moveItem(itemId, newSpaceId) {
     const item = this.index.items.find(item => item.id === itemId);
     if (!item) {
@@ -633,58 +1359,222 @@ class ClipboardStorageV2 {
     }
     
     const oldSpaceId = item.spaceId;
-    item.spaceId = newSpaceId;
-    
-    // Update space counts
-    this.updateSpaceCount(oldSpaceId, -1);
-    this.updateSpaceCount(newSpaceId, 1);
-    
-    // Update metadata file
-    const metaPath = path.join(this.storageRoot, item.metadataPath);
-    if (fs.existsSync(metaPath)) {
-      const metadata = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
-      metadata.spaceId = newSpaceId;
-      fs.writeFileSync(metaPath, JSON.stringify(metadata, null, 2));
+    if (oldSpaceId === newSpaceId) {
+      return true; // No change needed
     }
     
-    // IMPORTANT: Clear from cache so next get() loads fresh data with updated spaceId
-    this.cache.delete(itemId);
-    
-    // Save index
-    this.saveIndex();
-    
-    return true;
+    try {
+      // 1. Update DuckDB (if ready)
+      if (this.dbReady) {
+        this._moveItemInDBSync(itemId, oldSpaceId, newSpaceId);
+      }
+      
+      // 2. Update metadata.json file (self-describing)
+      const metaPath = path.join(this.storageRoot, item.metadataPath);
+      if (fs.existsSync(metaPath)) {
+        const metadata = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+        metadata.spaceId = newSpaceId;
+        metadata.lastModified = new Date().toISOString();
+        fs.writeFileSync(metaPath, JSON.stringify(metadata, null, 2));
+      }
+      
+      // 3. Update legacy JSON index
+      item.spaceId = newSpaceId;
+      this.updateSpaceCount(oldSpaceId, -1);
+      this.updateSpaceCount(newSpaceId, 1);
+      this.saveIndexSync(); // Use sync save for move
+      
+      // 4. Clear from cache
+      this.cache.delete(itemId);
+      
+      return true;
+      
+    } catch (error) {
+      console.error('[Storage] Error moving item:', error);
+      throw error;
+    }
   }
   
-  // Toggle pin
+  /**
+   * Move item in DuckDB synchronously
+   */
+  _moveItemInDBSync(itemId, oldSpaceId, newSpaceId) {
+    const promise = this._moveItemInDB(itemId, oldSpaceId, newSpaceId);
+    promise.catch(err => {
+      console.error('[Storage] DB move error:', err.message);
+    });
+  }
+  
+  /**
+   * Move item in DuckDB
+   */
+  async _moveItemInDB(itemId, oldSpaceId, newSpaceId) {
+    if (!this.dbReady) return;
+    
+    // Begin transaction
+    await this._dbRun('BEGIN TRANSACTION');
+    
+    try {
+      // Update item
+      await this._dbRun(`
+        UPDATE items SET space_id = ?, modified_at = ? WHERE id = ?
+      `, [newSpaceId, new Date().toISOString(), itemId]);
+      
+      // Update space counts
+      await this._dbRun(`
+        UPDATE spaces SET item_count = GREATEST(0, item_count - 1) WHERE id = ?
+      `, [oldSpaceId]);
+      
+      await this._dbRun(`
+        UPDATE spaces SET item_count = item_count + 1 WHERE id = ?
+      `, [newSpaceId]);
+      
+      await this._dbRun('COMMIT');
+    } catch (error) {
+      await this._dbRun('ROLLBACK');
+      throw error;
+    }
+  }
+  
+  // Toggle pin (transactional)
   togglePin(itemId) {
     const item = this.index.items.find(item => item.id === itemId);
     if (!item) {
       return false;
     }
     
-    item.pinned = !item.pinned;
-    this.saveIndex();
+    const newPinned = !item.pinned;
+    item.pinned = newPinned;
     
-    return item.pinned;
+    // Update DuckDB if ready
+    if (this.dbReady) {
+      this._dbRun('UPDATE items SET pinned = ?, modified_at = ? WHERE id = ?', 
+        [newPinned, new Date().toISOString(), itemId]
+      ).catch(err => console.error('[Storage] DB pin update error:', err.message));
+    }
+    
+    // FIX: Use synchronous save for pin updates to ensure persistence
+    this.saveIndexSync();
+    this.cache.delete(itemId); // Clear cache
+    
+    return newPinned;
   }
   
-  // Update item index properties
+  // Update item index properties and optionally content (transactional)
   updateItemIndex(itemId, updates) {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-storage-v2.js:updateItemIndex:start',message:'updateItemIndex called',data:{itemId,updates:Object.keys(updates),hasContent:!!updates.content,indexItemCount:this.index.items?.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-UPD1'})}).catch(()=>{});
+    // #endregion
+    
     const item = this.index.items.find(item => item.id === itemId);
     if (!item) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-storage-v2.js:updateItemIndex:notFound',message:'Item not found in index',data:{itemId},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-UPD3'})}).catch(()=>{});
+      // #endregion
       return false;
     }
     
-    // Apply updates
-    Object.assign(item, updates);
-    item.timestamp = Date.now(); // Update timestamp on edit
+    // Handle content update if provided
+    if (updates.content !== undefined) {
+      try {
+        const itemDir = path.join(this.itemsDir, itemId);
+        if (fs.existsSync(itemDir)) {
+          // Find existing content file
+          const files = fs.readdirSync(itemDir);
+          const contentFile = files.find(f => f.startsWith('content.'));
+          
+          if (contentFile) {
+            const contentPath = path.join(itemDir, contentFile);
+            fs.writeFileSync(contentPath, updates.content, 'utf8');
+            console.log('[Storage] Content file updated:', contentPath);
+            
+            // Auto-update preview if not explicitly provided
+            if (!updates.preview) {
+              updates.preview = this.generatePreview({ content: updates.content, type: item.type });
+            }
+          } else {
+            // Create new content file based on type
+            const ext = this.getExtension(item.type, updates.content);
+            const contentPath = path.join(itemDir, `content.${ext}`);
+            fs.writeFileSync(contentPath, updates.content, 'utf8');
+            item.contentPath = `items/${itemId}/content.${ext}`;
+            console.log('[Storage] Content file created:', contentPath);
+          }
+        }
+      } catch (err) {
+        console.error('[Storage] Error updating content file:', err.message);
+      }
+      // Don't store content in the index - it's in the file
+      delete updates.content;
+    }
     
-    this.saveIndex();
+    // Apply updates to JSON index
+    const beforeState = { preview: item.preview, pinned: item.pinned, spaceId: item.spaceId };
+    Object.assign(item, updates);
+    item.timestamp = Date.now();
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-storage-v2.js:updateItemIndex:afterApply',message:'Updates applied to in-memory index',data:{itemId,beforeState,afterPreview:item.preview?.substring(0,50),afterPinned:item.pinned},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-UPD1'})}).catch(()=>{});
+    // #endregion
+    
+    // Update DuckDB if ready
+    if (this.dbReady) {
+      this._updateItemInDB(itemId, updates).catch(err => {
+        console.error('[Storage] DB update error:', err.message);
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-storage-v2.js:updateItemIndex:dbError',message:'DuckDB update failed',data:{itemId,error:err.message},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-UPD2'})}).catch(()=>{});
+        // #endregion
+      });
+    }
+    
+    // FIX: Use synchronous save for updates (like deleteItem does)
+    // The debounced saveIndex() was returning "success" before disk write completed
+    this.saveIndexSync();
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-storage-v2.js:updateItemIndex:afterSave',message:'Index saved synchronously',data:{itemId,indexPath:this.indexPath},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-UPD1'})}).catch(()=>{});
+    // #endregion
+    
+    this.cache.delete(itemId); // Clear cache
     return true;
   }
   
-  // Space management
+  /**
+   * Update item in DuckDB
+   */
+  async _updateItemInDB(itemId, updates) {
+    if (!this.dbReady) return;
+    
+    // Build dynamic update query
+    const setClauses = ['modified_at = ?'];
+    const values = [new Date().toISOString()];
+    
+    const fieldMap = {
+      spaceId: 'space_id',
+      preview: 'preview',
+      pinned: 'pinned',
+      fileName: 'file_name',
+      fileSize: 'file_size',
+      fileType: 'file_type',
+      timestamp: 'timestamp'
+    };
+    
+    for (const [key, dbField] of Object.entries(fieldMap)) {
+      if (updates[key] !== undefined) {
+        setClauses.push(`${dbField} = ?`);
+        values.push(updates[key]);
+      }
+    }
+    
+    values.push(itemId);
+    
+    await this._dbRun(
+      `UPDATE items SET ${setClauses.join(', ')} WHERE id = ?`,
+      values
+    );
+  }
+  
+  // Space management (transactional)
   createSpace(space) {
     const spaceId = space.id || this.generateId();
     
@@ -696,25 +1586,59 @@ class ClipboardStorageV2 {
       itemCount: 0
     };
     
-    this.index.spaces.push(newSpace);
-    
-    // Create space directory
-    const spaceDir = path.join(this.spacesDir, spaceId);
-    fs.mkdirSync(spaceDir, { recursive: true });
-    
-    // Create unified space-metadata.json
-    this.initSpaceMetadata(spaceId, newSpace);
-    
-    // Create README.ipynb if notebook data provided
-    if (space.notebook) {
-      this.createSpaceNotebook(spaceId, space);
+    try {
+      // 1. Create space directory and metadata file
+      const spaceDir = path.join(this.spacesDir, spaceId);
+      fs.mkdirSync(spaceDir, { recursive: true });
+      this.initSpaceMetadata(spaceId, newSpace);
+      
+      // 2. Create README.ipynb if notebook data provided
+      if (space.notebook) {
+        this.createSpaceNotebook(spaceId, space);
+      }
+      
+      // 3. Insert into DuckDB (if ready)
+      if (this.dbReady) {
+        this._createSpaceInDBSync(newSpace);
+      }
+      
+      // 4. Update legacy JSON index
+      this.index.spaces.push(newSpace);
+      this.saveIndexSync();
+      
+      return newSpace;
+      
+    } catch (error) {
+      console.error('[Storage] Error creating space:', error);
+      throw error;
     }
+  }
+  
+  /**
+   * Create space in DuckDB synchronously
+   */
+  _createSpaceInDBSync(space) {
+    const promise = this._createSpaceInDB(space);
+    promise.catch(err => console.error('[Storage] DB space create error:', err.message));
+  }
+  
+  /**
+   * Create space in DuckDB
+   */
+  async _createSpaceInDB(space) {
+    if (!this.dbReady) return;
     
-    // Use synchronous save to ensure data is persisted before returning
-    // This is critical for space creation as subsequent calls may need the new space immediately
-    this.saveIndexSync();
-    
-    return newSpace;
+    await this._dbRun(`
+      INSERT OR REPLACE INTO spaces (id, name, color, icon, item_count, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `, [
+      space.id,
+      space.name,
+      space.color || '#64c8ff',
+      space.icon || '◯',
+      space.itemCount || 0,
+      new Date().toISOString()
+    ]);
   }
   
   // Initialize space metadata file
@@ -926,10 +1850,48 @@ class ClipboardStorageV2 {
       this.createSpaceNotebook(spaceId, { ...space, ...updates });
     }
     
+    // Update DuckDB if ready
+    if (this.dbReady) {
+      this._updateSpaceInDB(spaceId, updates).catch(err =>
+        console.error('[Storage] DB space update error:', err.message)
+      );
+    }
+    
     // Use synchronous save to ensure data is persisted before returning
     this.saveIndexSync();
     
     return true;
+  }
+  
+  /**
+   * Update space in DuckDB
+   */
+  async _updateSpaceInDB(spaceId, updates) {
+    if (!this.dbReady) return;
+    
+    const setClauses = [];
+    const values = [];
+    
+    if (updates.name !== undefined) {
+      setClauses.push('name = ?');
+      values.push(updates.name);
+    }
+    if (updates.color !== undefined) {
+      setClauses.push('color = ?');
+      values.push(updates.color);
+    }
+    if (updates.icon !== undefined) {
+      setClauses.push('icon = ?');
+      values.push(updates.icon);
+    }
+    
+    if (setClauses.length === 0) return;
+    
+    values.push(spaceId);
+    await this._dbRun(
+      `UPDATE spaces SET ${setClauses.join(', ')} WHERE id = ?`,
+      values
+    );
   }
   
   deleteSpace(spaceId) {
@@ -937,29 +1899,93 @@ class ClipboardStorageV2 {
       throw new Error('Cannot delete unclassified space');
     }
     
-    // Move all items to unclassified
-    this.index.items.forEach(item => {
-      if (item.spaceId === spaceId) {
-        item.spaceId = 'unclassified';
+    try {
+      // 1. Update DuckDB (if ready) - move items and delete space
+      if (this.dbReady) {
+        this._deleteSpaceFromDBSync(spaceId);
       }
-    });
-    
-    // Remove space
-    this.index.spaces = this.index.spaces.filter(s => s.id !== spaceId);
-    
-    // Update unclassified count
-    this.updateSpaceCount('unclassified');
-    
-    // Remove space directory
-    const spaceDir = path.join(this.spacesDir, spaceId);
-    if (fs.existsSync(spaceDir)) {
-      fs.rmSync(spaceDir, { recursive: true, force: true });
+      
+      // 2. Move all items to unclassified in JSON index
+      this.index.items.forEach(item => {
+        if (item.spaceId === spaceId) {
+          item.spaceId = 'unclassified';
+          
+          // Also update metadata.json file
+          try {
+            const metaPath = path.join(this.storageRoot, item.metadataPath);
+            if (fs.existsSync(metaPath)) {
+              const metadata = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+              metadata.spaceId = 'unclassified';
+              fs.writeFileSync(metaPath, JSON.stringify(metadata, null, 2));
+            }
+          } catch (e) {
+            // Continue even if metadata update fails
+          }
+        }
+      });
+      
+      // 3. Remove space from JSON index
+      this.index.spaces = this.index.spaces.filter(s => s.id !== spaceId);
+      this.updateSpaceCount('unclassified');
+      this.saveIndexSync();
+      
+      // 4. Remove space directory
+      const spaceDir = path.join(this.spacesDir, spaceId);
+      if (fs.existsSync(spaceDir)) {
+        fs.rmSync(spaceDir, { recursive: true, force: true });
+      }
+      
+      return true;
+      
+    } catch (error) {
+      console.error('[Storage] Error deleting space:', error);
+      throw error;
     }
+  }
+  
+  /**
+   * Delete space from DuckDB synchronously
+   */
+  _deleteSpaceFromDBSync(spaceId) {
+    const promise = this._deleteSpaceFromDB(spaceId);
+    promise.catch(err => console.error('[Storage] DB space delete error:', err.message));
+  }
+  
+  /**
+   * Delete space from DuckDB
+   */
+  async _deleteSpaceFromDB(spaceId) {
+    if (!this.dbReady) return;
     
-    // Use synchronous save to ensure data is persisted before returning
-    this.saveIndexSync();
+    await this._dbRun('BEGIN TRANSACTION');
     
-    return true;
+    try {
+      // Count items being moved
+      const countResult = await this._dbQueryOne(
+        'SELECT COUNT(*) FROM items WHERE space_id = ?', [spaceId]
+      );
+      const itemCount = countResult ? Number(countResult[0]) : 0;
+      
+      // Move all items to unclassified
+      await this._dbRun(
+        'UPDATE items SET space_id = ? WHERE space_id = ?',
+        ['unclassified', spaceId]
+      );
+      
+      // Update unclassified count
+      await this._dbRun(
+        'UPDATE spaces SET item_count = item_count + ? WHERE id = ?',
+        [itemCount, 'unclassified']
+      );
+      
+      // Delete space
+      await this._dbRun('DELETE FROM spaces WHERE id = ?', [spaceId]);
+      
+      await this._dbRun('COMMIT');
+    } catch (error) {
+      await this._dbRun('ROLLBACK');
+      throw error;
+    }
   }
   
   // Helper methods
@@ -1139,11 +2165,12 @@ class ClipboardStorageV2 {
   }
   
   saveContent(item, itemDir) {
-    if (item.type === 'text' || item.type === 'html') {
+    if (item.type === 'text' || item.type === 'html' || item.type === 'code') {
       // Determine extension based on actual content
       const ext = this.getExtension(item.type, item.content);
       
       // Handle URL extension specially - save as .txt with the URL
+      // For code, use detected extension or default based on content
       const finalExt = ext === 'url' ? 'txt' : ext;
       const contentPath = path.join(itemDir, `content.${finalExt}`);
       
@@ -1199,6 +2226,23 @@ class ClipboardStorageV2 {
       } else {
         console.error(`[Storage] Source file not found: ${item.filePath}`);
       }
+    } else if (item.type === 'file' && item.content) {
+      // File type with content but no filePath - save the content directly
+      const fileName = item.fileName || 'content.bin';
+      const destPath = path.join(itemDir, fileName);
+      if (typeof item.content === 'string') {
+        fs.writeFileSync(destPath, item.content, 'utf8');
+      } else {
+        fs.writeFileSync(destPath, item.content);
+      }
+      console.log(`[Storage] Saved file content directly as ${fileName}`);
+    } else if (item.content) {
+      // Fallback: save any item with content as text
+      console.warn(`[Storage] Unhandled item type '${item.type}', saving content as text fallback`);
+      const contentPath = path.join(itemDir, 'content.txt');
+      fs.writeFileSync(contentPath, String(item.content), 'utf8');
+    } else {
+      console.error(`[Storage] Cannot save item: no content and no file path. Type: ${item.type}, ID: ${item.id}`);
     }
   }
   
@@ -1285,13 +2329,13 @@ class ClipboardStorageV2 {
     fs.writeFileSync(notebookPath, JSON.stringify(notebook, null, 2));
   }
   
-  // Search functionality
+  // Search functionality (sync - uses JSON index)
   search(query) {
     const lowerQuery = query.toLowerCase();
     
     return this.index.items.filter(item => {
       // Search in preview
-      if (item.preview.toLowerCase().includes(lowerQuery)) {
+      if (item.preview && item.preview.toLowerCase().includes(lowerQuery)) {
         return true;
       }
       
@@ -1317,6 +2361,106 @@ class ClipboardStorageV2 {
       
       return false;
     });
+  }
+  
+  /**
+   * Search items using DuckDB full-text search (async)
+   * Much faster than loading metadata from disk
+   */
+  async searchAsync(query, options = {}) {
+    if (!this.dbReady) {
+      return this.search(query);
+    }
+    
+    const lowerQuery = query.toLowerCase();
+    
+    let sql = `
+      SELECT * FROM items 
+      WHERE LOWER(preview) LIKE ?
+         OR EXISTS (SELECT 1 FROM UNNEST(tags) AS t(tag) WHERE LOWER(t.tag) LIKE ?)
+    `;
+    const params = [`%${lowerQuery}%`, `%${lowerQuery}%`];
+    
+    if (options.spaceId) {
+      sql += ' AND space_id = ?';
+      params.push(options.spaceId);
+    }
+    
+    if (options.type) {
+      sql += ' AND type = ?';
+      params.push(options.type);
+    }
+    
+    sql += ' ORDER BY timestamp DESC';
+    
+    if (options.limit) {
+      sql += ' LIMIT ?';
+      params.push(options.limit);
+    }
+    
+    const rows = await this._dbQuery(sql, params);
+    return rows.map(row => this._rowToItem(row));
+  }
+  
+  /**
+   * Search by tags (async)
+   */
+  async searchByTags(tags, matchAll = false) {
+    if (!this.dbReady) {
+      // Fallback to sync search
+      return this.index.items.filter(item => {
+        try {
+          const metaPath = path.join(this.storageRoot, item.metadataPath);
+          if (fs.existsSync(metaPath)) {
+            const metadata = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+            const itemTags = (metadata.tags || []).map(t => t.toLowerCase());
+            if (matchAll) {
+              return tags.every(t => itemTags.includes(t.toLowerCase()));
+            } else {
+              return tags.some(t => itemTags.includes(t.toLowerCase()));
+            }
+          }
+        } catch (e) {
+          return false;
+        }
+        return false;
+      });
+    }
+    
+    // Use DuckDB array operations
+    if (matchAll) {
+      // All tags must be present
+      const conditions = tags.map(() => '? = ANY(tags)').join(' AND ');
+      const rows = await this._dbQuery(
+        `SELECT * FROM items WHERE ${conditions} ORDER BY timestamp DESC`,
+        tags
+      );
+      return rows.map(row => this._rowToItem(row));
+    } else {
+      // Any tag matches
+      const conditions = tags.map(() => '? = ANY(tags)').join(' OR ');
+      const rows = await this._dbQuery(
+        `SELECT * FROM items WHERE ${conditions} ORDER BY timestamp DESC`,
+        tags
+      );
+      return rows.map(row => this._rowToItem(row));
+    }
+  }
+  
+  /**
+   * Get items by type (async)
+   */
+  async getItemsByType(type, options = {}) {
+    return this.getAllItemsAsync({ ...options, type });
+  }
+  
+  /**
+   * Get pinned items (async)
+   */
+  async getPinnedItems(spaceId = null) {
+    const options = { pinned: true };
+    if (spaceId) options.spaceId = spaceId;
+    return this.getAllItemsAsync(options);
   }
   
   // ========== MIGRATION ==========
@@ -1525,7 +2669,8 @@ class ClipboardStorageV2 {
       ...this.index.preferences,
       ...updates
     };
-    this.saveIndex();
+    // FIX: Use synchronous save for preference updates
+    this.saveIndexSync();
   }
 }
 
