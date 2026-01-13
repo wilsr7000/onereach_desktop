@@ -522,6 +522,10 @@ class SpacesAPIServer {
           // Get the newly added item's ID
           const addedItem = global.clipboardManager.history?.[0];
           
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'spaces-api-server.js:handleSendToSpace:afterAdd',message:'After addToHistory',data:{addedItemId:addedItem?.id,addedItemSpaceId:addedItem?.spaceId,historyLength:global.clipboardManager.history?.length,storageItemCount:global.clipboardManager.storage?.index?.items?.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-ADD'})}).catch(()=>{});
+          // #endregion
+          
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ success: true, itemId: addedItem?.id || 'unknown' }));
         } else {
