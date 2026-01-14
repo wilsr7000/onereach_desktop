@@ -5625,12 +5625,13 @@ ${chunks[i]}`;
           ? this.contextCapture.enhanceSourceDetection(data.plainText || data.content, context)
           : 'black-hole';
         
-        // Build item
+        // Build item - handle both "html" and "content" keys (black hole uses "html")
+        const htmlContent = data.html || data.content || '';
         const item = {
           type: 'html',
-          content: data.content,
-          plainText: data.plainText,
-          preview: this.truncateText(data.plainText || this.stripHtml(data.content), 100),
+          content: htmlContent,
+          plainText: data.plainText || data.text || '',
+          preview: this.truncateText(data.plainText || data.text || this.stripHtml(htmlContent), 100),
           timestamp: Date.now(),
           pinned: false,
           spaceId: data.spaceId || this.currentSpace || 'unclassified',
