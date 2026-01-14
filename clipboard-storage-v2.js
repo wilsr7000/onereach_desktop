@@ -1460,10 +1460,10 @@ class ClipboardStorageV2 {
     return newPinned;
   }
   
-  // Update item index properties and optionally content (transactional)
+  // Update item index properties, metadata, and optionally content (transactional)
   updateItemIndex(itemId, updates) {
     // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-storage-v2.js:updateItemIndex:start',message:'updateItemIndex called',data:{itemId,updates:Object.keys(updates),hasContent:!!updates.content,indexItemCount:this.index.items?.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-UPD1'})}).catch(()=>{});
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-storage-v2.js:updateItemIndex:start',message:'updateItemIndex called',data:{itemId,updates:Object.keys(updates),hasContent:!!updates.content,hasTitle:!!updates.title,hasTags:!!updates.tags,indexItemCount:this.index.items?.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-UPD1'})}).catch(()=>{});
     // #endregion
     
     const item = this.index.items.find(item => item.id === itemId);
@@ -1474,10 +1474,56 @@ class ClipboardStorageV2 {
       return false;
     }
     
+    const itemDir = path.join(this.itemsDir, itemId);
+    
+    // Handle metadata file updates (title, tags, author, source, etc.)
+    const metadataFields = ['title', 'tags', 'author', 'source', 'description', 'scenes', 'metadata'];
+    const hasMetadataUpdates = metadataFields.some(field => updates[field] !== undefined);
+    
+    if (hasMetadataUpdates && fs.existsSync(itemDir)) {
+      try {
+        const metadataPath = path.join(itemDir, 'metadata.json');
+        let metadata = {};
+        
+        // Load existing metadata
+        if (fs.existsSync(metadataPath)) {
+          metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+        }
+        
+        // Apply metadata updates
+        for (const field of metadataFields) {
+          if (updates[field] !== undefined) {
+            if (field === 'metadata' && typeof updates.metadata === 'object') {
+              // Merge nested metadata object
+              metadata = { ...metadata, ...updates.metadata };
+            } else {
+              metadata[field] = updates[field];
+            }
+          }
+        }
+        
+        // Update modification time
+        metadata.dateModified = new Date().toISOString();
+        
+        // Save updated metadata
+        fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+        console.log('[Storage] Metadata file updated:', metadataPath, 'fields:', metadataFields.filter(f => updates[f] !== undefined));
+        
+        // Remove metadata fields from updates (they're in the file, not index)
+        // But keep tags in updates since they're also in DuckDB
+        for (const field of metadataFields) {
+          if (field !== 'tags') {
+            delete updates[field];
+          }
+        }
+      } catch (err) {
+        console.error('[Storage] Error updating metadata file:', err.message);
+      }
+    }
+    
     // Handle content update if provided
     if (updates.content !== undefined) {
       try {
-        const itemDir = path.join(this.itemsDir, itemId);
         if (fs.existsSync(itemDir)) {
           // Find existing content file
           const files = fs.readdirSync(itemDir);
@@ -1564,6 +1610,12 @@ class ClipboardStorageV2 {
         setClauses.push(`${dbField} = ?`);
         values.push(updates[key]);
       }
+    }
+    
+    // Handle tags specially (stored as JSON array in DuckDB)
+    if (updates.tags !== undefined) {
+      setClauses.push('tags = ?');
+      values.push(JSON.stringify(updates.tags));
     }
     
     values.push(itemId);
