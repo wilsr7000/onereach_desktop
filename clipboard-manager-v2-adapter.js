@@ -6,6 +6,7 @@ const { getSharedStorage } = require('./clipboard-storage-v2');
 const AppContextCapture = require('./app-context-capture');
 const getLogger = require('./event-logger');
 const { getContentIngestionService, ValidationError, retryOperation } = require('./content-ingestion');
+const { getSpacesAPI } = require('./spaces-api');
 
 // Handle Electron imports gracefully
 let BrowserWindow, ipcMain, globalShortcut, screen, app, clipboard, nativeImage;
@@ -80,7 +81,114 @@ class ClipboardManagerV2 {
       
       // Set up website monitoring periodic checks
       this.startWebsiteMonitoring();
+      
+      // Subscribe to SpacesAPI events to keep in-memory history in sync
+      // This ensures Spaces Manager UI stays updated when changes happen via API
+      this._subscribeToSpacesAPIEvents();
     });
+  }
+  
+  /**
+   * Subscribe to SpacesAPI events to keep in-memory history synchronized
+   * This fixes sync issues where API changes weren't reflected in UI until reboot
+   */
+  _subscribeToSpacesAPIEvents() {
+    try {
+      const spacesAPI = getSpacesAPI();
+      
+      // When an item is deleted via API, remove from our in-memory history
+      spacesAPI.on('item:deleted', ({ spaceId, itemId }) => {
+        console.log('[Clipboard] SpacesAPI item:deleted event received:', itemId);
+        const beforeCount = this.history?.length || 0;
+        if (this.history) {
+          this.history = this.history.filter(h => h.id !== itemId);
+        }
+        this.pinnedItems.delete(itemId);
+        const afterCount = this.history?.length || 0;
+        
+        if (beforeCount !== afterCount) {
+          console.log('[Clipboard] Removed item from history, notifying UI');
+          this.updateSpaceCounts();
+          this.notifyHistoryUpdate();
+        }
+      });
+      
+      // When an item is added via API, add to our in-memory history
+      spacesAPI.on('item:added', ({ spaceId, item }) => {
+        console.log('[Clipboard] SpacesAPI item:added event received:', item?.id);
+        this.ensureHistoryLoaded();
+        
+        // Only add if not already in history (avoid duplicates)
+        if (item && !this.history.find(h => h.id === item.id)) {
+          // Format item for history array
+          const historyItem = {
+            id: item.id,
+            type: item.type,
+            content: item.content || '',
+            preview: item.preview || '',
+            timestamp: item.timestamp || Date.now(),
+            spaceId: item.spaceId || 'unclassified',
+            pinned: item.pinned || false,
+            thumbnail: item.thumbnail,
+            metadata: item.metadata || {},
+            fileName: item.fileName,
+            fileSize: item.fileSize,
+            _needsContent: true
+          };
+          
+          this.history.unshift(historyItem);
+          if (item.pinned) {
+            this.pinnedItems.add(item.id);
+          }
+          
+          console.log('[Clipboard] Added item to history, notifying UI');
+          this.updateSpaceCounts();
+          this.notifyHistoryUpdate();
+        }
+      });
+      
+      // When an item is updated via API, update our in-memory history
+      spacesAPI.on('item:updated', ({ spaceId, itemId, data }) => {
+        console.log('[Clipboard] SpacesAPI item:updated event received:', itemId, Object.keys(data || {}));
+        this.ensureHistoryLoaded();
+        
+        const item = this.history.find(h => h.id === itemId);
+        if (item && data) {
+          Object.assign(item, data);
+          
+          // Handle pinned state changes
+          if (data.pinned !== undefined) {
+            if (data.pinned) {
+              this.pinnedItems.add(itemId);
+            } else {
+              this.pinnedItems.delete(itemId);
+            }
+          }
+          
+          console.log('[Clipboard] Updated item in history, notifying UI');
+          this.notifyHistoryUpdate();
+        }
+      });
+      
+      // When an item is moved between spaces via API
+      spacesAPI.on('item:moved', ({ itemId, fromSpaceId, toSpaceId }) => {
+        console.log('[Clipboard] SpacesAPI item:moved event received:', itemId, fromSpaceId, '->', toSpaceId);
+        this.ensureHistoryLoaded();
+        
+        const item = this.history.find(h => h.id === itemId);
+        if (item) {
+          item.spaceId = toSpaceId;
+          console.log('[Clipboard] Updated item space, notifying UI');
+          this.updateSpaceCounts();
+          this.notifyHistoryUpdate();
+        }
+      });
+      
+      console.log('[Clipboard] Subscribed to SpacesAPI events for sync');
+    } catch (error) {
+      console.error('[Clipboard] Failed to subscribe to SpacesAPI events:', error.message);
+      // Non-fatal - app will still work, just without real-time sync
+    }
   }
   
   // PERFORMANCE: Lazy load history on first access
