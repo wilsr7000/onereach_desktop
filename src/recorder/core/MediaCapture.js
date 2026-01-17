@@ -1,6 +1,8 @@
 /**
  * MediaCapture - Camera and screen capture handling
  * @module src/recorder/core/MediaCapture
+ * 
+ * Integrates with unified MicrophoneManager for mic conflict detection
  */
 
 /**
@@ -11,6 +13,29 @@ export class MediaCapture {
     this.cameraStream = null;
     this.screenStream = null;
     this.combinedStream = null;
+    this.hasMicClaim = false;  // Track if we've claimed the mic
+  }
+
+  /**
+   * Check if mic is available (not in use by another feature)
+   * @returns {boolean}
+   */
+  isMicAvailable() {
+    if (typeof window !== 'undefined' && window.micManager) {
+      return !window.micManager.isInUse();
+    }
+    return true;  // If no micManager, assume available
+  }
+
+  /**
+   * Get what's currently using the mic
+   * @returns {string|null}
+   */
+  getMicUser() {
+    if (typeof window !== 'undefined' && window.micManager) {
+      return window.micManager.getActiveConsumer();
+    }
+    return null;
   }
 
   /**
@@ -26,6 +51,13 @@ export class MediaCapture {
       height = 1080
     } = options;
 
+    // Check for mic conflict if audio is requested
+    if (audio && !this.isMicAvailable()) {
+      const currentUser = this.getMicUser();
+      console.warn(`[MediaCapture] Mic in use by "${currentUser}" - camera audio may conflict`);
+      // Don't block, but warn - user may want to proceed anyway
+    }
+
     try {
       this.cameraStream = await navigator.mediaDevices.getUserMedia({
         video: video ? {
@@ -36,7 +68,14 @@ export class MediaCapture {
         audio: audio
       });
 
-      console.log('[MediaCapture] Camera stream acquired');
+      // If we got audio, mark that we're using the mic
+      if (audio && this.cameraStream.getAudioTracks().length > 0) {
+        this.hasMicClaim = true;
+        console.log('[MediaCapture] Camera stream acquired (with mic)');
+      } else {
+        console.log('[MediaCapture] Camera stream acquired (video only)');
+      }
+      
       return this.cameraStream;
 
     } catch (error) {
@@ -126,20 +165,27 @@ export class MediaCapture {
   /**
    * Stop all streams
    */
-  stopAll() {
-    this.stopCamera();
+  async stopAll() {
+    await this.stopCamera();
     this.stopScreen();
     this.combinedStream = null;
   }
 
   /**
-   * Stop camera stream
+   * Stop camera stream (async for proper mic release)
    */
-  stopCamera() {
+  async stopCamera() {
     if (this.cameraStream) {
       this.cameraStream.getTracks().forEach(track => track.stop());
       this.cameraStream = null;
-      console.log('[MediaCapture] Camera stopped');
+      
+      // Clear mic claim
+      if (this.hasMicClaim) {
+        this.hasMicClaim = false;
+        console.log('[MediaCapture] Camera stopped (mic released)');
+      } else {
+        console.log('[MediaCapture] Camera stopped');
+      }
     }
   }
 

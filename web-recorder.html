@@ -1384,6 +1384,9 @@
       // Recorders
       cameraRecorder: null,
       screenRecorder: null,
+      
+      // Mic tracking
+      hasMicClaim: false,
 
       // Recorded data
       cameraChunks: [],
@@ -1763,6 +1766,26 @@
       },
 
       /**
+       * Check if mic is available (via unified MicrophoneManager)
+       */
+      isMicAvailable() {
+        if (typeof window !== 'undefined' && window.micManager) {
+          return !window.micManager.isInUse();
+        }
+        return true;  // If no micManager, assume available
+      },
+
+      /**
+       * Get what's currently using the mic
+       */
+      getMicUser() {
+        if (typeof window !== 'undefined' && window.micManager) {
+          return window.micManager.getActiveConsumer();
+        }
+        return null;
+      },
+
+      /**
        * Load available media devices
        */
       async loadDevices() {
@@ -1843,16 +1866,25 @@
           if (this.cameraStream) {
             this.cameraStream.getTracks().forEach(t => t.stop());
             this.cameraStream = null;
+            this.hasMicClaim = false;
           }
           this.elements.cameraPreview.srcObject = null;
           this.elements.cameraPlaceholder.classList.remove('hidden');
           return;
         }
 
+        // Check for mic conflict
+        if (!this.isMicAvailable()) {
+          const currentUser = this.getMicUser();
+          console.warn(`[WebRecorder] Mic in use by "${currentUser}" - may cause conflict`);
+          this.showStatus(`Warning: Mic in use by ${currentUser}`, 'warning');
+        }
+
         try {
           // Stop existing camera stream
           if (this.cameraStream) {
             this.cameraStream.getTracks().forEach(t => t.stop());
+            this.hasMicClaim = false;
           }
 
           const micId = this.elements.micSelect.value;
@@ -1865,13 +1897,15 @@
           this.elements.cameraPreview.srcObject = this.cameraStream;
           this.elements.cameraPlaceholder.classList.add('hidden');
 
-          // Connect to audio meter
+          // Connect to audio meter and track mic usage
           if (this.cameraStream.getAudioTracks().length > 0) {
+            this.hasMicClaim = true;
             const source = this.audioContext.createMediaStreamSource(this.cameraStream);
             source.connect(this.audioAnalyser);
             if (!this.audioMeterAnimationFrame) {
               this.updateAudioMeter();
             }
+            console.log('[WebRecorder] Camera stream acquired (with mic)');
           }
         } catch (error) {
           console.error('[WebRecorder] Camera error:', error);
@@ -2693,6 +2727,18 @@
         e.preventDefault();
         e.returnValue = 'Upload in progress. Leaving now will cancel the upload. Are you sure?';
       }
+    });
+
+    // Cleanup streams on actual unload to release mic
+    window.addEventListener('unload', () => {
+      if (app.cameraStream) {
+        app.cameraStream.getTracks().forEach(t => t.stop());
+        app.hasMicClaim = false;
+      }
+      if (app.screenStream) {
+        app.screenStream.getTracks().forEach(t => t.stop());
+      }
+      console.log('[WebRecorder] Streams cleaned up on unload');
     });
   </script>
 </body>

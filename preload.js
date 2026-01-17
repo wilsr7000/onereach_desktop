@@ -593,6 +593,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openSettings: () => ipcRenderer.send('open-settings'),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   
+  // Keep-alive ping/pong for preventing zombie windows
+  ping: () => ipcRenderer.send('window:ping'),
+  onPong: (callback) => {
+    const handler = (event, data) => callback(data);
+    ipcRenderer.on('window:pong', handler);
+    return () => ipcRenderer.removeListener('window:pong', handler);
+  },
+  
   // Log event (for branch events)
   logEvent: (eventType, eventData) => ipcRenderer.send('logger:event', { eventType, eventData }),
   
@@ -788,6 +796,157 @@ contextBridge.exposeInMainWorld('realtimeSpeech', {
       }
     };
   }
+});
+
+// ==================== UNIFIED MICROPHONE MANAGER ====================
+// Centralized mic access with proper async cleanup
+// Based on the working Voice Mode implementation above
+// Other consumers (recorder, web-recorder) should use this API
+
+// Singleton instance for mic management
+const micManagerState = {
+  stream: null,
+  audioContext: null,
+  source: null,
+  processor: null,
+  activeConsumer: null,
+  acquiredAt: null
+};
+
+const defaultMicConstraints = {
+  channelCount: 1,
+  sampleRate: 24000,
+  echoCancellation: true,
+  noiseSuppression: true
+};
+
+contextBridge.exposeInMainWorld('micManager', {
+  /**
+   * Acquire microphone access
+   * @param {string} consumerId - Identifier (e.g., 'recorder', 'web-recorder')
+   * @param {object} constraints - Audio constraints
+   * @returns {object|null} { stream, audioContext } or null if in use
+   */
+  acquire: async (consumerId, constraints = {}) => {
+    // Check if already in use by different consumer
+    if (micManagerState.stream && micManagerState.activeConsumer !== consumerId) {
+      console.warn(`[MicManager] Mic in use by "${micManagerState.activeConsumer}", requested by "${consumerId}"`);
+      return null;
+    }
+    
+    // Already acquired by this consumer
+    if (micManagerState.stream && micManagerState.activeConsumer === consumerId) {
+      console.log(`[MicManager] Mic already held by "${consumerId}"`);
+      return { 
+        stream: micManagerState.stream, 
+        audioContext: micManagerState.audioContext 
+      };
+    }
+    
+    try {
+      const audioConstraints = { ...defaultMicConstraints, ...constraints };
+      const sampleRate = audioConstraints.sampleRate || 24000;
+      
+      // Request permission first
+      await ipcRenderer.invoke('speech:request-mic-permission');
+      
+      // Acquire stream
+      micManagerState.stream = await navigator.mediaDevices.getUserMedia({
+        audio: audioConstraints
+      });
+      
+      micManagerState.audioContext = new AudioContext({ sampleRate });
+      micManagerState.activeConsumer = consumerId;
+      micManagerState.acquiredAt = Date.now();
+      
+      console.log(`[MicManager] 🎤 Mic acquired by "${consumerId}"`);
+      
+      return { 
+        stream: micManagerState.stream, 
+        audioContext: micManagerState.audioContext 
+      };
+    } catch (error) {
+      console.error(`[MicManager] Failed to acquire mic:`, error);
+      throw error;
+    }
+  },
+
+  /**
+   * Release microphone - MUST be awaited for proper cleanup
+   * @param {string} consumerId - Must match the consumer that acquired
+   */
+  release: async (consumerId) => {
+    if (micManagerState.activeConsumer !== consumerId) {
+      if (micManagerState.activeConsumer) {
+        console.warn(`[MicManager] "${consumerId}" tried to release mic owned by "${micManagerState.activeConsumer}"`);
+      }
+      return;
+    }
+    
+    // Cleanup in proper order (matches voice mode pattern)
+    if (micManagerState.processor) {
+      micManagerState.processor.disconnect();
+      micManagerState.processor = null;
+    }
+    if (micManagerState.source) {
+      micManagerState.source.disconnect();
+      micManagerState.source = null;
+    }
+    if (micManagerState.audioContext) {
+      await micManagerState.audioContext.close();
+      micManagerState.audioContext = null;
+    }
+    if (micManagerState.stream) {
+      micManagerState.stream.getTracks().forEach(track => track.stop());
+      micManagerState.stream = null;
+    }
+    
+    const duration = micManagerState.acquiredAt ? Date.now() - micManagerState.acquiredAt : 0;
+    micManagerState.activeConsumer = null;
+    micManagerState.acquiredAt = null;
+    
+    console.log(`[MicManager] 🎤 Mic released by "${consumerId}" (held for ${duration}ms)`);
+  },
+
+  /**
+   * Force release - for emergency cleanup
+   */
+  forceRelease: async () => {
+    const consumer = micManagerState.activeConsumer || 'unknown';
+    console.warn(`[MicManager] Force releasing mic (was held by "${consumer}")`);
+    
+    if (micManagerState.processor) micManagerState.processor.disconnect();
+    if (micManagerState.source) micManagerState.source.disconnect();
+    if (micManagerState.audioContext) await micManagerState.audioContext.close();
+    if (micManagerState.stream) micManagerState.stream.getTracks().forEach(t => t.stop());
+    
+    micManagerState.processor = null;
+    micManagerState.source = null;
+    micManagerState.audioContext = null;
+    micManagerState.stream = null;
+    micManagerState.activeConsumer = null;
+    micManagerState.acquiredAt = null;
+  },
+
+  /**
+   * Check if mic is in use
+   */
+  isInUse: () => !!micManagerState.stream,
+
+  /**
+   * Get active consumer ID
+   */
+  getActiveConsumer: () => micManagerState.activeConsumer,
+
+  /**
+   * Get full status for debugging
+   */
+  getStatus: () => ({
+    inUse: !!micManagerState.stream,
+    consumer: micManagerState.activeConsumer,
+    acquiredAt: micManagerState.acquiredAt,
+    duration: micManagerState.acquiredAt ? Date.now() - micManagerState.acquiredAt : null
+  })
 });
 
 // Expose Voice TTS API (ElevenLabs Text-to-Speech for voice mode)

@@ -649,6 +649,90 @@ contextBridge.exposeInMainWorld('realtimeSpeech', {
   }
 });
 
+// ==================== UNIFIED MICROPHONE MANAGER ====================
+// Centralized mic access with proper async cleanup
+// Based on the working Voice Mode implementation above
+
+const micManagerState = {
+  stream: null,
+  audioContext: null,
+  source: null,
+  processor: null,
+  activeConsumer: null,
+  acquiredAt: null
+};
+
+const defaultMicConstraints = {
+  channelCount: 1,
+  sampleRate: 24000,
+  echoCancellation: true,
+  noiseSuppression: true
+};
+
+contextBridge.exposeInMainWorld('micManager', {
+  acquire: async (consumerId, constraints = {}) => {
+    if (micManagerState.stream && micManagerState.activeConsumer !== consumerId) {
+      console.warn(`[MicManager] Mic in use by "${micManagerState.activeConsumer}"`);
+      return null;
+    }
+    if (micManagerState.stream && micManagerState.activeConsumer === consumerId) {
+      return { stream: micManagerState.stream, audioContext: micManagerState.audioContext };
+    }
+    
+    try {
+      const audioConstraints = { ...defaultMicConstraints, ...constraints };
+      const sampleRate = audioConstraints.sampleRate || 24000;
+      
+      await ipcRenderer.invoke('speech:request-mic-permission');
+      micManagerState.stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+      micManagerState.audioContext = new AudioContext({ sampleRate });
+      micManagerState.activeConsumer = consumerId;
+      micManagerState.acquiredAt = Date.now();
+      
+      console.log(`[MicManager] 🎤 Mic acquired by "${consumerId}"`);
+      return { stream: micManagerState.stream, audioContext: micManagerState.audioContext };
+    } catch (error) {
+      console.error(`[MicManager] Failed to acquire mic:`, error);
+      throw error;
+    }
+  },
+
+  release: async (consumerId) => {
+    if (micManagerState.activeConsumer !== consumerId) return;
+    
+    if (micManagerState.processor) { micManagerState.processor.disconnect(); micManagerState.processor = null; }
+    if (micManagerState.source) { micManagerState.source.disconnect(); micManagerState.source = null; }
+    if (micManagerState.audioContext) { await micManagerState.audioContext.close(); micManagerState.audioContext = null; }
+    if (micManagerState.stream) { micManagerState.stream.getTracks().forEach(t => t.stop()); micManagerState.stream = null; }
+    
+    const duration = micManagerState.acquiredAt ? Date.now() - micManagerState.acquiredAt : 0;
+    micManagerState.activeConsumer = null;
+    micManagerState.acquiredAt = null;
+    console.log(`[MicManager] 🎤 Mic released by "${consumerId}" (${duration}ms)`);
+  },
+
+  forceRelease: async () => {
+    if (micManagerState.processor) micManagerState.processor.disconnect();
+    if (micManagerState.source) micManagerState.source.disconnect();
+    if (micManagerState.audioContext) await micManagerState.audioContext.close();
+    if (micManagerState.stream) micManagerState.stream.getTracks().forEach(t => t.stop());
+    micManagerState.processor = null;
+    micManagerState.source = null;
+    micManagerState.audioContext = null;
+    micManagerState.stream = null;
+    micManagerState.activeConsumer = null;
+    micManagerState.acquiredAt = null;
+  },
+
+  isInUse: () => !!micManagerState.stream,
+  getActiveConsumer: () => micManagerState.activeConsumer,
+  getStatus: () => ({
+    inUse: !!micManagerState.stream,
+    consumer: micManagerState.activeConsumer,
+    duration: micManagerState.acquiredAt ? Date.now() - micManagerState.acquiredAt : null
+  })
+});
+
 // Expose Voice TTS API (ElevenLabs Text-to-Speech)
 contextBridge.exposeInMainWorld('voiceTTS', {
   // Speak text using ElevenLabs TTS

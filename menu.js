@@ -3,6 +3,52 @@ const fs = require('fs');
 const path = require('path');
 
 // ============================================
+// GSX WINDOW TRACKING
+// ============================================
+// Track all GSX windows to ensure proper cleanup on quit
+const gsxWindows = [];
+
+/**
+ * Register a GSX window for tracking
+ * @param {BrowserWindow} window - The window to track
+ * @param {string} title - Window title for debugging
+ */
+function registerGSXWindow(window, title) {
+  gsxWindows.push({ window, title, created: Date.now() });
+  console.log(`[GSX Windows] Registered: ${title} (Total: ${gsxWindows.length})`);
+  
+  // Remove from tracking when closed
+  window.once('closed', () => {
+    const index = gsxWindows.findIndex(w => w.window === window);
+    if (index !== -1) {
+      gsxWindows.splice(index, 1);
+      console.log(`[GSX Windows] Unregistered: ${title} (Remaining: ${gsxWindows.length})`);
+    }
+  });
+}
+
+/**
+ * Force close all tracked GSX windows
+ * Used during app quit to prevent zombie windows
+ */
+function closeAllGSXWindows() {
+  console.log(`[GSX Windows] Force closing ${gsxWindows.length} windows`);
+  
+  gsxWindows.forEach(({ window, title }) => {
+    if (!window.isDestroyed()) {
+      console.log(`[GSX Windows] Destroying: ${title}`);
+      try {
+        window.destroy();
+      } catch (error) {
+        console.error(`[GSX Windows] Error destroying ${title}:`, error);
+      }
+    }
+  });
+  
+  gsxWindows.length = 0; // Clear array
+}
+
+// ============================================
 // PERFORMANCE: Menu data caching
 // ============================================
 // Cache menu configuration data to avoid repeated file I/O
@@ -207,6 +253,7 @@ function openGSXLargeWindow(url, title, windowTitle, loadingMessage = 'Loading..
           <button id="gsx-forward" title="Forward">▶</button>
           <button id="gsx-refresh" title="Refresh">↻</button>
           <button id="gsx-mission-control" title="Show All Windows">⊞</button>
+          <button id="gsx-close" title="Close Window">×</button>
         \`;
         
         // Add styles
@@ -262,6 +309,17 @@ function openGSXLargeWindow(url, title, windowTitle, loadingMessage = 'Loading..
             opacity: 0.3;
             cursor: not-allowed;
           }
+          
+          #gsx-minimal-toolbar button#gsx-close {
+            margin-left: 8px;
+            border-left: 1px solid rgba(255, 255, 255, 0.1);
+            padding-left: 12px;
+          }
+          
+          #gsx-minimal-toolbar button#gsx-close:hover {
+            background: rgba(255, 59, 48, 0.2);
+            color: #ff3b30;
+          }
         \`;
         
         document.head.appendChild(style);
@@ -292,6 +350,10 @@ function openGSXLargeWindow(url, title, windowTitle, loadingMessage = 'Loading..
           }
         });
         
+        document.getElementById('gsx-close').addEventListener('click', () => {
+          window.close();
+        });
+        
         // Update button states based on history
         function updateNavigationButtons() {
           const backBtn = document.getElementById('gsx-back');
@@ -305,6 +367,127 @@ function openGSXLargeWindow(url, title, windowTitle, loadingMessage = 'Loading..
         window.addEventListener('popstate', updateNavigationButtons);
       })();
     `).catch(err => console.error('[GSX Window] Error injecting toolbar:', err));
+    
+    // Inject window keep-alive and zombie detection
+    gsxWindow.webContents.executeJavaScript(`
+      (function() {
+        // Skip if already initialized
+        if (window.__gsxKeepAliveInitialized) return;
+        window.__gsxKeepAliveInitialized = true;
+        
+        console.log('[GSX Keep-Alive] Initializing connection monitoring');
+        
+        let lastPong = Date.now();
+        let lastActivity = Date.now();
+        let emergencyUIShown = false;
+        let pingIntervalId = null;
+        let zombieCheckIntervalId = null;
+        let pongCleanup = null;
+        
+        // Track pong responses
+        if (window.electronAPI && window.electronAPI.onPong) {
+          pongCleanup = window.electronAPI.onPong((data) => {
+            lastPong = Date.now();
+            console.log('[GSX Keep-Alive] Pong received');
+          });
+        }
+        
+        // Wrap electronAPI to track activity (smart keep-alive)
+        if (window.electronAPI) {
+          const originalAPI = window.electronAPI;
+          const activityProxy = new Proxy(originalAPI, {
+            get(target, prop) {
+              if (typeof target[prop] === 'function' && prop !== 'onPong') {
+                return function(...args) {
+                  lastActivity = Date.now();
+                  return target[prop](...args);
+                };
+              }
+              return target[prop];
+            }
+          });
+          window.electronAPI = activityProxy;
+        }
+        
+        // Backup ping only when idle for 4 minutes
+        pingIntervalId = setInterval(() => {
+          const idleTime = Date.now() - lastActivity;
+          if (idleTime > 240000 && window.electronAPI && window.electronAPI.ping) {
+            console.log('[GSX Keep-Alive] Sending idle ping');
+            window.electronAPI.ping();
+          }
+        }, 60000); // Check every minute
+        
+        // Detect zombie state (no pong for 10 minutes)
+        zombieCheckIntervalId = setInterval(() => {
+          const timeSinceLastPong = Date.now() - lastPong;
+          if (timeSinceLastPong > 600000 && !emergencyUIShown) {
+            console.error('[GSX Keep-Alive] Connection lost - window is zombie');
+            showEmergencyUI();
+            emergencyUIShown = true;
+          }
+        }, 30000); // Check every 30 seconds
+        
+        // Cleanup function for window close
+        function cleanup() {
+          console.log('[GSX Keep-Alive] Cleaning up intervals and listeners');
+          if (pingIntervalId) clearInterval(pingIntervalId);
+          if (zombieCheckIntervalId) clearInterval(zombieCheckIntervalId);
+          if (pongCleanup) pongCleanup();
+        }
+        
+        // Listen for window closing signal from main process
+        if (window.electronAPI && window.electronAPI.onPong) {
+          // Piggyback on existing IPC infrastructure
+          window.addEventListener('beforeunload', cleanup);
+        }
+        
+        // Also listen for explicit close signal
+        window.addEventListener('window-closing', cleanup);
+        
+        // Show emergency UI when connection is dead
+        function showEmergencyUI() {
+          const emergency = document.createElement('div');
+          emergency.id = 'gsx-emergency-banner';
+          emergency.innerHTML = \`
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <span style="font-size: 20px;">⚠️</span>
+              <div style="flex: 1;">
+                <div style="font-weight: 600; margin-bottom: 4px;">Window Connection Lost</div>
+                <div style="font-size: 12px; opacity: 0.9;">Close button may not work. Use Cmd+Q to quit the app.</div>
+              </div>
+              <button onclick="window.close()" style="
+                background: rgba(255,59,48,0.2);
+                border: 1px solid #ff3b30;
+                color: #ff3b30;
+                padding: 8px 16px;
+                border-radius: 6px;
+                cursor: pointer;
+                font-weight: 600;
+                font-size: 12px;
+              ">Try Close Anyway</button>
+            </div>
+          \`;
+          
+          emergency.style.cssText = \`
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 9999999;
+            background: rgba(255,165,0,0.95);
+            color: white;
+            padding: 16px 24px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            font-size: 14px;
+            backdrop-filter: blur(10px);
+          \`;
+          
+          document.body.appendChild(emergency);
+        }
+      })();
+    `).catch(err => console.error('[GSX Window] Error injecting keep-alive:', err));
   });
   
   // Also remove on did-stop-loading as a fallback
@@ -333,6 +516,36 @@ function openGSXLargeWindow(url, title, windowTitle, loadingMessage = 'Loading..
   gsxWindow.once('ready-to-show', () => {
     gsxWindow.show();
   });
+  
+  // Add forced close handler to prevent zombie windows
+  let isClosing = false;
+  gsxWindow.on('close', (event) => {
+    if (isClosing) return; // Already closing, don't interfere
+    
+    console.log(`[GSX Window] Close requested: ${title}`);
+    isClosing = true;
+    
+    // Prevent default to control the shutdown
+    event.preventDefault();
+    
+    // Try to notify renderer
+    try {
+      gsxWindow.webContents.send('window-closing');
+    } catch (e) {
+      console.log(`[GSX Window] Could not send closing signal: ${e.message}`);
+    }
+    
+    // Force destroy after short delay (500ms for state save)
+    setTimeout(() => {
+      if (!gsxWindow.isDestroyed()) {
+        console.log(`[GSX Window] Force destroying: ${title}`);
+        gsxWindow.destroy();
+      }
+    }, 500);
+  });
+  
+  // Register for tracking
+  registerGSXWindow(gsxWindow, title);
   
   return gsxWindow;
 }
@@ -3267,5 +3480,7 @@ module.exports = {
   refreshGSXLinks,
   refreshApplicationMenu,
   // PERFORMANCE: Expose cache invalidation for when menu data files are updated
-  invalidateMenuCache: () => menuCache.invalidate()
+  invalidateMenuCache: () => menuCache.invalidate(),
+  // Window management for app quit
+  closeAllGSXWindows
 }; 

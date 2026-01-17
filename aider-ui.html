@@ -7525,7 +7525,7 @@
                 const btn = document.getElementById('voiceBtn');
                 
                 if (this.voiceMode.stopStreaming) {
-                    this.voiceMode.stopStreaming();
+                    await this.voiceMode.stopStreaming();
                     this.voiceMode.stopStreaming = null;
                 }
                 

@@ -26,7 +26,7 @@
 
 ### GSX Create
 - [ ] **Task queue persistence** - Verify working across all edge cases
-- [ ] **Graceful shutdown** - Ensure all state saves on quit
+- [x] **Graceful shutdown** - Fixed in v3.8.12 with app quit handlers and forced window close
 - [ ] **HUD position** - Sometimes resets after restart
 - [ ] **Agent summaries** - Improve quality/relevance
 
@@ -121,6 +121,13 @@
 
 ## ✅ Recently Completed
 
+- [x] **Zombie window prevention and app quit fixes** (v3.8.12)
+  - Added app lifecycle handlers (before-quit, window-all-closed, will-quit)
+  - GSX window tracking system with forced close
+  - IPC heartbeat system to prevent zombie windows
+  - Proper cleanup of intervals and listeners
+  - Close button in GSX toolbar for convenience
+  - Fixes: App not quitting, windows not closing after hours open
 - [x] **Spaces API tags not saving/retrieving** - Fixed tag handling in HTTP API
   - `handleSendToSpace` now extracts tags from request (root level or metadata.tags)
   - `items.get` now returns tags at root level consistently

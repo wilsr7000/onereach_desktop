@@ -1145,6 +1145,119 @@ app.whenReady().then(() => {
 });
 
 // ============================================
+// APP LIFECYCLE HANDLERS
+// ============================================
+
+// Handle app quit - coordinate window closing
+app.on('before-quit', (event) => {
+  console.log('[App] before-quit event - coordinating shutdown');
+  
+  // Close all GSX windows first (they have forced destroy logic)
+  try {
+    const { closeAllGSXWindows } = require('./menu');
+    closeAllGSXWindows();
+  } catch (error) {
+    console.error('[App] Error closing GSX windows:', error);
+  }
+  
+  // Get all windows
+  const allWindows = BrowserWindow.getAllWindows();
+  console.log(`[App] Found ${allWindows.length} windows to close`);
+  
+  // Close clipboard manager first
+  if (clipboardManager) {
+    try {
+      clipboardManager.destroy();
+      console.log('[App] Clipboard manager destroyed');
+    } catch (error) {
+      console.error('[App] Error destroying clipboard manager:', error);
+    }
+  }
+  
+  // Force close all remaining windows with timeout
+  allWindows.forEach((win, index) => {
+    if (!win.isDestroyed()) {
+      const title = win.getTitle();
+      console.log(`[App] Force closing window ${index + 1}/${allWindows.length}: ${title}`);
+      
+      try {
+        // Try graceful close first
+        win.close();
+        
+        // Force destroy after 1 second if still alive
+        setTimeout(() => {
+          if (!win.isDestroyed()) {
+            console.log(`[App] Force destroying stubborn window: ${title}`);
+            win.destroy();
+          }
+        }, 1000);
+      } catch (error) {
+        console.error(`[App] Error closing window ${title}:`, error);
+        // Try to destroy anyway
+        try {
+          win.destroy();
+        } catch (e) {
+          console.error(`[App] Error destroying window ${title}:`, e);
+        }
+      }
+    }
+  });
+});
+
+// Quit when all windows are closed (except on macOS)
+app.on('window-all-closed', () => {
+  console.log('[App] All windows closed');
+  // On macOS, apps typically stay open until explicitly quit
+  if (process.platform !== 'darwin') {
+    console.log('[App] Quitting app (non-macOS)');
+    app.quit();
+  } else {
+    console.log('[App] Staying open (macOS - waiting for Cmd+Q)');
+  }
+});
+
+// Final cleanup before process exits
+app.on('will-quit', (event) => {
+  console.log('[App] will-quit event - final cleanup');
+  
+  // Shutdown Aider Bridge
+  if (aiderBridge) {
+    console.log('[App] Shutting down Aider Bridge...');
+    try {
+      aiderBridge.shutdown().catch(err => 
+        console.error('[App] Error shutting down Aider:', err)
+      );
+    } catch (error) {
+      console.error('[App] Error in Aider shutdown:', error);
+    }
+  }
+  
+  // Unregister global shortcuts
+  if (registeredShortcuts && registeredShortcuts.length > 0) {
+    registeredShortcuts.forEach(shortcut => {
+      try {
+        globalShortcut.unregister(shortcut);
+      } catch (e) {
+        console.error(`[App] Error unregistering shortcut ${shortcut}:`, e);
+      }
+    });
+    console.log(`[App] Unregistered ${registeredShortcuts.length} shortcuts`);
+  }
+  
+  // Final log flush
+  if (logger && logger.flush) {
+    try {
+      logger.flush();
+      console.log('[App] Logger flushed');
+    } catch (error) {
+      console.error('[App] Error flushing logger:', error);
+    }
+  }
+  
+  console.log('[App] Final cleanup complete - app will now quit');
+});
+
+// ============================================
 // UNIFIED SPACES API
 // ============================================
 
@@ -5624,6 +5737,17 @@ function setupIPC() {
       console.error('[IPC] Error clearing cache and reloading:', error);
     }
   });
+
+  // IPC ping/pong for connection keep-alive (prevents zombie windows)
+  ipcMain.on('window:ping', (event) => {
+    try {
+      event.reply('window:pong', { timestamp: Date.now() });
+    } catch (err) {
+      console.error('[IPC] Error sending pong:', err);
+    }
+  });
+
+  console.log('[setupIPC] Window keep-alive handlers registered');
 
   ipcMain.handle('settings:get-all', async () => {
     const settingsManager = global.settingsManager;
