@@ -2,7 +2,7 @@ const { app, ipcMain, Tray, Menu, MenuItem, BrowserWindow, desktopCapturer, dial
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
-const { setApplicationMenu, registerTestMenuShortcut, refreshGSXLinks } = require('./menu');
+const { setApplicationMenu, registerTestMenuShortcut, refreshGSXLinks, closeAllGSXWindows } = require('./menu');
 const { shell } = require('electron');
 const browserWindow = require('./browserWindow');
 const log = require('electron-log');
@@ -1154,7 +1154,6 @@ app.on('before-quit', (event) => {
   
   // Close all GSX windows first (they have forced destroy logic)
   try {
-    const { closeAllGSXWindows } = require('./menu');
     closeAllGSXWindows();
   } catch (error) {
     console.error('[App] Error closing GSX windows:', error);
