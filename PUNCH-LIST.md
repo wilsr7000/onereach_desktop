@@ -121,6 +121,10 @@
 
 ## ✅ Recently Completed
 
+- [x] **Missing import fix** (v3.8.13)
+  - Fixed closeAllGSXWindows not imported in main.js
+  - Rebuilt keytar native module for ARM64 compatibility
+  - Fixes: App launch error "js undefined undefined"
 - [x] **Zombie window prevention and app quit fixes** (v3.8.12)
   - Added app lifecycle handlers (before-quit, window-all-closed, will-quit)
   - GSX window tracking system with forced close
