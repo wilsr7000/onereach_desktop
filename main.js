@@ -1,4 +1,5 @@
-const { app, ipcMain, Tray, Menu, MenuItem, BrowserWindow, desktopCapturer, dialog, globalShortcut } = require('electron');
+const { app, ipcMain, Tray, Menu, MenuItem, BrowserWindow, desktopCapturer, globalShortcut, screen } = require('electron');
+const dialog = require('./wrapped-dialog'); // Use wrapped dialog for Spaces integration
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
@@ -20,12 +21,19 @@ const VideoEditor = require('./video-editor');
 const { getRecorder } = require('./recorder');
 const { getBudgetManager } = require('./budget-manager');
 const AuthManager = require('./auth-manager');
+const { getConversationCapture } = require('./src/ai-conversation-capture');
+
+// Global conversation capture instance
+let conversationCapture = null;
 
 // Global Budget Manager instance
 let budgetManager = null;
 
 // Global Auth Manager instance
 let authManager = null;
+
+// Global Voice Orb window instance
+let orbWindow = null;
 
 // Enable Speech Recognition API in Electron
 // These must be set before app.whenReady()
@@ -769,6 +777,11 @@ app.whenReady().then(() => {
   const logAIAnalyzer = getLogAIAnalyzer();
   console.log('AI log analyzer initialized');
   
+  // Initialize Spaces upload handler and register IPC handlers
+  const { registerIPCHandlers } = require('./spaces-upload-handler');
+  registerIPCHandlers();
+  console.log('[Spaces Upload] IPC handlers registered');
+  
   // Initialize test context manager
   const testContextManager = require('./test-context-manager');
   
@@ -1066,6 +1079,9 @@ app.whenReady().then(() => {
     // Initialize Voice TTS (ElevenLabs Text-to-Speech for voice mode)
     setupVoiceTTS();
 
+    // Initialize Voice Orb if enabled in settings
+    initializeVoiceOrb();
+
     console.log('[Startup] Deferred managers initialized');
   });
   
@@ -1219,6 +1235,15 @@ app.on('window-all-closed', () => {
 app.on('will-quit', (event) => {
   console.log('[App] will-quit event - final cleanup');
   
+  // Clean up Spaces upload temp files
+  try {
+    const { cleanupTempFiles } = require('./spaces-upload-handler');
+    cleanupTempFiles();
+    console.log('[App] Cleaned up Spaces upload temp files');
+  } catch (err) {
+    console.error('[App] Error cleaning up Spaces temp files:', err);
+  }
+  
   // Shutdown Aider Bridge
   if (aiderBridge) {
     console.log('[App] Shutting down Aider Bridge...');
@@ -1269,6 +1294,33 @@ function setupSpacesAPI() {
   
   const { getSpacesAPI } = require('./spaces-api');
   const spacesAPI = getSpacesAPI();
+  
+  // Initialize conversation capture
+  try {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:1298',message:'ConversationCapture init START',data:{spacesAPIExists:!!spacesAPI,timestamp:Date.now()},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+    // #endregion
+    
+    const { getSettingsManager } = require('./settings-manager');
+    const settingsManager = getSettingsManager();
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:1305',message:'SettingsManager loaded',data:{exists:!!settingsManager,hasGet:!!(settingsManager && settingsManager.get)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+    // #endregion
+    
+    conversationCapture = getConversationCapture(spacesAPI, settingsManager);
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:1312',message:'ConversationCapture CREATED',data:{exists:!!conversationCapture,isEnabled:conversationCapture?conversationCapture.isEnabled():null},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+    // #endregion
+    
+    console.log('[ConversationCapture] ✅ Initialized');
+  } catch (error) {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:1319',message:'ConversationCapture init FAILED',data:{error:error.message,stack:error.stack},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+    // #endregion
+    console.error('[ConversationCapture] Failed to initialize:', error);
+  }
   
   // Set up broadcast handler to notify all windows of changes
   spacesAPI.setBroadcastHandler((event, data) => {
@@ -1416,6 +1468,124 @@ function setupSpacesAPI() {
     } catch (error) {
       console.error('[SpacesAPI] Error in spaces:search:', error);
       return [];
+    }
+  });
+  
+  // ---- GENERATIVE SEARCH ----
+  
+  // Generative search engine instance
+  let generativeSearchEngine = null;
+  
+  // Initialize generative search engine
+  function getGenerativeSearchEngine() {
+    if (!generativeSearchEngine) {
+      try {
+        const { GenerativeFilterEngine } = require('./lib/generative-search');
+        generativeSearchEngine = new GenerativeFilterEngine(spacesAPI, {
+          concurrency: 5,
+          batchSize: 8,
+          onProgress: (progress) => {
+            // Broadcast progress to all windows
+            BrowserWindow.getAllWindows().forEach(win => {
+              win.webContents.send('generative-search:progress', progress);
+            });
+          }
+        });
+        console.log('[GenerativeSearch] Engine initialized');
+      } catch (error) {
+        console.error('[GenerativeSearch] Failed to initialize engine:', error);
+      }
+    }
+    return generativeSearchEngine;
+  }
+  
+  // Run generative search
+  ipcMain.handle('generative-search:search', async (event, options) => {
+    try {
+      const engine = getGenerativeSearchEngine();
+      if (!engine) {
+        throw new Error('Generative search engine not available');
+      }
+      
+      // Get API key from settings
+      const apiKey = settingsManager.get('openaiApiKey');
+      if (!apiKey) {
+        throw new Error('OpenAI API key not configured. Please add it in Settings.');
+      }
+      
+      const results = await engine.search({
+        ...options,
+        apiKey
+      });
+      
+      return results;
+    } catch (error) {
+      console.error('[GenerativeSearch] Search error:', error);
+      throw error;
+    }
+  });
+  
+  // Estimate search cost
+  ipcMain.handle('generative-search:estimate-cost', async (event, options) => {
+    try {
+      const engine = getGenerativeSearchEngine();
+      if (!engine) {
+        return { formatted: 'Engine not available' };
+      }
+      
+      // Get item count for the space
+      let items = spacesAPI.storage.getAllItems();
+      if (options.spaceId) {
+        items = items.filter(item => item.spaceId === options.spaceId);
+      }
+      
+      return engine.estimateCost(
+        items.length,
+        options.filters || [],
+        options.mode || 'quick'
+      );
+    } catch (error) {
+      console.error('[GenerativeSearch] Cost estimation error:', error);
+      return { formatted: 'Unable to estimate' };
+    }
+  });
+  
+  // Cancel ongoing search
+  ipcMain.handle('generative-search:cancel', async () => {
+    try {
+      const engine = getGenerativeSearchEngine();
+      if (engine && engine.batchProcessor) {
+        engine.batchProcessor.cancel();
+      }
+      return true;
+    } catch (error) {
+      console.error('[GenerativeSearch] Cancel error:', error);
+      return false;
+    }
+  });
+  
+  // Get filter types
+  ipcMain.handle('generative-search:get-filter-types', async () => {
+    try {
+      const { FILTER_TYPES, FILTER_CATEGORIES } = require('./lib/generative-search');
+      return { filterTypes: FILTER_TYPES, categories: FILTER_CATEGORIES };
+    } catch (error) {
+      console.error('[GenerativeSearch] Get filter types error:', error);
+      return { filterTypes: {}, categories: {} };
+    }
+  });
+  
+  // Clear search cache
+  ipcMain.handle('generative-search:clear-cache', async () => {
+    try {
+      const engine = getGenerativeSearchEngine();
+      if (engine) {
+        engine.clearCache();
+      }
+      return true;
+    } catch (error) {
+      console.error('[GenerativeSearch] Clear cache error:', error);
+      return false;
     }
   });
   
@@ -1738,6 +1908,294 @@ function setupSpacesAPI() {
   });
   
   console.log('[SpacesAPI] ✅ All IPC handlers registered (including tags and smart folders)');
+  
+  // ---- CONVERSATION CAPTURE IPC HANDLERS ----
+  
+  // Get overlay script content
+  ipcMain.handle('get-overlay-script', () => {
+    try {
+      const fs = require('fs');
+      const overlayPath = path.join(__dirname, 'src', 'ai-window-overlay.js');
+      return fs.readFileSync(overlayPath, 'utf8');
+    } catch (error) {
+      console.error('[ConversationCapture] Error reading overlay script:', error);
+      return '';
+    }
+  });
+  
+  // Check if conversation capture is enabled
+  ipcMain.handle('conversation:isEnabled', () => {
+    try {
+      return conversationCapture?.isEnabled() || false;
+    } catch (error) {
+      console.error('[ConversationCapture] Error checking enabled:', error);
+      return false;
+    }
+  });
+  
+  // Check if paused
+  ipcMain.handle('conversation:isPaused', () => {
+    try {
+      return conversationCapture?.isPaused() || false;
+    } catch (error) {
+      console.error('[ConversationCapture] Error checking paused:', error);
+      return false;
+    }
+  });
+  
+  // Set pause state
+  ipcMain.handle('conversation:setPaused', (event, paused) => {
+    try {
+      if (conversationCapture) {
+        conversationCapture.setPaused(paused);
+        return { success: true };
+      }
+      return { success: false, error: 'Not initialized' };
+    } catch (error) {
+      console.error('[ConversationCapture] Error setting paused:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Mark current conversation as do not save
+  ipcMain.handle('conversation:markDoNotSave', (event, serviceId) => {
+    try {
+      if (conversationCapture) {
+        conversationCapture.markDoNotSave(serviceId);
+        return { success: true };
+      }
+      return { success: false, error: 'Not initialized' };
+    } catch (error) {
+      console.error('[ConversationCapture] Error marking do not save:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Check if current conversation is marked do not save
+  ipcMain.handle('conversation:isMarkedDoNotSave', (event, serviceId) => {
+    try {
+      return conversationCapture?.isMarkedDoNotSave(serviceId) || false;
+    } catch (error) {
+      console.error('[ConversationCapture] Error checking do not save:', error);
+      return false;
+    }
+  });
+  
+  // Get current conversation
+  ipcMain.handle('conversation:getCurrent', (event, serviceId) => {
+    try {
+      return conversationCapture?.getCurrentConversation(serviceId) || null;
+    } catch (error) {
+      console.error('[ConversationCapture] Error getting current:', error);
+      return null;
+    }
+  });
+  
+  // Undo save
+  ipcMain.handle('conversation:undoSave', async (event, itemId) => {
+    try {
+      if (conversationCapture) {
+        return await conversationCapture.undoSave(itemId);
+      }
+      return { success: false, error: 'Not initialized' };
+    } catch (error) {
+      console.error('[ConversationCapture] Error undoing save:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Copy conversation to another space
+  ipcMain.handle('conversation:copyToSpace', async (event, conversationId, targetSpaceId) => {
+    try {
+      if (conversationCapture) {
+        return await conversationCapture.copyConversationToSpace(conversationId, targetSpaceId);
+      }
+      return { success: false, error: 'Not initialized' };
+    } catch (error) {
+      console.error('[ConversationCapture] Error copying to space:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Handle ChatGPT response captured from fetch interceptor
+  ipcMain.on('chatgpt-response-captured', async (event, data) => {
+    console.log('[ConversationCapture] Received ChatGPT response from interceptor');
+    console.log('[ConversationCapture] Conversation ID:', data.conversationId);
+    console.log('[ConversationCapture] Message length:', data.message?.length || 0);
+    
+    try {
+      if (conversationCapture && data.message) {
+        await conversationCapture.captureResponse('ChatGPT', {
+          message: data.message,
+          externalConversationId: data.conversationId,
+          timestamp: data.timestamp || new Date().toISOString()
+        });
+        console.log('[ConversationCapture] ✅ ChatGPT response captured successfully');
+      }
+    } catch (error) {
+      console.error('[ConversationCapture] Error capturing ChatGPT response:', error);
+    }
+  });
+  
+  // Handle Grok response captured from fetch interceptor
+  ipcMain.on('grok-response-captured', async (event, data) => {
+    console.log('[ConversationCapture] Received Grok response from interceptor');
+    console.log('[ConversationCapture] Conversation ID:', data.conversationId);
+    console.log('[ConversationCapture] Message length:', data.message?.length || 0);
+    
+    try {
+      if (conversationCapture && data.message) {
+        await conversationCapture.captureResponse('Grok', {
+          message: data.message,
+          externalConversationId: data.conversationId,
+          timestamp: data.timestamp || new Date().toISOString()
+        });
+        console.log('[ConversationCapture] ✅ Grok response captured successfully');
+      }
+    } catch (error) {
+      console.error('[ConversationCapture] Error capturing Grok response:', error);
+    }
+  });
+  
+  // Handle Gemini response captured from fetch interceptor
+  ipcMain.on('gemini-response-captured', async (event, data) => {
+    console.log('[ConversationCapture] Received Gemini response from interceptor');
+    console.log('[ConversationCapture] Conversation ID:', data.conversationId);
+    console.log('[ConversationCapture] Message length:', data.message?.length || 0);
+    
+    try {
+      if (conversationCapture && data.message) {
+        await conversationCapture.captureResponse('Gemini', {
+          message: data.message,
+          externalConversationId: data.conversationId,
+          timestamp: data.timestamp || new Date().toISOString()
+        });
+        console.log('[ConversationCapture] ✅ Gemini response captured successfully');
+      }
+    } catch (error) {
+      console.error('[ConversationCapture] Error capturing Gemini response:', error);
+    }
+  });
+  
+  // Get media items for a conversation
+  ipcMain.handle('conversation:getMedia', async (event, spaceId, conversationId) => {
+    try {
+      if (conversationCapture) {
+        return await conversationCapture.getConversationMedia(spaceId, conversationId);
+      }
+      return [];
+    } catch (error) {
+      console.error('[ConversationCapture] Error getting media:', error);
+      return [];
+    }
+  });
+  
+  // Headless Claude prompt - Run a prompt in a hidden window
+  ipcMain.handle('claude:runHeadlessPrompt', async (event, prompt, options = {}) => {
+    try {
+      console.log('[IPC] claude:runHeadlessPrompt called');
+      if (typeof global.runHeadlessClaudePrompt !== 'function') {
+        return { success: false, error: 'runHeadlessClaudePrompt not initialized yet' };
+      }
+      return await global.runHeadlessClaudePrompt(prompt, options);
+    } catch (error) {
+      console.error('[IPC] Error in headless Claude prompt:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Unified Claude Service - Headless first, API fallback
+  ipcMain.handle('claude:unified-complete', async (event, prompt, options = {}) => {
+    try {
+      console.log('[IPC] claude:unified-complete called');
+      const { getUnifiedClaudeService } = require('./unified-claude');
+      const unifiedClaude = getUnifiedClaudeService();
+      return await unifiedClaude.complete(prompt, options);
+    } catch (error) {
+      console.error('[IPC] Error in unified Claude complete:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('claude:unified-status', async (event) => {
+    try {
+      const { getUnifiedClaudeService } = require('./unified-claude');
+      const unifiedClaude = getUnifiedClaudeService();
+      return await unifiedClaude.getStatus();
+    } catch (error) {
+      console.error('[IPC] Error getting Claude status:', error);
+      return { error: error.message };
+    }
+  });
+  
+  ipcMain.handle('claude:unified-update-settings', async (event, settings) => {
+    try {
+      const { getUnifiedClaudeService } = require('./unified-claude');
+      const unifiedClaude = getUnifiedClaudeService();
+      unifiedClaude.updateSettings(settings);
+      return { success: true };
+    } catch (error) {
+      console.error('[IPC] Error updating Claude settings:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Test support - Only available in test mode
+  if (process.env.NODE_ENV === 'test' || process.env.TEST_MODE === 'true') {
+    console.log('[ConversationCapture] Registering test-only IPC handlers');
+    
+    // Test capture - Simulate conversation capture for automated testing
+    ipcMain.handle('conversation:test-capture', async (event, data) => {
+      try {
+        if (!conversationCapture) {
+          return { success: false, error: 'ConversationCapture not initialized' };
+        }
+        
+        const { serviceId, conversation } = data;
+        
+        // Create a new conversation if needed
+        if (!conversationCapture.activeConversations.has(serviceId)) {
+          conversationCapture.activeConversations.set(serviceId, {
+            id: `test-conv-${Date.now()}`,
+            serviceId: serviceId,
+            startTime: new Date().toISOString(),
+            lastActivity: Date.now(),
+            messages: [],
+            media: [],
+            exchangeCount: 0,
+            model: conversation.model || 'test-model',
+            hasImages: false,
+            hasFiles: false,
+            hasCode: false,
+            doNotSave: false,
+            savedItemId: null
+          });
+        }
+        
+        // Get the active conversation
+        const activeConv = conversationCapture.activeConversations.get(serviceId);
+        
+        // Add messages
+        activeConv.messages.push(...conversation.messages);
+        activeConv.exchangeCount = conversation.exchangeCount || Math.floor(conversation.messages.length / 2);
+        activeConv.lastActivity = Date.now();
+        
+        // Save the conversation
+        await conversationCapture._saveConversation(serviceId, activeConv);
+        
+        return { 
+          success: true, 
+          itemId: activeConv.savedItemId,
+          conversationId: activeConv.id 
+        };
+      } catch (error) {
+        console.error('[ConversationCapture] Test capture error:', error);
+        return { success: false, error: error.message };
+      }
+    });
+  }
+  
+  console.log('[ConversationCapture] ✅ IPC handlers registered');
 }
 
 // Tab picker window reference
@@ -6391,6 +6849,195 @@ function setupIPC() {
       return { success: false, error: error.message };
     }
   });
+
+  // ============================================
+  // UNIVERSAL SPACES API IPC HANDLERS
+  // ============================================
+  
+  // Convenience method for video paths (wraps existing implementation)
+  ipcMain.handle('spaces-api:getVideoPath', async (event, itemId) => {
+    try {
+      const ClipboardStorage = require('./clipboard-storage-v2');
+      const storage = new ClipboardStorage();
+      
+      console.log('[SpacesAPI] Getting video path for item:', itemId);
+      
+      // Helper to load scenes from metadata
+      const loadScenes = (itemId) => {
+        try {
+          const metadataPath = path.join(storage.itemsDir, itemId, 'metadata.json');
+          if (fs.existsSync(metadataPath)) {
+            const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+            return metadata.scenes || [];
+          }
+        } catch (e) {
+          // Ignore metadata errors
+        }
+        return [];
+      };
+      
+      // First, try to load item via storage
+      try {
+        const item = storage.loadItem(itemId);
+        
+        if (item && item.content) {
+          let filePath;
+          if (path.isAbsolute(item.content)) {
+            filePath = item.content;
+          } else {
+            filePath = path.join(storage.storageRoot, item.content);
+          }
+          
+          if (fs.existsSync(filePath)) {
+            console.log('[SpacesAPI] Found video via loadItem:', filePath);
+            return { 
+              success: true, 
+              filePath: filePath,
+              fileName: item.fileName || path.basename(filePath),
+              scenes: loadScenes(itemId)
+            };
+          }
+        }
+      } catch (loadError) {
+        console.log('[SpacesAPI] loadItem failed, trying fallback:', loadError.message);
+      }
+      
+      // Fallback: Scan the item directory for video files directly
+      const itemDir = path.join(storage.itemsDir, itemId);
+      console.log('[SpacesAPI] Checking item directory:', itemDir);
+      
+      if (fs.existsSync(itemDir)) {
+        const files = fs.readdirSync(itemDir);
+        console.log('[SpacesAPI] Files in item dir:', files);
+        
+        // Filter for video files
+        const videoExtensions = ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm', '.m4v', '.mpg', '.mpeg'];
+        const videoFile = files.find(f => {
+          const lower = f.toLowerCase();
+          if (f.startsWith('.')) return false;
+          return videoExtensions.some(ext => lower.endsWith(ext));
+        });
+        
+        if (videoFile) {
+          const videoPath = path.join(itemDir, videoFile);
+          console.log('[SpacesAPI] Found video file in item dir:', videoPath);
+          
+          const indexEntry = storage.index.items.find(i => i.id === itemId);
+          
+          return { 
+            success: true, 
+            filePath: videoPath,
+            fileName: indexEntry?.fileName || videoFile,
+            scenes: loadScenes(itemId)
+          };
+        }
+      }
+      
+      // File not found
+      const indexEntry = storage.index.items.find(i => i.id === itemId);
+      console.error('[SpacesAPI] Video file not found. Expected:', indexEntry?.contentPath);
+      return { 
+        success: false, 
+        error: `Video file is missing from storage. The file may have been deleted or moved. Expected: ${indexEntry?.fileName || 'unknown'}`
+      };
+    } catch (error) {
+      console.error('[SpacesAPI] Error getting video path:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Space management
+  ipcMain.handle('spaces-api:list', async () => {
+    const { getSpacesAPI } = require('./spaces-api');
+    const api = getSpacesAPI();
+    return await api.list();
+  });
+  
+  ipcMain.handle('spaces-api:get', async (event, spaceId) => {
+    const { getSpacesAPI } = require('./spaces-api');
+    const api = getSpacesAPI();
+    return await api.get(spaceId);
+  });
+  
+  ipcMain.handle('spaces-api:create', async (event, name, options) => {
+    const { getSpacesAPI } = require('./spaces-api');
+    const api = getSpacesAPI();
+    return await api.create(name, options);
+  });
+  
+  ipcMain.handle('spaces-api:update', async (event, spaceId, data) => {
+    const { getSpacesAPI } = require('./spaces-api');
+    const api = getSpacesAPI();
+    return await api.update(spaceId, data);
+  });
+  
+  ipcMain.handle('spaces-api:delete', async (event, spaceId) => {
+    const { getSpacesAPI } = require('./spaces-api');
+    const api = getSpacesAPI();
+    return await api.delete(spaceId);
+  });
+  
+  // Item management
+  ipcMain.handle('spaces-api:items:list', async (event, spaceId, options) => {
+    const { getSpacesAPI } = require('./spaces-api');
+    const api = getSpacesAPI();
+    return await api.items.list(spaceId, options);
+  });
+  
+  ipcMain.handle('spaces-api:items:get', async (event, spaceId, itemId) => {
+    const { getSpacesAPI } = require('./spaces-api');
+    const api = getSpacesAPI();
+    return await api.items.get(spaceId, itemId);
+  });
+  
+  ipcMain.handle('spaces-api:items:add', async (event, spaceId, item) => {
+    const { getSpacesAPI } = require('./spaces-api');
+    const api = getSpacesAPI();
+    return await api.items.add(spaceId, item);
+  });
+  
+  ipcMain.handle('spaces-api:items:update', async (event, spaceId, itemId, data) => {
+    const { getSpacesAPI } = require('./spaces-api');
+    const api = getSpacesAPI();
+    return await api.items.update(spaceId, itemId, data);
+  });
+  
+  ipcMain.handle('spaces-api:items:delete', async (event, spaceId, itemId) => {
+    const { getSpacesAPI } = require('./spaces-api');
+    const api = getSpacesAPI();
+    return await api.items.delete(spaceId, itemId);
+  });
+  
+  ipcMain.handle('spaces-api:items:move', async (event, itemId, fromSpaceId, toSpaceId) => {
+    const { getSpacesAPI } = require('./spaces-api');
+    const api = getSpacesAPI();
+    return await api.items.move(itemId, fromSpaceId, toSpaceId);
+  });
+  
+  // File access
+  ipcMain.handle('spaces-api:files:getSpacePath', async (event, spaceId) => {
+    const { getSpacesAPI } = require('./spaces-api');
+    const api = getSpacesAPI();
+    return await api.files.getSpacePath(spaceId);
+  });
+  
+  ipcMain.handle('spaces-api:files:list', async (event, spaceId, subPath) => {
+    const { getSpacesAPI } = require('./spaces-api');
+    const api = getSpacesAPI();
+    return await api.files.list(spaceId, subPath);
+  });
+  
+  ipcMain.handle('spaces-api:files:read', async (event, spaceId, filePath) => {
+    const { getSpacesAPI } = require('./spaces-api');
+    const api = getSpacesAPI();
+    return await api.files.read(spaceId, filePath);
+  });
+  
+  ipcMain.handle('spaces-api:files:write', async (event, spaceId, filePath, content) => {
+    const { getSpacesAPI } = require('./spaces-api');
+    const api = getSpacesAPI();
+    return await api.files.write(spaceId, filePath, content);
+  });
   
   ipcMain.handle('save-smart-export-pdf', async (event, html, metadata) => {
     try {
@@ -6757,6 +7404,15 @@ function setupIPC() {
     } catch (error) {
       console.error('[SmartExport] Error opening modal:', error);
       return { success: false, error: error.message };
+    }
+  });
+
+  // Close smart-export modal via IPC
+  ipcMain.on('smart-export:close-modal', (event) => {
+    console.log('[SmartExport] Close modal IPC received');
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win) {
+      win.close();
     }
   });
 
@@ -7753,6 +8409,132 @@ function setupIPC() {
         }
       }
     }
+  });
+
+  // Handle create space from black hole
+  ipcMain.handle('black-hole:create-space', async (event) => {
+    // Use a simpler approach - create a small input dialog window
+    const inputWindow = new BrowserWindow({
+      width: 400,
+      height: 200,
+      modal: true,
+      parent: global.clipboardManager?.blackHoleWindow,
+      show: false,
+      frame: false,
+      transparent: false,
+      backgroundColor: '#1e1e1e',
+      webPreferences: {
+        nodeIntegration: true,
+        contextIsolation: false
+      }
+    });
+    
+    inputWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            padding: 20px;
+            background: #1e1e1e;
+            color: #fff;
+            margin: 0;
+          }
+          h2 { margin-top: 0; font-size: 18px; }
+          input {
+            width: 100%;
+            padding: 10px;
+            font-size: 14px;
+            border: 1px solid #444;
+            border-radius: 4px;
+            background: #2a2a2a;
+            color: #fff;
+            margin: 10px 0;
+            box-sizing: border-box;
+          }
+          .buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+          }
+          button {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+          }
+          .primary {
+            background: #6366f1;
+            color: white;
+          }
+          .secondary {
+            background: #444;
+            color: white;
+          }
+        </style>
+      </head>
+      <body>
+        <h2>Create New Space</h2>
+        <input type="text" id="spaceName" placeholder="Enter space name..." autofocus>
+        <div class="buttons">
+          <button class="secondary" onclick="cancel()">Cancel</button>
+          <button class="primary" onclick="create()">Create</button>
+        </div>
+        <script>
+          const { ipcRenderer } = require('electron');
+          document.getElementById('spaceName').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') create();
+            if (e.key === 'Escape') cancel();
+          });
+          function cancel() {
+            ipcRenderer.send('input-dialog-response', null);
+          }
+          function create() {
+            const name = document.getElementById('spaceName').value.trim();
+            if (name) {
+              ipcRenderer.send('input-dialog-response', name);
+            }
+          }
+        </script>
+      </body>
+      </html>
+    `)}`);
+    
+    inputWindow.once('ready-to-show', () => {
+      inputWindow.show();
+    });
+    
+    // Wait for response
+    return new Promise((resolve) => {
+      ipcMain.once('input-dialog-response', async (evt, spaceName) => {
+        inputWindow.close();
+        
+        if (!spaceName) {
+          resolve({ success: false });
+          return;
+        }
+        
+        // Create the space using the unified SpacesAPI
+        try {
+          const newSpace = await spacesAPI.create(spaceName, {
+            icon: '📁',
+            color: '#6366f1'
+          });
+          
+          if (newSpace) {
+            resolve({ success: true, space: newSpace });
+          } else {
+            resolve({ success: false, error: 'Failed to create space' });
+          }
+        } catch (error) {
+          console.error('Error creating space:', error);
+          resolve({ success: false, error: error.message });
+        }
+      });
+    });
   });
 
   // Handle show black hole request
@@ -9624,6 +10406,9 @@ function setupIPC() {
     } else if (url.includes('perplexity.ai')) {
       aiType = 'chat';
       aiService = 'Perplexity';
+    } else if (url.includes('x.ai') || url.includes('grok.x.com') || url.includes('grok.com')) {
+      aiType = 'chat';
+      aiService = 'Grok';
     } else if (label.toLowerCase().includes('image') || url.includes('midjourney') || url.includes('dalle')) {
       aiType = 'image-generation';
     } else if (label.toLowerCase().includes('video')) {
@@ -9686,6 +10471,16 @@ function setupIPC() {
         if (method === 'Network.requestWillBeSent') {
           // Log outgoing request
           const request = params.request;
+          
+          // Console log artifact-related URLs for debugging
+          if (request.url.includes('artifacts') || request.url.includes('/files/')) {
+            console.log(`[${label}] 🔍 Artifact URL detected: ${request.url}`);
+            console.log(`[${label}]    Method: ${request.method}`);
+            
+            // Don't try to download - Claude's artifact endpoints return 404
+            // The artifact content is embedded in the SSE completion response
+          }
+          
           logger.info('LLM Network Request', {
             event: 'llm:network:request',
             aiService: aiService,
@@ -9698,13 +10493,111 @@ function setupIPC() {
           });
           
           // Log detailed payload if it's an API call
-          if (request.postData && 
+          // Exclude telemetry/analytics URLs
+          const isTelemetryUrl = request.url.includes('/ces/') || 
+                                 request.url.includes('/telemetry/') || 
+                                 request.url.includes('/analytics/') ||
+                                 request.url.includes('/v1/t') ||
+                                 request.url.includes('ddforward=');
+          
+          // Grok-specific: only capture actual conversation endpoints (new and follow-up responses)
+          const isGrokConversationRequest = aiService === 'Grok' && 
+                                            (request.url.includes('/app-chat/conversations/new') || 
+                                             request.url.includes('/responses') ||
+                                             request.url.includes('/conversations_v2/'));
+          
+          // Gemini-specific: capture conversation-related endpoints (exclude CSP reports)
+          // Focus on StreamGenerate which is the actual conversation endpoint
+          const isGeminiConversationRequest = aiService === 'Gemini' && 
+                                              !request.url.includes('cspreport') &&
+                                              !request.url.includes('/csp/') &&
+                                              request.url.includes('StreamGenerate');
+          
+          if (aiService === 'Gemini' && request.url.includes('StreamGenerate')) {
+            console.log('[Gemini DEBUG] StreamGenerate request detected');
+          }
+          
+          if (request.postData && !isTelemetryUrl &&
               (request.url.includes('/api/') || 
                request.url.includes('/v1/') ||
                request.url.includes('chat') ||
-               request.url.includes('completions'))) {
+               request.url.includes('completion') ||
+               request.url.includes('claude') ||
+               request.url.includes('messages') ||
+               request.url.includes('/backend-api/conversation') ||
+               aiService === 'Claude' ||
+               isGrokConversationRequest ||
+               isGeminiConversationRequest)) {  // Grok/Gemini: specific conversation endpoints
             try {
-              const payload = JSON.parse(request.postData);
+              let payload;
+              
+              // Gemini uses URL-encoded form data, not JSON
+              if (aiService === 'Gemini' && (request.url.includes('batchexecute') || request.url.includes('StreamGenerate'))) {
+                // Parse URL-encoded form data
+                const formData = new URLSearchParams(request.postData);
+                const fReq = formData.get('f.req');
+                
+                if (fReq) {
+                  console.log('[Gemini DEBUG] Found f.req in batchexecute');
+                  
+                  // fReq is a nested JSON string
+                  // Format: [[["rpcName","[[\"message\",...]]",null,"generic"]]]
+                  try {
+                    const parsed = JSON.parse(fReq);
+                    console.log('[Gemini DEBUG] Parsed f.req, outer array length:', parsed?.length);
+                    
+                    // Extract user message from the nested structure
+                    // The message is typically in parsed[0][0][1] which is itself a JSON string
+                    if (Array.isArray(parsed) && parsed[0] && parsed[0][0]) {
+                      const innerJson = parsed[0][0][1];
+                      if (typeof innerJson === 'string') {
+                        try {
+                          const innerParsed = JSON.parse(innerJson);
+                          console.log('[Gemini DEBUG] Inner parsed type:', typeof innerParsed, Array.isArray(innerParsed) ? 'array' : '');
+                          
+                          // The user message is usually in the first string element
+                          const extractUserMessage = (arr) => {
+                            if (!Array.isArray(arr)) return null;
+                            for (const item of arr) {
+                              if (typeof item === 'string' && item.length > 0 && item.length < 5000 && !item.match(/^[a-f0-9-]{30,}$/i)) {
+                                return item;
+                              }
+                              if (Array.isArray(item)) {
+                                const found = extractUserMessage(item);
+                                if (found) return found;
+                              }
+                            }
+                            return null;
+                          };
+                          
+                          const userMessage = extractUserMessage(innerParsed);
+                          if (userMessage) {
+                            console.log('[Gemini DEBUG] Extracted user message:', userMessage.substring(0, 100));
+                            payload = { _geminiMessage: userMessage, _isGeminiBatchexecute: true };
+                          } else {
+                            payload = { _isGeminiBatchexecute: true };
+                          }
+                        } catch (innerErr) {
+                          console.log('[Gemini DEBUG] Inner parse failed:', innerErr.message);
+                          payload = { _isGeminiBatchexecute: true };
+                        }
+                      } else {
+                        payload = { _isGeminiBatchexecute: true };
+                      }
+                    } else {
+                      payload = { _isGeminiBatchexecute: true };
+                    }
+                  } catch (parseErr) {
+                    console.log('[Gemini DEBUG] f.req parse failed:', parseErr.message);
+                    payload = { _isGeminiBatchexecute: true };
+                  }
+                } else {
+                  // No f.req, try standard JSON
+                  payload = JSON.parse(request.postData);
+                }
+              } else {
+                payload = JSON.parse(request.postData);
+              }
               
               // Check if payload contains file/image data and extract metadata
               const processedPayload = extractFileMetadata(payload);
@@ -9718,6 +10611,228 @@ function setupIPC() {
                 filesDetected: processedPayload.files,
                 timestamp: new Date().toISOString()
               });
+              
+              // Capture prompt for conversation history
+              if (conversationCapture && aiType === 'chat') {
+                try {
+                  // Extract conversation ID from URL
+                  let externalConversationId = null;
+                  
+                  if (aiService === 'Claude') {
+                    // Claude: /api/organizations/.../chat_conversations/UUID/completion
+                    const match = request.url.match(/chat_conversations\/([a-f0-9\-]+)/i);
+                    if (match) {
+                      externalConversationId = match[1];
+                      console.log(`[ConversationCapture] Extracted Claude conversation ID: ${externalConversationId}`);
+                    }
+                  } else if (aiService === 'ChatGPT') {
+                    // Only capture actual conversation requests 
+                    // ChatGPT uses various paths: /backend-api/conversation, /backend-api/f/conversation, etc.
+                    const isConversationEndpoint = request.url.includes('/conversation') && 
+                                                   request.url.includes('backend-api');
+                    
+                    if (!isConversationEndpoint) {
+                      console.log(`[ConversationCapture] Skipping non-conversation ChatGPT request: ${request.url.substring(0, 100)}`);
+                      return;
+                    }
+                    
+                    // Skip init requests - they have no user message
+                    if (request.url.includes('/conversation/init')) {
+                      console.log(`[ConversationCapture] Skipping ChatGPT init request (no user message)`);
+                      return;
+                    }
+                    
+                    console.log(`[ConversationCapture] ✅ Detected ChatGPT conversation request: ${request.url.substring(0, 100)}`);
+                    
+                    // ChatGPT: /backend-api/conversation/{conversation_id}
+                    // OR: May be in request body as conversation_id
+                    const urlMatch = request.url.match(/\/conversation\/([a-f0-9\-]+)/i);
+                    if (urlMatch) {
+                      externalConversationId = urlMatch[1];
+                      console.log(`[ConversationCapture] Extracted ChatGPT conversation ID from URL: ${externalConversationId}`);
+                    } else if (payload && payload.conversation_id) {
+                      externalConversationId = payload.conversation_id;
+                      console.log(`[ConversationCapture] Extracted ChatGPT conversation ID from payload: ${externalConversationId}`);
+                    } else if (payload && payload.parent_message_id) {
+                      // Fallback: use parent message ID to group related messages
+                      externalConversationId = payload.parent_message_id;
+                      console.log(`[ConversationCapture] Using ChatGPT parent message ID as conversation ID: ${externalConversationId}`);
+                    }
+                    
+                    // Diagnostic logging for ChatGPT payload structure
+                    console.log('[ChatGPT DEBUG] Request URL:', request.url);
+                    console.log('[ChatGPT DEBUG] Payload keys:', Object.keys(payload));
+                    if (payload.messages && Array.isArray(payload.messages)) {
+                      console.log('[ChatGPT DEBUG] Message count:', payload.messages.length);
+                      const lastMsg = payload.messages[payload.messages.length - 1];
+                      console.log('[ChatGPT DEBUG] Last message structure:', JSON.stringify(lastMsg, null, 2).substring(0, 500));
+                    }
+                  } else if (aiService === 'Grok') {
+                    // Grok: Only capture actual conversation requests
+                    // Skip non-conversation endpoints
+                    const isGrokConversation = request.url.includes('/app-chat/') || 
+                                               request.url.includes('/conversations');
+                    
+                    if (!isGrokConversation) {
+                      console.log(`[ConversationCapture] Skipping non-conversation Grok request: ${request.url.substring(0, 80)}`);
+                      return;
+                    }
+                    
+                    console.log('[Grok DEBUG] Request URL:', request.url);
+                    console.log('[Grok DEBUG] Payload keys:', JSON.stringify(Object.keys(payload)));
+                    console.log('[Grok DEBUG] Payload sample:', JSON.stringify(payload).substring(0, 500));
+                    
+                    // Try to extract conversation ID from URL
+                    const urlMatch = request.url.match(/\/conversation[s]?\/([a-f0-9\-]+)/i);
+                    if (urlMatch) {
+                      externalConversationId = urlMatch[1];
+                      console.log(`[ConversationCapture] Extracted Grok conversation ID from URL: ${externalConversationId}`);
+                    } else if (payload.conversation_id || payload.conversationId) {
+                      externalConversationId = payload.conversation_id || payload.conversationId;
+                      console.log(`[ConversationCapture] Extracted Grok conversation ID from payload: ${externalConversationId}`);
+                    } else if (payload.session_id || payload.sessionId) {
+                      externalConversationId = payload.session_id || payload.sessionId;
+                      console.log(`[ConversationCapture] Using Grok session ID as conversation ID: ${externalConversationId}`);
+                    }
+                    
+                    // Extract Grok message - Grok uses 'message' field directly or nested structures
+                    let grokMessage = payload.message || payload.query || payload.text || payload.content || payload.input;
+                    if (!grokMessage && payload.messages && Array.isArray(payload.messages)) {
+                      // If messages array exists, get last user message
+                      const userMsg = payload.messages.filter(m => m.role === 'user' || m.sender === 'human').pop();
+                      grokMessage = userMsg?.content || userMsg?.message || userMsg?.text;
+                    }
+                    
+                    if (grokMessage) {
+                      console.log('[Grok DEBUG] Found message:', typeof grokMessage === 'string' ? grokMessage.substring(0, 100) : JSON.stringify(grokMessage).substring(0, 100));
+                      // Store in payload for extraction
+                      payload._grokMessage = grokMessage;
+                    }
+                  } else if (aiService === 'Gemini') {
+                    // Gemini: Extract conversation from various possible formats
+                    // Gemini web uses batchexecute and other endpoints
+                    // Exclude CSP reports and other non-conversation requests
+                    const isGeminiConversation = !request.url.includes('cspreport') &&
+                                                 !request.url.includes('/csp/') &&
+                                                 (request.url.includes('batchexecute') || 
+                                                  request.url.includes('StreamGenerate') ||
+                                                  request.url.includes('/generate') ||
+                                                  request.url.includes('/chat'));
+                    
+                    if (!isGeminiConversation) {
+                      console.log(`[ConversationCapture] Skipping non-conversation Gemini request: ${request.url.substring(0, 80)}`);
+                      return;
+                    }
+                    
+                    console.log('[Gemini DEBUG] Request URL:', request.url);
+                    console.log('[Gemini DEBUG] Payload keys:', JSON.stringify(Object.keys(payload)));
+                    console.log('[Gemini DEBUG] Payload sample:', JSON.stringify(payload).substring(0, 500));
+                    
+                    // Try to extract conversation ID from URL or payload
+                    const urlMatch = request.url.match(/conversation[s]?\/([a-zA-Z0-9_-]+)/i);
+                    if (urlMatch) {
+                      externalConversationId = urlMatch[1];
+                      console.log(`[ConversationCapture] Extracted Gemini conversation ID from URL: ${externalConversationId}`);
+                    } else if (payload.conversationId || payload.conversation_id) {
+                      externalConversationId = payload.conversationId || payload.conversation_id;
+                      console.log(`[ConversationCapture] Extracted Gemini conversation ID from payload: ${externalConversationId}`);
+                    }
+                    
+                    // Extract Gemini message - Gemini uses various field names
+                    // Common fields: contents, prompt, text, message, query
+                    let geminiMessage = null;
+                    
+                    // Gemini API format: contents[].parts[].text
+                    if (payload.contents && Array.isArray(payload.contents)) {
+                      const userContent = payload.contents.filter(c => c.role === 'user').pop();
+                      if (userContent?.parts) {
+                        geminiMessage = userContent.parts.map(p => p.text || '').join('');
+                      }
+                    }
+                    
+                    // Alternative formats
+                    if (!geminiMessage) {
+                      geminiMessage = payload.prompt || payload.text || payload.message || payload.query || payload.input;
+                    }
+                    
+                    // Nested messages array
+                    if (!geminiMessage && payload.messages && Array.isArray(payload.messages)) {
+                      const userMsg = payload.messages.filter(m => m.role === 'user').pop();
+                      geminiMessage = userMsg?.content || userMsg?.text || userMsg?.message;
+                    }
+                    
+                    if (geminiMessage) {
+                      console.log('[Gemini DEBUG] Found message:', typeof geminiMessage === 'string' ? geminiMessage.substring(0, 100) : JSON.stringify(geminiMessage).substring(0, 100));
+                      // Store in payload for extraction
+                      payload._geminiMessage = geminiMessage;
+                    }
+                    
+                    // If message was already extracted from batchexecute parsing, use it
+                    if (!payload._geminiMessage && payload._isGeminiBatchexecute) {
+                      console.log('[Gemini DEBUG] No message found in batchexecute - may be metadata request');
+                    }
+                  }
+                  
+                  // #region agent log
+                  fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:10179',message:'Capturing PROMPT',data:{aiService,externalConversationId,payloadKeys:Object.keys(payload),hasMessages:!!payload.messages,hasPrompt:!!payload.prompt,messageType:typeof payload.messages},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
+                  // #endregion
+                  
+                  // Build message based on service
+                  let messageToCapture = payload.messages || payload.prompt;
+                  if (aiService === 'Grok' && payload._grokMessage) {
+                    messageToCapture = payload._grokMessage;
+                  } else if (aiService === 'Gemini' && payload._geminiMessage) {
+                    messageToCapture = payload._geminiMessage;
+                  }
+                  
+                  conversationCapture.capturePrompt(aiService, {
+                    message: messageToCapture,
+                    model: payload.model,
+                    timestamp: new Date().toISOString(),
+                    externalConversationId  // Pass the conversation ID
+                  }).catch(err => {
+                    // #region agent log
+                    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:10189',message:'capturePrompt promise REJECTED',data:{error:err.message,stack:err.stack},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
+                    // #endregion
+                    console.error('[ConversationCapture] Error capturing prompt:', err);
+                  });
+                } catch (err) {
+                  // #region agent log
+                  fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:10196',message:'capturePrompt threw exception',data:{error:err.message,stack:err.stack},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
+                  // #endregion
+                  console.error('[ConversationCapture] Error in capturePrompt:', err);
+                }
+              }
+              
+              // Capture media files
+              if (conversationCapture && aiType === 'chat' && processedPayload.files && processedPayload.files.length > 0) {
+                try {
+                  // Extract conversation ID from URL
+                  let externalConversationId = null;
+                  
+                  if (aiService === 'Claude') {
+                    // Claude: /api/organizations/.../chat_conversations/UUID/completion
+                    const match = request.url.match(/chat_conversations\/([a-f0-9\-]+)/i);
+                    if (match) {
+                      externalConversationId = match[1];
+                    }
+                  } else if (aiService === 'ChatGPT') {
+                    // ChatGPT: /backend-api/conversation/{conversation_id}
+                    const urlMatch = request.url.match(/\/conversation\/([a-f0-9\-]+)/i);
+                    if (urlMatch) {
+                      externalConversationId = urlMatch[1];
+                    } else if (payload && payload.conversation_id) {
+                      externalConversationId = payload.conversation_id;
+                    } else if (payload && payload.parent_message_id) {
+                      externalConversationId = payload.parent_message_id;
+                    }
+                  }
+                  
+                  conversationCapture.captureMedia(aiService, processedPayload.files, externalConversationId);
+                } catch (err) {
+                  console.error('[ConversationCapture] Error capturing media:', err);
+                }
+              }
             } catch (err) {
               // Not JSON, check if it's multipart form data (file upload)
               const contentType = request.headers['content-type'] || request.headers['Content-Type'] || '';
@@ -9785,11 +10900,12 @@ function setupIPC() {
             });
           }
           
-          // Get response body if it's an API response
+          // Get response body if it's an API response OR artifact endpoint
           if (response.url.includes('/api/') || 
               response.url.includes('/v1/') ||
               response.url.includes('chat') ||
-              response.url.includes('completions')) {
+              response.url.includes('completions') ||
+              response.url.includes('artifacts')) {  // Add artifacts
             aiWindow.webContents.debugger.sendCommand('Network.getResponseBody', {
               requestId: params.requestId
             }).then(responseBody => {
@@ -9797,6 +10913,24 @@ function setupIPC() {
                 const body = responseBody.base64Encoded 
                   ? Buffer.from(responseBody.body, 'base64').toString('utf-8')
                   : responseBody.body;
+                
+                // Special handling for artifact responses
+                if (response.url.includes('artifacts')) {
+                  console.log(`[${label}] 📄 Artifact content received: ${response.url}`);
+                  console.log(`[${label}]    Content length: ${body.length}`);
+                  
+                  // Try to parse as JSON
+                  try {
+                    const artifactData = JSON.parse(body);
+                    console.log(`[${label}]    Artifact data:`, JSON.stringify(artifactData, null, 2).substring(0, 500));
+                    
+                    // TODO: Store artifact content and associate with conversation
+                    // For now, just log it
+                  } catch (e) {
+                    // Might be raw content (SVG, HTML, etc.)
+                    console.log(`[${label}]    Raw artifact content:`, body.substring(0, 500));
+                  }
+                }
                 
                 // Try to parse as JSON
                 try {
@@ -9836,8 +10970,10 @@ function setupIPC() {
               }
             }).catch(err => {
               // Some responses can't be retrieved, that's okay
-              if (!err.message.includes('No resource')) {
-                console.error(`[${label}] Error getting response body:`, err);
+              // Only log unexpected errors, not common DevTools protocol failures
+              const errMsg = err?.message || '';
+              if (errMsg && !errMsg.includes('No resource') && !errMsg.includes('No data found')) {
+                console.debug(`[${label}] Response body unavailable:`, errMsg || 'unknown');
               }
             });
           }
@@ -9845,7 +10981,7 @@ function setupIPC() {
           // Capture streaming data chunks (SSE)
           if (streamingResponses.has(params.requestId)) {
             const streamData = streamingResponses.get(params.requestId);
-            console.log(`[${label}] Received ${params.dataLength} bytes for streaming request ${params.requestId}`);
+            // Removed verbose logging for streaming data chunks
             
             // Get the actual chunk data
             aiWindow.webContents.debugger.sendCommand('Network.getResponseBody', {
@@ -9859,7 +10995,7 @@ function setupIPC() {
               streamData.chunks.push(body);
               streamData.lastUpdate = Date.now();
               
-              console.log(`[${label}] Stream data length: ${body.length} chars`);
+              // Removed verbose logging - only log errors
             }).catch(err => {
               // Might not be available yet, that's okay
             });
@@ -9870,7 +11006,7 @@ function setupIPC() {
             const streamData = streamingResponses.get(params.requestId);
             streamData.complete = true;
             
-            console.log(`[${label}] Stream finished for request ${params.requestId}`);
+            // Stream finished - logging reduced to avoid terminal spam
             
             // Get the final complete response
             aiWindow.webContents.debugger.sendCommand('Network.getResponseBody', {
@@ -9881,12 +11017,13 @@ function setupIPC() {
                   ? Buffer.from(responseBody.body, 'base64').toString('utf-8')
                   : responseBody.body;
                 
-                console.log(`[${label}] Complete stream data length: ${body.length} chars`);
+                // Reduced logging - only log to structured logger, not console
                 
                 // Parse SSE format (data: ... \n\n)
                 const sseEvents = [];
                 const lines = body.split('\n');
                 let currentEvent = {};
+                let hasToolUse = false;
                 
                 for (const line of lines) {
                   if (line.startsWith('data: ')) {
@@ -9897,6 +11034,12 @@ function setupIPC() {
                     try {
                       const parsed = JSON.parse(data);
                       sseEvents.push(parsed);
+                      
+                      // Check for tool_use (artifacts)
+                      if (parsed.type === 'content_block_start' && parsed.content_block?.type === 'tool_use') {
+                        hasToolUse = true;
+                        console.log(`[${label}] 🔧 TOOL_USE DETECTED:`, parsed.content_block.name);
+                      }
                       
                       // Extract the actual message content
                       if (parsed.message && parsed.message.content) {
@@ -9909,6 +11052,11 @@ function setupIPC() {
                       // Not JSON, might be plain text
                     }
                   }
+                }
+                
+                if (hasToolUse) {
+                  console.log(`[${label}] 📄 Artifact detected in stream, dumping full SSE events...`);
+                  console.log(JSON.stringify(sseEvents, null, 2).substring(0, 5000));
                 }
                 
                 // Log the complete streaming response
@@ -9926,11 +11074,95 @@ function setupIPC() {
                 
                 // Extract and log just the final message text for easy reading
                 if (sseEvents.length > 0) {
-                  const lastEvent = sseEvents[sseEvents.length - 1];
-                  let messageText = null;
+                  // Find the content delta events and accumulate text
+                  let fullText = '';
+                  let artifacts = []; // Collect artifacts
+                  let artifactInputs = new Map(); // Track artifact inputs by block index
+                  let currentBlockIndex = -1;
+                  let currentBlockId = null;
                   
-                  // Try to extract the message text
-                  if (lastEvent.message && lastEvent.message.content) {
+                  for (const event of sseEvents) {
+                    // Track content block index
+                    if (event.type === 'content_block_start') {
+                      currentBlockIndex = event.index !== undefined ? event.index : currentBlockIndex + 1;
+                      currentBlockId = event.content_block?.id;
+                    }
+                    
+                    if (event.type === 'content_block_delta' && event.delta?.text) {
+                      fullText += event.delta.text;
+                    } else if (event.delta?.text) {
+                      fullText += event.delta.text;
+                    } else if (event.message?.content) {
+                      // Fallback for other formats (ChatGPT, Gemini, etc.)
+                      if (typeof event.message.content === 'string') {
+                        fullText += event.message.content;
+                      } else if (Array.isArray(event.message.content)) {
+                        fullText += event.message.content.map(c => c.text || '').join('');
+                      }
+                    }
+                    
+                    // Accumulate input_json_delta chunks for artifacts
+                    if (event.type === 'content_block_delta' && event.delta?.type === 'input_json_delta') {
+                      const blockKey = currentBlockId || currentBlockIndex;
+                      if (!artifactInputs.has(blockKey)) {
+                        artifactInputs.set(blockKey, '');
+                      }
+                      artifactInputs.set(blockKey, artifactInputs.get(blockKey) + event.delta.partial_json);
+                    }
+                    
+                    // Check for artifacts in the event
+                    if (event.type === 'content_block_start' && event.content_block) {
+                      const block = event.content_block;
+                      // Claude artifacts have type 'tool_use'
+                      if (block.type === 'tool_use') {
+                        artifacts.push({
+                          ...block,
+                          _blockKey: block.id || currentBlockIndex  // Track for later input reconstruction
+                        });
+                      }
+                    }
+                    
+                    // Also check message.content array for artifacts
+                    if (event.message?.content && Array.isArray(event.message.content)) {
+                      for (const contentBlock of event.message.content) {
+                        if (contentBlock.type === 'tool_use' || (contentBlock.type && contentBlock.type !== 'text' && contentBlock.content)) {
+                          artifacts.push(contentBlock);
+                        }
+                      }
+                    }
+                  }
+                  
+                  // Reconstruct artifact inputs from accumulated JSON deltas
+                  for (const artifact of artifacts) {
+                    const blockKey = artifact._blockKey;
+                    if (blockKey && artifactInputs.has(blockKey)) {
+                      try {
+                        const inputJson = artifactInputs.get(blockKey);
+                        artifact.input = JSON.parse(inputJson);
+                        console.log(`[${label}] 🔧 Reconstructed input for ${artifact.name}:`, JSON.stringify(artifact.input).substring(0, 300));
+                      } catch (e) {
+                        console.log(`[${label}] ⚠️ Failed to parse input JSON for ${artifact.name}:`, e.message);
+                      }
+                    }
+                    delete artifact._blockKey; // Clean up temporary key
+                  }
+                  
+                  if (artifacts.length > 0) {
+                    console.log(`[${label}] ✅ Total artifacts captured: ${artifacts.length}`);
+                  }
+                  
+                  // Add downloaded artifacts to the artifacts array
+                  if (global.pendingArtifacts && global.pendingArtifacts.length > 0) {
+                    console.log(`[${label}] 📦 Adding ${global.pendingArtifacts.length} downloaded artifacts to response`);
+                    artifacts.push(...global.pendingArtifacts);
+                    global.pendingArtifacts = []; // Clear pending artifacts
+                  }
+                  
+                  const lastEvent = sseEvents[sseEvents.length - 1];
+                  let messageText = fullText || null;
+                  
+                  // Legacy extraction for other AI services
+                  if (!messageText && lastEvent.message && lastEvent.message.content) {
                     if (typeof lastEvent.message.content === 'string') {
                       messageText = lastEvent.message.content;
                     } else if (lastEvent.message.content.parts) {
@@ -9946,6 +11178,55 @@ function setupIPC() {
                       responseText: messageText,
                       timestamp: new Date().toISOString()
                     });
+                    
+                    // Capture response for conversation history
+                    if (conversationCapture && aiType === 'chat') {
+                      try {
+                        // Extract conversation ID from URL
+                        let externalConversationId = null;
+                        
+                        if (aiService === 'Claude') {
+                          // Claude: /api/organizations/.../chat_conversations/UUID/completion
+                          const match = streamData.url.match(/chat_conversations\/([a-f0-9\-]+)/i);
+                          if (match) {
+                            externalConversationId = match[1];
+                            console.log(`[ConversationCapture] Extracted Claude conversation ID from response: ${externalConversationId}`);
+                          }
+                        } else if (aiService === 'ChatGPT') {
+                          // ChatGPT: /backend-api/conversation/{conversation_id}
+                          const urlMatch = streamData.url.match(/\/conversation\/([a-f0-9\-]+)/i);
+                          if (urlMatch) {
+                            externalConversationId = urlMatch[1];
+                            console.log(`[ConversationCapture] Extracted ChatGPT conversation ID from response URL: ${externalConversationId}`);
+                          }
+                          // Note: For responses, we typically don't have access to the payload,
+                          // so we rely on URL matching or the ID carried over from the request
+                        }
+                        
+                        // #region agent log
+                        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:10428',message:'Capturing RESPONSE',data:{aiService,externalConversationId,messageTextLength:messageText?messageText.length:0,hasEvents:!!sseEvents,eventCount:sseEvents?sseEvents.length:0},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
+                        // #endregion
+                        
+                        conversationCapture.captureResponse(aiService, {
+                          message: messageText,
+                          events: sseEvents,
+                          artifacts: artifacts, // Pass artifacts
+                          requestId: params.requestId,
+                          timestamp: new Date().toISOString(),
+                          externalConversationId  // Pass the conversation ID
+                        }).catch(err => {
+                          // #region agent log
+                          fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:10439',message:'captureResponse promise REJECTED',data:{error:err.message,stack:err.stack},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
+                          // #endregion
+                          console.error('[ConversationCapture] Error capturing response:', err);
+                        });
+                      } catch (err) {
+                        // #region agent log
+                        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:10446',message:'captureResponse threw exception',data:{error:err.message,stack:err.stack},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
+                        // #endregion
+                        console.error('[ConversationCapture] Error in captureResponse:', err);
+                      }
+                    }
                   }
                 }
                 
@@ -9953,7 +11234,11 @@ function setupIPC() {
                 console.error(`[${label}] Error parsing streaming response:`, err);
               }
             }).catch(err => {
-              console.error(`[${label}] Error getting streaming response body:`, err);
+              // Only log unexpected errors
+              const errMsg = err?.message || '';
+              if (errMsg && !errMsg.includes('No resource') && !errMsg.includes('No data found')) {
+                console.debug(`[${label}] Streaming response body unavailable:`, errMsg || 'unknown');
+              }
             });
             
             // Clean up after logging
@@ -10090,12 +11375,108 @@ function setupIPC() {
 
     // Handle download requests
     aiWindow.webContents.session.on('will-download', (event, item, webContents) => {
-      console.log(`[${label}] Download detected:`, item.getFilename());
+      const filename = item.getFilename();
+      console.log(`[${label}] Download detected:`, filename);
+      
+      // Check if this is an artifact download from Claude
+      const isArtifact = label === 'Claude' && 
+                         (filename.endsWith('.docx') || 
+                          filename.endsWith('.pdf') || 
+                          filename.endsWith('.xlsx') || 
+                          filename.endsWith('.pptx') ||
+                          filename.endsWith('.zip') ||
+                          filename.endsWith('.html') ||
+                          filename.endsWith('.csv') ||
+                          filename.endsWith('.txt'));
+      
+      if (isArtifact && conversationCapture) {
+        console.log(`[${label}] 📦 Artifact download detected: ${filename}`);
+        
+        // Hook into the 'done' event to capture after download completes
+        // We let handleDownloadWithSpaceOption manage the save path
+        item.once('done', (event, state) => {
+          if (state === 'completed') {
+            // Get the actual save path (set by handleDownloadWithSpaceOption)
+            const savePath = item.getSavePath();
+            console.log(`[${label}] ✅ Artifact downloaded, capturing from: ${savePath}`);
+            
+            // Small delay to ensure file is fully written
+            setTimeout(() => {
+              conversationCapture.captureDownloadedArtifact(label, {
+                filename: filename,
+                path: savePath,
+                size: item.getTotalBytes(),
+                mimeType: item.getMimeType(),
+                url: item.getURL()
+              }).catch(err => {
+                console.error(`[${label}] Failed to capture downloaded artifact:`, err);
+              });
+            }, 100);
+          } else {
+            console.warn(`[${label}] Download ${state} for: ${filename}`);
+          }
+        });
+      }
+      
+      // Use normal download handler for user (it will set the save path)
       browserWindow.handleDownloadWithSpaceOption(item, label);
     });
     
     // Load the URL
     aiWindow.loadURL(url);
+    
+    // Inject initialization script after page loads
+    aiWindow.webContents.on('did-finish-load', async () => {
+      try {
+        const fs = require('fs');
+        const overlayPath = path.join(__dirname, 'src', 'ai-window-overlay.js');
+        const overlayContent = fs.readFileSync(overlayPath, 'utf8');
+        
+        // Inject the initialization script
+        await aiWindow.webContents.executeJavaScript(`
+          (async function() {
+            console.log('[External AI] Initializing conversation capture');
+            
+            // Load and inject overlay
+            try {
+              if (!window.api || !window.api.getOverlayScript) {
+                console.error('[External AI] window.api not available');
+                return;
+              }
+              
+              const overlayContent = await window.api.getOverlayScript();
+              
+              if (!overlayContent) {
+                console.error('[External AI] No overlay script content received');
+                return;
+              }
+              
+              const script = document.createElement('script');
+              script.textContent = overlayContent;
+              document.head.appendChild(script);
+              console.log('[External AI] Overlay script injected successfully');
+            } catch (error) {
+              console.error('[External AI] Error injecting overlay:', error);
+            }
+          })();
+        `);
+        
+        // Inject Spaces upload enhancer
+        try {
+          const enhancerPath = path.join(__dirname, 'browser-file-input-enhancer.js');
+          const enhancerContent = fs.readFileSync(enhancerPath, 'utf8');
+          console.log(`[${label}] Injecting Spaces upload enhancer (${enhancerContent.length} bytes)`);
+          await aiWindow.webContents.executeJavaScript(enhancerContent);
+          console.log(`[${label}] Spaces upload enhancer injected successfully`);
+        } catch (error) {
+          console.error(`[${label}] Error injecting spaces upload enhancer:`, error);
+        }
+        
+        console.log(`[${label}] Conversation capture initialized`);
+      } catch (error) {
+        console.error(`[${label}] Error initializing conversation capture:`, error);
+      }
+    });
     
     // Show window when ready
     aiWindow.once('ready-to-show', () => {
@@ -10133,6 +11514,329 @@ function setupIPC() {
 
     return aiWindow;
   }
+
+  /**
+   * Run a prompt in a hidden Claude window and capture the response
+   * @param {string} prompt - The prompt to send to Claude
+   * @param {Object} options - Configuration options
+   * @param {number} options.timeout - Timeout in ms (default: 120000)
+   * @param {boolean} options.saveToSpaces - Whether to save to Spaces (default: true)
+   * @returns {Promise<{success: boolean, response: string, conversationId?: string, error?: string}>}
+   */
+  async function runHeadlessClaudePrompt(prompt, options = {}) {
+    const timeout = options.timeout || 120000;
+    const saveToSpaces = options.saveToSpaces !== false;
+    
+    console.log('[Headless Claude] Starting headless prompt...');
+    console.log('[Headless Claude] Prompt:', prompt.substring(0, 100) + (prompt.length > 100 ? '...' : ''));
+    
+    return new Promise((resolve, reject) => {
+      let resolved = false;
+      let hiddenWindow = null;
+      let timeoutId = null;
+      
+      const cleanup = () => {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
+        if (hiddenWindow && !hiddenWindow.isDestroyed()) {
+          try {
+            if (hiddenWindow.webContents.debugger.isAttached()) {
+              hiddenWindow.webContents.debugger.detach();
+            }
+          } catch (e) { /* ignore */ }
+          hiddenWindow.close();
+        }
+      };
+      
+      const finish = (result) => {
+        if (resolved) return;
+        resolved = true;
+        cleanup();
+        if (result.success) {
+          resolve(result);
+        } else {
+          reject(new Error(result.error || 'Unknown error'));
+        }
+      };
+      
+      // Timeout handling
+      timeoutId = setTimeout(() => {
+        console.log('[Headless Claude] Timeout reached');
+        finish({ success: false, error: 'Claude prompt timed out after ' + (timeout / 1000) + ' seconds' });
+      }, timeout);
+      
+      try {
+        // Create hidden window
+        const windowConfig = {
+          width: 1400,
+          height: 900,
+          show: false, // NEVER show
+          webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            webSecurity: true,
+            partition: 'persist:claude', // Use existing Claude session
+            preload: path.join(__dirname, 'preload-external-ai.js')
+          }
+        };
+        
+        hiddenWindow = new BrowserWindow(windowConfig);
+        console.log('[Headless Claude] Hidden window created');
+        
+        // Track streaming responses
+        const streamingResponses = new Map();
+        let responseText = '';
+        let conversationId = null;
+        
+        // Set up network interception via Chrome DevTools Protocol
+        try {
+          hiddenWindow.webContents.debugger.attach('1.3');
+          hiddenWindow.webContents.debugger.sendCommand('Network.enable');
+          console.log('[Headless Claude] Network debugger attached');
+          
+          hiddenWindow.webContents.debugger.on('message', (event, method, params) => {
+            // Track request to completion endpoint
+            if (method === 'Network.requestWillBeSent') {
+              const request = params.request;
+              if (request.url.includes('chat_conversations') && request.url.includes('completion')) {
+                console.log('[Headless Claude] Detected completion request:', request.url);
+                streamingResponses.set(params.requestId, {
+                  url: request.url,
+                  chunks: [],
+                  complete: false
+                });
+                
+                // Extract conversation ID
+                const match = request.url.match(/chat_conversations\/([a-f0-9\-]+)/i);
+                if (match) {
+                  conversationId = match[1];
+                  console.log('[Headless Claude] Conversation ID:', conversationId);
+                }
+              }
+            }
+            
+            // Collect response data
+            if (method === 'Network.dataReceived') {
+              const streamData = streamingResponses.get(params.requestId);
+              if (streamData) {
+                // Data received event - we'll get actual content on loadingFinished
+              }
+            }
+            
+            // Response complete - get body
+            if (method === 'Network.loadingFinished') {
+              const streamData = streamingResponses.get(params.requestId);
+              if (streamData && !streamData.complete) {
+                streamData.complete = true;
+                console.log('[Headless Claude] Response complete, fetching body...');
+                
+                // Get response body
+                hiddenWindow.webContents.debugger.sendCommand('Network.getResponseBody', {
+                  requestId: params.requestId
+                }).then(response => {
+                  const body = response.body;
+                  console.log('[Headless Claude] Response body length:', body?.length || 0);
+                  
+                  if (body) {
+                    // Parse SSE events
+                    const lines = body.split('\n');
+                    let fullText = '';
+                    
+                    for (const line of lines) {
+                      if (line.startsWith('data: ')) {
+                        const data = line.substring(6).trim();
+                        if (!data || data === '[DONE]') continue;
+                        
+                        try {
+                          const event = JSON.parse(data);
+                          
+                          // Claude content_block_delta format
+                          if (event.type === 'content_block_delta' && event.delta?.text) {
+                            fullText += event.delta.text;
+                          } else if (event.delta?.text) {
+                            fullText += event.delta.text;
+                          }
+                        } catch (e) {
+                          // Skip non-JSON lines
+                        }
+                      }
+                    }
+                    
+                    if (fullText) {
+                      responseText = fullText;
+                      console.log('[Headless Claude] Captured response:', fullText.substring(0, 200) + '...');
+                      
+                      // Optionally save to Spaces via conversation capture
+                      if (saveToSpaces && conversationCapture) {
+                        try {
+                          conversationCapture.capturePrompt('Claude', {
+                            message: prompt,
+                            timestamp: new Date().toISOString(),
+                            externalConversationId: conversationId
+                          });
+                          
+                          conversationCapture.captureResponse('Claude', {
+                            message: responseText,
+                            timestamp: new Date().toISOString(),
+                            externalConversationId: conversationId
+                          });
+                        } catch (err) {
+                          console.error('[Headless Claude] Error saving to Spaces:', err);
+                        }
+                      }
+                      
+                      finish({
+                        success: true,
+                        response: responseText,
+                        conversationId: conversationId
+                      });
+                    }
+                  }
+                }).catch(err => {
+                  // Only log unexpected errors
+                  const errMsg = err?.message || '';
+                  if (errMsg && !errMsg.includes('No resource') && !errMsg.includes('No data found')) {
+                    console.debug('[Headless Claude] Response body unavailable:', errMsg || 'unknown');
+                  }
+                });
+              }
+            }
+          });
+        } catch (err) {
+          console.error('[Headless Claude] Error attaching debugger:', err);
+          finish({ success: false, error: 'Failed to attach network debugger' });
+          return;
+        }
+        
+        // Check for login redirect
+        hiddenWindow.webContents.on('did-navigate', (event, url) => {
+          console.log('[Headless Claude] Navigated to:', url);
+          if (url.includes('login') || url.includes('sign-in') || url.includes('oauth')) {
+            finish({ success: false, error: 'Not logged in to Claude. Please log in first by opening Claude normally.' });
+          }
+        });
+        
+        // Load Claude new conversation page
+        hiddenWindow.loadURL('https://claude.ai/new');
+        console.log('[Headless Claude] Loading claude.ai/new...');
+        
+        // Inject prompt after page loads
+        hiddenWindow.webContents.on('did-finish-load', async () => {
+          console.log('[Headless Claude] Page loaded, waiting for DOM...');
+          
+          // Wait for the page to be fully interactive
+          await new Promise(r => setTimeout(r, 3000));
+          
+          try {
+            // Inject the prompt
+            const injectionResult = await hiddenWindow.webContents.executeJavaScript(`
+              (async function() {
+                console.log('[Headless Claude Injection] Starting...');
+                
+                // Wait for input to appear
+                let retries = 10;
+                let input = null;
+                
+                while (retries > 0 && !input) {
+                  input = document.querySelector('div[contenteditable="true"]') ||
+                          document.querySelector('div.ProseMirror') ||
+                          document.querySelector('[data-placeholder]');
+                  if (!input) {
+                    await new Promise(r => setTimeout(r, 500));
+                    retries--;
+                  }
+                }
+                
+                if (!input) {
+                  console.error('[Headless Claude Injection] Input not found after retries');
+                  return { success: false, error: 'Input element not found - may need login' };
+                }
+                
+                console.log('[Headless Claude Injection] Found input:', input.tagName, input.className);
+                
+                // Focus and set content
+                input.focus();
+                
+                // For ProseMirror/contenteditable, we need to set innerHTML with a paragraph
+                const promptText = ${JSON.stringify(prompt)};
+                input.innerHTML = '<p>' + promptText + '</p>';
+                
+                // Dispatch input event
+                input.dispatchEvent(new InputEvent('input', { 
+                  bubbles: true, 
+                  cancelable: true,
+                  inputType: 'insertText',
+                  data: promptText
+                }));
+                
+                console.log('[Headless Claude Injection] Content set, looking for send button...');
+                
+                // Wait a moment for UI to update
+                await new Promise(r => setTimeout(r, 500));
+                
+                // Find send button - Claude uses aria-label="Send Message" or similar
+                let sendBtn = document.querySelector('button[aria-label*="Send"]') ||
+                              document.querySelector('button[type="submit"]') ||
+                              document.querySelector('button[data-testid="send-button"]') ||
+                              // Fallback: look for button near the input
+                              document.querySelector('form button:not([aria-label*="Attach"])');
+                
+                if (!sendBtn) {
+                  // Try finding by icon or class
+                  const buttons = document.querySelectorAll('button');
+                  for (const btn of buttons) {
+                    if (btn.querySelector('svg') && !btn.disabled && btn.offsetParent !== null) {
+                      // Check if it's near the input area
+                      const rect = btn.getBoundingClientRect();
+                      if (rect.bottom > window.innerHeight - 200) {
+                        sendBtn = btn;
+                        break;
+                      }
+                    }
+                  }
+                }
+                
+                if (sendBtn) {
+                  console.log('[Headless Claude Injection] Found send button, clicking...');
+                  sendBtn.click();
+                  return { success: true, message: 'Prompt submitted' };
+                } else {
+                  console.error('[Headless Claude Injection] Send button not found');
+                  return { success: false, error: 'Send button not found' };
+                }
+              })();
+            `);
+            
+            console.log('[Headless Claude] Injection result:', injectionResult);
+            
+            if (injectionResult && !injectionResult.success) {
+              finish({ success: false, error: injectionResult.error || 'Failed to inject prompt' });
+            }
+            // Otherwise wait for network response via debugger
+            
+          } catch (err) {
+            console.error('[Headless Claude] Error injecting prompt:', err);
+            finish({ success: false, error: 'Failed to inject prompt: ' + err.message });
+          }
+        });
+        
+        // Handle window errors
+        hiddenWindow.on('unresponsive', () => {
+          console.log('[Headless Claude] Window unresponsive');
+          finish({ success: false, error: 'Claude window became unresponsive' });
+        });
+        
+      } catch (err) {
+        console.error('[Headless Claude] Error:', err);
+        finish({ success: false, error: err.message });
+      }
+    });
+  }
+  
+  // Expose runHeadlessClaudePrompt globally for testing and IPC
+  global.runHeadlessClaudePrompt = runHeadlessClaudePrompt;
 
   // Handle tab actions
   ipcMain.on('tab-action', (event, data) => {
@@ -12280,6 +13984,183 @@ ipcMain.on('open-budget-estimator', () => {
   openBudgetEstimator();
 });
 
+// ==================== VOICE ORB ====================
+
+/**
+ * Initialize Voice Orb based on settings
+ */
+function initializeVoiceOrb() {
+  try {
+    const voiceOrbEnabled = global.settingsManager?.get('voiceOrbEnabled');
+    
+    if (!voiceOrbEnabled) {
+      console.log('[VoiceOrb] Voice Orb disabled in settings');
+      return;
+    }
+    
+    console.log('[VoiceOrb] Initializing Voice Orb...');
+    
+    // Initialize Voice Task SDK for classification
+    try {
+      const { initializeVoiceTaskSDK } = require('./src/voice-task-sdk/integration');
+      initializeVoiceTaskSDK({ useNewSpeechService: false });
+      console.log('[VoiceOrb] Voice Task SDK initialized');
+    } catch (sdkError) {
+      console.error('[VoiceOrb] Voice Task SDK init error:', sdkError.message);
+      // Continue anyway - orb will work for transcription
+    }
+    
+    // Setup orb IPC handlers
+    setupOrbIPC();
+    
+    // Create the orb window
+    createOrbWindow();
+    
+    // Register global shortcut (Cmd/Ctrl + Shift + O for Orb)
+    const shortcut = process.platform === 'darwin' ? 'Command+Shift+O' : 'Ctrl+Shift+O';
+    try {
+      globalShortcut.register(shortcut, () => {
+        toggleOrbWindow();
+      });
+      console.log(`[VoiceOrb] Registered global shortcut: ${shortcut}`);
+    } catch (shortcutError) {
+      console.error('[VoiceOrb] Failed to register shortcut:', shortcutError.message);
+    }
+    
+    console.log('[VoiceOrb] Voice Orb initialized successfully');
+    
+  } catch (error) {
+    console.error('[VoiceOrb] Initialization error:', error);
+  }
+}
+
+/**
+ * Setup IPC handlers for orb window controls
+ */
+function setupOrbIPC() {
+  // Show orb window
+  ipcMain.handle('orb:show', () => {
+    if (orbWindow && !orbWindow.isDestroyed()) {
+      orbWindow.show();
+    }
+  });
+  
+  // Hide orb window
+  ipcMain.handle('orb:hide', () => {
+    if (orbWindow && !orbWindow.isDestroyed()) {
+      orbWindow.hide();
+    }
+  });
+  
+  // Toggle orb visibility
+  ipcMain.handle('orb:toggle', () => {
+    toggleOrbWindow();
+  });
+  
+  // Set orb position (for drag support)
+  ipcMain.handle('orb:position', (event, x, y) => {
+    if (orbWindow && !orbWindow.isDestroyed()) {
+      orbWindow.setPosition(Math.round(x), Math.round(y));
+    }
+  });
+  
+  // Handle orb click (could expand to panel in future)
+  ipcMain.on('orb:clicked', () => {
+    console.log('[VoiceOrb] Orb clicked');
+    // Future: could show an expanded panel
+  });
+  
+  console.log('[VoiceOrb] IPC handlers registered');
+}
+
+/**
+ * Create the floating orb window
+ */
+function createOrbWindow() {
+  if (orbWindow && !orbWindow.isDestroyed()) {
+    orbWindow.show();
+    return orbWindow;
+  }
+  
+  const display = screen.getPrimaryDisplay();
+  const { width: screenWidth, height: screenHeight } = display.workAreaSize;
+  
+  // Position in bottom-right corner
+  // Window is taller to accommodate transcript tooltip above orb
+  const windowWidth = 300;
+  const windowHeight = 150;
+  const x = screenWidth - windowWidth - 20;
+  const y = screenHeight - windowHeight - 20;
+  
+  orbWindow = new BrowserWindow({
+    width: windowWidth,
+    height: windowHeight,
+    x,
+    y,
+    alwaysOnTop: true,
+    transparent: true,
+    frame: false,
+    skipTaskbar: true,
+    resizable: false,
+    hasShadow: false,
+    focusable: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload-orb.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  
+  // Set window level to float above everything
+  orbWindow.setAlwaysOnTop(true, 'floating');
+  orbWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  
+  // Load the orb UI
+  orbWindow.loadFile(path.join(__dirname, 'orb.html'));
+  
+  // Handle window close
+  orbWindow.on('closed', () => {
+    orbWindow = null;
+  });
+  
+  console.log('[VoiceOrb] Orb window created');
+  return orbWindow;
+}
+
+/**
+ * Toggle orb window visibility
+ */
+function toggleOrbWindow() {
+  if (!orbWindow || orbWindow.isDestroyed()) {
+    // Create if not exists
+    createOrbWindow();
+  } else if (orbWindow.isVisible()) {
+    orbWindow.hide();
+  } else {
+    orbWindow.show();
+  }
+}
+
+/**
+ * Show the orb window (for menu/external access)
+ */
+function showOrbWindow() {
+  if (!orbWindow || orbWindow.isDestroyed()) {
+    createOrbWindow();
+  } else {
+    orbWindow.show();
+  }
+}
+
+/**
+ * Hide the orb window (for menu/external access)
+ */
+function hideOrbWindow() {
+  if (orbWindow && !orbWindow.isDestroyed()) {
+    orbWindow.hide();
+  }
+}
+
 // ==================== VOICE TTS (ElevenLabs) ====================
 
 let voiceTTSAudio = null;
@@ -12357,5 +14238,9 @@ module.exports = {
   updateGSXMenu,
   openBudgetDashboard,
   openBudgetEstimator,
-  openBudgetSetup
+  openBudgetSetup,
+  // Voice Orb
+  showOrbWindow,
+  hideOrbWindow,
+  toggleOrbWindow
 }; 

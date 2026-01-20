@@ -2217,6 +2217,22 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
           }
         },
         {
+          label: 'Toggle Voice Orb',
+          accelerator: 'CommandOrControl+Shift+O',
+          click: () => {
+            try {
+              const main = require('./main');
+              if (main.toggleOrbWindow) {
+                main.toggleOrbWindow();
+              } else {
+                console.log('[Menu] Voice Orb not initialized - enable in Settings');
+              }
+            } catch (error) {
+              console.error('[Menu] Voice Orb toggle error:', error);
+            }
+          }
+        },
+        {
           label: 'GSX Create',
           accelerator: 'CommandOrControl+Shift+A',
           click: () => {

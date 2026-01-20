@@ -493,6 +493,37 @@
                 </div>
                 <div class="info-text">⚠️ Deprecated - use the new "Auto-generate AI metadata" option above instead</div>
             </div>
+            
+            <div class="divider"></div>
+            
+            <h3 style="font-size: 16px; margin-bottom: 16px;">Headless Claude (Free AI Calls)</h3>
+            
+            <div class="form-group">
+                <div class="checkbox-group">
+                    <input type="checkbox" id="claudePreferHeadless" checked>
+                    <label for="claudePreferHeadless" style="margin-bottom: 0;">Prefer headless Claude (free, uses web login)</label>
+                </div>
+                <div class="info-text">When enabled, AI operations will first try using your Claude web session (free), falling back to API only if needed. Requires being logged into claude.ai.</div>
+            </div>
+            
+            <div class="form-group">
+                <label for="claudeHeadlessTimeout">Headless Timeout (seconds)</label>
+                <select id="claudeHeadlessTimeout">
+                    <option value="30000">30 seconds</option>
+                    <option value="60000" selected>60 seconds (default)</option>
+                    <option value="90000">90 seconds</option>
+                    <option value="120000">120 seconds</option>
+                </select>
+                <div class="info-text">How long to wait for headless Claude before falling back to API</div>
+            </div>
+            
+            <div class="form-group">
+                <div class="checkbox-group">
+                    <input type="checkbox" id="claudeApiFallback" checked>
+                    <label for="claudeApiFallback" style="margin-bottom: 0;">Enable API fallback</label>
+                </div>
+                <div class="info-text">If headless fails (not logged in, timeout), automatically fall back to the Claude API (requires API key, has cost)</div>
+            </div>
         </div>
         
         <div class="section">
@@ -602,6 +633,22 @@
                 </div>
                 <div class="info-text">Automatically save settings when changed</div>
             </div>
+            
+            <div class="form-group">
+                <div class="checkbox-group">
+                    <input type="checkbox" id="spacesUploadIntegration">
+                    <label for="spacesUploadIntegration" style="margin-bottom: 0;">Spaces Upload Integration</label>
+                </div>
+                <div class="info-text">Show "Choose from Spaces" option when uploading files throughout the app. Provides quick access to your Spaces content in file pickers.</div>
+            </div>
+            
+            <div class="form-group">
+                <div class="checkbox-group">
+                    <input type="checkbox" id="voiceOrbEnabled">
+                    <label for="voiceOrbEnabled" style="margin-bottom: 0;">Enable Voice Orb</label>
+                </div>
+                <div class="info-text">Show a floating voice orb for quick voice commands. Toggle visibility with Cmd+Shift+O (Mac) or Ctrl+Shift+O (Windows).</div>
+            </div>
         </div>
         
         <div class="section">
@@ -668,6 +715,8 @@
                 document.getElementById('assemblyaiApiKey').value = settings.assemblyaiApiKey || '';
                 document.getElementById('theme').value = settings.theme || 'dark';
                 document.getElementById('autoSave').checked = settings.autoSave !== false;
+                document.getElementById('spacesUploadIntegration').checked = settings.spacesUploadIntegration !== false; // Default true
+                document.getElementById('voiceOrbEnabled').checked = settings.voiceOrbEnabled === true; // Default false
                 document.getElementById('autoGenerateScreenshotMetadata').checked = settings.autoGenerateScreenshotMetadata === true;
                 
                 // Auto AI Metadata settings
@@ -779,6 +828,11 @@
                 
                 // Check video release connections
                 checkVideoReleaseConnections();
+                
+                // Load Claude headless settings
+                document.getElementById('claudePreferHeadless').checked = settings.claudePreferHeadless !== false; // Default true
+                document.getElementById('claudeHeadlessTimeout').value = settings.claudeHeadlessTimeout || '60000';
+                document.getElementById('claudeApiFallback').checked = settings.claudeApiFallback !== false; // Default true
             } catch (error) {
                 console.error('Error loading settings:', error);
                 showStatus('Error loading settings', 'error');
@@ -812,6 +866,8 @@
                 vimeoClientSecret: document.getElementById('vimeoClientSecret').value,
                 theme: document.getElementById('theme').value,
                 autoSave: document.getElementById('autoSave').checked,
+                spacesUploadIntegration: document.getElementById('spacesUploadIntegration').checked,
+                voiceOrbEnabled: document.getElementById('voiceOrbEnabled').checked,
                 claude4ThinkingMode: document.getElementById('claude4ThinkingMode').value,
                 claude4ThinkingLevel: document.getElementById('claude4ThinkingLevel').value,
                 autoGenerateScreenshotMetadata: document.getElementById('autoGenerateScreenshotMetadata').checked,
@@ -824,7 +880,11 @@
                 gsxSyncInterval: document.getElementById('gsxSyncInterval').value,
                 learningApiUrl: document.getElementById('learningApiUrl').value,
                 learningApiMethod: document.getElementById('learningApiMethod').value,
-                learningApiCache: document.getElementById('learningApiCache').checked
+                learningApiCache: document.getElementById('learningApiCache').checked,
+                // Claude headless settings
+                claudePreferHeadless: document.getElementById('claudePreferHeadless').checked,
+                claudeHeadlessTimeout: parseInt(document.getElementById('claudeHeadlessTimeout').value),
+                claudeApiFallback: document.getElementById('claudeApiFallback').checked
             };
             
             try {
