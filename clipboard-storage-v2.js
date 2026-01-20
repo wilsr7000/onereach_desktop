@@ -70,6 +70,9 @@ class ClipboardStorageV2 {
     // Ensure all spaces have metadata files (including unclassified)
     this.ensureAllSpacesHaveMetadata();
     
+    // Ensure system spaces exist (Web Monitors, etc.)
+    this.ensureSystemSpaces();
+    
     // In-memory cache for performance
     this.cache = new Map();
     this.cacheSize = 100; // Keep last 100 items in cache
@@ -162,9 +165,17 @@ class ClipboardStorageV2 {
         color TEXT DEFAULT '#64c8ff',
         icon TEXT DEFAULT '◯',
         item_count INTEGER DEFAULT 0,
+        is_system BOOLEAN DEFAULT FALSE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+    
+    // Add is_system column if it doesn't exist (migration for existing DBs)
+    try {
+      await this._dbRun(`ALTER TABLE spaces ADD COLUMN is_system BOOLEAN DEFAULT FALSE`);
+    } catch (e) {
+      // Column already exists, ignore
+    }
     
     // Preferences table - replacing index.json preferences
     await this._dbRun(`
@@ -719,14 +730,91 @@ class ClipboardStorageV2 {
     console.log('[Storage] Verified metadata files for all', this.index.spaces.length, 'spaces');
   }
   
+  /**
+   * Ensure system spaces exist (Web Monitors, etc.)
+   * Called during initialization to create built-in spaces
+   */
+  ensureSystemSpaces() {
+    if (!this.index || !this.index.spaces) return;
+    
+    // Define system spaces
+    const systemSpaces = [
+      {
+        id: 'web-monitors',
+        name: 'Web Monitors',
+        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
+        color: '#4a9eff',
+        isSystem: true
+      }
+    ];
+    
+    for (const systemSpace of systemSpaces) {
+      const existsById = this.index.spaces.find(s => s.id === systemSpace.id);
+      const existsByName = this.index.spaces.find(s => s.name === systemSpace.name && s.id !== systemSpace.id);
+      
+      if (existsByName && !existsById) {
+        // Migration: There's an existing space with the same name but different ID
+        // We need to update the ID and migrate all items
+        const oldId = existsByName.id;
+        console.log(`[Storage] Migrating system space "${systemSpace.name}" from ID "${oldId}" to "${systemSpace.id}"`);
+        
+        // Update the space properties
+        existsByName.id = systemSpace.id;
+        existsByName.icon = systemSpace.icon;
+        existsByName.color = systemSpace.color;
+        existsByName.isSystem = true;
+        
+        // Migrate all items in this space
+        let migratedCount = 0;
+        this.index.items.forEach(item => {
+          if (item.spaceId === oldId) {
+            item.spaceId = systemSpace.id;
+            migratedCount++;
+          }
+        });
+        
+        console.log(`[Storage] Migrated ${migratedCount} items to new space ID`);
+        
+        // Save the index
+        this.saveIndexSync();
+        console.log(`[Storage] System space migration complete`);
+        
+      } else if (!existsById) {
+        console.log(`[Storage] Creating system space: ${systemSpace.name}`);
+        try {
+          this.createSpace(systemSpace);
+        } catch (error) {
+          console.error(`[Storage] Failed to create system space ${systemSpace.id}:`, error);
+        }
+      } else {
+        // Update existing space properties if needed
+        let needsSave = false;
+        
+        if (!existsById.isSystem) {
+          existsById.isSystem = true;
+          needsSave = true;
+          console.log(`[Storage] Marked existing space ${systemSpace.id} as system`);
+        }
+        
+        // Update icon if it's not a proper SVG (fix for corrupted icons)
+        if (!existsById.icon || !existsById.icon.includes('<svg')) {
+          existsById.icon = systemSpace.icon;
+          needsSave = true;
+          console.log(`[Storage] Updated icon for system space ${systemSpace.id}`);
+        }
+        
+        if (needsSave) {
+          this.saveIndexSync();
+        }
+      }
+    }
+  }
+  
   loadIndex() {
     if (fs.existsSync(this.indexPath)) {
       try {
         const data = fs.readFileSync(this.indexPath, 'utf8');
         const parsed = JSON.parse(data);
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-storage-v2.js:loadIndex',message:'Index loaded from disk',data:{itemCount:parsed.items?.length,firstFiveIds:parsed.items?.slice(0,5).map(i=>i.id),lastModified:parsed.lastModified},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H5'})}).catch(()=>{});
-        // #endregion
         return parsed;
       } catch (error) {
         console.error('Error loading index, checking backup:', error);
@@ -818,9 +906,6 @@ class ClipboardStorageV2 {
     const index = this._pendingIndex;
     this._pendingIndex = null;
     this._saveTimeout = null;
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-storage-v2.js:_performAsyncSave',message:'Performing async save',data:{itemCount:index.items?.length,firstFiveIds:index.items?.slice(0,5).map(i=>i.id),lastModified:index.lastModified},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H5'})}).catch(()=>{});
-    // #endregion
     
     const tempPath = this.indexPath + '.tmp';
     const backupPath = this.indexPath + '.backup';
@@ -938,6 +1023,18 @@ class ClipboardStorageV2 {
       }
     }
     
+    // Add web-monitor specific properties
+    if (item.type === 'web-monitor') {
+      indexEntry.url = item.url;
+      indexEntry.name = item.name;
+      indexEntry.monitorId = item.monitorId;
+      indexEntry.lastChecked = item.lastChecked;
+      indexEntry.status = item.status || 'active';
+      indexEntry.changeCount = item.changeCount || 0;
+      indexEntry.timeline = item.timeline || [];
+      indexEntry.settings = item.settings || { aiDescriptions: false };
+    }
+    
     try {
       // 1. Create item directory
       fs.mkdirSync(itemDir, { recursive: true });
@@ -963,10 +1060,6 @@ class ClipboardStorageV2 {
         ...item.metadata
       };
       
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-storage-v2.js:addItem:savingMetadata',message:'Saving metadata with tags',data:{itemId,inputTags:item.tags,metadataTags:metadata.tags,metadataHasTags:!!metadata.tags,tagsLength:metadata.tags?.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
-      // #endregion
-      
       fs.writeFileSync(
         path.join(itemDir, 'metadata.json'),
         JSON.stringify(metadata, null, 2)
@@ -981,9 +1074,6 @@ class ClipboardStorageV2 {
       this.index.items.unshift(indexEntry);
       this.updateSpaceCount(indexEntry.spaceId);
       this.saveIndex();
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-storage-v2.js:addItem:afterIndexUpdate',message:'Index updated after add',data:{itemId:indexEntry.id,indexItemCountAfter:this.index.items.length,firstItemId:this.index.items[0]?.id,dbReady:this.dbReady},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
-      // #endregion
       
       // 7. Update cache
       let cacheContent = item.content;
@@ -1200,9 +1290,6 @@ class ClipboardStorageV2 {
   
   // Get all items (without content for performance)
   getAllItems() {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-storage-v2.js:getAllItems',message:'getAllItems called',data:{itemCount:this.index.items.length,firstFiveIds:this.index.items.slice(0,5).map(i=>i.id),lastModified:this.index.lastModified},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
-    // #endregion
     return this.index.items;
   }
   
@@ -1462,15 +1549,8 @@ class ClipboardStorageV2 {
   
   // Update item index properties, metadata, and optionally content (transactional)
   updateItemIndex(itemId, updates) {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-storage-v2.js:updateItemIndex:start',message:'updateItemIndex called',data:{itemId,updates:Object.keys(updates),hasContent:!!updates.content,hasTitle:!!updates.title,hasTags:!!updates.tags,indexItemCount:this.index.items?.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-UPD1'})}).catch(()=>{});
-    // #endregion
-    
     const item = this.index.items.find(item => item.id === itemId);
     if (!item) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-storage-v2.js:updateItemIndex:notFound',message:'Item not found in index',data:{itemId},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-UPD3'})}).catch(()=>{});
-      // #endregion
       return false;
     }
     
@@ -1559,27 +1639,16 @@ class ClipboardStorageV2 {
     Object.assign(item, updates);
     item.timestamp = Date.now();
     
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-storage-v2.js:updateItemIndex:afterApply',message:'Updates applied to in-memory index',data:{itemId,beforeState,afterPreview:item.preview?.substring(0,50),afterPinned:item.pinned},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-UPD1'})}).catch(()=>{});
-    // #endregion
-    
     // Update DuckDB if ready
     if (this.dbReady) {
       this._updateItemInDB(itemId, updates).catch(err => {
         console.error('[Storage] DB update error:', err.message);
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-storage-v2.js:updateItemIndex:dbError',message:'DuckDB update failed',data:{itemId,error:err.message},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-UPD2'})}).catch(()=>{});
-        // #endregion
       });
     }
     
     // FIX: Use synchronous save for updates (like deleteItem does)
     // The debounced saveIndex() was returning "success" before disk write completed
     this.saveIndexSync();
-    
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-storage-v2.js:updateItemIndex:afterSave',message:'Index saved synchronously',data:{itemId,indexPath:this.indexPath},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-UPD1'})}).catch(()=>{});
-    // #endregion
     
     this.cache.delete(itemId); // Clear cache
     return true;
@@ -1635,7 +1704,8 @@ class ClipboardStorageV2 {
       name: space.name,
       icon: space.icon || '◯',
       color: space.color || '#64c8ff',
-      itemCount: 0
+      itemCount: 0,
+      isSystem: space.isSystem || false
     };
     
     try {
@@ -1681,14 +1751,15 @@ class ClipboardStorageV2 {
     if (!this.dbReady) return;
     
     await this._dbRun(`
-      INSERT OR REPLACE INTO spaces (id, name, color, icon, item_count, created_at)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT OR REPLACE INTO spaces (id, name, color, icon, item_count, is_system, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `, [
       space.id,
       space.name,
       space.color || '#64c8ff',
       space.icon || '◯',
       space.itemCount || 0,
+      space.isSystem || false,
       new Date().toISOString()
     ]);
   }
@@ -1949,6 +2020,12 @@ class ClipboardStorageV2 {
   deleteSpace(spaceId) {
     if (spaceId === 'unclassified') {
       throw new Error('Cannot delete unclassified space');
+    }
+    
+    // Check if this is a system space
+    const space = this.index.spaces.find(s => s.id === spaceId);
+    if (space?.isSystem) {
+      throw new Error('Cannot delete system space');
     }
     
     try {
@@ -2382,12 +2459,30 @@ class ClipboardStorageV2 {
   }
   
   // Search functionality (sync - uses JSON index)
+  // Comprehensive search across all metadata fields
   search(query) {
-    const lowerQuery = query.toLowerCase();
+    if (!query || typeof query !== 'string') return [];
+    
+    const lowerQuery = query.toLowerCase().trim();
+    if (lowerQuery.length === 0) return [];
+    
+    const queryWords = lowerQuery.split(/\s+/).filter(w => w.length > 0);
     
     return this.index.items.filter(item => {
       // Search in preview
       if (item.preview && item.preview.toLowerCase().includes(lowerQuery)) {
+        return true;
+      }
+      
+      // Search in fileName
+      if (item.fileName && item.fileName.toLowerCase().includes(lowerQuery)) {
+        return true;
+      }
+      
+      // Check each query word in preview/fileName
+      const previewLower = (item.preview || '').toLowerCase();
+      const fileNameLower = (item.fileName || '').toLowerCase();
+      if (queryWords.some(word => previewLower.includes(word) || fileNameLower.includes(word))) {
         return true;
       }
       
@@ -2397,6 +2492,11 @@ class ClipboardStorageV2 {
         if (fs.existsSync(metaPath)) {
           const metadata = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
           
+          // Search in title (most important!)
+          if (metadata.title?.toLowerCase().includes(lowerQuery)) {
+            return true;
+          }
+          
           // Search in tags
           if (metadata.tags?.some(tag => tag.toLowerCase().includes(lowerQuery))) {
             return true;
@@ -2404,6 +2504,44 @@ class ClipboardStorageV2 {
           
           // Search in description
           if (metadata.description?.toLowerCase().includes(lowerQuery)) {
+            return true;
+          }
+          
+          // Search in notes (user-added content)
+          if (metadata.notes?.toLowerCase().includes(lowerQuery)) {
+            return true;
+          }
+          
+          // Search in author
+          if (metadata.author?.toLowerCase().includes(lowerQuery)) {
+            return true;
+          }
+          
+          // Search in source/URL
+          if (metadata.source?.toLowerCase().includes(lowerQuery)) {
+            return true;
+          }
+          
+          // Search in YouTube-specific fields
+          if (metadata.youtubeDescription?.toLowerCase().includes(lowerQuery)) {
+            return true;
+          }
+          if (metadata.uploader?.toLowerCase().includes(lowerQuery)) {
+            return true;
+          }
+          
+          // Check individual query words against all metadata
+          const metadataText = [
+            metadata.title,
+            metadata.description,
+            metadata.notes,
+            metadata.author,
+            metadata.source,
+            metadata.uploader,
+            ...(metadata.tags || [])
+          ].filter(Boolean).join(' ').toLowerCase();
+          
+          if (queryWords.some(word => metadataText.includes(word))) {
             return true;
           }
         }

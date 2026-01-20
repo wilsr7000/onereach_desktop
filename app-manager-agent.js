@@ -452,6 +452,8 @@ class AppManagerAgent {
       timestamp: new Date().toISOString(),
       errorsFound: 0,
       issuesDiagnosed: 0,
+      newDiagnoses: 0,      // NEW: Track diagnoses that required LLM (not cached)
+      cachedDiagnoses: 0,   // NEW: Track diagnoses that used cache
       fixesApplied: 0,
       fixesFailed: 0,
       duration: 0
@@ -490,7 +492,14 @@ class AppManagerAgent {
         try {
           const diagnosis = await this._diagnoseError(errorGroup);
           result.issuesDiagnosed++;
-          this.stats.issuesDetected++;
+          
+          // Track whether this was a new diagnosis or cached
+          if (diagnosis.details?.cached) {
+            result.cachedDiagnoses++;
+          } else {
+            result.newDiagnoses++;
+            this.stats.issuesDetected++;  // Only count new detections
+          }
           
           // Register in broken items registry (tracks all errors for this version)
           this.registerBrokenItem(errorGroup, diagnosis);
@@ -719,9 +728,17 @@ Summary:`;
     // Recent activity from this scan
     const activityLines = [];
     
-    if (scanResult.errorsFound > 0) {
-      activityLines.push(`- Found ${scanResult.errorsFound} errors this scan`);
+    // Only count NEW diagnoses as activity (not cached ones)
+    // This prevents LLM summary calls when just incrementing occurrence counts
+    if (scanResult.newDiagnoses > 0) {
+      activityLines.push(`- Diagnosed ${scanResult.newDiagnoses} NEW errors this scan`);
       context.hasActivity = true;
+    }
+    
+    // Log cached diagnoses for info but don't trigger activity
+    if (scanResult.cachedDiagnoses > 0) {
+      activityLines.push(`- Updated ${scanResult.cachedDiagnoses} existing tracked errors`);
+      // Note: NOT setting hasActivity - cached diagnoses don't need new summaries
     }
     
     if (scanResult.fixesApplied > 0) {
@@ -734,18 +751,18 @@ Summary:`;
       context.hasActivity = true;
     }
     
-    // Include recent diagnoses for context
-    if (this.recentDiagnoses.length > 0) {
+    // Include recent diagnoses for context (but don't trigger summary just for historical data)
+    if (this.recentDiagnoses.length > 0 && context.hasActivity) {
       const recentIssues = this.recentDiagnoses.slice(0, 3).map(d => 
         `- ${d.issue?.substring(0, 50) || 'Unknown issue'}`
       );
       activityLines.push('Recent issues:');
       activityLines.push(...recentIssues);
-      context.hasActivity = true;
+      // Note: Don't set hasActivity here - this is historical context, not new activity
     }
     
-    // Include top broken items
-    if (this.brokenItemsRegistry.length > 0) {
+    // Include top broken items for context (but don't trigger summary just for historical data)
+    if (this.brokenItemsRegistry.length > 0 && context.hasActivity) {
       const topBroken = this.brokenItemsRegistry
         .filter(b => b.status !== 'fixed')
         .slice(0, 2)
@@ -754,16 +771,15 @@ Summary:`;
       if (topBroken.length > 0) {
         activityLines.push('Top issues:');
         activityLines.push(...topBroken);
-        context.hasActivity = true;
+        // Note: Don't set hasActivity here - this is historical context, not new activity
       }
     }
     
     context.activity = activityLines.join('\n') || 'No significant activity';
     
-    // Always generate summary if we have any stats
-    if (this.stats.scansCompleted > 0) {
-      context.hasActivity = true;
-    }
+    // Only generate summary if THIS scan had meaningful activity
+    // Don't burn LLM tokens just because historical scans happened
+    // hasActivity is already set to true by the checks above when there's actual activity
     
     return context;
   }

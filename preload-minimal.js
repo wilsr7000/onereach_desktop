@@ -15,6 +15,10 @@ contextBridge.exposeInMainWorld(
         isElectron: true,
         platform: process.platform
       };
+    },
+    // Method to open Spaces picker for file uploads
+    openSpacesPicker: () => {
+      return ipcRenderer.invoke('open-spaces-picker');
     }
   }
 );

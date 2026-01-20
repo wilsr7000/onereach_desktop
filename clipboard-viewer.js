@@ -35,6 +35,7 @@ let currentView = 'list'; // Add view state
 let screenshotCaptureEnabled = true;
 let selectedTags = []; // Tags currently selected for filtering
 let allTags = {}; // Map of tag -> count
+let selectedItems = new Set(); // Track selected item IDs for bulk operations
 
 // Helper function to get asset paths in Electron
 function getAssetPath(filename) {
@@ -44,6 +45,10 @@ function getAssetPath(filename) {
 
 // Initialize
 async function init() {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:init:start',message:'Init function called',data:{timestamp:Date.now()},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+    // #endregion
+    
     const loadingOverlay = document.getElementById('loadingOverlay');
     const errorDisplay = document.getElementById('errorDisplay');
     const errorMessage = document.getElementById('errorMessage');
@@ -82,7 +87,19 @@ async function init() {
         setupEventListeners();
         setupPreviewEventListeners();
         setView('list');
+        
+        // #region agent log
+        const criticalElements = ['closeBtn','minimizeBtn','maximizeBtn','selectAllBtn','deselectAllBtn','bulkMoveBtn','bulkDeleteBtn','searchInput','spacesList','addSpaceBtn','historyList','contextMenu','iconPicker','modalSave','modalCancel','metadataSave','metadataCancel','generateMetadataBtn'];
+        const missingElements = criticalElements.filter(id => !document.getElementById(id));
+        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:init:elementCheck',message:'Checking critical elements at startup',data:{totalChecked:criticalElements.length,missingCount:missingElements.length,missingElements:missingElements},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})}).catch(()=>{});
+        // #endregion
+        
         document.getElementById('searchInput').focus();
+        
+        // #region agent log
+        const chatbotBtn = document.querySelector('.filter-btn[data-filter="chatbot-conversation"]');
+        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:init:afterSetup',message:'Checking for chatbot button in DOM',data:{chatbotBtnExists:!!chatbotBtn,chatbotBtnVisible:chatbotBtn?(window.getComputedStyle(chatbotBtn).display!=='none'):false,allFilterCount:document.querySelectorAll('.filter-btn').length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
+        // #endregion
         
         // PERFORMANCE: Parallelize independent API calls
         console.log('Loading data in parallel...');
@@ -164,7 +181,7 @@ function setView(view) {
     const historyList = document.getElementById('historyList');
     
     // Update list classes
-    historyList.classList.remove('grid-view', 'list-view');
+    historyList.classList.remove('grid-view', 'list-view', 'grouped-view');
     historyList.classList.add(`${view}-view`);
     
     // Update button states
@@ -173,7 +190,11 @@ function setView(view) {
     });
     
     // Re-render to apply view-specific styles
-    renderHistory();
+    if (view === 'grouped') {
+        renderGroupedView();
+    } else {
+        renderHistory();
+    }
 }
 
 // Update spaces visibility based on enabled state
@@ -277,7 +298,7 @@ async function loadHistory() {
             historyList.innerHTML = `
                 <div class="empty-state">
                     <img src="${getAssetPath('or-logo.png')}" class="empty-logo" alt="OneReach Logo">
-                    <div class="empty-icon">⚠️</div>
+                    <div class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" style="width: 40px; height: 40px;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>
                     <div class="empty-text">Error loading items</div>
                     <div class="empty-hint">${error.message}</div>
                 </div>
@@ -288,11 +309,87 @@ async function loadHistory() {
 }
 
 // Render spaces in sidebar
+
+// Generate auto-title for AI conversations from first user message
+function generateConversationTitle(firstMessageContent, provider) {
+    if (!firstMessageContent) {
+        return `${provider} Conversation`;
+    }
+    
+    const text = firstMessageContent.trim();
+    
+    // Remove common prefixes like "Can you", "Please", "I want to", etc.
+    let cleanText = text
+        .replace(/^(can you|could you|please|i want to|i need to|i'd like to|help me|tell me|explain|show me|write|create|make|build|how do i|how can i|what is|what are|why is|why are)\s+/i, '')
+        .trim();
+    
+    // If the cleaned text is too short, use original
+    if (cleanText.length < 10) {
+        cleanText = text;
+    }
+    
+    // Extract first sentence or meaningful chunk
+    const sentenceMatch = cleanText.match(/^[^.!?\n]+[.!?]?/);
+    let title = sentenceMatch ? sentenceMatch[0].trim() : cleanText;
+    
+    // Remove trailing punctuation for cleaner title
+    title = title.replace(/[.!?,;:]+$/, '').trim();
+    
+    // Truncate if too long
+    if (title.length > 50) {
+        title = title.substring(0, 47) + '...';
+    }
+    
+    // Capitalize first letter
+    title = title.charAt(0).toUpperCase() + title.slice(1);
+    
+    return title || `${provider} Conversation`;
+}
+
+// Get provider-specific icon SVG for AI conversations
+function getProviderIcon(providerClass) {
+    switch (providerClass) {
+        case 'claude':
+            // Claude/Anthropic - stylized "C" 
+            return `<svg viewBox="0 0 24 24" fill="currentColor" style="width: 18px; height: 18px;">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15h-2v-2h2v2zm2.07-7.75l-.9.92C11.45 10.9 11 11.5 11 13h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H6c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z"/>
+            </svg>`;
+        case 'chatgpt':
+            // ChatGPT/OpenAI - hexagon style
+            return `<svg viewBox="0 0 24 24" fill="currentColor" style="width: 18px; height: 18px;">
+                <path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.8956zm16.0993 3.8558L12.6 8.3829l2.02-1.1638a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.4069-.6813zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.1408 1.6465 4.4708 4.4708 0 0 1 .5765 3.0137zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.5056-2.6067-1.5056z"/>
+            </svg>`;
+        case 'grok':
+            // Grok/X - X logo style
+            return `<svg viewBox="0 0 24 24" fill="currentColor" style="width: 18px; height: 18px;">
+                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+            </svg>`;
+        case 'gemini':
+            // Gemini/Google - sparkle style
+            return `<svg viewBox="0 0 24 24" fill="currentColor" style="width: 18px; height: 18px;">
+                <path d="M12 0L14.59 9.41L24 12L14.59 14.59L12 24L9.41 14.59L0 12L9.41 9.41L12 0Z"/>
+            </svg>`;
+        default:
+            // Default chat icon
+            return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 18px; height: 18px;">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>`;
+    }
+}
+
 // Generate smart title for clipboard items
 function generateTitleForItem(item) {
-    // Priority 1: Use existing title from metadata
-    if (item.metadata?.title) {
+    // Priority 1: Use existing title from metadata (but ensure it's a string)
+    if (item.metadata?.title && typeof item.metadata.title === 'string') {
         return item.metadata.title;
+    }
+    
+    // Special handling for chatbot conversations
+    if (item.jsonSubtype === 'chatbot-conversation') {
+        const aiService = item.metadata?.aiService || 'AI';
+        const exchangeCount = item.metadata?.exchangeCount || 0;
+        const date = new Date(item.metadata?.startTime || item.timestamp).toLocaleDateString();
+        return `${aiService} Conversation - ${exchangeCount} exchanges (${date})`;
     }
     
     // Priority 2: Use fileName for files
@@ -441,7 +538,7 @@ function setupSpaceDragAndDrop() {
                     }
                     
                     if (successCount > 0) {
-                        showNotification(`✅ Added ${successCount} file${successCount > 1 ? 's' : ''} to ${spaceName}`);
+                        showNotification(`Added ${successCount} file${successCount > 1 ? 's' : ''} to ${spaceName}`);
                         await loadSpaces();
                         await loadHistory();
                     } else {
@@ -464,7 +561,7 @@ function setupSpaceDragAndDrop() {
                 const result = await window.clipboard.moveToSpace(itemId, spaceId);
                 
                 if (result.success) {
-                    showNotification('✅ Moved to ' + (spaceItem.querySelector('.space-name')?.textContent || 'space'));
+                    showNotification('Moved to ' + (spaceItem.querySelector('.space-name')?.textContent || 'space'));
                     await loadSpaces();
                     await loadHistory();
                 } else {
@@ -514,7 +611,6 @@ function setupSpaceDragAndDrop() {
                     gap: 8px;
                     color: rgba(255, 255, 255, 0.9);
                 ">
-                    <span>📋</span>
                     <span>Paste into ${spaceName}</span>
                 </div>
                 <div class="context-menu-item" data-action="paste-file" style="
@@ -625,7 +721,7 @@ async function pasteIntoSpace(spaceId) {
             });
             
             if (result?.success) {
-                showNotification(`✅ Image pasted into ${spaceName}`);
+                showNotification(`Image pasted into ${spaceName}`);
             } else {
                 const errorMsg = result?.error || 'Failed to paste image';
                 console.error('[Paste] Image error:', errorMsg);
@@ -636,17 +732,22 @@ async function pasteIntoSpace(spaceId) {
         else if (clipboardData.hasText && clipboardData.text && !clipboardData.hasHtml) {
             const text = clipboardData.text.trim();
             console.log('[Paste] Detected: TEXT (no HTML)', text.substring(0, 50));
+            console.log('[Paste] Calling addText with spaceId:', spaceId);
             
             result = await window.clipboard.addText({
                 content: text,
                 spaceId: spaceId
             });
             
+            console.log('[Paste] addText result:', JSON.stringify(result, null, 2));
+            
             if (result?.success) {
                 if (result.isYouTube) {
-                    showNotification(`✅ YouTube video queued for download into ${spaceName}`);
+                    showNotification(`YouTube video queued for download into ${spaceName}`);
+                } else if (result.isWebMonitor) {
+                    showNotification(`Now monitoring: ${result.monitorName || text}`);
                 } else {
-                    showNotification(`✅ Text pasted into ${spaceName}`);
+                    showNotification(`Text pasted into ${spaceName}`);
                 }
             } else {
                 const errorMsg = result?.error || 'Failed to paste text';
@@ -665,7 +766,7 @@ async function pasteIntoSpace(spaceId) {
             });
             
             if (result?.success) {
-                showNotification(`✅ Rich content pasted into ${spaceName}`);
+                showNotification(`Rich content pasted into ${spaceName}`);
             } else {
                 const errorMsg = result?.error || 'Failed to paste HTML';
                 console.error('[Paste] HTML error:', errorMsg);
@@ -683,7 +784,7 @@ async function pasteIntoSpace(spaceId) {
             });
             
             if (result?.success) {
-                showNotification(`✅ Text pasted into ${spaceName}`);
+                showNotification(`Text pasted into ${spaceName}`);
             } else {
                 const errorMsg = result?.error || 'Failed to paste text';
                 console.error('[Paste] Text fallback error:', errorMsg);
@@ -746,7 +847,7 @@ async function pasteFileIntoSpace(spaceId) {
             }
         }
         
-        showNotification(`✅ ${files.length} file(s) pasted into ${spaceName}`);
+        showNotification(` ${files.length} file(s) pasted into ${spaceName}`);
         
         // Reload to show new items
         setTimeout(async () => {
@@ -760,66 +861,87 @@ async function pasteFileIntoSpace(spaceId) {
     }
 }
 
-// Show notification helper
-function showNotification(message) {
-    const toast = document.createElement('div');
-    toast.style.cssText = `
-        position: fixed;
-        bottom: 20px;
-        right: 20px;
-        background: #1a1a25;
-        color: white;
-        padding: 12px 20px;
-        border-radius: 8px;
-        border: 1px solid rgba(99, 102, 241, 0.5);
-        z-index: 10001;
-        font-size: 13px;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-        animation: slideIn 0.3s ease-out;
-    `;
-    toast.textContent = message;
-    document.body.appendChild(toast);
-    
-    setTimeout(() => {
-        toast.style.animation = 'slideOut 0.3s ease-out';
-        setTimeout(() => toast.remove(), 300);
-    }, 3000);
-}
+// Show notification helper - simple version (full implementation is below)
+// This is kept for compatibility but the main implementation is the unified one below
 
 function renderSpaces() {
     const spacesList = document.getElementById('spacesList');
     
     // Always show "All Items" first
+    const allItemsIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>';
+    
     let html = `
         <div class="space-item ${currentSpace === null ? 'active' : ''}" data-space-id="null">
-            <span class="space-icon">∞</span>
+            <span class="space-icon">${allItemsIcon}</span>
             <span class="space-name">All Items</span>
             <span class="space-count">-</span>
         </div>
     `;
     
-    // Sort spaces by lastUsed (most recent first), then by createdAt
-    const sortedSpaces = [...spacesData].sort((a, b) => {
+    // Separate system spaces from user spaces
+    const systemSpaces = spacesData.filter(s => s.isSystem);
+    const userSpaces = spacesData.filter(s => !s.isSystem);
+    
+    // Sort user spaces by lastUsed (most recent first), then by createdAt
+    const sortedUserSpaces = [...userSpaces].sort((a, b) => {
         const aLastUsed = a.lastUsed || a.createdAt || 0;
         const bLastUsed = b.lastUsed || b.createdAt || 0;
         return bLastUsed - aLastUsed; // Most recent first
     });
     
-    // Add user-created spaces (sorted by most recently used)
-    sortedSpaces.forEach(space => {
-        html += `
-            <div class="space-item ${currentSpace === space.id ? 'active' : ''}" data-space-id="${space.id}">
-                <span class="space-icon">${space.icon}</span>
-                <span class="space-name">${space.name}</span>
+    const defaultSpaceIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="8"/></svg>';
+    const actionIcons = {
+        notebook: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 7h16M4 12h16M4 17h10"/></svg>',
+        pdf: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',
+        edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
+        delete: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'
+    };
+    
+    // Helper function to render a space item
+    const renderSpaceItem = (space, isSystem = false) => {
+        const spaceName = typeof space.name === 'string' ? space.name : (space.name?.toString() || 'Unnamed Space');
+        const spaceIcon = (space.icon && space.icon.includes('<svg')) ? space.icon : defaultSpaceIcon;
+        
+        // Get unviewed changes count for badge (Web Monitors feature)
+        const unviewedCount = space.unviewedChanges || 0;
+        const badgeHtml = unviewedCount > 0 
+            ? `<span class="change-badge">${unviewedCount}</span>` 
+            : '';
+        
+        // System spaces don't show delete button
+        const deleteAction = isSystem 
+            ? '' 
+            : `<div class="space-action" data-action="delete" data-space-id="${space.id}">${actionIcons.delete}</div>`;
+        
+        return `
+            <div class="space-item ${currentSpace === space.id ? 'active' : ''} ${isSystem ? 'system-space' : ''}" data-space-id="${space.id}">
+                <span class="space-icon">${spaceIcon}</span>
+                <span class="space-name">${escapeHtml(spaceName)}</span>
+                ${badgeHtml}
                 <span class="space-count">${space.itemCount || 0}</span>
                 <div class="space-actions">
-                    <div class="space-action" data-action="notebook" data-space-id="${space.id}" title="Open Notebook">▣</div>
-                    <div class="space-action" data-action="pdf" data-space-id="${space.id}" title="Export">📄</div>
-                    <div class="space-action" data-action="edit" data-space-id="${space.id}">✎</div>
-                    <div class="space-action" data-action="delete" data-space-id="${space.id}">✕</div>
+                    <div class="space-action" data-action="notebook" data-space-id="${space.id}" title="Open Notebook">${actionIcons.notebook}</div>
+                    <div class="space-action" data-action="pdf" data-space-id="${space.id}" title="Export">${actionIcons.pdf}</div>
+                    <div class="space-action" data-action="edit" data-space-id="${space.id}">${actionIcons.edit}</div>
+                    ${deleteAction}
                 </div>
             </div>
         `;
+    };
+    
+    // Add system spaces first (Web Monitors, etc.)
+    systemSpaces.forEach(space => {
+        html += renderSpaceItem(space, true);
+    });
+    
+    // Add separator if there are both system and user spaces
+    if (systemSpaces.length > 0 && sortedUserSpaces.length > 0) {
+        html += '<div class="space-separator"></div>';
+    }
+    
+    // Add user-created spaces (sorted by most recently used)
+    sortedUserSpaces.forEach(space => {
+        html += renderSpaceItem(space, false);
     });
     
     spacesList.innerHTML = html;
@@ -831,6 +953,8 @@ function renderSpaces() {
 // Render history list
 // PERFORMANCE: Batch size for chunked rendering
 const RENDER_BATCH_SIZE = 50;
+// Track current render to cancel previous chunked renders
+let currentRenderVersion = 0;
 
 // Helper function to render a single history item to HTML
 function renderHistoryItemToHtml(item) {
@@ -906,7 +1030,7 @@ function renderHistoryItemToHtml(item) {
                 `;
             }
             
-            const icon = getTypeIcon(item.type, item.source, item.fileType, item.fileCategory, item.metadata, item.jsonSubtype);
+            const icon = getTypeIcon(item.type, item.source, item.fileType, item.fileCategory, item.metadata, item.jsonSubtype, item.tags, item.preview || item.content);
             const timeAgo = formatTimeAgo(item.timestamp);
             
             let contentHtml = '';
@@ -1000,17 +1124,25 @@ function renderHistoryItemToHtml(item) {
                         </div>
                     `;
                 } else if (item.fileType === 'audio') {
-                    // For audio files, show file info - use Preview button to play
+                    // For audio files, show enhanced audio tile design
+                    const duration = item.metadata?.duration || '';
                     contentHtml = `
-                        <div class="file-info" style="display: flex; align-items: center; gap: 12px;">
-                            <div class="file-icon" style="font-size: 28px;">🎵</div>
-                            <div class="file-details">
-                                <div class="file-name">${escapeHtml(item.fileName)}</div>
-                                <div class="file-meta">
+                        <div class="audio-tile-design">
+                            <div class="audio-tile-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <path d="M9 18V5l12-2v13"/>
+                                    <circle cx="6" cy="18" r="3"/>
+                                    <circle cx="18" cy="16" r="3"/>
+                                </svg>
+                            </div>
+                            <div class="file-details" style="flex: 1;">
+                                <div class="file-name" style="font-size: 13px; margin-bottom: 4px;">${escapeHtml(item.fileName)}</div>
+                                <div class="file-meta" style="gap: 8px;">
+                                    <span class="asset-type-badge badge-audio">Audio</span>
                                     <span>${formatFileSize(item.fileSize)}</span>
-                                    <span>${item.fileExt ? item.fileExt.toUpperCase() : ''}</span>
-                                    <span style="color: rgba(100, 200, 255, 0.8);">Click ◎ Preview to play</span>
+                                    ${duration ? `<span>${duration}</span>` : ''}
                                 </div>
+                                <div style="font-size: 10px; color: rgba(236, 72, 153, 0.7); margin-top: 6px;">Click ◎ to preview</div>
                             </div>
                         </div>
                     `;
@@ -1111,6 +1243,76 @@ function renderHistoryItemToHtml(item) {
                         contentHtml += `<div class="item-content code">${escapeHtml(item.preview)}</div>`;
                     }
                 }
+            } else if (item.metadata?.type === 'ai-conversation') {
+                // Redesigned AI Conversation tile
+                const provider = item.metadata?.provider || item.metadata?.serviceId || item.metadata?.aiService || 'AI';
+                const messageCount = item.metadata?.messageCount || item.metadata?.exchangeCount || 0;
+                const hasArtifacts = item.metadata?.hasArtifacts || false;
+                const hasCode = item.metadata?.hasCode || false;
+                const hasFiles = item.metadata?.hasFiles || false;
+                const hasImages = item.metadata?.hasImages || false;
+                
+                // Get messages from jsonData for title/question extraction
+                const messages = item.metadata?.jsonData?.messages || [];
+                const firstUserMessage = messages.find(m => m.role === 'user');
+                
+                // Generate auto-title from first user message
+                const conversationTitle = generateConversationTitle(firstUserMessage?.content, provider);
+                
+                // Get first question for display (truncated)
+                const firstQuestion = firstUserMessage?.content?.trim() || '';
+                const truncatedQuestion = firstQuestion.length > 80 
+                    ? '"' + firstQuestion.substring(0, 77) + '..."'
+                    : firstQuestion ? '"' + firstQuestion + '"' : '';
+                
+                // Format date
+                const convDate = item.metadata?.startTime || item.metadata?.jsonData?.startTime || item.timestamp;
+                const formattedDate = convDate ? new Date(convDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+                
+                // Determine provider class for styling
+                const providerLower = provider.toLowerCase();
+                let providerClass = 'claude';
+                if (providerLower.includes('chatgpt') || providerLower.includes('openai')) providerClass = 'chatgpt';
+                else if (providerLower.includes('grok')) providerClass = 'grok';
+                else if (providerLower.includes('gemini') || providerLower.includes('google')) providerClass = 'gemini';
+                
+                // Get provider icon
+                const providerIcon = getProviderIcon(providerClass);
+                
+                // Check for thumbnail (first image in conversation)
+                const media = item.metadata?.jsonData?.media || [];
+                const firstImage = media.find(m => m.type?.startsWith('image/') || m.mimeType?.startsWith('image/'));
+                const thumbnailHtml = firstImage?.dataUrl 
+                    ? `<div class="ai-conv-thumb"><img src="${firstImage.dataUrl}" alt=""></div>`
+                    : '';
+                
+                // Build content badges
+                let badgesHtml = '';
+                if (hasCode) badgesHtml += '<span class="ai-conv-badge code" title="Has code blocks">{ }</span>';
+                if (hasArtifacts) badgesHtml += '<span class="ai-conv-badge artifact" title="Has artifacts">★</span>';
+                if (hasFiles) badgesHtml += '<span class="ai-conv-badge files" title="Has files">📎</span>';
+                
+                contentHtml = `
+                    <div class="ai-conversation-tile redesigned">
+                        <div class="ai-conv-header">
+                            <div class="ai-conv-provider-icon ${providerClass}">
+                                ${providerIcon}
+                            </div>
+                            <div class="ai-conv-title-area">
+                                <div class="ai-conv-title">${escapeHtml(conversationTitle)}</div>
+                                ${truncatedQuestion ? `<div class="ai-conv-question">${escapeHtml(truncatedQuestion)}</div>` : ''}
+                            </div>
+                        </div>
+                        <div class="ai-conv-footer">
+                            ${thumbnailHtml}
+                            <div class="ai-conv-meta">
+                                <span>${messageCount} message${messageCount !== 1 ? 's' : ''}</span>
+                                ${formattedDate ? `<span class="ai-conv-date">${formattedDate}</span>` : ''}
+                            </div>
+                            ${badgesHtml ? `<div class="ai-conv-badges">${badgesHtml}</div>` : ''}
+                        </div>
+                    </div>
+                `;
             } else if (item.type === 'generated-document' || (item.metadata && item.metadata.type === 'generated-document')) {
                 // Handle generated documents
                 const templateName = item.metadata?.templateName || 'Document';
@@ -1118,7 +1320,7 @@ function renderHistoryItemToHtml(item) {
                 contentHtml = `
                     <div class="generated-document-preview">
                         <div class="doc-header">
-                            <span class="doc-badge">✨ AI Generated</span>
+                            <span class="doc-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 12px; height: 12px; display: inline-block; vertical-align: middle; margin-right: 4px;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> AI Generated</span>
                             <span class="doc-template">${templateName}</span>
                         </div>
                         <div class="doc-title">${escapeHtml(item.text || item.plainText || 'Generated Document')}</div>
@@ -1147,6 +1349,81 @@ function renderHistoryItemToHtml(item) {
                 contentHtml = `
                     ${title ? `<div class="item-title">${escapeHtml(title)}</div>` : ''}
                     <div class="item-content code">${escapeHtml(item.preview)}</div>
+                `;
+            } else if (item.source === 'url') {
+                // Enhanced URL tile card design
+                const urlText = item.preview || item.content || item.text || '';
+                let displayUrl = urlText;
+                let domain = '';
+                try {
+                    const urlObj = new URL(urlText);
+                    domain = urlObj.hostname;
+                    displayUrl = urlText.length > 60 ? urlText.substring(0, 60) + '...' : urlText;
+                } catch (e) {
+                    displayUrl = urlText.length > 60 ? urlText.substring(0, 60) + '...' : urlText;
+                }
+                contentHtml = `
+                    <div class="url-tile-card">
+                        <div class="url-tile-favicon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 20px; height: 20px; color: rgba(59, 130, 246, 0.8);">
+                                <circle cx="12" cy="12" r="10"/>
+                                <line x1="2" y1="12" x2="22" y2="12"/>
+                                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                            </svg>
+                        </div>
+                        <div class="url-tile-info">
+                            <div class="url-tile-title">${escapeHtml(displayUrl)}</div>
+                            ${domain ? `<div class="url-tile-domain"><span class="asset-type-badge badge-url">Link</span>${escapeHtml(domain)}</div>` : ''}
+                        </div>
+                    </div>
+                `;
+            } else if (item.type === 'web-monitor') {
+                // Web Monitor preview card
+                const monitorName = item.name || 'Website';
+                const monitorUrl = item.url || '';
+                const status = item.status || 'active';
+                const changeCount = item.changeCount || 0;
+                const lastChecked = item.lastChecked ? new Date(item.lastChecked).toLocaleString() : 'Never';
+                
+                let domain = '';
+                try {
+                    domain = new URL(monitorUrl).hostname;
+                } catch (e) {
+                    domain = monitorUrl;
+                }
+                
+                const statusColor = status === 'active' ? '#10b981' : status === 'paused' ? '#f59e0b' : '#ef4444';
+                const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
+                
+                contentHtml = `
+                    <div class="web-monitor-card">
+                        <div class="web-monitor-header">
+                            <div class="web-monitor-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 24px; height: 24px; color: #4a9eff;">
+                                    <circle cx="12" cy="12" r="10"/>
+                                    <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                                </svg>
+                            </div>
+                            <div class="web-monitor-info">
+                                <div class="web-monitor-name">${escapeHtml(monitorName)}</div>
+                                <div class="web-monitor-url">${escapeHtml(domain)}</div>
+                            </div>
+                            <div class="web-monitor-status" style="background: ${statusColor}20; color: ${statusColor};">
+                                <span class="status-dot" style="background: ${statusColor};"></span>
+                                ${statusLabel}
+                            </div>
+                        </div>
+                        <div class="web-monitor-stats">
+                            <div class="web-monitor-stat">
+                                <span class="stat-value">${changeCount}</span>
+                                <span class="stat-label">Changes</span>
+                            </div>
+                            <div class="web-monitor-stat">
+                                <span class="stat-value">${lastChecked === 'Never' ? '-' : lastChecked.split(',')[0]}</span>
+                                <span class="stat-label">Last Check</span>
+                            </div>
+                        </div>
+                    </div>
                 `;
             } else {
                 const title = generateTitleForItem(item);
@@ -1182,15 +1459,41 @@ function renderHistoryItemToHtml(item) {
                 }
             }
             
-            const typeClass = item.metadata?.riffNoteId ? 'type-riff' : (item.type === 'file' ? `type-${item.fileCategory || 'file'}` : `type-${item.source || item.type}`);
+            const typeClass = isRiffNote(item) ? 'type-riff' : (item.type === 'file' ? `type-${item.fileCategory || 'file'}` : `type-${item.source || item.type}`);
+            const isSelected = selectedItems.has(item.id);
+            
+            // Determine the display type for CSS styling
+            const getDisplayType = () => {
+                if (item.type === 'generated-document' || item.metadata?.type === 'generated-document') return 'generated-document';
+                if (item.metadata?.type === 'ai-conversation') return 'ai-conversation';
+                if (item.type === 'image') return 'image';
+                if (item.type === 'file') {
+                    if (item.fileType === 'video' || item.fileCategory === 'video') return 'video';
+                    if (item.fileType === 'audio' || item.fileCategory === 'audio') return 'audio';
+                    if (item.fileType === 'pdf' || item.fileExt === '.pdf') return 'pdf';
+                    if (item.fileType === 'presentation' || item.fileCategory === 'presentation') return 'presentation';
+                    if (item.fileCategory === 'code') return 'code';
+                    if (item.fileCategory === 'image' || item.fileType === 'image-file') return 'image';
+                    return 'file';
+                }
+                if (item.type === 'html') return 'html';
+                if (item.source === 'code') return 'code';
+                if (item.source === 'url' || item.type === 'url') return 'url';
+                return item.type || 'text';
+            };
+            const displayType = getDisplayType();
             
             return `
-                <div class="history-item ${item.pinned ? 'pinned' : ''}" data-id="${item.id}" draggable="true">
+                <div class="history-item ${item.pinned ? 'pinned' : ''} ${isSelected ? 'selected' : ''} tile-${displayType}" data-id="${item.id}" data-type="${displayType}" data-source="${item.source || ''}" draggable="true">
+                    <div class="item-checkbox-wrapper">
+                        <div class="item-checkbox ${isSelected ? 'checked' : ''}" data-item-id="${item.id}"></div>
+                    </div>
                     <div class="item-header">
                         <div class="item-type">
                             <span class="type-icon ${typeClass}">${icon}</span>
                             <span class="item-time">${timeAgo}</span>
                             ${item.metadata?.context?.app?.name ? `<span class="item-source" title="${escapeHtml(item.metadata.context.contextDisplay || '')}">from ${escapeHtml(item.metadata.context.app.name)}</span>` : ''}
+                            ${item._scoreBadge || ''}
                         </div>
                     </div>
                     ${contentHtml}
@@ -1221,7 +1524,7 @@ function renderHistoryItemToHtml(item) {
                 <div class="history-item error-item" data-id="${item.id || 'unknown'}">
                     <div class="item-header">
                         <div class="item-type">
-                            <span class="type-icon">⚠️</span>
+                            <span class="type-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span>
                             <span class="item-time">Error</span>
                         </div>
                     </div>
@@ -1229,7 +1532,7 @@ function renderHistoryItemToHtml(item) {
                         Failed to render item: ${itemError.message}
                     </div>
                     <div class="item-actions">
-                        <button class="action-btn" data-action="delete" title="Delete">🗑️</button>
+                        <button class="action-btn" data-action="delete" title="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
                     </div>
                 </div>
             `;
@@ -1241,6 +1544,9 @@ function renderHistory(items = history) {
     console.log('renderHistory called with', items ? items.length : 0, 'items');
     const historyList = document.getElementById('historyList');
     const itemCount = document.getElementById('itemCount');
+    
+    // Increment render version to cancel any pending chunked renders from previous calls
+    const thisRenderVersion = ++currentRenderVersion;
     
     if (!historyList) {
         console.error('historyList element not found!');
@@ -1282,6 +1588,12 @@ function renderHistory(items = history) {
         let currentIndex = RENDER_BATCH_SIZE;
         
         function renderNextBatch() {
+            // Cancel if a newer render has started
+            if (thisRenderVersion !== currentRenderVersion) {
+                console.log('Chunked render cancelled (newer render started)');
+                return;
+            }
+            
             if (currentIndex >= items.length) return;
             
             const batch = items.slice(currentIndex, currentIndex + RENDER_BATCH_SIZE);
@@ -1309,7 +1621,7 @@ function renderHistory(items = history) {
         historyList.innerHTML = `
             <div class="empty-state">
                 <img src="${getAssetPath('or-logo.png')}" class="empty-logo" alt="OneReach Logo">
-                <div class="empty-icon">⚠️</div>
+                <div class="empty-icon">!</div>
                 <div class="empty-text">Error rendering items</div>
                 <div class="empty-hint">${error.message}</div>
                 <button onclick="window.clipboard.clearCorruptItems && window.clipboard.clearCorruptItems()" style="margin-top: 16px; padding: 8px 16px; background: rgba(255,100,100,0.3); border: 1px solid rgba(255,100,100,0.5); border-radius: 6px; color: white; cursor: pointer;">Clear Corrupt Items</button>
@@ -1317,6 +1629,235 @@ function renderHistory(items = history) {
         `;
         itemCount.textContent = 'Error';
     }
+}
+
+// Collapsed state for tag groups (persisted in localStorage)
+let collapsedTagGroups = JSON.parse(localStorage.getItem('collapsedTagGroups') || '{}');
+
+// Tag colors (persisted in localStorage, keyed by space)
+let tagColors = JSON.parse(localStorage.getItem('tagColors') || '{}');
+
+// Preset tag colors for color picker
+const TAG_COLOR_PRESETS = [
+    '#ff6b6b', // Red
+    '#ff9f43', // Orange
+    '#feca57', // Yellow
+    '#1dd1a1', // Green
+    '#54a0ff', // Blue
+    '#5f27cd', // Purple
+    '#ff6b9d', // Pink
+    '#00d2d3', // Cyan
+    '#a29bfe', // Lavender
+    '#636e72', // Gray
+];
+
+// Save collapsed state to localStorage
+function saveCollapsedState() {
+    localStorage.setItem('collapsedTagGroups', JSON.stringify(collapsedTagGroups));
+}
+
+// Get tag color for current space
+function getTagColor(tag) {
+    const spaceKey = currentSpace || '__all__';
+    return tagColors[spaceKey]?.[tag] || null;
+}
+
+// Set tag color for current space
+function setTagColor(tag, color) {
+    const spaceKey = currentSpace || '__all__';
+    if (!tagColors[spaceKey]) {
+        tagColors[spaceKey] = {};
+    }
+    if (color) {
+        tagColors[spaceKey][tag] = color;
+    } else {
+        delete tagColors[spaceKey][tag];
+    }
+    localStorage.setItem('tagColors', JSON.stringify(tagColors));
+}
+
+// Show tag color picker context menu
+function showTagColorPicker(e, tag) {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Remove any existing color picker
+    const existingPicker = document.getElementById('tagColorPicker');
+    if (existingPicker) existingPicker.remove();
+    
+    const currentColor = getTagColor(tag);
+    
+    const picker = document.createElement('div');
+    picker.id = 'tagColorPicker';
+    picker.className = 'tag-color-picker';
+    picker.innerHTML = `
+        <div class="tag-color-picker-header">
+            <span>Color for "${tag}"</span>
+        </div>
+        <div class="tag-color-picker-colors">
+            ${TAG_COLOR_PRESETS.map(color => `
+                <div class="tag-color-option ${currentColor === color ? 'selected' : ''}" 
+                     data-color="${color}" 
+                     style="background: ${color};">
+                </div>
+            `).join('')}
+            <div class="tag-color-option clear-color ${!currentColor ? 'selected' : ''}" 
+                 data-color="" 
+                 title="No color">
+                ✕
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(picker);
+    
+    // Position the picker near the click
+    const rect = e.target.closest('.sidebar-tag-item')?.getBoundingClientRect() || { right: e.clientX, top: e.clientY };
+    picker.style.position = 'fixed';
+    picker.style.left = `${rect.right + 8}px`;
+    picker.style.top = `${rect.top}px`;
+    
+    // Make sure it doesn't go off screen
+    const pickerRect = picker.getBoundingClientRect();
+    if (pickerRect.right > window.innerWidth) {
+        picker.style.left = `${rect.left - pickerRect.width - 8}px`;
+    }
+    if (pickerRect.bottom > window.innerHeight) {
+        picker.style.top = `${window.innerHeight - pickerRect.height - 8}px`;
+    }
+    
+    // Handle color selection
+    picker.querySelectorAll('.tag-color-option').forEach(option => {
+        option.addEventListener('click', () => {
+            const color = option.dataset.color;
+            setTagColor(tag, color || null);
+            picker.remove();
+            updateSidebarTags();
+            if (currentView === 'grouped') {
+                filterItems();
+            }
+        });
+    });
+    
+    // Close picker when clicking outside
+    const closePicker = (e) => {
+        if (!picker.contains(e.target)) {
+            picker.remove();
+            document.removeEventListener('click', closePicker);
+        }
+    };
+    setTimeout(() => document.addEventListener('click', closePicker), 0);
+}
+
+// Toggle tag group collapse state
+function toggleTagGroup(tag) {
+    collapsedTagGroups[tag] = !collapsedTagGroups[tag];
+    saveCollapsedState();
+    renderGroupedView();
+}
+
+// Render items grouped by tags
+function renderGroupedView(items = history) {
+    console.log('renderGroupedView called with', items ? items.length : 0, 'items');
+    const historyList = document.getElementById('historyList');
+    const itemCount = document.getElementById('itemCount');
+    
+    if (!historyList) {
+        console.error('historyList element not found!');
+        return;
+    }
+    
+    if (!items || items.length === 0) {
+        historyList.innerHTML = `
+            <div class="empty-state">
+                <img src="${getAssetPath('or-logo.png')}" class="empty-logo" alt="OneReach Logo">
+                <div class="empty-text">No items in this space</div>
+                <div class="empty-hint">Copy something to add it here</div>
+            </div>
+        `;
+        if (itemCount) itemCount.textContent = '0 items';
+        return;
+    }
+    
+    // Group items by tags
+    const tagGroups = {};
+    const untaggedItems = [];
+    
+    items.forEach(item => {
+        const itemTags = item.metadata?.tags || item.tags || [];
+        if (!Array.isArray(itemTags) || itemTags.length === 0) {
+            untaggedItems.push(item);
+        } else {
+            // Add item to each tag group it belongs to
+            itemTags.forEach(tag => {
+                if (typeof tag === 'string' && tag.trim()) {
+                    const normalizedTag = tag.trim().toLowerCase();
+                    if (!tagGroups[normalizedTag]) {
+                        tagGroups[normalizedTag] = [];
+                    }
+                    tagGroups[normalizedTag].push(item);
+                }
+            });
+        }
+    });
+    
+    // Sort tag groups by count (most items first), then alphabetically
+    const sortedTags = Object.keys(tagGroups).sort((a, b) => {
+        const countDiff = tagGroups[b].length - tagGroups[a].length;
+        if (countDiff !== 0) return countDiff;
+        return a.localeCompare(b);
+    });
+    
+    // Build HTML for grouped view
+    let html = '';
+    
+    sortedTags.forEach(tag => {
+        const tagItems = tagGroups[tag];
+        const isCollapsed = collapsedTagGroups[tag] === true;
+        const chevron = isCollapsed ? '▶' : '▼';
+        const color = getTagColor(tag);
+        const colorIndicator = color ? `<span class="tag-group-color" style="background: ${color};"></span>` : '';
+        const borderStyle = color ? `border-left-color: ${color};` : '';
+        
+        html += `
+            <div class="tag-group" data-tag="${escapeHtml(tag)}" style="${borderStyle}">
+                <div class="tag-group-header" onclick="toggleTagGroup('${escapeHtml(tag)}')">
+                    <span class="tag-group-chevron">${chevron}</span>
+                    ${colorIndicator}
+                    <span class="tag-group-name">${escapeHtml(tag)}</span>
+                    <span class="tag-group-count">(${tagItems.length})</span>
+                </div>
+                <div class="tag-group-items ${isCollapsed ? 'collapsed' : ''}" style="${borderStyle}">
+                    ${tagItems.map(item => renderHistoryItemToHtml(item)).join('')}
+                </div>
+            </div>
+        `;
+    });
+    
+    // Add untagged items at the end
+    if (untaggedItems.length > 0) {
+        const isCollapsed = collapsedTagGroups['__untagged__'] === true;
+        const chevron = isCollapsed ? '▶' : '▼';
+        
+        html += `
+            <div class="tag-group untagged-group" data-tag="__untagged__">
+                <div class="tag-group-header" onclick="toggleTagGroup('__untagged__')">
+                    <span class="tag-group-chevron">${chevron}</span>
+                    <span class="tag-group-name">Untagged</span>
+                    <span class="tag-group-count">(${untaggedItems.length})</span>
+                </div>
+                <div class="tag-group-items ${isCollapsed ? 'collapsed' : ''}">
+                    ${untaggedItems.map(item => renderHistoryItemToHtml(item)).join('')}
+                </div>
+            </div>
+        `;
+    }
+    
+    historyList.innerHTML = html;
+    
+    // Update item count (show unique items, not duplicated across groups)
+    const uniqueItemCount = items.length;
+    if (itemCount) itemCount.textContent = `${uniqueItemCount} item${uniqueItemCount !== 1 ? 's' : ''}`;
 }
 
 // Update item counts for all spaces
@@ -1356,17 +1897,20 @@ async function updateItemCounts() {
 }
 
 // Get icon for content type
-function getTypeIcon(type, source, fileType, fileCategory, metadata, jsonSubtype) {
-    if (type === 'generated-document' || (metadata && metadata.type === 'generated-document')) return '✨';
-    // Check for Riff notes (notes created in Riff app)
-    if (metadata?.riffNoteId) return '📝';
+function getTypeIcon(type, source, fileType, fileCategory, metadata, jsonSubtype, tags, preview) {
+    // Check JSON subtypes first (works for both file and text items)
+    if (jsonSubtype === 'style-guide') return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:14px;height:14px;"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>';
+    if (jsonSubtype === 'journey-map') return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:14px;height:14px;"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>';
+    if (jsonSubtype === 'chatbot-conversation') return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:14px;height:14px;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+    
+    if (type === 'generated-document' || (metadata && metadata.type === 'generated-document')) return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:14px;height:14px;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>';
+    // Check for Riff notes (notes created in Riff app) - checks metadata, tags, and content marker
+    if (isRiffNote({ metadata, tags, content: preview })) return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:14px;height:14px;"><path d="M4 7h16M4 12h16M4 17h10"/></svg>';
     if (type === 'file') {
-        // Check JSON subtypes first (style-guide, journey-map)
-        if (jsonSubtype === 'style-guide') return '🎨';
-        if (jsonSubtype === 'journey-map') return '🗺️';
         if (fileType === 'pdf') return '▥';
         if (fileType === 'flow') return '⧉';
         if (fileType === 'notebook') return '◉';
+        if (fileType === 'presentation' || fileCategory === 'presentation') return '▦';
         if (fileType === 'video') return '▶';
         if (fileType === 'audio') return '♫';
         if (fileType === 'image-file') return '▣';
@@ -1386,6 +1930,7 @@ function getTypeIcon(type, source, fileType, fileCategory, metadata, jsonSubtype
     if (source === 'email') return '✉';
     if (type === 'image') return '▣';
     if (type === 'html') return '◔';
+    if (type === 'web-monitor') return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:14px;height:14px;"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>';
     return '▬';
 }
 
@@ -1539,6 +2084,152 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// Open file in system default application
+async function openFileInSystem(filePath) {
+    try {
+        if (window.clipboard && window.clipboard.openInSystem) {
+            const result = await window.clipboard.openInSystem(filePath);
+            if (!result.success) {
+                console.error('Failed to open file:', result.error);
+                alert('Failed to open file: ' + (result.error || 'Unknown error'));
+            }
+        } else {
+            // Fallback: try using shell.openPath via IPC
+            console.error('openInSystem not available');
+            alert('Unable to open file - feature not available');
+        }
+    } catch (error) {
+        console.error('Error opening file:', error);
+        alert('Error opening file: ' + error.message);
+    }
+}
+
+// Extract Riff note ID from item (checks all storage locations)
+function extractRiffNoteId(item) {
+    if (!item) return null;
+    
+    console.log('[Riff] Checking item for Riff ID:', {
+        hasMetadata: !!item.metadata,
+        _riffNoteId: item.metadata?._riffNoteId,
+        riffNoteId: item.metadata?.riffNoteId,
+        tags: item.tags,
+        contentPreview: (item.content || item.preview || '').substring(0, 100)
+    });
+    
+    // 1. Check metadata (_riffNoteId or riffNoteId)
+    if (item.metadata?._riffNoteId) {
+        console.log('[Riff] Found in metadata._riffNoteId:', item.metadata._riffNoteId);
+        return item.metadata._riffNoteId;
+    }
+    if (item.metadata?.riffNoteId) {
+        console.log('[Riff] Found in metadata.riffNoteId:', item.metadata.riffNoteId);
+        return item.metadata.riffNoteId;
+    }
+    
+    // 2. Check tags for riff-note:uuid format
+    if (item.tags && Array.isArray(item.tags)) {
+        for (const tag of item.tags) {
+            if (tag.startsWith('riff-note:')) {
+                const id = tag.replace('riff-note:', '');
+                console.log('[Riff] Found in tags:', id);
+                return id;
+            }
+        }
+    }
+    
+    // 3. Check content for [RIFF:uuid] marker
+    const content = item.content || item.preview || '';
+    const riffMarkerMatch = content.match(/\[RIFF:([a-f0-9-]+)\]/i);
+    if (riffMarkerMatch) {
+        console.log('[Riff] Found in content marker:', riffMarkerMatch[1]);
+        return riffMarkerMatch[1];
+    }
+    
+    console.log('[Riff] No Riff ID found in item');
+    return null;
+}
+
+// Check if item is a Riff note
+function isRiffNote(item) {
+    return !!extractRiffNoteId(item);
+}
+
+// Open Riff note in GSX Riff tool
+function openInRiff() {
+    if (!currentPreviewItem) {
+        console.error('No item selected for Riff');
+        return;
+    }
+    
+    const riffNoteId = extractRiffNoteId(currentPreviewItem);
+    if (!riffNoteId) {
+        console.error('No Riff note ID found');
+        showNotification({ type: 'error', message: 'This item is not a Riff note' });
+        return;
+    }
+    
+    // GSX Riff deep link format
+    const baseUrl = 'https://files.edison.api.onereach.ai/public/35254342-4a2e-475b-aec1-18547e517e29/riff/index.html';
+    const deepLink = `${baseUrl}?riff=${riffNoteId}`;
+    
+    console.log('[Riff] Opening Riff note:', riffNoteId, deepLink);
+    
+    // Open in internal GSX window (not external browser)
+    if (window.clipboard && window.clipboard.openGSXWindow) {
+        window.clipboard.openGSXWindow(deepLink, 'Riff');
+        showNotification({ type: 'success', message: 'Opening in Riff...' });
+    } else if (window.electronAPI && window.electronAPI.openExternal) {
+        // Fallback to external browser
+        window.electronAPI.openExternal(deepLink);
+        showNotification({ type: 'success', message: 'Opening in browser...' });
+    } else {
+        // Last resort fallback
+        window.open(deepLink, '_blank');
+        showNotification({ type: 'info', message: 'Opened in new tab' });
+    }
+}
+
+// Show document fallback (for non-DOCX or conversion errors)
+function showDocumentFallback(viewMode, historyItem, filePath) {
+    // Get file icon based on extension
+    let fileIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 48px; height: 48px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>';
+    if (historyItem.fileExt === '.docx' || historyItem.fileExt === '.doc') {
+        fileIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="#2b579a" stroke-width="1.5" style="width: 48px; height: 48px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><text x="12" y="16" text-anchor="middle" font-size="6" font-weight="bold" fill="#2b579a" stroke="none">W</text></svg>';
+    } else if (historyItem.fileExt === '.pdf') {
+        fileIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="1.5" style="width: 48px; height: 48px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><text x="12" y="16" text-anchor="middle" font-size="5" font-weight="bold" fill="#dc2626" stroke="none">PDF</text></svg>';
+    }
+    
+    viewMode.innerHTML = `
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 20px; padding: 40px;">
+            <div style="opacity: 0.8;">${fileIcon}</div>
+            <div style="text-align: center;">
+                <div style="font-size: 16px; font-weight: 500; color: rgba(255, 255, 255, 0.9); margin-bottom: 8px;">${escapeHtml(historyItem.fileName || 'Document')}</div>
+                <div style="font-size: 12px; color: rgba(255, 255, 255, 0.5);">${formatFileSize(historyItem.fileSize)} ${historyItem.fileExt ? '• ' + historyItem.fileExt.toUpperCase().replace('.', '') : ''}</div>
+                ${historyItem.metadata?.title ? `<div style="font-size: 13px; color: rgba(255, 255, 255, 0.7); margin-top: 12px; max-width: 400px;">${escapeHtml(historyItem.metadata.title)}</div>` : ''}
+                ${historyItem.metadata?.description ? `<div style="font-size: 11px; color: rgba(255, 255, 255, 0.5); margin-top: 8px; max-width: 400px; line-height: 1.4;">${escapeHtml(historyItem.metadata.description.substring(0, 200))}${historyItem.metadata.description.length > 200 ? '...' : ''}</div>` : ''}
+            </div>
+            <button onclick="openFileInSystem('${escapeHtml(filePath)}')" style="
+                padding: 10px 24px;
+                background: rgba(255, 255, 255, 0.1);
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                border-radius: 6px;
+                color: rgba(255, 255, 255, 0.9);
+                cursor: pointer;
+                font-size: 13px;
+                transition: all 0.2s;
+            " onmouseover="this.style.background='rgba(255,255,255,0.15)'" onmouseout="this.style.background='rgba(255,255,255,0.1)'">
+                Open in Default App
+            </button>
+        </div>
+    `;
+    viewMode.style.display = 'flex';
+    viewMode.style.whiteSpace = 'normal';
+    viewMode.style.fontFamily = 'inherit';
+    viewMode.style.overflow = 'auto';
+    viewMode.style.flex = '1';
+    document.getElementById('previewModeBtn').style.display = 'none';
+}
+
 // ============================================
 // Tag Filtering Functions
 // ============================================
@@ -1660,7 +2351,7 @@ function updateTagUI() {
             selectedTagsContainer.innerHTML = selectedTags.map(tag => 
                 `<div class="selected-tag" data-tag="${escapeHtml(tag)}">
                     <span>${escapeHtml(tag)}</span>
-                    <span class="remove-tag" data-tag="${escapeHtml(tag)}">✕</span>
+                    <span class="remove-tag" data-tag="${escapeHtml(tag)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 10px; height: 10px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
                 </div>`
             ).join('');
             
@@ -1678,6 +2369,128 @@ function updateTagUI() {
     
     // Update dropdown pills
     updateTagDropdown();
+    
+    // Update sidebar tags
+    updateSidebarTags();
+}
+
+// Update sidebar tags list
+function updateSidebarTags() {
+    const container = document.getElementById('sidebarTagsList');
+    const countEl = document.getElementById('sidebarTagsCount');
+    if (!container) return;
+    
+    // Get items based on current space
+    const items = currentSpace === null ? history : history.filter(item => item.spaceId === currentSpace);
+    const tagCounts = extractAllTags(items);
+    
+    // Sort tags by count (most used first), then alphabetically
+    const sortedTags = Object.entries(tagCounts)
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    
+    // Update count badge
+    if (countEl) {
+        countEl.textContent = sortedTags.length;
+    }
+    
+    if (sortedTags.length === 0) {
+        container.innerHTML = '<div class="sidebar-tags-empty">No tags in this space</div>';
+        return;
+    }
+    
+    container.innerHTML = sortedTags.map(([tag, count]) => {
+        const isSelected = selectedTags.includes(tag);
+        const color = getTagColor(tag);
+        const colorStyle = color ? `background: ${color}; border-color: ${color};` : '';
+        return `
+            <div class="sidebar-tag-item ${isSelected ? 'selected' : ''}" 
+                 data-tag="${escapeHtml(tag)}"
+                 draggable="false">
+                <span class="sidebar-tag-indicator" style="${colorStyle}"></span>
+                <span class="sidebar-tag-name">${escapeHtml(tag)}</span>
+                <span class="sidebar-tag-count">${count}</span>
+            </div>
+        `;
+    }).join('');
+    
+    // Add click handlers
+    container.querySelectorAll('.sidebar-tag-item').forEach(item => {
+        // Right-click for color picker
+        item.addEventListener('contextmenu', (e) => {
+            showTagColorPicker(e, item.dataset.tag);
+        });
+        
+        item.addEventListener('click', () => {
+            const tag = item.dataset.tag;
+            toggleTag(tag);
+        });
+        
+        // Add drag-over handlers for tag assignment
+        item.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            item.classList.add('drag-over');
+        });
+        
+        item.addEventListener('dragleave', () => {
+            item.classList.remove('drag-over');
+        });
+        
+        item.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            item.classList.remove('drag-over');
+            const tag = item.dataset.tag;
+            
+            // Get the dragged item ID
+            const itemId = e.dataTransfer.getData('text/plain');
+            if (itemId) {
+                await addTagToItem(itemId, tag);
+            }
+        });
+    });
+}
+
+// Add a tag to an item
+async function addTagToItem(itemId, tag) {
+    try {
+        // Find the item
+        const item = history.find(h => h.id === itemId);
+        if (!item) return;
+        
+        // Get current tags
+        const currentTags = item.metadata?.tags || item.tags || [];
+        const normalizedTag = tag.trim().toLowerCase();
+        
+        // Check if tag already exists
+        const normalizedCurrentTags = currentTags.map(t => t.trim().toLowerCase());
+        if (normalizedCurrentTags.includes(normalizedTag)) {
+            console.log('Tag already exists on item');
+            return;
+        }
+        
+        // Add the tag
+        const newTags = [...currentTags, tag];
+        
+        // Update the item metadata
+        await window.clipboard.updateItemMetadata(itemId, { tags: newTags });
+        
+        // Update local state
+        if (item.metadata) {
+            item.metadata.tags = newTags;
+        } else {
+            item.metadata = { tags: newTags };
+        }
+        item.tags = newTags;
+        
+        // Refresh UI
+        updateTagUI();
+        if (currentView === 'grouped') {
+            filterItems();
+        }
+        
+        console.log(`Added tag "${tag}" to item ${itemId}`);
+    } catch (error) {
+        console.error('Error adding tag to item:', error);
+    }
 }
 
 // Check if an item matches the selected tags
@@ -1730,6 +2543,230 @@ function initTagFilter() {
 }
 
 // ============================================
+// Generative Search
+// ============================================
+
+let generativeSearchPanel = null;
+let generativeSearchProgressCleanup = null;
+
+// Initialize Generative Search UI
+function initGenerativeSearch() {
+    const searchBtn = document.getElementById('generativeSearchBtn');
+    const panelContainer = document.getElementById('generativeSearchPanelContainer');
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:initGenerativeSearch',message:'Checking GenerativeSearch dependencies',data:{searchBtnExists:!!searchBtn,panelContainerExists:!!panelContainer,GenerativeSearchPanelDefined:typeof GenerativeSearchPanel !== 'undefined'},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H5'})}).catch(()=>{});
+    // #endregion
+    
+    if (!searchBtn || !panelContainer) {
+        console.log('[GenerativeSearch] UI elements not found');
+        return;
+    }
+    
+    // Check if GenerativeSearchPanel class is available
+    if (typeof GenerativeSearchPanel === 'undefined') {
+        console.log('[GenerativeSearch] Panel class not loaded');
+        return;
+    }
+    
+    // Create the panel
+    generativeSearchPanel = new GenerativeSearchPanel(panelContainer, {
+        currentSpace: currentSpace,
+        onSearch: async (options) => {
+            try {
+                // Setup progress listener
+                if (generativeSearchProgressCleanup) {
+                    generativeSearchProgressCleanup();
+                }
+                generativeSearchProgressCleanup = window.clipboard.generativeSearch.onProgress((progress) => {
+                    if (generativeSearchPanel) {
+                        generativeSearchPanel.updateProgress(
+                            progress.percentComplete,
+                            `Processing ${progress.processed}/${progress.total} items...`
+                        );
+                    }
+                });
+                
+                // Run search
+                const results = await window.clipboard.generativeSearch.search(options);
+                
+                // Cleanup progress listener
+                if (generativeSearchProgressCleanup) {
+                    generativeSearchProgressCleanup();
+                    generativeSearchProgressCleanup = null;
+                }
+                
+                return results;
+            } catch (error) {
+                if (generativeSearchProgressCleanup) {
+                    generativeSearchProgressCleanup();
+                    generativeSearchProgressCleanup = null;
+                }
+                throw error;
+            }
+        },
+        onResults: (results) => {
+            if (results && results.length > 0) {
+                // Render the search results
+                renderGenerativeSearchResults(results);
+            } else {
+                // Clear and show message
+                filterItems();
+            }
+        },
+        onCancel: () => {
+            window.clipboard.generativeSearch.cancel();
+            if (generativeSearchProgressCleanup) {
+                generativeSearchProgressCleanup();
+                generativeSearchProgressCleanup = null;
+            }
+        }
+    });
+    
+    // Toggle panel visibility
+    searchBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isVisible = panelContainer.style.display !== 'none';
+        
+        if (isVisible) {
+            panelContainer.style.display = 'none';
+            searchBtn.classList.remove('active');
+        } else {
+            panelContainer.style.display = 'block';
+            searchBtn.classList.add('active');
+            generativeSearchPanel.setCurrentSpace(currentSpace);
+            generativeSearchPanel.show();
+        }
+    });
+    
+    // Close panel when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!panelContainer.contains(e.target) && e.target !== searchBtn && !searchBtn.contains(e.target)) {
+            if (panelContainer.style.display !== 'none') {
+                panelContainer.style.display = 'none';
+                searchBtn.classList.remove('active');
+            }
+        }
+    });
+    
+    // Prevent panel close when clicking inside
+    panelContainer.addEventListener('click', (e) => {
+        e.stopPropagation();
+    });
+    
+    console.log('[GenerativeSearch] Initialized');
+}
+
+// Render generative search results with scores
+function renderGenerativeSearchResults(results) {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:renderGenerativeSearchResults',message:'Looking for historyList element',data:{resultsLength:results?.length,historyListExists:!!document.getElementById('historyList')},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+    // #endregion
+    // FIX: Changed from 'historyContainer' to 'historyList' - the correct element ID
+    const container = document.getElementById('historyList');
+    if (!container) return;
+    
+    // Add search results indicator
+    let resultsIndicator = document.querySelector('.generative-results-indicator');
+    if (!resultsIndicator) {
+        resultsIndicator = document.createElement('div');
+        resultsIndicator.className = 'generative-results-indicator';
+        container.parentNode.insertBefore(resultsIndicator, container);
+    }
+    resultsIndicator.innerHTML = `
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: linear-gradient(135deg, rgba(147, 51, 234, 0.1), rgba(79, 70, 229, 0.1)); border: 1px solid rgba(147, 51, 234, 0.2); border-radius: 8px; margin-bottom: 12px;">
+            <span style="color: rgba(200, 180, 255, 0.9); font-size: 13px;">
+                AI Search: ${results.length} items found, sorted by relevance
+            </span>
+            <button onclick="clearGenerativeSearchResults()" style="background: rgba(147, 51, 234, 0.2); border: 1px solid rgba(147, 51, 234, 0.3); color: rgba(200, 180, 255, 0.9); padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                Clear Results
+            </button>
+        </div>
+    `;
+    
+    // Render the items with score badges and tooltips
+    const itemsWithScoreBadges = results.map((item, idx) => {
+        const score = item._search?.compositeScore || 0;
+        const scores = item._search?.scores || {};
+        
+        // #region agent log
+        if (idx === 0) {
+            fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:renderGenerativeSearchResults:scoreBadge',message:'First item score data',data:{compositeScore:score,scores:scores,_searchKeys:Object.keys(item._search||{}),itemPreview:item.preview?.substring(0,50)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-TOOLTIP'})}).catch(()=>{});
+        }
+        // #endregion
+        
+        // Build tooltip explaining the relevance
+        // Prioritize the LLM's reason explanation if available
+        const reason = item._search?.reason;
+        
+        let tooltip;
+        if (reason) {
+            // Use the LLM's explanation
+            tooltip = `${Math.round(score)}% Match\n\n${reason}`;
+        } else {
+            // Fall back to score breakdown if no reason provided
+            const scoreDetails = Object.entries(scores)
+                .filter(([key]) => key !== 'reason') // Exclude reason from scores list
+                .map(([filterId, value]) => {
+                    if (typeof value !== 'number') return null;
+                    const filterName = filterId.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+                    return `${filterName}: ${Math.round(value)}%`;
+                })
+                .filter(Boolean)
+                .join('\n');
+            
+            tooltip = scoreDetails 
+                ? `AI Relevance: ${Math.round(score)}%\n\nScore Breakdown:\n${scoreDetails}`
+                : `AI Relevance: ${Math.round(score)}%`;
+        }
+        
+        // Create tooltip content as data attribute (for custom tooltip)
+        const tooltipData = encodeURIComponent(tooltip);
+        
+        const badgeHtml = `<span class="gs-score-badge" data-tooltip="${tooltipData}" style="background: linear-gradient(135deg, rgba(147, 51, 234, 0.3), rgba(79, 70, 229, 0.3)); padding: 2px 8px; border-radius: 4px; font-size: 10px; color: rgba(200, 180, 255, 0.9); margin-left: 8px; cursor: help; position: relative;">${Math.round(score)}%</span>`;
+        // #region agent log
+        if (idx === 0) {
+            fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:badgeHtml',message:'Generated badge HTML',data:{badgeHtmlPreview:badgeHtml.substring(0,150),hasDataTooltip:badgeHtml.includes('data-tooltip'),tooltipDataPreview:tooltipData.substring(0,50)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
+        }
+        // #endregion
+        return {
+            ...item,
+            _scoreBadge: badgeHtml
+        };
+    });
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:beforeRenderHistory',message:'About to render items with badges',data:{itemCount:itemsWithScoreBadges.length,firstItemHasBadge:!!itemsWithScoreBadges[0]?._scoreBadge},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
+    // #endregion
+    
+    // Use existing render function
+    renderHistory(itemsWithScoreBadges, { showScoreBadges: true });
+    
+    // #region agent log
+    setTimeout(() => {
+        const badgesInDOM = document.querySelectorAll('.gs-score-badge');
+        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:afterRenderHistory',message:'Checking badges in DOM after render',data:{badgeCount:badgesInDOM.length,firstBadgeHtml:badgesInDOM[0]?.outerHTML?.substring(0,100)||'none'},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2,H4'})}).catch(()=>{});
+    }, 500);
+    // #endregion
+}
+
+// Clear generative search results
+function clearGenerativeSearchResults() {
+    const indicator = document.querySelector('.generative-results-indicator');
+    if (indicator) {
+        indicator.remove();
+    }
+    
+    // Reset to normal view
+    filterItems();
+    
+    // Clear panel results
+    if (generativeSearchPanel) {
+        generativeSearchPanel.clearResults();
+    }
+}
+
+// ============================================
 // Filter items (with tag support)
 // ============================================
 
@@ -1747,7 +2784,7 @@ function filterItems() {
                 if (item.type === 'file' && item.fileExt === '.md') return true;
                 return false;
             }
-            if (currentFilter === 'riff') return !!item.metadata?.riffNoteId;
+            if (currentFilter === 'riff') return isRiffNote(item);
             if (currentFilter === 'html') {
                 // HTML type items and .html files
                 if (item.type === 'html') return true;
@@ -1760,10 +2797,13 @@ function filterItems() {
             if (currentFilter === 'flow') return item.type === 'file' && (item.fileType === 'flow' || item.fileCategory === 'flow');
             if (currentFilter === 'notebook') return item.type === 'file' && (item.fileType === 'notebook' || item.fileCategory === 'notebook');
             if (currentFilter === 'data') return item.source === 'data' || (item.type === 'file' && item.fileCategory === 'data');
-            // Style-guide and journey-map can be either file type or text type (pasted JSON)
-            if (currentFilter === 'style-guide') return item.jsonSubtype === 'style-guide';
-            if (currentFilter === 'journey-map') return item.jsonSubtype === 'journey-map';
+            // Style-guide, journey-map, and chatbot-conversation can be either file type or text type (pasted JSON)
+            // Check both item.jsonSubtype and item.metadata.jsonSubtype since data may be stored in either location
+            if (currentFilter === 'style-guide') return item.jsonSubtype === 'style-guide' || item.metadata?.jsonSubtype === 'style-guide';
+            if (currentFilter === 'journey-map') return item.jsonSubtype === 'journey-map' || item.metadata?.jsonSubtype === 'journey-map';
+            if (currentFilter === 'chatbot-conversation') return item.jsonSubtype === 'chatbot-conversation' || item.metadata?.jsonSubtype === 'chatbot-conversation';
             if (currentFilter === 'spreadsheet') return item.source === 'spreadsheet' || (item.type === 'file' && (item.fileExt === '.xls' || item.fileExt === '.xlsx' || item.fileExt === '.ods'));
+            if (currentFilter === 'presentation') return item.type === 'file' && (item.fileCategory === 'presentation' || item.fileExt === '.ppt' || item.fileExt === '.pptx' || item.fileExt === '.key' || item.fileExt === '.odp');
             if (currentFilter === 'pdf') return item.type === 'file' && item.fileType === 'pdf';
             if (currentFilter === 'url') return item.source === 'url';
             if (currentFilter === 'image') return item.type === 'image' || (item.type === 'file' && item.fileType === 'image-file');
@@ -1780,7 +2820,12 @@ function filterItems() {
         items = items.filter(itemMatchesTags);
     }
     
-    renderHistory(items);
+    // Render with appropriate view mode
+    if (currentView === 'grouped') {
+        renderGroupedView(items);
+    } else {
+        renderHistory(items);
+    }
 }
 
 // Search items
@@ -1807,10 +2852,13 @@ async function searchItems(query) {
             if (currentFilter === 'flow') return item.type === 'file' && (item.fileType === 'flow' || item.fileCategory === 'flow');
             if (currentFilter === 'notebook') return item.type === 'file' && (item.fileType === 'notebook' || item.fileCategory === 'notebook');
             if (currentFilter === 'data') return item.source === 'data' || (item.type === 'file' && item.fileCategory === 'data');
-            // Style-guide and journey-map can be either file type or text type (pasted JSON)
-            if (currentFilter === 'style-guide') return item.jsonSubtype === 'style-guide';
-            if (currentFilter === 'journey-map') return item.jsonSubtype === 'journey-map';
+            // Style-guide, journey-map, and chatbot-conversation can be either file type or text type (pasted JSON)
+            // Check both item.jsonSubtype and item.metadata.jsonSubtype since data may be stored in either location
+            if (currentFilter === 'style-guide') return item.jsonSubtype === 'style-guide' || item.metadata?.jsonSubtype === 'style-guide';
+            if (currentFilter === 'journey-map') return item.jsonSubtype === 'journey-map' || item.metadata?.jsonSubtype === 'journey-map';
+            if (currentFilter === 'chatbot-conversation') return item.jsonSubtype === 'chatbot-conversation' || item.metadata?.jsonSubtype === 'chatbot-conversation';
             if (currentFilter === 'spreadsheet') return item.source === 'spreadsheet' || (item.type === 'file' && (item.fileExt === '.xls' || item.fileExt === '.xlsx' || item.fileExt === '.ods'));
+            if (currentFilter === 'presentation') return item.type === 'file' && (item.fileCategory === 'presentation' || item.fileExt === '.ppt' || item.fileExt === '.pptx' || item.fileExt === '.key' || item.fileExt === '.odp');
             if (currentFilter === 'pdf') return item.type === 'file' && item.fileType === 'pdf';
             if (currentFilter === 'url') return item.source === 'url';
             if (currentFilter === 'image') return item.type === 'image' || (item.type === 'file' && item.fileType === 'image-file');
@@ -1822,7 +2870,7 @@ async function searchItems(query) {
                 if (item.type === 'file' && item.fileExt === '.md') return true;
                 return false;
             }
-            if (currentFilter === 'riff') return !!item.metadata?.riffNoteId;
+            if (currentFilter === 'riff') return isRiffNote(item);
             if (currentFilter === 'html') {
                 if (item.type === 'html') return true;
                 if (item.type === 'generated-document' || item.metadata?.type === 'generated-document') return true;
@@ -1839,7 +2887,12 @@ async function searchItems(query) {
         filtered = filtered.filter(itemMatchesTags);
     }
     
-    renderHistory(filtered);
+    // Render with appropriate view mode
+    if (currentView === 'grouped') {
+        renderGroupedView(filtered);
+    } else {
+        renderHistory(filtered);
+    }
 }
 
 // Show context menu with smart positioning to prevent cut-off
@@ -2091,57 +3144,83 @@ async function handleFormatExport(spaceId, format, options = {}) {
     }
 }
 
-// Show notification
+// Show notification (handles both string and object formats)
+// This function is intentionally duplicated to override the simpler one above
 function showNotification(options) {
+    // Handle string input (simple message)
+    if (typeof options === 'string') {
+        options = { message: options, type: 'info' };
+    }
+    
+    // Determine colors based on type
+    let bgColor = 'rgba(26, 26, 37, 0.95)';
+    let borderColor = 'rgba(99, 102, 241, 0.5)';
+    if (options.type === 'success') {
+        bgColor = 'rgba(16, 185, 129, 0.9)';
+        borderColor = 'rgba(16, 185, 129, 0.8)';
+    } else if (options.type === 'error') {
+        bgColor = 'rgba(239, 68, 68, 0.9)';
+        borderColor = 'rgba(239, 68, 68, 0.8)';
+    } else if (options.type === 'warning') {
+        bgColor = 'rgba(245, 158, 11, 0.9)';
+        borderColor = 'rgba(245, 158, 11, 0.8)';
+    }
+    
     // Create notification element
     const notification = document.createElement('div');
     notification.style.cssText = `
         position: fixed;
         bottom: 20px;
         right: 20px;
-        background: ${options.type === 'success' ? 'rgba(76, 175, 80, 0.9)' : 'rgba(244, 67, 54, 0.9)'};
+        background: ${bgColor};
         color: #fff;
-        padding: 16px 24px;
+        padding: 12px 20px;
         border-radius: 8px;
-        font-size: 14px;
-        z-index: 10000;
-        animation: slideIn 0.3s ease;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        border: 1px solid ${borderColor};
+        font-size: 13px;
+        z-index: 10001;
+        animation: notifSlideIn 0.3s ease;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
         max-width: 400px;
     `;
     
-    notification.innerHTML = `
-        <div style="font-weight: 500; margin-bottom: 4px;">${options.title}</div>
-        <div style="opacity: 0.9;">${options.body}</div>
-    `;
+    // Build content - support both {title, body} and {message} formats
+    const title = options.title;
+    const body = options.body || options.message || '';
     
-    // Add animation keyframes
-    const style = document.createElement('style');
-    style.textContent = `
-        @keyframes slideIn {
-            from {
-                opacity: 0;
-                transform: translateX(100px);
+    if (title) {
+        notification.innerHTML = `
+            <div style="font-weight: 500; margin-bottom: 4px;">${title}</div>
+            <div style="opacity: 0.9;">${body}</div>
+        `;
+    } else {
+        notification.textContent = body;
+    }
+    
+    // Add animation keyframes if not already added
+    if (!document.getElementById('notif-animations')) {
+        const style = document.createElement('style');
+        style.id = 'notif-animations';
+        style.textContent = `
+            @keyframes notifSlideIn {
+                from { opacity: 0; transform: translateX(100px); }
+                to { opacity: 1; transform: translateX(0); }
             }
-            to {
-                opacity: 1;
-                transform: translateX(0);
+            @keyframes notifSlideOut {
+                from { opacity: 1; transform: translateX(0); }
+                to { opacity: 0; transform: translateX(100px); }
             }
-        }
-    `;
-    document.head.appendChild(style);
+        `;
+        document.head.appendChild(style);
+    }
     
     document.body.appendChild(notification);
     
-    // Remove after 5 seconds
+    // Remove after 4 seconds
     setTimeout(() => {
-        notification.style.opacity = '0';
-        notification.style.transform = 'translateX(100px)';
-        setTimeout(() => {
-            notification.remove();
-            style.remove();
-        }, 300);
-    }, 5000);
+        notification.style.animation = 'notifSlideOut 0.3s ease forwards';
+        setTimeout(() => notification.remove(), 300);
+    }, 4000);
 }
 
 // Show move to space modal
@@ -2164,10 +3243,98 @@ async function showMoveToSpaceModal(itemId) {
                             transition: all 0.2s;
                         ">
                             <span class="space-icon" style="font-size: 18px; margin-right: 12px;">${space.icon}</span>
-                            <span class="space-name" style="flex: 1;">${space.name}</span>
+                            <span class="space-name" style="flex: 1;">${escapeHtml(typeof space.name === 'string' ? space.name : 'Unnamed Space')}</span>
                             <span class="space-count" style="font-size: 12px; color: rgba(255, 255, 255, 0.5);">${space.itemCount || 0} items</span>
                         </div>
                     `).join('')}
+                    <!-- Create New Space Accordion -->
+                    <div id="createNewSpaceAccordion" style="margin-top: 8px;">
+                        <div class="create-space-header" id="createNewSpaceHeader" style="
+                            display: flex;
+                            align-items: center;
+                            padding: 12px;
+                            cursor: pointer;
+                            border-radius: 8px;
+                            border: 2px dashed rgba(255, 255, 255, 0.2);
+                            background: rgba(99, 102, 241, 0.1);
+                            transition: all 0.2s;
+                        ">
+                            <span class="chevron" id="createSpaceChevron" style="margin-right: 8px; transition: transform 0.2s; color: rgba(99, 102, 241, 1);">▶</span>
+                            <span style="font-size: 18px; margin-right: 12px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 18px; height: 18px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></span>
+                            <span style="flex: 1; color: rgba(99, 102, 241, 1);">Create New Space</span>
+                        </div>
+                        <div class="create-space-form" id="createNewSpaceForm" style="
+                            display: none;
+                            padding: 16px;
+                            background: rgba(0, 0, 0, 0.3);
+                            border-radius: 8px;
+                            margin-top: 8px;
+                            border: 1px solid rgba(99, 102, 241, 0.2);
+                        ">
+                            <div style="margin-bottom: 12px;">
+                                <input type="text" id="newSpaceNameMove" placeholder="Enter space name..." style="
+                                    width: 100%;
+                                    padding: 10px;
+                                    background: rgba(255, 255, 255, 0.05);
+                                    border: 1px solid rgba(255, 255, 255, 0.2);
+                                    border-radius: 6px;
+                                    color: #fff;
+                                    font-size: 14px;
+                                ">
+                            </div>
+                            <div style="margin-bottom: 12px;">
+                                <div style="font-size: 12px; color: rgba(255, 255, 255, 0.5); margin-bottom: 6px;">Icon</div>
+                                <div id="iconPickerMove" style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                    <div class="icon-option-inline selected" data-icon="◆" style="
+                                        width: 32px;
+                                        height: 32px;
+                                        display: flex;
+                                        align-items: center;
+                                        justify-content: center;
+                                        border-radius: 6px;
+                                        background: rgba(255, 255, 255, 0.1);
+                                        cursor: pointer;
+                                        transition: all 0.2s;
+                                        border: 2px solid transparent;
+                                    ">◆</div>
+                                    <div class="icon-option-inline" data-icon="●" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: rgba(255, 255, 255, 0.1); cursor: pointer; transition: all 0.2s; border: 2px solid transparent;">●</div>
+                                    <div class="icon-option-inline" data-icon="■" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: rgba(255, 255, 255, 0.1); cursor: pointer; transition: all 0.2s; border: 2px solid transparent;">■</div>
+                                    <div class="icon-option-inline" data-icon="▲" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: rgba(255, 255, 255, 0.1); cursor: pointer; transition: all 0.2s; border: 2px solid transparent;">▲</div>
+                                    <div class="icon-option-inline" data-icon="◉" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: rgba(255, 255, 255, 0.1); cursor: pointer; transition: all 0.2s; border: 2px solid transparent;">◉</div>
+                                    <div class="icon-option-inline" data-icon="◎" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: rgba(255, 255, 255, 0.1); cursor: pointer; transition: all 0.2s; border: 2px solid transparent;">◎</div>
+                                    <div class="icon-option-inline" data-icon="◇" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: rgba(255, 255, 255, 0.1); cursor: pointer; transition: all 0.2s; border: 2px solid transparent;">◇</div>
+                                    <div class="icon-option-inline" data-icon="○" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: rgba(255, 255, 255, 0.1); cursor: pointer; transition: all 0.2s; border: 2px solid transparent;">○</div>
+                                    <div class="icon-option-inline" data-icon="□" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: rgba(255, 255, 255, 0.1); cursor: pointer; transition: all 0.2s; border: 2px solid transparent;">□</div>
+                                    <div class="icon-option-inline" data-icon="△" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: rgba(255, 255, 255, 0.1); cursor: pointer; transition: all 0.2s; border: 2px solid transparent;">△</div>
+                                </div>
+                            </div>
+                            <div style="display: flex; gap: 8px;">
+                                <button id="cancelCreateMove" style="
+                                    flex: 1;
+                                    padding: 10px;
+                                    background: rgba(255, 255, 255, 0.1);
+                                    border: 1px solid rgba(255, 255, 255, 0.2);
+                                    border-radius: 6px;
+                                    color: #fff;
+                                    cursor: pointer;
+                                    font-size: 14px;
+                                    transition: all 0.2s;
+                                ">Cancel</button>
+                                <button id="confirmCreateMove" style="
+                                    flex: 1;
+                                    padding: 10px;
+                                    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+                                    border: none;
+                                    border-radius: 6px;
+                                    color: #fff;
+                                    cursor: pointer;
+                                    font-size: 14px;
+                                    font-weight: 500;
+                                    transition: all 0.2s;
+                                ">Create</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <div class="modal-buttons">
                     <button class="btn btn-secondary" onclick="document.getElementById('moveToSpaceModal').remove()">Cancel</button>
@@ -2181,6 +3348,112 @@ async function showMoveToSpaceModal(itemId) {
     
     // Add hover effects with inline event handlers
     const modal = document.getElementById('moveToSpaceModal');
+    
+    // Setup accordion for "Create New Space"
+    const createHeader = document.getElementById('createNewSpaceHeader');
+    const createForm = document.getElementById('createNewSpaceForm');
+    const createChevron = document.getElementById('createSpaceChevron');
+    const newSpaceInput = document.getElementById('newSpaceNameMove');
+    const iconPicker = document.getElementById('iconPickerMove');
+    const cancelBtn = document.getElementById('cancelCreateMove');
+    const confirmBtn = document.getElementById('confirmCreateMove');
+    
+    // Hover effects for header
+    createHeader.addEventListener('mouseenter', () => {
+        createHeader.style.background = 'rgba(99, 102, 241, 0.2)';
+        createHeader.style.borderColor = 'rgba(99, 102, 241, 0.5)';
+    });
+    createHeader.addEventListener('mouseleave', () => {
+        createHeader.style.background = 'rgba(99, 102, 241, 0.1)';
+        createHeader.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+    });
+    
+    // Toggle accordion
+    createHeader.addEventListener('click', () => {
+        const isExpanded = createForm.style.display !== 'none';
+        if (isExpanded) {
+            createForm.style.display = 'none';
+            createChevron.style.transform = 'rotate(0deg)';
+        } else {
+            createForm.style.display = 'block';
+            createChevron.style.transform = 'rotate(90deg)';
+            setTimeout(() => newSpaceInput.focus(), 100);
+        }
+    });
+    
+    // Icon picker selection
+    iconPicker.querySelectorAll('.icon-option-inline').forEach(option => {
+        option.addEventListener('click', () => {
+            iconPicker.querySelectorAll('.icon-option-inline').forEach(opt => {
+                opt.classList.remove('selected');
+                opt.style.borderColor = 'transparent';
+                opt.style.background = 'rgba(255, 255, 255, 0.1)';
+            });
+            option.classList.add('selected');
+            option.style.borderColor = 'rgba(99, 102, 241, 0.8)';
+            option.style.background = 'rgba(99, 102, 241, 0.2)';
+        });
+        option.addEventListener('mouseenter', () => {
+            if (!option.classList.contains('selected')) {
+                option.style.background = 'rgba(255, 255, 255, 0.15)';
+            }
+        });
+        option.addEventListener('mouseleave', () => {
+            if (!option.classList.contains('selected')) {
+                option.style.background = 'rgba(255, 255, 255, 0.1)';
+            }
+        });
+    });
+    
+    // Cancel button
+    cancelBtn.addEventListener('click', () => {
+        createForm.style.display = 'none';
+        createChevron.style.transform = 'rotate(0deg)';
+        newSpaceInput.value = '';
+    });
+    
+    // Create button - will be wired up in next step
+    confirmBtn.addEventListener('click', async () => {
+        const name = newSpaceInput.value.trim();
+        if (!name) {
+            alert('Please enter a space name');
+            return;
+        }
+        
+        const selectedIcon = iconPicker.querySelector('.icon-option-inline.selected');
+        const icon = selectedIcon ? selectedIcon.dataset.icon : '◆';
+        
+        try {
+            // Create the space
+            const result = await window.clipboard.createSpace({ name, icon, notebook: {} });
+            const newSpaceId = result?.space?.id;
+            
+            if (newSpaceId) {
+                // Move the item to the new space
+                await window.clipboard.moveToSpace(itemId, newSpaceId);
+                await loadSpaces();
+                await loadHistory();
+                modal.remove();
+                hideContextMenu();
+                showNotification(`✓ Moved to new space "${name}"`);
+            } else {
+                throw new Error('Failed to create space');
+            }
+        } catch (error) {
+            console.error('Error creating space and moving item:', error);
+            alert('Failed to create space: ' + error.message);
+        }
+    });
+    
+    // Enter key to submit
+    newSpaceInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            confirmBtn.click();
+        } else if (e.key === 'Escape') {
+            cancelBtn.click();
+        }
+    });
+    
     modal.querySelectorAll('.space-select-item').forEach(item => {
         item.addEventListener('mouseenter', () => {
             item.style.background = 'rgba(255, 255, 255, 0.1)';
@@ -2227,7 +3500,7 @@ async function showPasteToSpaceModal() {
     const modalHtml = `
         <div class="modal-overlay" id="pasteToSpaceModal" style="display: flex;">
             <div class="modal" style="width: 400px;">
-                <h2 class="modal-title">📋 Paste into Space</h2>
+                <h2 class="modal-title">Paste into Space</h2>
                 <p style="color: rgba(255, 255, 255, 0.6); margin-bottom: 16px; font-size: 13px;">
                     Choose a space to paste your clipboard content into:
                 </p>
@@ -2242,7 +3515,7 @@ async function showPasteToSpaceModal() {
                         background: rgba(255, 255, 255, 0.05);
                         transition: all 0.2s;
                     ">
-                        <span class="space-icon" style="font-size: 18px; margin-right: 12px;">📥</span>
+                        <span class="space-icon" style="font-size: 18px; margin-right: 12px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 18px; height: 18px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span>
                         <span class="space-name" style="flex: 1;">Unclassified</span>
                     </div>
                     ${spacesData.map(space => `
@@ -2257,10 +3530,98 @@ async function showPasteToSpaceModal() {
                             transition: all 0.2s;
                         ">
                             <span class="space-icon" style="font-size: 18px; margin-right: 12px;">${space.icon}</span>
-                            <span class="space-name" style="flex: 1;">${space.name}</span>
+                            <span class="space-name" style="flex: 1;">${escapeHtml(typeof space.name === 'string' ? space.name : 'Unnamed Space')}</span>
                             <span class="space-count" style="font-size: 12px; color: rgba(255, 255, 255, 0.5);">${space.itemCount || 0} items</span>
                         </div>
                     `).join('')}
+                    <!-- Create New Space Accordion -->
+                    <div id="createNewSpaceAccordionPaste" style="margin-top: 8px;">
+                        <div class="create-space-header" id="createNewSpaceHeaderPaste" style="
+                            display: flex;
+                            align-items: center;
+                            padding: 12px;
+                            cursor: pointer;
+                            border-radius: 8px;
+                            border: 2px dashed rgba(255, 255, 255, 0.2);
+                            background: rgba(99, 102, 241, 0.1);
+                            transition: all 0.2s;
+                        ">
+                            <span class="chevron" id="createSpaceChevronPaste" style="margin-right: 8px; transition: transform 0.2s; color: rgba(99, 102, 241, 1);">▶</span>
+                            <span style="font-size: 18px; margin-right: 12px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 18px; height: 18px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></span>
+                            <span style="flex: 1; color: rgba(99, 102, 241, 1);">Create New Space</span>
+                        </div>
+                        <div class="create-space-form" id="createNewSpaceFormPaste" style="
+                            display: none;
+                            padding: 16px;
+                            background: rgba(0, 0, 0, 0.3);
+                            border-radius: 8px;
+                            margin-top: 8px;
+                            border: 1px solid rgba(99, 102, 241, 0.2);
+                        ">
+                            <div style="margin-bottom: 12px;">
+                                <input type="text" id="newSpaceNamePaste" placeholder="Enter space name..." style="
+                                    width: 100%;
+                                    padding: 10px;
+                                    background: rgba(255, 255, 255, 0.05);
+                                    border: 1px solid rgba(255, 255, 255, 0.2);
+                                    border-radius: 6px;
+                                    color: #fff;
+                                    font-size: 14px;
+                                ">
+                            </div>
+                            <div style="margin-bottom: 12px;">
+                                <div style="font-size: 12px; color: rgba(255, 255, 255, 0.5); margin-bottom: 6px;">Icon</div>
+                                <div id="iconPickerPaste" style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                    <div class="icon-option-inline selected" data-icon="◆" style="
+                                        width: 32px;
+                                        height: 32px;
+                                        display: flex;
+                                        align-items: center;
+                                        justify-content: center;
+                                        border-radius: 6px;
+                                        background: rgba(255, 255, 255, 0.1);
+                                        cursor: pointer;
+                                        transition: all 0.2s;
+                                        border: 2px solid transparent;
+                                    ">◆</div>
+                                    <div class="icon-option-inline" data-icon="●" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: rgba(255, 255, 255, 0.1); cursor: pointer; transition: all 0.2s; border: 2px solid transparent;">●</div>
+                                    <div class="icon-option-inline" data-icon="■" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: rgba(255, 255, 255, 0.1); cursor: pointer; transition: all 0.2s; border: 2px solid transparent;">■</div>
+                                    <div class="icon-option-inline" data-icon="▲" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: rgba(255, 255, 255, 0.1); cursor: pointer; transition: all 0.2s; border: 2px solid transparent;">▲</div>
+                                    <div class="icon-option-inline" data-icon="◉" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: rgba(255, 255, 255, 0.1); cursor: pointer; transition: all 0.2s; border: 2px solid transparent;">◉</div>
+                                    <div class="icon-option-inline" data-icon="◎" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: rgba(255, 255, 255, 0.1); cursor: pointer; transition: all 0.2s; border: 2px solid transparent;">◎</div>
+                                    <div class="icon-option-inline" data-icon="◇" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: rgba(255, 255, 255, 0.1); cursor: pointer; transition: all 0.2s; border: 2px solid transparent;">◇</div>
+                                    <div class="icon-option-inline" data-icon="○" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: rgba(255, 255, 255, 0.1); cursor: pointer; transition: all 0.2s; border: 2px solid transparent;">○</div>
+                                    <div class="icon-option-inline" data-icon="□" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: rgba(255, 255, 255, 0.1); cursor: pointer; transition: all 0.2s; border: 2px solid transparent;">□</div>
+                                    <div class="icon-option-inline" data-icon="△" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: rgba(255, 255, 255, 0.1); cursor: pointer; transition: all 0.2s; border: 2px solid transparent;">△</div>
+                                </div>
+                            </div>
+                            <div style="display: flex; gap: 8px;">
+                                <button id="cancelCreatePaste" style="
+                                    flex: 1;
+                                    padding: 10px;
+                                    background: rgba(255, 255, 255, 0.1);
+                                    border: 1px solid rgba(255, 255, 255, 0.2);
+                                    border-radius: 6px;
+                                    color: #fff;
+                                    cursor: pointer;
+                                    font-size: 14px;
+                                    transition: all 0.2s;
+                                ">Cancel</button>
+                                <button id="confirmCreatePaste" style="
+                                    flex: 1;
+                                    padding: 10px;
+                                    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+                                    border: none;
+                                    border-radius: 6px;
+                                    color: #fff;
+                                    cursor: pointer;
+                                    font-size: 14px;
+                                    font-weight: 500;
+                                    transition: all 0.2s;
+                                ">Create</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <div class="modal-buttons">
                     <button class="btn btn-secondary" onclick="document.getElementById('pasteToSpaceModal').remove()">Cancel</button>
@@ -2274,6 +3635,109 @@ async function showPasteToSpaceModal() {
     
     // Add hover effects and click handlers
     const modal = document.getElementById('pasteToSpaceModal');
+    
+    // Setup accordion for "Create New Space"
+    const createHeader = document.getElementById('createNewSpaceHeaderPaste');
+    const createForm = document.getElementById('createNewSpaceFormPaste');
+    const createChevron = document.getElementById('createSpaceChevronPaste');
+    const newSpaceInput = document.getElementById('newSpaceNamePaste');
+    const iconPicker = document.getElementById('iconPickerPaste');
+    const cancelBtn = document.getElementById('cancelCreatePaste');
+    const confirmBtn = document.getElementById('confirmCreatePaste');
+    
+    // Hover effects for header
+    createHeader.addEventListener('mouseenter', () => {
+        createHeader.style.background = 'rgba(99, 102, 241, 0.2)';
+        createHeader.style.borderColor = 'rgba(99, 102, 241, 0.5)';
+    });
+    createHeader.addEventListener('mouseleave', () => {
+        createHeader.style.background = 'rgba(99, 102, 241, 0.1)';
+        createHeader.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+    });
+    
+    // Toggle accordion
+    createHeader.addEventListener('click', () => {
+        const isExpanded = createForm.style.display !== 'none';
+        if (isExpanded) {
+            createForm.style.display = 'none';
+            createChevron.style.transform = 'rotate(0deg)';
+        } else {
+            createForm.style.display = 'block';
+            createChevron.style.transform = 'rotate(90deg)';
+            setTimeout(() => newSpaceInput.focus(), 100);
+        }
+    });
+    
+    // Icon picker selection
+    iconPicker.querySelectorAll('.icon-option-inline').forEach(option => {
+        option.addEventListener('click', () => {
+            iconPicker.querySelectorAll('.icon-option-inline').forEach(opt => {
+                opt.classList.remove('selected');
+                opt.style.borderColor = 'transparent';
+                opt.style.background = 'rgba(255, 255, 255, 0.1)';
+            });
+            option.classList.add('selected');
+            option.style.borderColor = 'rgba(99, 102, 241, 0.8)';
+            option.style.background = 'rgba(99, 102, 241, 0.2)';
+        });
+        option.addEventListener('mouseenter', () => {
+            if (!option.classList.contains('selected')) {
+                option.style.background = 'rgba(255, 255, 255, 0.15)';
+            }
+        });
+        option.addEventListener('mouseleave', () => {
+            if (!option.classList.contains('selected')) {
+                option.style.background = 'rgba(255, 255, 255, 0.1)';
+            }
+        });
+    });
+    
+    // Cancel button
+    cancelBtn.addEventListener('click', () => {
+        createForm.style.display = 'none';
+        createChevron.style.transform = 'rotate(0deg)';
+        newSpaceInput.value = '';
+    });
+    
+    // Create button - create space and paste immediately
+    confirmBtn.addEventListener('click', async () => {
+        const name = newSpaceInput.value.trim();
+        if (!name) {
+            alert('Please enter a space name');
+            return;
+        }
+        
+        const selectedIcon = iconPicker.querySelector('.icon-option-inline.selected');
+        const icon = selectedIcon ? selectedIcon.dataset.icon : '◆';
+        
+        try {
+            // Create the space
+            const result = await window.clipboard.createSpace({ name, icon, notebook: {} });
+            const newSpaceId = result?.space?.id;
+            
+            if (newSpaceId) {
+                // Paste into the new space
+                modal.remove();
+                await pasteIntoSpace(newSpaceId);
+                showNotification(`✓ Pasted into new space "${name}"`);
+            } else {
+                throw new Error('Failed to create space');
+            }
+        } catch (error) {
+            console.error('[PasteModal] Error creating space and pasting:', error);
+            showNotification('❌ Failed to create space: ' + error.message);
+        }
+    });
+    
+    // Enter key to submit
+    newSpaceInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            confirmBtn.click();
+        } else if (e.key === 'Escape') {
+            cancelBtn.click();
+        }
+    });
+    
     modal.querySelectorAll('.space-select-item').forEach(item => {
         item.addEventListener('mouseenter', () => {
             item.style.background = 'rgba(99, 102, 241, 0.3)';
@@ -2532,16 +3996,61 @@ async function showMetadataModal(itemId) {
     // Update header with asset info
     const assetType = item.fileCategory || item.fileType || item.type;
     const typeConfig = {
-        'video': { icon: '🎬', name: 'Video', color: '#8b5cf6' },
-        'audio': { icon: '🎵', name: 'Audio', color: '#f59e0b' },
-        'code': { icon: '💻', name: 'Code', color: '#10b981' },
-        'pdf': { icon: '📄', name: 'PDF', color: '#ef4444' },
-        'data': { icon: '📊', name: 'Data', color: '#06b6d4' },
-        'image': { icon: '🖼️', name: 'Image', color: '#ec4899' },
-        'html': { icon: '🗂️', name: 'Document', color: '#6366f1' },
-        'url': { icon: '🌐', name: 'Web Link', color: '#3b82f6' },
-        'text': { icon: '📝', name: 'Text', color: '#64748b' },
-        'file': { icon: '📁', name: 'File', color: '#78716c' }
+        'video': { 
+            icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="5" width="20" height="14" rx="2"/><polygon points="10 8 16 12 10 16"/></svg>', 
+            name: 'Video', 
+            color: '#8b5cf6' 
+        },
+        'audio': { 
+            icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>', 
+            name: 'Audio', 
+            color: '#f59e0b' 
+        },
+        'code': { 
+            icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>', 
+            name: 'Code', 
+            color: '#10b981' 
+        },
+        'pdf': { 
+            icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M7 11h10M7 15h10"/></svg>', 
+            name: 'PDF', 
+            color: '#ef4444' 
+        },
+        'data': { 
+            icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 7h10M7 12h10M7 17h6"/></svg>', 
+            name: 'Data', 
+            color: '#06b6d4' 
+        },
+        'image': { 
+            icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>', 
+            name: 'Image', 
+            color: '#ec4899' 
+        },
+        'html': { 
+            icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>', 
+            name: 'Document', 
+            color: '#6366f1' 
+        },
+        'url': { 
+            icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>', 
+            name: 'Web Link', 
+            color: '#3b82f6' 
+        },
+        'web-monitor': { 
+            icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/><path d="M12 6v6l4 2"/></svg>', 
+            name: 'Web Monitor', 
+            color: '#4a9eff' 
+        },
+        'text': { 
+            icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 7h16M4 12h16M4 17h10"/></svg>', 
+            name: 'Text', 
+            color: '#64748b' 
+        },
+        'file': { 
+            icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>', 
+            name: 'File', 
+            color: '#78716c' 
+        }
     };
     
     const config = typeConfig[assetType] || typeConfig['file'];
@@ -2552,7 +4061,7 @@ async function showMetadataModal(itemId) {
     const typeBadgeEl = document.getElementById('metadataTypeBadge');
     const fileNameEl = document.getElementById('metadataFileName');
     
-    if (assetIconEl) assetIconEl.textContent = config.icon;
+    if (assetIconEl) assetIconEl.innerHTML = config.icon; // Use innerHTML for SVG
     if (titleEl) titleEl.textContent = metadata.title || item.fileName || 'Untitled';
     if (typeBadgeEl) typeBadgeEl.textContent = config.name;
     if (fileNameEl) fileNameEl.textContent = item.fileName || '';
@@ -2711,18 +4220,21 @@ async function showMetadataModal(itemId) {
                 if (text) {
                     navigator.clipboard.writeText(text);
                     copyTranscriptBtn.textContent = '✓ Copied!';
-                    setTimeout(() => { copyTranscriptBtn.textContent = '📋 Copy'; }, 2000);
+                    setTimeout(() => { copyTranscriptBtn.textContent = 'Copy'; }, 2000);
                 }
             };
         }
         
         // Extract Audio button - show for video files
         const extractAudioBtn = document.getElementById('extractAudioBtn');
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:showMetadataModal:extractAudioBtn',message:'Checking extractAudioBtn element',data:{extractAudioBtnExists:!!extractAudioBtn,itemId:item?.id,fileCategory:item?.fileCategory,fileType:item?.fileType},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
+        // #endregion
         const isVideo = item?.fileCategory === 'video' || item?.fileType?.startsWith('video/');
         if (isVideo && extractAudioBtn) {
             // Check if audio already extracted
             if (metadata.audioPath) {
-                extractAudioBtn.textContent = '🎵 Download Audio';
+                extractAudioBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 6px;"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg> Download Audio';
                 extractAudioBtn.style.display = 'inline-block';
                 extractAudioBtn.onclick = () => {
                     // Open file in finder/downloads
@@ -2733,7 +4245,7 @@ async function showMetadataModal(itemId) {
                     }
                 };
             } else {
-                extractAudioBtn.textContent = '🎵 Extract Audio';
+                extractAudioBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 6px;"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg> Extract Audio';
                 extractAudioBtn.style.display = 'inline-block';
                 extractAudioBtn.onclick = async () => {
                     extractAudioBtn.disabled = true;
@@ -2756,12 +4268,12 @@ async function showMetadataModal(itemId) {
                         if (removeProgressListener) removeProgressListener();
                         
                         if (result.success) {
-                            extractAudioBtn.textContent = '✅ Audio Ready';
+                            extractAudioBtn.textContent = 'Audio Ready';
                             extractAudioBtn.style.background = 'rgba(34, 197, 94, 0.6)';
                             
                             // Update button to download
                             setTimeout(() => {
-                                extractAudioBtn.textContent = '🎵 Download Audio';
+                                extractAudioBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 6px;"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg> Download Audio';
                                 extractAudioBtn.style.background = '';
                                 extractAudioBtn.disabled = false;
                                 extractAudioBtn.onclick = () => {
@@ -2776,7 +4288,7 @@ async function showMetadataModal(itemId) {
                             extractAudioBtn.textContent = '❌ Failed';
                             alert('Error: ' + result.error);
                             setTimeout(() => {
-                                extractAudioBtn.textContent = '🎵 Extract Audio';
+                                extractAudioBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 6px;"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg> Extract Audio';
                                 extractAudioBtn.disabled = false;
                             }, 2000);
                         }
@@ -2787,7 +4299,7 @@ async function showMetadataModal(itemId) {
                         extractAudioBtn.textContent = '❌ Error';
                         alert('Error: ' + e.message);
                         setTimeout(() => {
-                            extractAudioBtn.textContent = '🎵 Extract Audio';
+                            extractAudioBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 6px;"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg> Extract Audio';
                             extractAudioBtn.disabled = false;
                         }, 2000);
                     }
@@ -2887,19 +4399,19 @@ async function showMetadataModal(itemId) {
                         identifySpeakersBtn.textContent = '✓ Done';
                         identifySpeakersBtn.style.background = 'rgba(34, 197, 94, 0.6)';
                         setTimeout(() => {
-                            identifySpeakersBtn.textContent = '✨ Re-analyze';
+                            identifySpeakersBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 6px;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> Re-analyze';
                             identifySpeakersBtn.style.background = '';
                             identifySpeakersBtn.disabled = false;
                         }, 3000);
                     } else {
                         transcriptInfo.textContent = 'Error: ' + result.error;
-                        identifySpeakersBtn.textContent = '✨ Retry';
+                        identifySpeakersBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 6px;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> Retry';
                         identifySpeakersBtn.disabled = false;
                     }
                 } catch (e) {
                     console.error('[SpeakerID] Error:', e);
                     transcriptInfo.textContent = 'Error: ' + e.message;
-                    identifySpeakersBtn.textContent = '✨ Retry';
+                    identifySpeakersBtn.textContent = 'Retry';
                     identifySpeakersBtn.disabled = false;
                 }
             };
@@ -2907,6 +4419,234 @@ async function showMetadataModal(itemId) {
             identifySpeakersBtn.style.display = 'none';
         }
     }
+    
+    // ========================================
+    // WEB MONITOR TAB HANDLING
+    // ========================================
+    console.log('[MetadataModal] Item type check:', {
+        itemId: item.id,
+        itemType: item.type,
+        spaceId: item.spaceId,
+        isWebMonitor: item.type === 'web-monitor'
+    });
+    const isWebMonitor = item.type === 'web-monitor';
+    const monitorTab = document.getElementById('monitorTab');
+    
+    if (monitorTab) {
+        monitorTab.style.display = isWebMonitor ? 'inline-flex' : 'none';
+    }
+    
+    if (isWebMonitor) {
+        // Switch to monitor tab for web-monitor items
+        switchMetadataTab('monitor');
+        
+        // Populate monitor status
+        const statusValue = document.getElementById('monitorStatusValue');
+        const lastChecked = document.getElementById('monitorLastChecked');
+        const nextCheck = document.getElementById('monitorNextCheck');
+        const changeCount = document.getElementById('monitorChangeCount');
+        
+        const status = item.status || metadata.status || 'active';
+        const statusDotClass = status === 'active' ? 'active' : status === 'paused' ? 'paused' : 'error';
+        const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
+        
+        if (statusValue) {
+            statusValue.innerHTML = `<span class="status-dot ${statusDotClass}"></span> ${statusLabel}`;
+        }
+        
+        if (lastChecked) {
+            const lastCheckedTime = item.lastChecked || metadata.lastChecked;
+            lastChecked.textContent = lastCheckedTime 
+                ? new Date(lastCheckedTime).toLocaleString() 
+                : 'Never';
+        }
+        
+        // Get check interval (default 30 min)
+        const checkIntervalMins = item.settings?.checkInterval || metadata.settings?.checkInterval || 30;
+        
+        if (nextCheck) {
+            // Calculate next check based on custom interval
+            const lastTime = item.lastChecked || metadata.lastChecked;
+            if (lastTime) {
+                const nextTime = new Date(new Date(lastTime).getTime() + checkIntervalMins * 60 * 1000);
+                const now = new Date();
+                const minsUntil = Math.max(0, Math.round((nextTime - now) / 60000));
+                if (minsUntil > 60) {
+                    nextCheck.textContent = `In ${Math.round(minsUntil / 60)}h`;
+                } else if (minsUntil > 0) {
+                    nextCheck.textContent = `In ${minsUntil} min`;
+                } else {
+                    nextCheck.textContent = 'Soon';
+                }
+            } else {
+                // Format the default next check text
+                if (checkIntervalMins >= 60) {
+                    nextCheck.textContent = `In ${checkIntervalMins / 60}h`;
+                } else {
+                    nextCheck.textContent = `In ${checkIntervalMins} min`;
+                }
+            }
+        }
+        
+        if (changeCount) {
+            const timeline = item.timeline || metadata.timeline || [];
+            changeCount.textContent = timeline.length.toString();
+        }
+        
+        // Format interval for display
+        const formatInterval = (mins) => {
+            if (mins < 60) return `${mins} minutes`;
+            if (mins === 60) return '1 hour';
+            if (mins < 1440) return `${mins / 60} hours`;
+            return 'daily';
+        };
+        
+        // Populate timeline
+        const timelineContainer = document.getElementById('monitorTimeline');
+        const timeline = item.timeline || metadata.timeline || [];
+        
+        if (timelineContainer) {
+            if (timeline.length === 0) {
+                timelineContainer.innerHTML = `
+                    <div class="monitor-timeline-empty">
+                        No changes detected yet. The monitor will check this URL every ${formatInterval(checkIntervalMins)}.
+                    </div>
+                `;
+            } else {
+                timelineContainer.innerHTML = timeline.map((change, index) => `
+                    <div class="monitor-timeline-item" data-index="${index}">
+                        <div class="timeline-dot"></div>
+                        <div class="timeline-content">
+                            <div class="timeline-time">${new Date(change.timestamp).toLocaleString()}</div>
+                            <div class="timeline-summary">${escapeHtml(change.summary || 'Content changed')}</div>
+                        </div>
+                    </div>
+                `).join('');
+                
+                // Add click handlers to timeline items
+                timelineContainer.querySelectorAll('.monitor-timeline-item').forEach(el => {
+                    el.addEventListener('click', () => {
+                        const index = parseInt(el.dataset.index);
+                        showMonitorChangeDetail(timeline[index], index, timeline);
+                        
+                        // Mark as selected
+                        timelineContainer.querySelectorAll('.monitor-timeline-item').forEach(i => 
+                            i.classList.remove('selected')
+                        );
+                        el.classList.add('selected');
+                    });
+                });
+                
+                // Auto-select the most recent change
+                if (timeline.length > 0) {
+                    const firstItem = timelineContainer.querySelector('.monitor-timeline-item');
+                    if (firstItem) {
+                        firstItem.click();
+                    }
+                }
+            }
+        }
+        
+        // Setup control buttons
+        const checkNowBtn = document.getElementById('checkNowBtn');
+        const pauseMonitorBtn = document.getElementById('pauseMonitorBtn');
+        const toggleAiDescBtn = document.getElementById('toggleAiDescBtn');
+        const aiDescToggleLabel = document.getElementById('aiDescToggleLabel');
+        
+        const aiEnabled = item.settings?.aiDescriptions || metadata.settings?.aiDescriptions || false;
+        if (aiDescToggleLabel) {
+            aiDescToggleLabel.textContent = aiEnabled ? 'Disable AI Descriptions' : 'Enable AI Descriptions';
+        }
+        
+        if (pauseMonitorBtn) {
+            pauseMonitorBtn.innerHTML = status === 'paused' 
+                ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px;"><polygon points="5 3 19 12 5 21 5 3"/></svg> Resume'
+                : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px;"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> Pause';
+        }
+        
+        // Check Now button
+        if (checkNowBtn) {
+            checkNowBtn.onclick = async () => {
+                checkNowBtn.disabled = true;
+                checkNowBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px; animation: spin 1s linear infinite;"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> Checking...';
+                try {
+                    const result = await window.clipboard.checkMonitorNow(itemId);
+                    if (result.success) {
+                        showNotification('Check complete' + (result.changed ? ' - Changes detected!' : ' - No changes'));
+                        // Refresh the modal
+                        await showMetadataModal(itemId);
+                    } else {
+                        showNotification('Check failed: ' + result.error, 'error');
+                    }
+                } catch (e) {
+                    showNotification('Error: ' + e.message, 'error');
+                }
+                checkNowBtn.disabled = false;
+                checkNowBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px;"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> Check Now';
+            };
+        }
+        
+        // Pause/Resume button
+        if (pauseMonitorBtn) {
+            pauseMonitorBtn.onclick = async () => {
+                try {
+                    const newStatus = status === 'paused' ? 'active' : 'paused';
+                    const result = await window.clipboard.setMonitorStatus(itemId, newStatus);
+                    if (result.success) {
+                        showNotification(newStatus === 'paused' ? 'Monitor paused' : 'Monitor resumed');
+                        await showMetadataModal(itemId);
+                    }
+                } catch (e) {
+                    showNotification('Error: ' + e.message, 'error');
+                }
+            };
+        }
+        
+        // AI toggle button
+        if (toggleAiDescBtn) {
+            toggleAiDescBtn.onclick = async () => {
+                try {
+                    const newSetting = !aiEnabled;
+                    const result = await window.clipboard.setMonitorAiEnabled(itemId, newSetting);
+                    if (result.success) {
+                        showNotification(newSetting ? 'AI descriptions enabled' : 'AI descriptions disabled');
+                        await showMetadataModal(itemId);
+                    }
+                } catch (e) {
+                    showNotification('Error: ' + e.message, 'error');
+                }
+            };
+        }
+        
+        // Check frequency selector
+        const checkFrequencySelect = document.getElementById('checkFrequencySelect');
+        if (checkFrequencySelect) {
+            // Set current value
+            const currentInterval = item.settings?.checkInterval || metadata.settings?.checkInterval || 30;
+            checkFrequencySelect.value = currentInterval.toString();
+            
+            // Handle change
+            checkFrequencySelect.onchange = async () => {
+                try {
+                    const newInterval = parseInt(checkFrequencySelect.value, 10);
+                    const result = await window.clipboard.setMonitorCheckInterval(itemId, newInterval);
+                    if (result.success) {
+                        const intervalText = newInterval < 60 
+                            ? `${newInterval} minutes` 
+                            : newInterval === 60 
+                                ? '1 hour'
+                                : `${newInterval / 60} hours`;
+                        showNotification(`Check frequency set to ${intervalText}`);
+                    }
+                } catch (e) {
+                    showNotification('Error: ' + e.message, 'error');
+                }
+            };
+        }
+    }
+    // ========================================
+    // END WEB MONITOR TAB HANDLING
+    // ========================================
     
     // AI fields - with null checks for missing elements
     const aiGenerated = document.getElementById('metaAiGenerated');
@@ -2959,6 +4699,94 @@ async function showMetadataModal(itemId) {
 // Hide metadata modal
 function hideMetadataModal() {
     document.getElementById('metadataModal').style.display = 'none';
+}
+
+// Show details for a selected monitor change
+function showMonitorChangeDetail(change, index, timeline) {
+    const detailContainer = document.getElementById('monitorChangeDetail');
+    if (!detailContainer) return;
+    
+    detailContainer.style.display = 'block';
+    
+    // Screenshots
+    const screenshotBefore = document.getElementById('screenshotBefore');
+    const screenshotAfter = document.getElementById('screenshotAfter');
+    
+    if (screenshotBefore) {
+        if (change.screenshotBeforePath) {
+            screenshotBefore.innerHTML = `<img src="file://${change.screenshotBeforePath}" alt="Before">`;
+        } else {
+            screenshotBefore.innerHTML = '<div class="screenshot-placeholder">No screenshot</div>';
+        }
+    }
+    
+    if (screenshotAfter) {
+        if (change.screenshotAfterPath) {
+            screenshotAfter.innerHTML = `<img src="file://${change.screenshotAfterPath}" alt="After">`;
+        } else {
+            screenshotAfter.innerHTML = '<div class="screenshot-placeholder">No screenshot</div>';
+        }
+    }
+    
+    // Text diff
+    const diffContainer = document.getElementById('monitorDiff');
+    const diffStats = document.getElementById('diffStats');
+    
+    if (diffContainer && change.diff) {
+        const diff = change.diff;
+        let addedCount = 0;
+        let removedCount = 0;
+        
+        // Parse diff lines
+        const diffLines = Array.isArray(diff) ? diff : (diff.lines || []);
+        
+        const diffHtml = diffLines.map(line => {
+            if (typeof line === 'string') {
+                if (line.startsWith('+')) {
+                    addedCount++;
+                    return `<div class="diff-line added">${escapeHtml(line)}</div>`;
+                } else if (line.startsWith('-')) {
+                    removedCount++;
+                    return `<div class="diff-line removed">${escapeHtml(line)}</div>`;
+                } else {
+                    return `<div class="diff-line unchanged">${escapeHtml(line)}</div>`;
+                }
+            } else if (line.type) {
+                if (line.type === 'added') {
+                    addedCount++;
+                    return `<div class="diff-line added">+ ${escapeHtml(line.text || line.content)}</div>`;
+                } else if (line.type === 'removed') {
+                    removedCount++;
+                    return `<div class="diff-line removed">- ${escapeHtml(line.text || line.content)}</div>`;
+                } else {
+                    return `<div class="diff-line unchanged">${escapeHtml(line.text || line.content)}</div>`;
+                }
+            }
+            return '';
+        }).join('');
+        
+        diffContainer.innerHTML = diffHtml || '<div class="diff-placeholder">No text differences recorded</div>';
+        
+        if (diffStats) {
+            diffStats.innerHTML = `<span class="added">+${addedCount}</span> / <span class="removed">-${removedCount}</span>`;
+        }
+    } else if (diffContainer) {
+        diffContainer.innerHTML = '<div class="diff-placeholder">No text differences recorded</div>';
+        if (diffStats) diffStats.innerHTML = '';
+    }
+    
+    // AI Description
+    const aiDescContainer = document.getElementById('monitorAiDescription');
+    const aiDescContent = document.getElementById('aiDescContent');
+    
+    if (aiDescContainer && aiDescContent) {
+        if (change.aiDescription) {
+            aiDescContainer.style.display = 'block';
+            aiDescContent.textContent = change.aiDescription;
+        } else {
+            aiDescContainer.style.display = 'none';
+        }
+    }
 }
 
 // Switch metadata modal tab
@@ -3055,7 +4883,7 @@ async function saveMetadata() {
         if (result.success) {
             hideMetadataModal();
             await loadHistory();
-            showNotification('✅ Metadata saved');
+            showNotification('Metadata saved');
         } else {
             alert('Failed to save metadata: ' + (result.error || 'Unknown error'));
         }
@@ -3066,23 +4894,41 @@ async function saveMetadata() {
 
 // Generate metadata with AI
 async function generateMetadataWithAI() {
+    console.log('[AI Generate] Button clicked - starting metadata generation');
+    
     const modal = document.getElementById('metadataModal');
     const itemId = modal.dataset.itemId;
+    console.log('[AI Generate] Item ID:', itemId);
     
     // Get AI prompt from textarea
     const customPrompt = document.getElementById('aiPrompt').value.trim();
     
     // Get API settings
     const settings = await window.api.getSettings();
-    if (!settings.llmApiKey) {
+    console.log('[AI Generate] Settings loaded:', {
+        hasApiKey: !!settings.llmApiKey,
+        claudePreferHeadless: settings.claudePreferHeadless,
+        llmProvider: settings.llmProvider
+    });
+    
+    // Check if we have ANY way to generate metadata:
+    // 1. API key is set (OpenAI or Anthropic), OR
+    // 2. Headless Claude is enabled (uses web login, no API key needed)
+    const hasApiKey = !!settings.llmApiKey;
+    const hasHeadlessClaude = settings.claudePreferHeadless !== false; // Default is true
+    
+    console.log('[AI Generate] Can proceed:', { hasApiKey, hasHeadlessClaude });
+    
+    if (!hasApiKey && !hasHeadlessClaude) {
         // Update status
+        console.log('[AI Generate] No AI method available - showing error');
         const statusEl = document.getElementById('aiGenerationStatus');
-        statusEl.textContent = 'Please configure your API key in Settings first';
+        statusEl.textContent = 'Please configure your API key in Settings, or enable Headless Claude';
         statusEl.style.display = 'block';
         statusEl.style.color = '#ff6464';
         
         // Optionally open settings
-        if (confirm('API key required. Open settings now?')) {
+        if (confirm('No AI method available. Open settings now?')) {
             await window.api.send('open-settings');
         }
         return;
@@ -3101,11 +4947,14 @@ async function generateMetadataWithAI() {
     
     try {
         // Call AI generation
+        console.log('[AI Generate] Calling generateMetadataAI for item:', itemId);
         const result = await window.clipboard.generateMetadataAI(
             itemId, 
             settings.llmApiKey,
             customPrompt
         );
+        
+        console.log('[AI Generate] Result received:', result);
         
         if (result.success) {
             // Update DYNAMIC form fields with generated metadata
@@ -3238,7 +5087,12 @@ function updateActiveSpaceIndicator() {
     } else {
         const space = spacesData.find(s => s.id === activeSpaceId);
         if (space) {
-            icon.textContent = space.icon;
+            // Use innerHTML for SVG icons, textContent for plain text icons
+            if (space.icon && space.icon.includes('<svg')) {
+                icon.innerHTML = space.icon;
+            } else {
+                icon.textContent = space.icon || '';
+            }
             label.textContent = `Capturing to: ${space.name}`;
             indicator.classList.add('visible');
         } else {
@@ -3310,12 +5164,44 @@ function setupEventListeners() {
         });
     });
     
+    // Bulk action buttons
+    document.getElementById('selectAllBtn').addEventListener('click', () => {
+        selectAllItems();
+    });
+    
+    document.getElementById('deselectAllBtn').addEventListener('click', () => {
+        deselectAllItems();
+    });
+    
+    document.getElementById('bulkMoveBtn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleBulkMoveDropdown();
+    });
+    
+    document.getElementById('bulkDeleteBtn').addEventListener('click', async () => {
+        await bulkDeleteItems();
+    });
+    
+    // Close bulk move dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+        const dropdown = document.getElementById('bulkMoveDropdown');
+        const moveBtn = document.getElementById('bulkMoveBtn');
+        if (dropdown && !dropdown.contains(e.target) && e.target !== moveBtn && !moveBtn.contains(e.target)) {
+            dropdown.classList.remove('visible');
+        }
+    });
+    
     // Search input
     document.getElementById('searchInput').addEventListener('input', (e) => {
         searchItems(e.target.value);
     });
     
     // Filter buttons
+    const filterButtons = document.querySelectorAll('.filter-btn');
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:init:filterButtons',message:'Filter buttons found',data:{count:filterButtons.length,filters:Array.from(filterButtons).map(b=>b.dataset.filter)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
+    // #endregion
+    
     document.querySelectorAll('.filter-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
@@ -3327,6 +5213,9 @@ function setupEventListeners() {
     
     // Initialize tag filter
     initTagFilter();
+    
+    // Initialize generative search
+    initGenerativeSearch();
     
     // Space selection
     document.getElementById('spacesList').addEventListener('click', async (e) => {
@@ -3363,6 +5252,9 @@ function setupEventListeners() {
         
         // Select space
         const spaceId = spaceItem.dataset.spaceId;
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:spaceClick:before',message:'Space clicked - before loadHistory',data:{spaceId:spaceId,previousSpace:currentSpace,historyLength:history?.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
+        // #endregion
         currentSpace = spaceId === 'null' ? null : spaceId;
         await window.clipboard.setCurrentSpace(currentSpace);
         
@@ -3372,13 +5264,78 @@ function setupEventListeners() {
         spaceItem.classList.add('active');
 
         await loadHistory();
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:spaceClick:afterLoadHistory',message:'After loadHistory',data:{currentSpace:currentSpace,historyLength:history?.length,historyItemSpaces:history?.slice(0,5).map(h=>({id:h.id,spaceId:h.spaceId}))},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
+        // #endregion
         updateTagDropdown(); // Refresh available tags for this space
+        updateSidebarTags(); // Refresh sidebar tags for this space
         filterItems();
     });
     
     // Add space button
     document.getElementById('addSpaceBtn').addEventListener('click', () => {
         showSpaceModal();
+    });
+    
+    // AI Search score badge tooltip handler
+    // Strategy: Look for badge as CHILD of the hovered history-item, not as ancestor
+    let scoreTooltip = null;
+    let tooltipTarget = null;
+    
+    document.getElementById('historyList').addEventListener('mouseover', (e) => {
+        // Find the history item (parent container)
+        const historyItem = e.target.closest('.history-item');
+        if (!historyItem) return;
+        
+        // Look for a badge CHILD element inside this history item
+        const badge = historyItem.querySelector('.gs-score-badge');
+        
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:badge-check',message:'Badge lookup (child strategy)',data:{historyItemFound:!!historyItem,badgeFound:!!badge,hasDataTooltip:badge?.dataset?.tooltip?.substring(0,50)||'none',itemId:historyItem?.dataset?.id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-FIX'})}).catch(()=>{});
+        // #endregion
+        
+        if (badge && badge.dataset.tooltip && tooltipTarget !== historyItem) {
+            // Remove existing tooltip
+            if (scoreTooltip) scoreTooltip.remove();
+            
+            tooltipTarget = historyItem;
+            
+            // Create tooltip
+            scoreTooltip = document.createElement('div');
+            scoreTooltip.className = 'gs-score-tooltip';
+            scoreTooltip.textContent = decodeURIComponent(badge.dataset.tooltip);
+            document.body.appendChild(scoreTooltip);
+            
+            // Position near the badge
+            const rect = badge.getBoundingClientRect();
+            scoreTooltip.style.left = `${rect.left}px`;
+            scoreTooltip.style.top = `${rect.bottom + 8}px`;
+            
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:tooltip-created',message:'Tooltip created and positioned',data:{tooltipText:scoreTooltip.textContent?.substring(0,50),left:scoreTooltip.style.left,top:scoreTooltip.style.top},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-FIX'})}).catch(()=>{});
+            // #endregion
+            
+            // Adjust if off-screen
+            const tooltipRect = scoreTooltip.getBoundingClientRect();
+            if (tooltipRect.right > window.innerWidth) {
+                scoreTooltip.style.left = `${window.innerWidth - tooltipRect.width - 10}px`;
+            }
+            if (tooltipRect.bottom > window.innerHeight) {
+                scoreTooltip.style.top = `${rect.top - tooltipRect.height - 8}px`;
+            }
+        }
+    });
+    
+    document.getElementById('historyList').addEventListener('mouseout', (e) => {
+        const historyItem = e.target.closest('.history-item');
+        // Only remove if we're leaving the history item entirely
+        if (historyItem && historyItem === tooltipTarget && !historyItem.contains(e.relatedTarget)) {
+            if (scoreTooltip) {
+                scoreTooltip.remove();
+                scoreTooltip = null;
+            }
+            tooltipTarget = null;
+        }
     });
     
     // History item double-click to open preview
@@ -3396,6 +5353,15 @@ function setupEventListeners() {
     document.getElementById('historyList').addEventListener('click', async (e) => {
         const item = e.target.closest('.history-item');
         if (!item) {
+            return;
+        }
+        
+        // Handle checkbox clicks
+        const checkbox = e.target.closest('.item-checkbox');
+        if (checkbox) {
+            e.stopPropagation();
+            const itemId = checkbox.dataset.itemId;
+            toggleItemSelection(itemId);
             return;
         }
 
@@ -3604,46 +5570,8 @@ function setupEventListeners() {
                 }
             }
             
-            // Check if it's a generated document
-            if (historyItem && historyItem.type === 'generated-document') {
-                // For generated documents, copy the HTML content and don't close
-                const htmlContent = historyItem.content || historyItem.html;
-                if (htmlContent) {
-                    // Create a temporary div to convert HTML to rich text
-                    const tempDiv = document.createElement('div');
-                    tempDiv.innerHTML = htmlContent;
-                    
-                    // Copy as both HTML and plain text
-                    const selection = window.getSelection();
-                    const range = document.createRange();
-                    document.body.appendChild(tempDiv);
-                    range.selectNodeContents(tempDiv);
-                    selection.removeAllRanges();
-                    selection.addRange(range);
-                    
-                    try {
-                        document.execCommand('copy');
-                        showCopyNotification();
-                        // Don't close for generated documents - user might want to explore
-                    } catch (err) {
-                        console.error('Failed to copy generated document:', err);
-                        // Fallback to regular paste
-                        await window.clipboard.pasteItem(itemId);
-                        window.close();
-                    } finally {
-                        selection.removeAllRanges();
-                        document.body.removeChild(tempDiv);
-                    }
-                } else {
-                    // Fallback to regular paste
-                    await window.clipboard.pasteItem(itemId);
-                    window.close();
-                }
-            } else {
-                // For other items, paste and close
-                await window.clipboard.pasteItem(itemId);
-                window.close();
-            }
+            // For all non-audio items, open preview/edit mode
+            await showPreviewModal(itemId);
         }
     });
     
@@ -3691,6 +5619,7 @@ function setupEventListeners() {
     
     // Modal buttons
     document.getElementById('modalSave').addEventListener('click', async () => {
+        console.log('[Clipboard Viewer] Modal Save clicked');
         const name = document.getElementById('spaceName').value.trim();
         if (!name) {
             alert('Please enter a space name');
@@ -3699,6 +5628,7 @@ function setupEventListeners() {
         
         const icon = document.querySelector('.icon-option.selected').dataset.icon;
         const spaceId = document.getElementById('spaceModal').dataset.spaceId;
+        console.log('[Clipboard Viewer] Saving space:', { name, icon, spaceId: spaceId || 'NEW' });
         
         // Collect notebook data
         const notebook = {
@@ -3712,19 +5642,43 @@ function setupEventListeners() {
             updatedAt: new Date().toISOString()
         };
         
+        let newSpaceId = null;
         if (spaceId) {
             // Update existing space
+            console.log('[Clipboard Viewer] Updating existing space:', spaceId);
             await window.clipboard.updateSpace(spaceId, { name, icon, notebook });
         } else {
             // Create new space
-            await window.clipboard.createSpace({ name, icon, notebook });
+            console.log('[Clipboard Viewer] Creating new space:', name);
+            const result = await window.clipboard.createSpace({ name, icon, notebook });
+            console.log('[Clipboard Viewer] Create space result:', result);
+            newSpaceId = result?.space?.id;
+            console.log('[Clipboard Viewer] New space ID:', newSpaceId);
         }
         
         hideSpaceModal();
         await loadSpaces();
+        console.log('[Clipboard Viewer] Spaces reloaded, count:', spaces.length);
+        
+        // If we created a new space, select it
+        if (newSpaceId) {
+            console.log('[Clipboard Viewer] Selecting newly created space:', newSpaceId);
+            changeSpace(newSpaceId);
+        }
     });
     
-    document.getElementById('modalCancel').addEventListener('click', hideSpaceModal);
+    document.getElementById('modalCancel').addEventListener('click', () => {
+        console.log('[Space Modal] Cancel clicked');
+        hideSpaceModal();
+    });
+    
+    // Click outside to close space modal
+    document.getElementById('spaceModal').addEventListener('click', (e) => {
+        if (e.target.id === 'spaceModal') {
+            console.log('[Space Modal] Clicked outside, closing');
+            hideSpaceModal();
+        }
+    });
     
     // Metadata modal buttons
     document.getElementById('metadataSave').addEventListener('click', saveMetadata);
@@ -3735,6 +5689,7 @@ function setupEventListeners() {
     window.clipboard.onHistoryUpdate(async (updatedHistory) => {
         history = updatedHistory;
         updateTagDropdown(); // Refresh available tags
+        updateSidebarTags(); // Refresh sidebar tags
         filterItems();
         await updateItemCounts();
     });
@@ -3829,7 +5784,8 @@ function setupEventListeners() {
     window.clipboard.onSpacesUpdate((spaces) => {
         // Update local spaces list when it changes
         if (spaces) {
-            renderSpacesList(spaces);
+            spacesData = spaces;
+            renderSpaces();
         }
     });
     
@@ -3986,6 +5942,7 @@ async function showPreviewModal(itemId) {
     // Show appropriate view based on content type
     hideAllPreviewModes();
     
+    
     // Helper function to check if content looks like actual HTML
     const looksLikeHtml = (content) => {
         if (!content || typeof content !== 'string') return false;
@@ -4020,7 +5977,7 @@ async function showPreviewModal(itemId) {
         // Display file info with media player - compact layout
         let mediaHtml = `
             <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 16px;">
-                <div style="font-size: 40px;">${isAudio ? '🎵' : '🎬'}</div>
+                <div style="font-size: 40px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 40px; height: 40px;">${isAudio ? '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>' : '<rect x="2" y="5" width="20" height="14" rx="2"/><polygon points="10 8 16 12 10 16"/>'}</svg></div>
                 <div>
                     <div style="font-size: 14px; font-weight: 500; color: rgba(255, 255, 255, 0.9);">${escapeHtml(historyItem.fileName || 'Media File')}</div>
                     <div style="font-size: 11px; color: rgba(255, 255, 255, 0.5);">${formatFileSize(historyItem.fileSize)} • ${historyItem.fileExt?.toUpperCase() || mediaType}</div>
@@ -4084,13 +6041,219 @@ async function showPreviewModal(itemId) {
             // Show TTS for plain text content (even if type is 'html')
             document.getElementById('textToSpeechSection').style.display = 'block';
         }
-    } else if (isMarkdownContent(fullContent, historyItem)) {
-        // Show Markdown preview
-        document.getElementById('markdownRendered').innerHTML = renderMarkdown(fullContent);
+    } else if (isRiffNote(historyItem)) {
+        // Riff notes - MUST come before Markdown check since Riff content is often Markdown
+        // Show Riff note preview - render as Markdown with metadata header
+        const viewMode = document.getElementById('previewViewMode');
+        
+        // Strip [RIFF:uuid] marker from content if present
+        let riffContent = fullContent.replace(/\[RIFF:[a-f0-9-]+\]\s*/gi, '').trim();
+        
+        // Get Riff metadata for header
+        const riffTitle = historyItem.metadata?._title || historyItem.metadata?.title || 'Riff Note';
+        const riffKeywords = historyItem.metadata?._keywords || historyItem.metadata?.keywords || [];
+        
+        // Check if content looks like Markdown
+        const isMarkdown = isMarkdownContent(riffContent, historyItem);
+        
+        if (isMarkdown && typeof marked !== 'undefined') {
+            // Render as Markdown
+            const iframe = document.getElementById('previewHtmlFrame');
+            const renderedHtml = marked.parse(riffContent);
+            
+            // Build header with Riff info
+            const keywordsHtml = riffKeywords.length > 0 
+                ? `<div class="riff-keywords">${riffKeywords.map(k => `<span class="keyword-tag">${escapeHtml(k)}</span>`).join(' ')}</div>` 
+                : '';
+            
+            const riffHtml = `
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <style>
+                        body {
+                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                            line-height: 1.6;
+                            padding: 20px;
+                            background: #1e1e1e;
+                            color: rgba(255, 255, 255, 0.9);
+                            max-width: 800px;
+                            margin: 0 auto;
+                        }
+                        .riff-header {
+                            border-bottom: 1px solid rgba(100, 200, 255, 0.3);
+                            padding-bottom: 12px;
+                            margin-bottom: 20px;
+                        }
+                        .riff-title {
+                            font-size: 18px;
+                            font-weight: 600;
+                            color: rgba(100, 200, 255, 0.9);
+                            margin: 0 0 8px 0;
+                            display: flex;
+                            align-items: center;
+                            gap: 8px;
+                        }
+                        .riff-icon {
+                            width: 18px;
+                            height: 18px;
+                        }
+                        .riff-keywords {
+                            display: flex;
+                            flex-wrap: wrap;
+                            gap: 6px;
+                            margin-top: 8px;
+                        }
+                        .keyword-tag {
+                            background: rgba(100, 200, 255, 0.15);
+                            color: rgba(100, 200, 255, 0.9);
+                            padding: 2px 8px;
+                            border-radius: 10px;
+                            font-size: 11px;
+                        }
+                        h1, h2, h3, h4, h5, h6 { color: rgba(255, 255, 255, 0.95); margin-top: 1.5em; }
+                        p { margin: 1em 0; }
+                        ul, ol { padding-left: 2em; }
+                        code { background: rgba(255, 255, 255, 0.1); padding: 2px 6px; border-radius: 3px; font-family: 'Monaco', monospace; }
+                        pre { background: rgba(255, 255, 255, 0.05); padding: 12px; border-radius: 6px; overflow-x: auto; }
+                        pre code { background: none; padding: 0; }
+                        blockquote { border-left: 3px solid rgba(100, 200, 255, 0.5); margin-left: 0; padding-left: 1em; color: rgba(255, 255, 255, 0.7); }
+                        a { color: #6eb5ff; }
+                        table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+                        th, td { border: 1px solid rgba(255, 255, 255, 0.2); padding: 8px; text-align: left; }
+                        th { background: rgba(255, 255, 255, 0.1); }
+                    </style>
+                </head>
+                <body>
+                    <div class="riff-header">
+                        <div class="riff-title">
+                            <svg class="riff-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+                            ${escapeHtml(riffTitle)}
+                        </div>
+                        ${keywordsHtml}
+                    </div>
+                    ${renderedHtml}
+                </body>
+                </html>
+            `;
+            iframe.srcdoc = riffHtml;
+            document.getElementById('previewHtmlMode').style.display = 'block';
+            viewMode.style.display = 'none';
+        } else {
+            // Plain text Riff - show with nice formatting
+            viewMode.innerHTML = `
+                <div style="padding: 20px;">
+                    <div style="border-bottom: 1px solid rgba(100, 200, 255, 0.3); padding-bottom: 12px; margin-bottom: 20px;">
+                        <div style="font-size: 16px; font-weight: 600; color: rgba(100, 200, 255, 0.9); display: flex; align-items: center; gap: 8px;">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 16px; height: 16px;"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+                            ${escapeHtml(riffTitle)}
+                        </div>
+                        ${riffKeywords.length > 0 ? `
+                            <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;">
+                                ${riffKeywords.map(k => `<span style="background: rgba(100, 200, 255, 0.15); color: rgba(100, 200, 255, 0.9); padding: 2px 8px; border-radius: 10px; font-size: 11px;">${escapeHtml(k)}</span>`).join('')}
+                            </div>
+                        ` : ''}
+                    </div>
+                    <pre style="white-space: pre-wrap; font-family: -apple-system, BlinkMacSystemFont, sans-serif; line-height: 1.6; margin: 0;">${escapeHtml(riffContent)}</pre>
+                </div>
+            `;
+            viewMode.style.display = 'block';
+            viewMode.style.whiteSpace = 'normal';
+            viewMode.style.fontFamily = 'inherit';
+            viewMode.style.overflow = 'auto';
+            viewMode.style.flex = '1';
+        }
+        
+        // Show edit button and TTS for Riff
+        document.getElementById('previewModeBtn').style.display = 'inline-block';
+        document.getElementById('textToSpeechSection').style.display = 'block';
+    } else if (isMarkdownContent(fullContent, historyItem) || historyItem.jsonSubtype === 'chatbot-conversation' || historyItem.metadata?.jsonSubtype === 'chatbot-conversation') {
+        // Show Markdown preview (always for chatbot conversations)
+        const markdownContainer = document.getElementById('markdownRendered');
+        markdownContainer.innerHTML = renderMarkdown(fullContent);
+        
+        // Add special styling for chatbot conversations
+        if (historyItem.jsonSubtype === 'chatbot-conversation' || historyItem.metadata?.jsonSubtype === 'chatbot-conversation') {
+            markdownContainer.classList.add('chatbot-conversation');
+        } else {
+            markdownContainer.classList.remove('chatbot-conversation');
+        }
+        
         document.getElementById('previewMarkdownMode').style.display = 'block';
         document.getElementById('previewModeBtn').style.display = 'inline-block';
         // Show TTS for markdown
         document.getElementById('textToSpeechSection').style.display = 'block';
+    } else if (historyItem.type === 'file' && historyItem.fileCategory === 'document') {
+        // Show document file preview - handle DOCX specially
+        const isDocx = historyItem.fileExt === '.docx';
+        
+        if (isDocx && window.clipboard.convertDocxToHtml) {
+            // Show loading state
+            const viewMode = document.getElementById('previewViewMode');
+            viewMode.innerHTML = `
+                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 200px; gap: 16px;">
+                    <div style="font-size: 14px; color: rgba(255, 255, 255, 0.6);">Loading document...</div>
+                </div>
+            `;
+            viewMode.style.display = 'flex';
+            
+            // Convert DOCX to HTML
+            try {
+                const result = await window.clipboard.convertDocxToHtml(fullContent);
+                if (result.success && result.html) {
+                    // Show in HTML preview mode (editable)
+                    const iframe = document.getElementById('previewHtmlFrame');
+                    // Add editable styling to the iframe content
+                    const editableHtml = `
+                        <!DOCTYPE html>
+                        <html>
+                        <head>
+                            <style>
+                                body {
+                                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                                    line-height: 1.6;
+                                    padding: 20px;
+                                    background: #1e1e1e;
+                                    color: rgba(255, 255, 255, 0.9);
+                                    max-width: 800px;
+                                    margin: 0 auto;
+                                }
+                                h1, h2, h3, h4, h5, h6 { color: rgba(255, 255, 255, 0.95); margin-top: 1.5em; }
+                                p { margin: 1em 0; }
+                                ul, ol { padding-left: 2em; }
+                                table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+                                th, td { border: 1px solid rgba(255, 255, 255, 0.2); padding: 8px; text-align: left; }
+                                th { background: rgba(255, 255, 255, 0.1); }
+                                a { color: #6eb5ff; }
+                                img { max-width: 100%; height: auto; }
+                                blockquote { border-left: 3px solid rgba(255, 255, 255, 0.3); margin-left: 0; padding-left: 1em; color: rgba(255, 255, 255, 0.7); }
+                            </style>
+                        </head>
+                        <body contenteditable="true">
+                            ${result.html}
+                        </body>
+                        </html>
+                    `;
+                    iframe.srcdoc = editableHtml;
+                    document.getElementById('previewHtmlMode').style.display = 'block';
+                    document.getElementById('previewModeBtn').style.display = 'inline-block';
+                    viewMode.style.display = 'none';
+                    
+                    // Store original for change detection
+                    originalContent = result.html;
+                } else {
+                    // Fallback to file info display
+                    showDocumentFallback(viewMode, historyItem, fullContent);
+                }
+            } catch (error) {
+                console.error('Error converting DOCX:', error);
+                showDocumentFallback(viewMode, historyItem, fullContent);
+            }
+        } else {
+            // Non-DOCX documents - show file info with open button
+            const viewMode = document.getElementById('previewViewMode');
+            showDocumentFallback(viewMode, historyItem, fullContent);
+        }
     } else {
         // Show text preview (default)
         const viewMode = document.getElementById('previewViewMode');
@@ -4122,6 +6285,30 @@ async function showPreviewModal(itemId) {
     // Reset edit mode button
     updateEditModeButton();
     
+    // For Riff notes, update the Edit button to show "Edit in Riff" and hide the separate button
+    const editInRiffBtn = document.getElementById('editInRiffBtn');
+    const previewModeBtn = document.getElementById('previewModeBtn');
+    const isRiff = isRiffNote(historyItem);
+    
+    console.log('[Preview] Riff check result:', { isRiff, itemId: historyItem.id, metadata: historyItem.metadata, tags: historyItem.tags });
+    
+    if (editInRiffBtn) {
+        // Hide the separate "Edit in Riff" button since main Edit button now handles it
+        editInRiffBtn.style.display = 'none';
+    }
+    
+    if (previewModeBtn && isRiff) {
+        // Change Edit button to show "Edit in Riff" for Riff notes
+        previewModeBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle;"><path d="M4 7h16M4 12h16M4 17h10"/></svg> Edit in Riff`;
+        previewModeBtn.style.background = 'rgba(100, 200, 255, 0.15)';
+        previewModeBtn.style.borderColor = 'rgba(100, 200, 255, 0.3)';
+    } else if (previewModeBtn) {
+        // Reset to default Edit button
+        previewModeBtn.innerHTML = `<span id="previewModeIcon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span> Edit`;
+        previewModeBtn.style.background = '';
+        previewModeBtn.style.borderColor = '';
+    }
+    
     // Show modal
     modal.style.display = 'flex';
 }
@@ -4143,7 +6330,7 @@ function resetTTSState() {
     document.getElementById('ttsAudioContainer').style.display = 'none';
     document.getElementById('saveTtsAudioBtn').style.display = 'none';
     document.getElementById('ttsStatus').style.display = 'none';
-    document.getElementById('ttsButtonIcon').textContent = '🎙️';
+    document.getElementById('ttsButtonIcon').innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px;"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>';
     document.getElementById('ttsButtonText').textContent = 'Generate Audio';
     document.getElementById('generateSpeechBtn').disabled = false;
     
@@ -4336,7 +6523,7 @@ async function generateSpeech() {
         showTTSStatus('Error: ' + error.message, 'error');
     } finally {
         btn.disabled = false;
-        btnIcon.textContent = '🎙️';
+        btnIcon.textContent = '';
         btnText.textContent = 'Generate Audio';
     }
 }
@@ -4589,7 +6776,7 @@ async function loadAttachedTranscription(itemId) {
             document.getElementById('transcribeButtonIcon').textContent = '✓';
             document.getElementById('transcribeButtonText').textContent = 'Transcribed';
             
-            showTranscriptionStatus('📝 Transcription attached to this item', 'success');
+            showTranscriptionStatus('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 6px;"><path d="M4 7h16M4 12h16M4 17h10"/></svg> Transcription attached to this item', 'success');
             
             return true;
         }
@@ -4824,8 +7011,20 @@ function renderMarkdown(text) {
     
     let html = text;
     
+    // Preserve <sub> tags by temporarily replacing them
+    const subTags = [];
+    html = html.replace(/<sub>(.*?)<\/sub>/g, (match, content) => {
+        subTags.push(content);
+        return `__SUB_TAG_${subTags.length - 1}__`;
+    });
+    
     // Escape HTML first
     html = html.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    
+    // Restore <sub> tags
+    html = html.replace(/__SUB_TAG_(\d+)__/g, (match, index) => {
+        return `<sub>${subTags[index]}</sub>`;
+    });
     
     // Code blocks (fenced) - must be before other processing
     html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (match, lang, code) => {
@@ -4930,6 +7129,12 @@ function isMarkdownContent(content, item) {
 function togglePreviewEditMode() {
     if (!currentPreviewItem) return;
     
+    // For Riff notes, open in Riff tool instead of in-app editor
+    if (isRiffNote(currentPreviewItem)) {
+        openInRiff();
+        return;
+    }
+    
     isEditMode = !isEditMode;
     
     // Helper function to check if content looks like actual HTML
@@ -4999,12 +7204,15 @@ function updateEditModeButton() {
     const btn = document.getElementById('previewModeBtn');
     const icon = document.getElementById('previewModeIcon');
     
+    // Guard against null elements
+    if (!btn) return;
+    
     if (isEditMode) {
-        icon.textContent = '◉';
+        if (icon) icon.textContent = '◉';
         btn.innerHTML = '<span id="previewModeIcon">◉</span> View';
     } else {
-        icon.textContent = '✎';
-        btn.innerHTML = '<span id="previewModeIcon">✎</span> Edit';
+        if (icon) icon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+        btn.innerHTML = '<span id="previewModeIcon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span> Edit';
     }
 }
 
@@ -5110,6 +7318,7 @@ function getTypeLabel(item) {
     if (item.type === 'generated-document' || item.metadata?.type === 'generated-document') return 'Generated Document';
     if (item.type === 'file') {
         if (item.fileType === 'pdf') return 'PDF Document';
+        if (item.fileType === 'presentation' || item.fileCategory === 'presentation') return 'Presentation';
         if (item.fileType === 'video') return 'Video';
         if (item.fileType === 'audio') return 'Audio';
         if (item.fileType === 'image-file') return 'Image File';
@@ -5385,7 +7594,7 @@ function showImageEditAnalysis(description, fullMessage, needsOpenAIKey = false)
     `;
     
     const title = needsOpenAIKey ? 'OpenAI API Key Required' : 'AI Image Analysis';
-    const icon = needsOpenAIKey ? '🔑' : '✨';
+    const icon = needsOpenAIKey ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>' : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>';
     
     let analysisSection = '';
     if (description) {
@@ -5402,9 +7611,9 @@ function showImageEditAnalysis(description, fullMessage, needsOpenAIKey = false)
     }
     
     const noteContent = needsOpenAIKey 
-        ? `<strong>🔑 Add OpenAI API Key:</strong> To edit images with AI, add your OpenAI API key in <strong>Settings → AI Image Editing</strong>. 
+        ? `<strong><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 4px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> Add OpenAI API Key:</strong> To edit images with AI, add your OpenAI API key in <strong>Settings → AI Image Editing</strong>. 
            Get your key at <a href="#" onclick="window.electronAPI?.openExternal?.('https://platform.openai.com/api-keys')" style="color: #8b5cf6;">platform.openai.com</a>`
-        : `<strong>⚠️ Note:</strong> Image editing requires an OpenAI API key. Add it in Settings to enable this feature.`;
+        : `<strong><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 4px;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg> Note:</strong> Image editing requires an OpenAI API key. Add it in Settings to enable this feature.`;
     
     modal.innerHTML = `
         <div style="background: rgba(40, 40, 40, 0.98); border-radius: 12px; padding: 24px; max-width: 600px; max-height: 80vh; overflow-y: auto; border: 1px solid rgba(139, 92, 246, 0.3); box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);">
@@ -5511,14 +7720,31 @@ async function saveEditedImage() {
 
 // Setup preview modal event listeners
 function setupPreviewEventListeners() {
+    // #region agent log
+    const elementsCheck = {
+        previewModeBtn: !!document.getElementById('previewModeBtn'),
+        previewCopyBtn: !!document.getElementById('previewCopyBtn'),
+        previewClose: !!document.getElementById('previewClose'),
+        previewCloseX: !!document.getElementById('previewCloseX'),
+        previewEditCancel: !!document.getElementById('previewEditCancel'),
+        previewEditSave: !!document.getElementById('previewEditSave'),
+        previewEditTextarea: !!document.getElementById('previewEditTextarea')
+    };
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:setupPreviewEventListeners',message:'Checking preview modal elements',data:elementsCheck,timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})}).catch(()=>{});
+    // #endregion
+    
     // Mode toggle button
     document.getElementById('previewModeBtn').addEventListener('click', togglePreviewEditMode);
+    
+    // Edit in Riff button
+    document.getElementById('editInRiffBtn').addEventListener('click', openInRiff);
     
     // Copy button
     document.getElementById('previewCopyBtn').addEventListener('click', copyPreviewContent);
     
-    // Close button
+    // Close buttons (both the X in header and the Close button at bottom)
     document.getElementById('previewClose').addEventListener('click', hidePreviewModal);
+    document.getElementById('previewCloseX').addEventListener('click', hidePreviewModal);
     
     // Edit mode buttons
     document.getElementById('previewEditCancel').addEventListener('click', cancelPreviewEdit);
@@ -5938,7 +8164,7 @@ async function showVideoPreviewModal(itemId) {
             identifySpeakersBtn.innerHTML = '<span>🔄</span> Re-identify Speakers';
             identifySpeakersBtn.title = `Last identified: ${new Date(metadata.speakersIdentifiedAt).toLocaleString()} (Model: ${metadata.speakersIdentifiedModel})`;
         } else {
-            identifySpeakersBtn.innerHTML = '<span>✨</span> Identify Speakers';
+            identifySpeakersBtn.innerHTML = 'Identify Speakers';
             identifySpeakersBtn.title = 'Use AI to identify and label speakers in the transcript';
         }
     }
@@ -5973,7 +8199,7 @@ async function showVideoPreviewModal(itemId) {
         audioBtn.innerHTML = '<span>🎵</span> Download Audio';
         audioBtn.disabled = false;
     } else {
-        audioBtn.innerHTML = '<span>🎵</span> Extract Audio';
+        audioBtn.innerHTML = '<span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 6px;"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span> Extract Audio';
         audioBtn.disabled = false;
     }
     
@@ -6102,7 +8328,7 @@ function setupVideoModalListeners() {
             if (result.success) {
                 document.getElementById('videoTranscriptText').textContent = result.transcript;
                 videoTranscriptPlain = result.transcript;
-                status.textContent = `✅ Speakers identified successfully! (Model: ${result.model})`;
+                status.textContent = `Speakers identified successfully! (Model: ${result.model})`;
                 status.style.color = 'rgba(100, 255, 100, 0.9)';
                 
                 // Reload history to get updated metadata from disk, then refresh modal
@@ -6138,7 +8364,7 @@ function setupVideoModalListeners() {
         }
         
         btn.disabled = false;
-        btn.innerHTML = '<span>✨</span> Identify Speakers';
+        btn.innerHTML = '<span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 6px;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></span> Identify Speakers';
     });
     
     // Download audio button
@@ -6177,7 +8403,7 @@ function setupVideoModalListeners() {
                 if (removeProgressListener) removeProgressListener();
                 
                 if (result.success) {
-                    btn.innerHTML = '<span>✅</span> Audio Ready!';
+                    btn.innerHTML = 'Audio Ready!';
                     setTimeout(() => {
                         btn.innerHTML = '<span>🎵</span> Download Audio';
                         btn.disabled = false;
@@ -6205,7 +8431,7 @@ function setupVideoModalListeners() {
             navigator.clipboard.writeText(videoTranscriptPlain);
             const btn = document.getElementById('videoCopyTranscript');
             const originalText = btn.innerHTML;
-            btn.innerHTML = '<span>✅</span> Copied!';
+            btn.innerHTML = 'Copied!';
             setTimeout(() => btn.innerHTML = originalText, 1500);
         }
     });
@@ -6240,12 +8466,12 @@ function setupVideoModalListeners() {
                 }
             } else {
                 descriptionEl.textContent = 'Failed to generate summary: ' + result.error;
-                btn.innerHTML = '<span>✨</span> Retry';
+                btn.innerHTML = '<span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 6px;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></span> Retry';
                 btn.disabled = false;
             }
         } catch (err) {
             descriptionEl.textContent = 'Error: ' + err.message;
-            btn.innerHTML = '<span>✨</span> Retry';
+            btn.innerHTML = 'Retry';
             btn.disabled = false;
         }
     });
@@ -6338,6 +8564,296 @@ function setupHistoryItemDrag() {
 }
 
 // Initialize when DOM is ready
+// ============================================
+// BULK SELECTION & ACTIONS
+// ============================================
+
+/**
+ * Toggle selection of an item
+ */
+function toggleItemSelection(itemId) {
+    if (selectedItems.has(itemId)) {
+        selectedItems.delete(itemId);
+    } else {
+        selectedItems.add(itemId);
+    }
+    
+    updateBulkActionToolbar();
+    updateItemCheckbox(itemId);
+}
+
+/**
+ * Select all visible items
+ */
+function selectAllItems() {
+    const visibleItems = document.querySelectorAll('.history-item:not(.downloading)');
+    visibleItems.forEach(item => {
+        const itemId = item.dataset.id;
+        if (itemId) {
+            selectedItems.add(itemId);
+        }
+    });
+    
+    updateBulkActionToolbar();
+    updateAllCheckboxes();
+}
+
+/**
+ * Deselect all items
+ */
+function deselectAllItems() {
+    selectedItems.clear();
+    updateBulkActionToolbar();
+    updateAllCheckboxes();
+}
+
+/**
+ * Update the bulk action toolbar visibility and count
+ */
+function updateBulkActionToolbar() {
+    const toolbar = document.getElementById('bulkActionsToolbar');
+    const selectedCount = document.getElementById('selectedCount');
+    
+    if (selectedItems.size > 0) {
+        toolbar.classList.add('visible');
+        selectedCount.textContent = selectedItems.size;
+    } else {
+        toolbar.classList.remove('visible');
+    }
+}
+
+/**
+ * Update a single item's checkbox state
+ */
+function updateItemCheckbox(itemId) {
+    const checkbox = document.querySelector(`.item-checkbox[data-item-id="${itemId}"]`);
+    if (!checkbox) return;
+    
+    const item = checkbox.closest('.history-item');
+    if (selectedItems.has(itemId)) {
+        checkbox.classList.add('checked');
+        item.classList.add('selected');
+    } else {
+        checkbox.classList.remove('checked');
+        item.classList.remove('selected');
+    }
+}
+
+/**
+ * Update all checkboxes to match selection state
+ */
+function updateAllCheckboxes() {
+    document.querySelectorAll('.item-checkbox').forEach(checkbox => {
+        const itemId = checkbox.dataset.itemId;
+        if (!itemId) return;
+        
+        const item = checkbox.closest('.history-item');
+        if (selectedItems.has(itemId)) {
+            checkbox.classList.add('checked');
+            item.classList.add('selected');
+        } else {
+            checkbox.classList.remove('checked');
+            item.classList.remove('selected');
+        }
+    });
+}
+
+/**
+ * Delete multiple selected items
+ */
+async function bulkDeleteItems() {
+    if (selectedItems.size === 0) return;
+    
+    const count = selectedItems.size;
+    const confirmMsg = `Are you sure you want to delete ${count} item${count > 1 ? 's' : ''}? This cannot be undone.`;
+    
+    if (!confirm(confirmMsg)) {
+        return;
+    }
+    
+    try {
+        // Show loading state
+        const deleteBtn = document.getElementById('bulkDeleteBtn');
+        const originalText = deleteBtn.innerHTML;
+        deleteBtn.innerHTML = '<span>⏳</span><span>Deleting...</span>';
+        deleteBtn.disabled = true;
+        
+        // Convert Set to Array for API call
+        const itemIds = Array.from(selectedItems);
+        
+        // Call the bulk delete API
+        const result = await window.clipboard.deleteItems(itemIds);
+        
+        if (result.success) {
+            console.log(`[Bulk Delete] Successfully deleted ${result.deleted} items`);
+            
+            if (result.failed > 0) {
+                alert(`Deleted ${result.deleted} items. Failed to delete ${result.failed} items.\n\nErrors:\n${result.errors.join('\n')}`);
+            }
+            
+            // Clear selection
+            selectedItems.clear();
+            updateBulkActionToolbar();
+            
+            // Reload history to reflect changes
+            await loadHistory();
+        } else {
+            console.error('[Bulk Delete] Failed:', result.error);
+            alert(`Failed to delete items: ${result.error}`);
+        }
+        
+        // Restore button
+        deleteBtn.innerHTML = originalText;
+        deleteBtn.disabled = false;
+        
+    } catch (error) {
+        console.error('[Bulk Delete] Error:', error);
+        alert(`Error deleting items: ${error.message}`);
+        
+        // Restore button
+        const deleteBtn = document.getElementById('bulkDeleteBtn');
+        deleteBtn.innerHTML = '<span>×</span><span>Delete Selected</span>';
+        deleteBtn.disabled = false;
+    }
+}
+
+/**
+ * Toggle the bulk move dropdown
+ */
+function toggleBulkMoveDropdown() {
+    const dropdown = document.getElementById('bulkMoveDropdown');
+    const isVisible = dropdown.classList.contains('visible');
+    
+    if (isVisible) {
+        dropdown.classList.remove('visible');
+    } else {
+        // Populate the dropdown with spaces
+        populateBulkMoveSpaces();
+        dropdown.classList.add('visible');
+    }
+}
+
+/**
+ * Populate the bulk move dropdown with available spaces
+ */
+function populateBulkMoveSpaces() {
+    const spacesList = document.getElementById('bulkMoveSpacesList');
+    
+    // Filter out the current space
+    const availableSpaces = spacesData.filter(space => {
+        // If viewing "All Items" (currentSpace is null), all spaces are available
+        if (currentSpace === null) return true;
+        // Otherwise, exclude the current space
+        return space.id !== currentSpace;
+    });
+    
+    // Add "All Items" option if not currently viewing it
+    let html = '';
+    if (currentSpace !== null) {
+        html += `
+            <div class="bulk-move-space-option" data-space-id="null">
+                <div class="bulk-move-space-icon">∞</div>
+                <div class="bulk-move-space-name">All Items</div>
+            </div>
+        `;
+    }
+    
+    // Add all other spaces
+    availableSpaces.forEach(space => {
+        const itemCount = history.filter(item => item.spaceId === space.id).length;
+        html += `
+            <div class="bulk-move-space-option" data-space-id="${space.id}">
+                <div class="bulk-move-space-icon">${space.icon && space.icon.includes('<svg') ? space.icon : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 16px; height: 16px;"><circle cx="12" cy="12" r="8"/></svg>'}</div>
+                <div class="bulk-move-space-name">${escapeHtml(space.name)}</div>
+                <div class="bulk-move-space-count">${itemCount}</div>
+            </div>
+        `;
+    });
+    
+    if (html === '') {
+        html = '<div style="padding: 12px; text-align: center; color: rgba(255, 255, 255, 0.4); font-size: 12px;">No other spaces available</div>';
+    }
+    
+    spacesList.innerHTML = html;
+    
+    // Add click handlers
+    document.querySelectorAll('.bulk-move-space-option').forEach(option => {
+        option.addEventListener('click', async () => {
+            const targetSpaceId = option.dataset.spaceId;
+            await bulkMoveItems(targetSpaceId);
+        });
+    });
+}
+
+/**
+ * Move selected items to a different space
+ */
+async function bulkMoveItems(targetSpaceId) {
+    if (selectedItems.size === 0) return;
+    
+    // Close the dropdown
+    document.getElementById('bulkMoveDropdown').classList.remove('visible');
+    
+    try {
+        // Show loading state on move button
+        const moveBtn = document.getElementById('bulkMoveBtn');
+        const originalText = moveBtn.innerHTML;
+        moveBtn.innerHTML = '<span>⏳</span><span>Moving...</span>';
+        moveBtn.disabled = true;
+        
+        // Convert Set to Array for API call
+        const itemIds = Array.from(selectedItems);
+        
+        // Get target space name for confirmation
+        let targetSpaceName = 'All Items';
+        if (targetSpaceId && targetSpaceId !== 'null') {
+            const targetSpace = spacesData.find(s => s.id === targetSpaceId);
+            targetSpaceName = targetSpace ? targetSpace.name : 'Unknown Space';
+        }
+        
+        // Call the bulk move API
+        const result = await window.clipboard.moveItems(itemIds, targetSpaceId === 'null' ? null : targetSpaceId);
+        
+        if (result.success) {
+            console.log(`[Bulk Move] Successfully moved ${result.moved} items to ${targetSpaceName}`);
+            
+            if (result.failed > 0) {
+                alert(`Moved ${result.moved} items to "${targetSpaceName}". Failed to move ${result.failed} items.\n\nErrors:\n${result.errors.join('\n')}`);
+            }
+            
+            // Clear selection
+            selectedItems.clear();
+            updateBulkActionToolbar();
+            
+            // Reload history to reflect changes
+            await loadHistory();
+            
+            // Update spaces list to refresh counts
+            await loadSpaces();
+        } else {
+            console.error('[Bulk Move] Failed:', result.error);
+            alert(`Failed to move items: ${result.error}`);
+        }
+        
+        // Restore button
+        moveBtn.innerHTML = originalText;
+        moveBtn.disabled = false;
+        
+    } catch (error) {
+        console.error('[Bulk Move] Error:', error);
+        alert(`Error moving items: ${error.message}`);
+        
+        // Restore button
+        const moveBtn = document.getElementById('bulkMoveBtn');
+        moveBtn.innerHTML = '<span>→</span><span>Move to Space</span>';
+        moveBtn.disabled = false;
+    }
+}
+
+// ============================================
+// INITIALIZATION
+// ============================================
+
 document.addEventListener('DOMContentLoaded', () => {
     init();
     setupVideoModalListeners();

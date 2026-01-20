@@ -53,6 +53,14 @@
       pendingRangeMarker: null, // For tracking incomplete range markers (IN set, waiting for OUT)
       draggingMarker: null, // { id, type: 'spot'|'range-in'|'range-out'|'range-move', startX, startTime }
       
+      // Multi-source video system (for multi-camera/multi-take editing)
+      videoSources: [],  // Array of video source objects: { id, path, fileName, duration, metadata }
+      videoClips: [],    // Array of video clips on timeline: { id, sourceId, name, timelineStart, sourceIn, sourceOut, duration }
+      activeSourceId: null, // Currently playing source in video player
+      nextVideoSourceId: 1,  // Counter for generating unique source IDs
+      nextVideoClipId: 1,    // Counter for generating unique clip IDs
+      currentTimelinePosition: 0,  // Current position on the unified timeline (spans all clips)
+      
       // Playlist
       playlist: [],
       playlistPlaying: false,
@@ -237,7 +245,13 @@
           trimStart: this.trimStart,
           trimEnd: this.trimEnd,
           nextMarkerId: this.nextMarkerId,
-          nextTrackId: this.nextTrackId
+          nextTrackId: this.nextTrackId,
+          // Multi-source video state
+          videoSources: JSON.parse(JSON.stringify(this.videoSources || [])),
+          videoClips: JSON.parse(JSON.stringify(this.videoClips || [])),
+          activeSourceId: this.activeSourceId,
+          nextVideoSourceId: this.nextVideoSourceId,
+          nextVideoClipId: this.nextVideoClipId
         };
       },
 
@@ -263,11 +277,30 @@
           this.nextMarkerId = state.nextMarkerId ?? this.nextMarkerId;
           this.nextTrackId = state.nextTrackId ?? this.nextTrackId;
           
+          // Restore multi-source video state
+          if (state.videoSources) {
+            this.videoSources = JSON.parse(JSON.stringify(state.videoSources));
+          }
+          if (state.videoClips) {
+            this.videoClips = JSON.parse(JSON.stringify(state.videoClips));
+          }
+          if (state.activeSourceId !== undefined) {
+            this.activeSourceId = state.activeSourceId;
+          }
+          if (state.nextVideoSourceId !== undefined) {
+            this.nextVideoSourceId = state.nextVideoSourceId;
+          }
+          if (state.nextVideoClipId !== undefined) {
+            this.nextVideoClipId = state.nextVideoClipId;
+          }
+          
           // Re-render affected UI
           this.renderMarkers && this.renderMarkers();
           this.updateMarkersPanel && this.updateMarkersPanel();
           this.renderBeats && this.renderBeats();
           this.updateSliceMarkers && this.updateSliceMarkers();
+          this.renderVideoSources && this.renderVideoSources();
+          this.renderVideoClips && this.renderVideoClips();
           
           // Re-render audio tracks (clear container and re-render each)
           this._renderAllAudioTracks();
@@ -1596,9 +1629,24 @@
         const video = document.getElementById('videoPlayer');
         
         video.addEventListener('timeupdate', () => {
+          // Update timeline position based on current clip + video time
+          if (this.videoClips.length > 0 && this.activeSourceId) {
+            const activeClip = this.videoClips.find(c => c.sourceId === this.activeSourceId);
+            if (activeClip) {
+              const offsetIntoClip = video.currentTime - activeClip.sourceIn;
+              this.currentTimelinePosition = activeClip.timelineStart + offsetIntoClip;
+            }
+          } else {
+            // Legacy single video mode
+            this.currentTimelinePosition = video.currentTime;
+          }
+          
           this.updateTimeDisplay();
           this.updateAudioPlayhead();
           this.updateTeleprompterHighlight(video.currentTime);
+          
+          // Multi-source: Check if we need to switch sources at clip boundaries
+          this.checkClipBoundaries();
         });
         video.addEventListener('loadedmetadata', () => this.onVideoLoaded());
         video.addEventListener('play', () => {
@@ -8174,8 +8222,583 @@
         }
       },
 
-      // Load video
-      async loadVideo(filePath) {
+      // ==================== VIDEO SOURCE MANAGEMENT ====================
+      
+      /**
+       * Add a video source to the project
+       * @param {string} filePath - Path to video file
+       * @param {object} options - Additional options { addToTimeline: boolean }
+       * @returns {object} - Created source object
+       */
+      async addVideoSource(filePath, options = {}) {
+        const { addToTimeline = true } = options;
+        
+        try {
+          // Get video info
+          const videoInfo = await window.videoEditor.getInfo(filePath);
+          
+          if (videoInfo.error) {
+            throw new Error(videoInfo.error);
+          }
+          
+          // Check if source already exists
+          const existingSource = this.videoSources.find(s => s.path === filePath);
+          if (existingSource) {
+            console.log('[VideoSources] Source already exists:', existingSource.id);
+            if (addToTimeline) {
+              this.addVideoClipFromSource(existingSource.id);
+            }
+            return existingSource;
+          }
+          
+          // Create source object
+          const fileName = filePath.split('/').pop();
+          const source = {
+            id: `source_${this.nextVideoSourceId++}`,
+            path: filePath,
+            fileName: fileName,
+            duration: videoInfo.duration,
+            metadata: videoInfo
+          };
+          
+          this.videoSources.push(source);
+          console.log('[VideoSources] Added source:', source.id, fileName);
+          
+          // Render sources panel
+          this.renderVideoSources();
+          
+          // Add clip to timeline if requested
+          if (addToTimeline) {
+            this.addVideoClipFromSource(source.id);
+          }
+          
+          return source;
+          
+        } catch (error) {
+          console.error('[VideoSources] Error adding source:', error);
+          this.showToast('error', 'Failed to add video: ' + error.message);
+          throw error;
+        }
+      },
+      
+      /**
+       * Remove a video source (and all clips using it)
+       * @param {string} sourceId - Source ID to remove
+       */
+      removeVideoSource(sourceId) {
+        const source = this.videoSources.find(s => s.id === sourceId);
+        if (!source) return;
+        
+        // Remove all clips using this source
+        const clipsToRemove = this.videoClips.filter(c => c.sourceId === sourceId);
+        clipsToRemove.forEach(clip => this.removeVideoClip(clip.id));
+        
+        // Remove source
+        this.videoSources = this.videoSources.filter(s => s.id !== sourceId);
+        
+        console.log('[VideoSources] Removed source:', sourceId);
+        this.renderVideoSources();
+        this.showToast('info', `Removed ${source.fileName}`);
+      },
+      
+      /**
+       * Add a video clip to the timeline from a source
+       * @param {string} sourceId - Source ID
+       * @param {number} timelineStart - Optional timeline start position (defaults to end of timeline)
+       * @returns {object} - Created clip object
+       */
+      addVideoClipFromSource(sourceId, timelineStart = null) {
+        const source = this.videoSources.find(s => s.id === sourceId);
+        if (!source) {
+          console.error('[VideoClips] Source not found:', sourceId);
+          return null;
+        }
+        
+        // Calculate timeline position
+        if (timelineStart === null) {
+          // Place at end of timeline
+          if (this.videoClips.length === 0) {
+            timelineStart = 0;
+          } else {
+            const lastClip = this.videoClips[this.videoClips.length - 1];
+            timelineStart = lastClip.timelineStart + lastClip.duration;
+          }
+        }
+        
+        // Create clip object
+        const clip = {
+          id: `clip_${this.nextVideoClipId++}`,
+          sourceId: sourceId,
+          name: source.fileName,
+          timelineStart: timelineStart,
+          sourceIn: 0,
+          sourceOut: source.duration,
+          duration: source.duration
+        };
+        
+        this.videoClips.push(clip);
+        
+        // Sort clips by timeline position
+        this.videoClips.sort((a, b) => a.timelineStart - b.timelineStart);
+        
+        console.log('[VideoClips] Added clip:', clip.id, 'from', sourceId, 'at', timelineStart);
+        
+        // Render timeline
+        this.renderVideoClips();
+        
+        // If this is the first clip, load the source into the player
+        if (this.videoClips.length === 1) {
+          this.switchToSource(sourceId);
+        }
+        
+        return clip;
+      },
+      
+      /**
+       * Remove a video clip from the timeline
+       * @param {string} clipId - Clip ID to remove
+       */
+      removeVideoClip(clipId) {
+        const clip = this.videoClips.find(c => c.id === clipId);
+        if (!clip) return;
+        
+        this.videoClips = this.videoClips.filter(c => c.id !== clipId);
+        
+        console.log('[VideoClips] Removed clip:', clipId);
+        this.renderVideoClips();
+        
+        // If no clips left, clear the player
+        if (this.videoClips.length === 0) {
+          this.clearVideoPlayer();
+        }
+      },
+      
+      /**
+       * Get the video clip at a specific timeline position
+       * @param {number} time - Timeline time in seconds
+       * @returns {object|null} - Clip object or null
+       */
+      getVideoClipAtTime(time) {
+        for (const clip of this.videoClips) {
+          const clipEnd = clip.timelineStart + clip.duration;
+          if (time >= clip.timelineStart && time < clipEnd) {
+            return clip;
+          }
+        }
+        return null;
+      },
+      
+      /**
+       * Check if playhead has crossed clip boundaries and switch sources if needed
+       * Called during playback (timeupdate event)
+       */
+      checkClipBoundaries() {
+        if (this.videoClips.length === 0) return;
+        
+        const video = document.getElementById('videoPlayer');
+        if (!video || video.paused) return;
+        
+        // Calculate current timeline position (not video.currentTime, which is source-relative)
+        const currentClip = this.getVideoClipAtTime(this.currentTimelinePosition || 0);
+        
+        if (!currentClip) return;
+        
+        // If we're in a different clip than the active source, switch
+        if (currentClip.sourceId !== this.activeSourceId) {
+          console.log('[Playback] Switching to clip:', currentClip.id, 'source:', currentClip.sourceId);
+          
+          // Calculate offset into the new clip
+          const offsetIntoClip = (this.currentTimelinePosition || 0) - currentClip.timelineStart;
+          const sourceTime = currentClip.sourceIn + offsetIntoClip;
+          
+          // Switch source and seek to the right position
+          this.switchToSource(currentClip.sourceId, sourceTime);
+          
+          // Resume playback if it was playing
+          if (!video.paused) {
+            video.play().catch(err => console.error('[Playback] Resume error:', err));
+          }
+        }
+      },
+      
+      /**
+       * Split a video clip at the current playhead position
+       * @param {string} clipId - Clip ID to split (optional, uses clip at playhead if not provided)
+       */
+      splitVideoClipAtPlayhead(clipId = null) {
+        const video = document.getElementById('videoPlayer');
+        if (!video) return;
+        
+        const playheadTime = this.currentTimelinePosition || video.currentTime;
+        
+        // Find the clip to split
+        let clip;
+        if (clipId) {
+          clip = this.videoClips.find(c => c.id === clipId);
+        } else {
+          clip = this.getVideoClipAtTime(playheadTime);
+        }
+        
+        if (!clip) {
+          this.showToast('warning', 'No clip at playhead position');
+          return;
+        }
+        
+        // Check if playhead is actually inside the clip (not at edges)
+        const clipEnd = clip.timelineStart + clip.duration;
+        if (playheadTime <= clip.timelineStart || playheadTime >= clipEnd) {
+          this.showToast('warning', 'Playhead must be inside the clip');
+          return;
+        }
+        
+        // Calculate split point
+        const offsetIntoClip = playheadTime - clip.timelineStart;
+        const splitSourceTime = clip.sourceIn + offsetIntoClip;
+        
+        // Create two new clips
+        const clip1 = {
+          id: `${clip.id}_a`,
+          sourceId: clip.sourceId,
+          name: `${clip.name} (1)`,
+          timelineStart: clip.timelineStart,
+          sourceIn: clip.sourceIn,
+          sourceOut: splitSourceTime,
+          duration: offsetIntoClip
+        };
+        
+        const clip2 = {
+          id: `${clip.id}_b`,
+          sourceId: clip.sourceId,
+          name: `${clip.name} (2)`,
+          timelineStart: playheadTime,
+          sourceIn: splitSourceTime,
+          sourceOut: clip.sourceOut,
+          duration: clip.duration - offsetIntoClip
+        };
+        
+        // Replace original clip with two new clips
+        const clipIndex = this.videoClips.findIndex(c => c.id === clip.id);
+        this.videoClips.splice(clipIndex, 1, clip1, clip2);
+        
+        console.log('[VideoClips] Split clip:', clip.id, 'into', clip1.id, 'and', clip2.id);
+        this.renderVideoClips();
+        this.showToast('success', 'Clip split');
+      },
+      
+      /**
+       * Trim a video clip's in/out points
+       * @param {string} clipId - Clip ID
+       * @param {number} newIn - New source in point (null to keep existing)
+       * @param {number} newOut - New source out point (null to keep existing)
+       */
+      trimVideoClip(clipId, newIn = null, newOut = null) {
+        const clip = this.videoClips.find(c => c.id === clipId);
+        if (!clip) return;
+        
+        const source = this.videoSources.find(s => s.id === clip.sourceId);
+        if (!source) return;
+        
+        // Update in/out points
+        if (newIn !== null) {
+          clip.sourceIn = Math.max(0, Math.min(newIn, source.duration));
+        }
+        if (newOut !== null) {
+          clip.sourceOut = Math.max(clip.sourceIn, Math.min(newOut, source.duration));
+        }
+        
+        // Recalculate duration
+        clip.duration = clip.sourceOut - clip.sourceIn;
+        
+        // Shift subsequent clips
+        this.compactClipsOnTimeline();
+        
+        console.log('[VideoClips] Trimmed clip:', clipId);
+        this.renderVideoClips();
+      },
+      
+      /**
+       * Move a video clip to a new timeline position
+       * @param {string} clipId - Clip ID
+       * @param {number} newTimelineStart - New timeline start position
+       */
+      moveVideoClip(clipId, newTimelineStart) {
+        const clip = this.videoClips.find(c => c.id === clipId);
+        if (!clip) return;
+        
+        clip.timelineStart = Math.max(0, newTimelineStart);
+        
+        // Re-sort clips
+        this.videoClips.sort((a, b) => a.timelineStart - b.timelineStart);
+        
+        console.log('[VideoClips] Moved clip:', clipId, 'to', newTimelineStart);
+        this.renderVideoClips();
+      },
+      
+      /**
+       * Compact clips on timeline (remove gaps)
+       */
+      compactClipsOnTimeline() {
+        let currentTime = 0;
+        this.videoClips.forEach(clip => {
+          clip.timelineStart = currentTime;
+          currentTime += clip.duration;
+        });
+      },
+      
+      /**
+       * Export multi-source video (concatenate all clips)
+       */
+      async exportMultiSourceVideo() {
+        if (this.videoClips.length === 0) {
+          this.showToast('error', 'No video clips to export');
+          return;
+        }
+        
+        try {
+          this.showProgress('Exporting multi-source video...', 0);
+          
+          console.log('[Export] Exporting', this.videoClips.length, 'clips');
+          
+          // Prepare clips and sources data
+          const clips = this.videoClips.map(clip => ({
+            id: clip.id,
+            sourceId: clip.sourceId,
+            sourceIn: clip.sourceIn,
+            sourceOut: clip.sourceOut,
+            duration: clip.duration,
+            timelineStart: clip.timelineStart
+          }));
+          
+          const sources = this.videoSources.map(source => ({
+            id: source.id,
+            path: source.path
+          }));
+          
+          // Export
+          const result = await window.videoEditor.concatenateClips(clips, sources, {
+            format: 'mp4',
+            quality: 'medium'
+          });
+          
+          this.hideProgress();
+          
+          if (result.success) {
+            this.showToast('success', `Exported ${result.clipsProcessed} clips!`);
+            this.loadExports();
+          } else {
+            throw new Error(result.error || 'Export failed');
+          }
+          
+        } catch (error) {
+          this.hideProgress();
+          console.error('[Export] Multi-source export error:', error);
+          this.showToast('error', 'Export failed: ' + error.message);
+        }
+      },
+      
+      /**
+       * Switch the video player to a specific source
+       * @param {string} sourceId - Source ID to switch to
+       * @param {number} startTime - Optional start time within the source
+       */
+      async switchToSource(sourceId, startTime = 0) {
+        const source = this.videoSources.find(s => s.id === sourceId);
+        if (!source) {
+          console.error('[VideoSources] Cannot switch to source:', sourceId);
+          return;
+        }
+        
+        console.log('[VideoSources] Switching to source:', sourceId, source.fileName);
+        
+        this.activeSourceId = sourceId;
+        this.videoPath = source.path;
+        this.videoInfo = source.metadata;
+        
+        // Update video player
+        const video = document.getElementById('videoPlayer');
+        video.src = pathToFileUrl(source.path);
+        
+        // Set start time
+        if (startTime > 0) {
+          video.currentTime = startTime;
+        }
+        
+        // Update UI
+        document.getElementById('fileName').textContent = source.fileName;
+        
+        return source;
+      },
+      
+      /**
+       * Clear the video player
+       */
+      clearVideoPlayer() {
+        const video = document.getElementById('videoPlayer');
+        video.src = '';
+        this.videoPath = null;
+        this.videoInfo = null;
+        this.activeSourceId = null;
+        
+        document.getElementById('fileName').textContent = 'No video loaded';
+      },
+      
+      /**
+       * Render video sources panel
+       */
+      renderVideoSources() {
+        const container = document.getElementById('videoSourcesList');
+        if (!container) return;
+        
+        if (this.videoSources.length === 0) {
+          container.innerHTML = '<div class="empty-state">No video sources. Click + to add.</div>';
+          return;
+        }
+        
+        container.innerHTML = this.videoSources.map(source => `
+          <div class="video-source-item" data-source-id="${source.id}">
+            <div class="video-source-icon">📹</div>
+            <div class="video-source-info">
+              <div class="video-source-name" title="${source.fileName}">${source.fileName}</div>
+              <div class="video-source-duration">${this.formatTime(source.duration)}</div>
+            </div>
+            <div class="video-source-actions">
+              <button class="btn-icon" onclick="app.addVideoClipFromSource('${source.id}')" title="Add to timeline">
+                ➕
+              </button>
+              <button class="btn-icon" onclick="app.removeVideoSource('${source.id}')" title="Remove source">
+                🗑️
+              </button>
+            </div>
+          </div>
+        `).join('');
+      },
+      
+      /**
+       * Open file dialog to add a video source
+       */
+      async addVideoSourceDialog() {
+        try {
+          const result = await window.videoEditor.openFile();
+          if (result && result.filePaths && result.filePaths.length > 0) {
+            const filePath = result.filePaths[0];
+            await this.addVideoSource(filePath, { addToTimeline: true });
+            this.showToast('success', `Added ${filePath.split('/').pop()}`);
+          }
+        } catch (error) {
+          console.error('[VideoSources] Error adding source:', error);
+          this.showToast('error', 'Failed to add video source');
+        }
+      },
+      
+      /**
+       * Render video clips on the timeline
+       */
+      renderVideoClips() {
+        const track = document.getElementById('videoTrack');
+        if (!track) {
+          console.warn('[VideoClips] Video track element not found');
+          return;
+        }
+        
+        // Clear existing clips
+        track.innerHTML = '';
+        
+        if (this.videoClips.length === 0) {
+          // Show placeholder
+          const placeholder = document.createElement('div');
+          placeholder.className = 'timeline-clip-placeholder';
+          placeholder.textContent = 'Drag video sources here or click + to add';
+          track.appendChild(placeholder);
+          return;
+        }
+        
+        // Calculate total timeline duration
+        const totalDuration = this.videoClips.reduce((max, clip) => 
+          Math.max(max, clip.timelineStart + clip.duration), 0
+        );
+        
+        // Render each clip
+        this.videoClips.forEach(clip => {
+          const source = this.videoSources.find(s => s.id === clip.sourceId);
+          if (!source) return;
+          
+          const clipEl = document.createElement('div');
+          clipEl.className = 'timeline-clip video-clip';
+          clipEl.dataset.clipId = clip.id;
+          clipEl.dataset.sourceId = clip.sourceId;
+          
+          // Calculate position and width as percentages
+          const leftPercent = (clip.timelineStart / totalDuration) * 100;
+          const widthPercent = (clip.duration / totalDuration) * 100;
+          
+          clipEl.style.left = `${leftPercent}%`;
+          clipEl.style.width = `${widthPercent}%`;
+          
+          clipEl.innerHTML = `
+            <div class="timeline-thumbnails" id="clip-thumbnails-${clip.id}"></div>
+            <span class="timeline-clip-name">${clip.name}</span>
+            <div class="marker-range-overlay-container"></div>
+          `;
+          
+          // Add click handler
+          clipEl.onclick = (e) => this.selectVideoClip(clip.id, e);
+          
+          track.appendChild(clipEl);
+        });
+        
+        // Update track info
+        const trackInfo = document.querySelector('#videoTrack').closest('.timeline-row').querySelector('.track-clip-count');
+        if (trackInfo) {
+          trackInfo.textContent = `${this.videoClips.length} Clip${this.videoClips.length !== 1 ? 's' : ''}`;
+        }
+      },
+      
+      /**
+       * Select a video clip
+       * @param {string} clipId - Clip ID
+       * @param {Event} event - Click event
+       */
+      selectVideoClip(clipId, event) {
+        const clip = this.videoClips.find(c => c.id === clipId);
+        if (!clip) return;
+        
+        // Visual selection
+        document.querySelectorAll('.video-clip').forEach(el => {
+          el.classList.toggle('selected', el.dataset.clipId === clipId);
+        });
+        
+        // Switch to this source if needed
+        if (clip.sourceId !== this.activeSourceId) {
+          this.switchToSource(clip.sourceId, clip.sourceIn);
+        }
+        
+        // Seek to clip start on timeline
+        const video = document.getElementById('videoPlayer');
+        if (video) {
+          const offset = event ? this.getTimeFromClickPosition(event) : 0;
+          video.currentTime = clip.sourceIn + offset;
+        }
+      },
+      
+      // Load video (modified to support multi-source mode)
+      async loadVideo(filePath, options = {}) {
+        const { 
+          addToSources = false,  // If true, add to sources and create clip instead of replacing
+          replaceCurrent = true   // If false with addToSources=true, keeps existing clips
+        } = options;
+        
+        // NEW BEHAVIOR: Add to sources instead of replacing
+        if (addToSources) {
+          try {
+            await this.addVideoSource(filePath, { addToTimeline: true });
+            return;
+          } catch (error) {
+            console.error('[LoadVideo] Failed to add source:', error);
+            return;
+          }
+        }
+        
+        // LEGACY BEHAVIOR: Replace current video (backwards compatible)
         this.videoPath = filePath;
 
         // Clear waveform cache for new video
@@ -8325,6 +8948,9 @@
 
         // ==================== PRELOADER ====================
         // Check for missing assets and prompt user to generate them
+//#region agent log
+fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'video-editor-app.js:8702',message:'onVideoLoaded - before preloader',data:{hasTranscriptSegments:!!this.transcriptSegments,transcriptSegmentsCount:this.transcriptSegments?.length||0,transcriptSource:this.transcriptSource,spaceItemId:this.spaceItemId,loadingFromProject:this._loadingFromProject},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B,C,E'})}).catch(()=>{});
+//#endregion
         if (window.VideoEditorPreloader && this.videoPath) {
           try {
             const preloadResult = await window.VideoEditorPreloader.checkAndPrompt(
@@ -16586,6 +17212,9 @@
           this.transcriptSegments = versionData.transcriptSegments;
           // Also restore the transcript source to prevent preloader from prompting regeneration
           this.transcriptSource = versionData.transcriptSource || 'elevenlabs-scribe';
+//#region agent log
+fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'video-editor-app.js:16963',message:'applyVersionState - transcript restored',data:{segmentsCount:this.transcriptSegments.length,transcriptSource:this.transcriptSource,originalSource:versionData.transcriptSource,hasOriginalSource:!!versionData.transcriptSource},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A,C,D,E'})}).catch(()=>{});
+//#endregion
           console.log('[ProjectManager] Loaded', this.transcriptSegments.length, 'transcript segments from version (source:', this.transcriptSource + ')');
           
           // Show and initialize teleprompter with restored transcript
@@ -17158,6 +17787,14 @@
         const project = await window.projectAPI.getProject(projectId);
         const spaceId = project?.spaceId || 'default';
         
+        // Use the existing modal system instead of prompt()
+        this.showAddVideoToProjectModal(projectId, spaceId);
+      },
+      
+      // Show modal to add video to project
+      async showAddVideoToProjectModal(projectId, spaceId) {
+        console.log('[showAddVideoToProjectModal] Project:', projectId, 'Space:', spaceId);
+        
         // Get videos from the space
         const result = await window.spaces.getItems(spaceId);
         // Handle both { success, items } format and raw array format
@@ -17172,50 +17809,98 @@
           return;
         }
         
-        // Create a simple selection dialog
-        const videoOptions = videos.map(v => `${v.fileName || v.name || 'Untitled'}`).join('\n');
-        const selection = prompt(
-          `Select a video to add to this project:\n\nAvailable videos:\n${videos.map((v, i) => `${i + 1}. ${v.fileName || v.name || 'Untitled'}`).join('\n')}\n\nEnter the number (1-${videos.length}):`
-        );
+        // Create modal HTML
+        const modalHtml = `
+          <div id="addVideoModal" class="modal-overlay">
+            <div class="modal" style="max-width: 600px; max-height: 80vh; display: flex; flex-direction: column;">
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #3a3a3a;">
+                <h2 style="margin: 0; font-size: 16px; font-weight: 600; color: #ddd;">Add Video to Project</h2>
+                <button style="background: none; border: none; color: #999; font-size: 24px; cursor: pointer; padding: 0; line-height: 1;" onclick="app.closeAddVideoModal()" title="Close">&times;</button>
+              </div>
+              <div style="overflow-y: auto; flex: 1; margin-bottom: 16px;">
+                <p style="margin-bottom: 16px; color: #999; font-size: 13px;">Select a video from this space to add to your project:</p>
+                <div id="addVideoList" style="display: flex; flex-direction: column; gap: 8px;">
+                  ${videos.map(video => `
+                    <div class="video-option" data-video-id="${video.id}" 
+                         style="padding: 12px; border: 1px solid #3a3a3a; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 12px; transition: all 0.2s; background: #2a2a2a;"
+                         onmouseover="this.style.borderColor='#64c8ff'; this.style.backgroundColor='#333'"
+                         onmouseout="this.style.borderColor='#3a3a3a'; this.style.backgroundColor='#2a2a2a'"
+                         onclick="app.selectVideoForProject('${video.id}')">
+                      <div style="font-size: 24px;">🎬</div>
+                      <div style="flex: 1;">
+                        <div style="font-weight: 500; margin-bottom: 4px; color: #ddd;">${video.fileName || video.name || 'Untitled'}</div>
+                        ${video.metadata?.duration ? `<div style="font-size: 12px; color: #888;">Duration: ${this.formatDuration(video.metadata.duration)}</div>` : ''}
+                      </div>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+              <div style="display: flex; justify-content: flex-end; padding-top: 12px; border-top: 1px solid #3a3a3a;">
+                <button style="padding: 8px 16px; background: #3a3a3a; border: none; border-radius: 4px; color: #ddd; cursor: pointer; font-size: 13px;" onclick="app.closeAddVideoModal()">Cancel</button>
+              </div>
+            </div>
+          </div>
+        `;
         
-        if (!selection) {
-          console.log('[promptAddVideoToProject] User cancelled');
+        // Add modal to page
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        
+        // Store project ID for later
+        this.pendingProjectId = projectId;
+        
+        // Add visible class after a small delay to trigger CSS transition
+        setTimeout(() => {
+          const modal = document.getElementById('addVideoModal');
+          if (modal) {
+            modal.classList.add('visible');
+          }
+        }, 10);
+      },
+      
+      closeAddVideoModal() {
+        const modal = document.getElementById('addVideoModal');
+        if (modal) {
+          // Remove visible class to trigger fade-out transition
+          modal.classList.remove('visible');
+          // Wait for transition to complete before removing from DOM
+          setTimeout(() => {
+            modal.remove();
+          }, 200);
+        }
+        this.pendingProjectId = null;
+      },
+      
+      async selectVideoForProject(videoId) {
+        console.log('[selectVideoForProject] Video:', videoId, 'Project:', this.pendingProjectId);
+        
+        if (!this.pendingProjectId) {
+          console.error('[selectVideoForProject] No pending project ID');
           return;
         }
         
-        const index = parseInt(selection, 10) - 1;
-        if (isNaN(index) || index < 0 || index >= videos.length) {
-          this.showToast('error', 'Invalid selection');
-          return;
+        const projectId = this.pendingProjectId;
+        this.closeAddVideoModal();
+        
+        try {
+          // Get the video path
+          const pathResult = await window.spaces.getVideoPath(videoId);
+          if (!pathResult.success || !pathResult.filePath) {
+            this.showToast('error', pathResult.error || 'Could not get video path');
+            return;
+          }
+          
+          // Add video as asset to project
+          const asset = await window.projectAPI.addAsset(projectId, pathResult.filePath, 'video');
+          console.log('[selectVideoForProject] Added asset:', asset);
+          
+          this.showToast('success', 'Video added to project');
+          
+          // Reload the project to show the new asset
+          await this.openProject(projectId);
+        } catch (error) {
+          console.error('[selectVideoForProject] Error:', error);
+          this.showToast('error', 'Failed to add video: ' + error.message);
         }
-        
-        const selectedVideo = videos[index];
-        console.log('[promptAddVideoToProject] Selected video:', selectedVideo.id, selectedVideo.fileName);
-        
-        // Get the video path
-        const pathResult = await window.spaces.getVideoPath(selectedVideo.id);
-        if (!pathResult.success || !pathResult.filePath) {
-          this.showToast('error', pathResult.error || 'Could not get video path');
-          return;
-        }
-        
-        // Add video as asset to project
-        const asset = await window.projectAPI.addAsset(projectId, pathResult.filePath, 'video');
-        console.log('[promptAddVideoToProject] Added asset:', asset);
-        
-        // Update version to use this as primary video
-        if (asset && asset.id) {
-          await window.projectAPI.updateVersion(versionId, {
-            primaryVideoAssetId: asset.id
-          });
-        }
-        
-        // Load the video - use loadVideoFromSpace for proper preprocessing
-        // This ensures transcript, waveform, and thumbnails are checked/generated
-        console.log('[promptAddVideoToProject] Loading video via loadVideoFromSpace for preprocessing');
-        await this.loadVideoFromSpace(selectedVideo.id);
-        
-        this.showToast('success', `Added video: ${pathResult.fileName || 'Video'}`);
       },
 
       // Confirm and create new project
@@ -17612,7 +18297,13 @@
           
           // IMPORTANT: Apply version state BEFORE loading video to avoid race condition
           // where video's loadedmetadata event fires before transcriptSegments is set
+//#region agent log
+fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'video-editor-app.js:18026',message:'loadProject - before applyVersionState',data:{versionId:result.version.id,hasTranscriptSegmentsInVersion:!!(result.version.transcriptSegments&&result.version.transcriptSegments.length>0),transcriptSourceInVersion:result.version.transcriptSource},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C,E'})}).catch(()=>{});
+//#endregion
           this.applyVersionState(result.version);
+//#region agent log
+fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'video-editor-app.js:18028',message:'loadProject - after applyVersionState',data:{hasTranscriptSegments:!!this.transcriptSegments,transcriptSegmentsCount:this.transcriptSegments?.length||0,transcriptSource:this.transcriptSource},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C,E'})}).catch(()=>{});
+//#endregion
           
           if (result.primaryAsset?.path) {
             console.log('[loadProject] Loading video from path:', result.primaryAsset.path);
@@ -18765,6 +19456,7 @@
         });
 
         document.getElementById('editTab').classList.toggle('hidden', tabName !== 'edit');
+        document.getElementById('sourcesTab')?.classList.toggle('hidden', tabName !== 'sources');
         document.getElementById('scenesTab').classList.toggle('hidden', tabName !== 'scenes');
         document.getElementById('spacesTab').classList.toggle('hidden', tabName !== 'spaces');
         document.getElementById('budgetTab')?.classList.toggle('hidden', tabName !== 'budget');
@@ -18778,6 +19470,11 @@
         // Render scenes list when switching to scenes tab
         if (tabName === 'scenes') {
           this.renderScenesList();
+        }
+        
+        // Render sources when switching to sources tab
+        if (tabName === 'sources') {
+          this.renderVideoSources();
         }
       },
 
@@ -18868,7 +19565,23 @@
         try {
           // Get the actual file path from the backend
           console.log('[VideoEditor] Getting path for video:', videoId);
-          const result = await window.spaces.getVideoPath(videoId);
+          
+          // Try new Spaces API first if available
+          let result;
+          if (window.spaces.api) {
+            try {
+              // Use the new unified video path getter
+              result = await window.spaces.api.getVideoPath(videoId);
+              console.log('[VideoEditor] Retrieved video via Spaces API:', result);
+            } catch (apiError) {
+              console.warn('[VideoEditor] Spaces API failed, falling back to legacy method:', apiError);
+              // Fall back to legacy method
+              result = await window.spaces.getVideoPath(videoId);
+            }
+          } else {
+            // Use legacy method
+            result = await window.spaces.getVideoPath(videoId);
+          }
           
           if (!result.success || !result.filePath) {
             this.showToast('error', result.error || 'Video file not found');

@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Choose from Spaces</title>
+  <style>
+    /* Tufte-inspired minimalist design: maximize data-ink ratio */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: "Gill Sans", "Gill Sans MT", Calibri, sans-serif;
+      background: #fafafa;
+      color: #111;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      line-height: 1.4;
+    }
+    
+    /* Header: minimal, functional */
+    .header {
+      padding: 12px 16px;
+      background: #fff;
+      border-bottom: 1px solid #ddd;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .header h2 {
+      font-size: 14px;
+      font-weight: 400;
+      letter-spacing: 0.02em;
+      color: #555;
+    }
+    
+    .search-box {
+      padding: 6px 10px;
+      background: #fff;
+      border: 1px solid #ccc;
+      border-radius: 2px;
+      color: #111;
+      font-size: 12px;
+      width: 180px;
+      font-family: inherit;
+    }
+    
+    .search-box:focus {
+      outline: none;
+      border-color: #666;
+      box-shadow: inset 0 0 0 1px #666;
+    }
+    
+    .main {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+    
+    /* Sidebar: clean list, minimal decoration */
+    .sidebar {
+      width: 180px;
+      background: #fff;
+      border-right: 1px solid #ddd;
+      overflow-y: auto;
+    }
+    
+    .space-item {
+      padding: 8px 12px;
+      cursor: pointer;
+      border-bottom: 1px solid #f0f0f0;
+      display: grid;
+      grid-template-columns: 20px 1fr auto;
+      gap: 8px;
+      align-items: center;
+      transition: none;
+    }
+    
+    .space-item:hover {
+      background: #f5f5f5;
+    }
+    
+    .space-item.active {
+      background: #111;
+      color: #fff;
+    }
+    
+    /* Space icons: SVG-based, minimal geometric shapes */
+    .space-icon {
+      width: 16px;
+      height: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .space-icon svg {
+      width: 100%;
+      height: 100%;
+    }
+    
+    .space-name {
+      font-size: 12px;
+      font-weight: 400;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    
+    .space-count {
+      font-size: 10px;
+      color: #888;
+      font-variant-numeric: tabular-nums;
+    }
+    
+    .space-item.active .space-count {
+      color: #aaa;
+    }
+    
+    /* Items container */
+    .items-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: #fafafa;
+    }
+    
+    /* Filter bar: minimal tabs */
+    .filter-bar {
+      padding: 8px 16px;
+      background: #fff;
+      border-bottom: 1px solid #ddd;
+      display: flex;
+      gap: 0;
+    }
+    
+    .filter-btn {
+      padding: 4px 12px;
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: #888;
+      font-size: 11px;
+      cursor: pointer;
+      transition: none;
+      font-family: inherit;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    
+    .filter-btn:hover {
+      color: #111;
+    }
+    
+    .filter-btn.active {
+      color: #111;
+      border-bottom-color: #111;
+    }
+    
+    /* Items: dense grid with minimal visual weight */
+    .items-grid {
+      flex: 1;
+      padding: 16px;
+      overflow-y: auto;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+      gap: 12px;
+      align-content: start;
+    }
+    
+    .item-card {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 2px;
+      padding: 10px 8px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      align-items: center;
+      transition: none;
+      min-height: 80px;
+    }
+    
+    .item-card:hover {
+      border-color: #666;
+    }
+    
+    .item-card.selected {
+      border-color: #111;
+      border-width: 2px;
+      padding: 9px 7px;
+      background: #f5f5f5;
+    }
+    
+    /* Item icons: clean SVG geometric shapes */
+    .item-icon {
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .item-icon svg {
+      width: 100%;
+      height: 100%;
+    }
+    
+    .item-name {
+      font-size: 10px;
+      color: #555;
+      word-break: break-word;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      line-height: 1.3;
+      text-align: center;
+      width: 100%;
+    }
+    
+    /* Footer: minimal, data-focused */
+    .footer {
+      padding: 10px 16px;
+      background: #fff;
+      border-top: 1px solid #ddd;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .selection-info {
+      font-size: 11px;
+      color: #666;
+      font-variant-numeric: tabular-nums;
+    }
+    
+    .footer-buttons {
+      display: flex;
+      gap: 8px;
+    }
+    
+    button {
+      padding: 6px 12px;
+      border: 1px solid #ccc;
+      border-radius: 2px;
+      font-size: 11px;
+      cursor: pointer;
+      font-family: inherit;
+      background: #fff;
+      color: #111;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      transition: none;
+    }
+    
+    button:hover {
+      border-color: #111;
+    }
+    
+    .btn-cancel {
+      background: #fff;
+      color: #666;
+    }
+    
+    .btn-cancel:hover {
+      color: #111;
+    }
+    
+    .btn-select {
+      background: #111;
+      color: #fff;
+      border-color: #111;
+    }
+    
+    .btn-select:hover {
+      background: #000;
+    }
+    
+    .btn-select:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+      background: #ddd;
+      border-color: #ddd;
+      color: #999;
+    }
+    
+    .btn-select:disabled:hover {
+      background: #ddd;
+      border-color: #ddd;
+    }
+    
+    /* Empty state: minimal, informative */
+    .empty-state {
+      grid-column: 1 / -1;
+      text-align: center;
+      padding: 40px 20px;
+      color: #999;
+      font-size: 11px;
+    }
+    
+    .empty-state-icon {
+      width: 32px;
+      height: 32px;
+      margin: 0 auto 12px;
+      opacity: 0.3;
+    }
+    
+    .empty-state-icon svg {
+      width: 100%;
+      height: 100%;
+    }
+    
+    /* Scrollbars: minimal */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    
+    ::-webkit-scrollbar-track {
+      background: #f5f5f5;
+    }
+    
+    ::-webkit-scrollbar-thumb {
+      background: #ccc;
+      border-radius: 0;
+    }
+    
+    ::-webkit-scrollbar-thumb:hover {
+      background: #999;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h2>SPACES</h2>
+    <input type="text" class="search-box" placeholder="Search" id="search-input">
+  </div>
+  
+  <div class="main">
+    <div class="sidebar" id="spaces-list">
+      <div style="padding: 20px; text-align: center; color: #666;">Loading...</div>
+    </div>
+    
+    <div class="items-container">
+      <div class="filter-bar">
+        <button class="filter-btn active" data-filter="all">All</button>
+        <button class="filter-btn" data-filter="file">Files</button>
+        <button class="filter-btn" data-filter="image">Images</button>
+        <button class="filter-btn" data-filter="text">Text</button>
+        <button class="filter-btn" data-filter="code">Code</button>
+      </div>
+      
+      <div class="items-grid" id="items-grid">
+        <div class="empty-state">
+          <div class="empty-state-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+          </div>
+          <div>Select a space</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="footer">
+    <div class="selection-info" id="selection-info">0 items selected</div>
+    <div class="footer-buttons">
+      <button class="btn-cancel" id="cancel-btn">Cancel</button>
+      <button class="btn-select" id="select-btn" disabled>Select</button>
+    </div>
+  </div>
+  
+  <script src="spaces-picker-renderer.js"></script>
+</body>
+</html>

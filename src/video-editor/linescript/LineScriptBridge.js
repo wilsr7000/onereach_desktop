@@ -20,6 +20,8 @@ import { QuoteFinder } from './QuoteFinder.js';
 import { ProjectRating } from './ProjectRating.js';
 import { RatingStorage } from './RatingStorage.js';
 import { ExportPresets, EXPORT_FORMATS } from './ExportPresets.js';
+import { ProductionScriptManager } from './ProductionScript.js';
+import { ProductionScriptUI } from './ProductionScriptUI.js';
 
 /**
  * Initialize all Line Script modules and attach them to the app context
@@ -107,6 +109,9 @@ export function initLineScriptBridge(app) {
   // Initialize the panel
   lineScriptPanel.init();
   
+  // Initialize production script manager event listeners
+  setupProductionScriptSync(app, lineScriptPanel.productionScriptManager);
+  
   // Set up AI metadata generation handler
   setupAIGenerationHandler(app, lineScriptPanel, lineScriptAI);
   
@@ -148,6 +153,32 @@ export function initLineScriptBridge(app) {
     exportPresets,
     ratingStorage
   };
+}
+
+/**
+ * Set up production script synchronization
+ */
+function setupProductionScriptSync(app, productionScriptManager) {
+  // Save production directions when they change
+  productionScriptManager.on('directionAdded', () => {
+    if (app.lineScriptPanel) {
+      app.lineScriptPanel.saveProductionDirections();
+    }
+  });
+  
+  productionScriptManager.on('directionUpdated', () => {
+    if (app.lineScriptPanel) {
+      app.lineScriptPanel.saveProductionDirections();
+    }
+  });
+  
+  productionScriptManager.on('directionDeleted', () => {
+    if (app.lineScriptPanel) {
+      app.lineScriptPanel.saveProductionDirections();
+    }
+  });
+  
+  console.log('[LineScriptBridge] Production script sync initialized');
 }
 
 /**
@@ -822,6 +853,105 @@ function setupExportHandlers(app, exportPresets) {
     app.showToast?.(`Exported ${successCount}/${results.length} formats`, successCount > 0 ? 'success' : 'error');
     
     return results;
+  };
+  
+  /**
+   * Export production script as formatted document
+   */
+  app.exportProductionScriptDocument = function() {
+    if (!app.lineScriptPanel) {
+      app.showToast?.('Production script not available', 'warning');
+      return;
+    }
+    
+    return app.lineScriptPanel.exportProductionScript();
+  };
+  
+  /**
+   * Export shot list from production script
+   */
+  app.exportProductionShotList = function() {
+    if (!app.lineScriptPanel) {
+      app.showToast?.('Production script not available', 'warning');
+      return;
+    }
+    
+    return app.lineScriptPanel.exportShotList();
+  };
+  
+  /**
+   * Export camera report
+   */
+  app.exportCameraReport = function() {
+    if (!app.lineScriptPanel?.productionScriptManager) {
+      app.showToast?.('No camera directions to export', 'warning');
+      return;
+    }
+    
+    const directions = app.lineScriptPanel.productionScriptManager.getAll();
+    if (directions.length === 0) {
+      app.showToast?.('No camera directions to export', 'warning');
+      return;
+    }
+    
+    // Generate camera report grouped by type
+    let report = '# CAMERA REPORT\n\n';
+    report += `Generated: ${new Date().toLocaleString()}\n`;
+    report += `Total Directions: ${directions.length}\n\n`;
+    report += '---\n\n';
+    
+    // Group by shot type
+    const shotTypes = {};
+    const movements = {};
+    const angles = {};
+    
+    directions.forEach(dir => {
+      if (dir.shotType) {
+        shotTypes[dir.shotType] = (shotTypes[dir.shotType] || 0) + 1;
+      }
+      if (dir.cameraMovement) {
+        movements[dir.cameraMovement] = (movements[dir.cameraMovement] || 0) + 1;
+      }
+      if (dir.cameraAngle) {
+        angles[dir.cameraAngle] = (angles[dir.cameraAngle] || 0) + 1;
+      }
+    });
+    
+    report += '## Shot Types\n\n';
+    Object.entries(shotTypes).forEach(([type, count]) => {
+      report += `- ${type}: ${count}\n`;
+    });
+    
+    report += '\n## Camera Movements\n\n';
+    Object.entries(movements).forEach(([movement, count]) => {
+      report += `- ${movement}: ${count}\n`;
+    });
+    
+    report += '\n## Camera Angles\n\n';
+    Object.entries(angles).forEach(([angle, count]) => {
+      report += `- ${angle}: ${count}\n`;
+    });
+    
+    report += '\n---\n\n## Detailed Shot Log\n\n';
+    directions.forEach((dir, idx) => {
+      const timecode = app.lineScriptPanel.formatTimecode(dir.time);
+      report += `${idx + 1}. [${timecode}] ${dir.getFullName()}\n`;
+      if (dir.description) {
+        report += `   ${dir.description}\n`;
+      }
+      report += '\n';
+    });
+    
+    // Download
+    const blob = new Blob([report], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'camera-report.txt';
+    a.click();
+    URL.revokeObjectURL(url);
+    
+    app.showToast?.('Camera report exported', 'success');
   };
   
   /**

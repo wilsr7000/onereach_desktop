@@ -219,7 +219,16 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // Listen for notification requests
   window.api.receive('show-notification', (data) => {
-    showNotification(data.title, data.body);
+    // Handle various notification formats and prevent undefined values
+    const title = data?.title || data?.message || '';
+    const body = data?.body || data?.text || '';
+    
+    // Only show if we have at least some content
+    if (title || body) {
+      showNotification(title, body);
+    } else {
+      console.warn('[Notification] Received empty notification:', data);
+    }
   });
   
   // Generate dynamic menus based on localStorage data

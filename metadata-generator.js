@@ -10,6 +10,7 @@
 
 const ClaudeAPI = require('./claude-api');
 const { getOpenAIAPI } = require('./openai-api');
+const { getUnifiedClaudeService } = require('./unified-claude');
 const fs = require('fs');
 const path = require('path');
 
@@ -271,16 +272,43 @@ Respond with JSON only:
 
   /**
    * AUDIO METADATA - Specialized for audio files, podcasts, music
-   * Uses GPT-5.2 for transcript analysis (large context)
+   * Priority: 1) Headless Claude (free), 2) OpenAI API, 3) Claude API
    */
   async generateAudioMetadata(item, apiKey, spaceContext) {
-    // Get API keys from settings
+    // Build the prompt for audio analysis
+    const prompt = this.buildAudioPrompt(item, spaceContext);
+    
+    // Priority 1: Try headless Claude first (FREE)
+    try {
+      console.log('[MetadataGen] Trying headless Claude for audio (free)...');
+      const unifiedClaude = getUnifiedClaudeService();
+      const result = await unifiedClaude.complete(prompt, {
+        operation: 'metadata-generation',
+        saveToSpaces: false,
+        forceHeadless: true
+      });
+      
+      if (result.success && result.response) {
+        console.log('[MetadataGen] ✅ Headless Claude succeeded for audio (FREE)');
+        const jsonMatch = result.response.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const metadata = JSON.parse(jsonMatch[0]);
+          metadata._model_used = 'claude-headless';
+          metadata._method = 'headless';
+          metadata._cost = 0;
+          return metadata;
+        }
+      }
+    } catch (headlessError) {
+      console.log('[MetadataGen] Headless Claude failed for audio:', headlessError.message);
+    }
+    
+    // Priority 2: Try OpenAI API (if key available)
     const settingsManager = global.settingsManager;
     const openaiKey = settingsManager?.get('openaiApiKey') || process.env.OPENAI_API_KEY;
     
-    // Use GPT-5.2 for audio analysis if OpenAI key available (good for long transcripts)
     if (openaiKey) {
-      console.log('[MetadataGen] Using GPT-5.2 for audio analysis');
+      console.log('[MetadataGen] Trying GPT-5.2 for audio (OpenAI API)...');
       try {
         const content = [
           `Audio file: ${item.fileName || 'Unknown'}`,
@@ -295,17 +323,19 @@ Respond with JSON only:
           spaceContext
         });
         metadata._model_used = 'gpt-5.2';
+        metadata._method = 'openai-api';
         return metadata;
       } catch (error) {
-        console.warn('[MetadataGen] GPT-5.2 failed, falling back to Claude:', error.message);
+        console.warn('[MetadataGen] GPT-5.2 failed for audio:', error.message);
       }
     }
     
-    // Fallback to Claude
-    const prompt = this.buildAudioPrompt(item, spaceContext);
+    // Priority 3: Fallback to Claude API
+    console.log('[MetadataGen] Falling back to Claude API for audio...');
     const messageContent = [{ type: 'text', text: prompt }];
-    const metadata = await this.callClaude(messageContent, apiKey);
+    const metadata = await this.callClaudeDirectAPI(messageContent, apiKey);
     metadata._model_used = 'claude-sonnet-4-5-20250929';
+    metadata._method = 'claude-api';
     return metadata;
   }
 
@@ -376,19 +406,46 @@ Respond with JSON only:
 
   /**
    * TEXT/CODE METADATA - Specialized for text documents and code
-   * Uses GPT-5.2 for large context handling
+   * Priority: 1) Headless Claude (free), 2) OpenAI API, 3) Claude API
    */
   async generateTextMetadata(item, apiKey, spaceContext) {
     const content = item.content || item.text || item.preview || '';
     const isCode = item.fileCategory === 'code' || item.source === 'code';
     
-    // Get API keys from settings
+    // Build the prompt for text/code analysis
+    const prompt = this.buildTextPrompt(item, spaceContext);
+    
+    // Priority 1: Try headless Claude first (FREE)
+    try {
+      console.log('[MetadataGen] Trying headless Claude first (free)...');
+      const unifiedClaude = getUnifiedClaudeService();
+      const result = await unifiedClaude.complete(prompt, {
+        operation: 'metadata-generation',
+        saveToSpaces: false,
+        forceHeadless: true // Only try headless, don't fall back to API yet
+      });
+      
+      if (result.success && result.response) {
+        console.log('[MetadataGen] ✅ Headless Claude succeeded (FREE)');
+        const jsonMatch = result.response.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const metadata = JSON.parse(jsonMatch[0]);
+          metadata._model_used = 'claude-headless';
+          metadata._method = 'headless';
+          metadata._cost = 0;
+          return metadata;
+        }
+      }
+    } catch (headlessError) {
+      console.log('[MetadataGen] Headless Claude failed:', headlessError.message);
+    }
+    
+    // Priority 2: Try OpenAI API (if key available)
     const settingsManager = global.settingsManager;
     const openaiKey = settingsManager?.get('openaiApiKey') || process.env.OPENAI_API_KEY;
     
-    // Use GPT-5.2 for text analysis if OpenAI key available
     if (openaiKey) {
-      console.log('[MetadataGen] Using GPT-5.2 for text/code analysis');
+      console.log('[MetadataGen] Trying GPT-5.2 (OpenAI API)...');
       try {
         const metadata = await this.openaiAPI.generateMetadata(content, isCode ? 'code' : 'text', openaiKey, {
           fileName: item.fileName,
@@ -396,17 +453,19 @@ Respond with JSON only:
           spaceContext
         });
         metadata._model_used = 'gpt-5.2';
+        metadata._method = 'openai-api';
         return metadata;
       } catch (error) {
-        console.warn('[MetadataGen] GPT-5.2 failed, falling back to Claude:', error.message);
+        console.warn('[MetadataGen] GPT-5.2 failed:', error.message);
       }
     }
     
-    // Fallback to Claude
-    const prompt = this.buildTextPrompt(item, spaceContext);
+    // Priority 3: Fallback to Claude API
+    console.log('[MetadataGen] Falling back to Claude API...');
     const messageContent = [{ type: 'text', text: prompt }];
-    const metadata = await this.callClaude(messageContent, apiKey);
+    const metadata = await this.callClaudeDirectAPI(messageContent, apiKey);
     metadata._model_used = 'claude-sonnet-4-5-20250929';
+    metadata._method = 'claude-api';
     return metadata;
   }
 
@@ -513,34 +572,61 @@ Respond with JSON only:
 
   /**
    * HTML/RICH CONTENT METADATA - Specialized for web pages, documents
-   * Uses GPT-5.2 for large HTML documents
+   * Priority: 1) Headless Claude (free), 2) OpenAI API, 3) Claude API
    */
   async generateHtmlMetadata(item, apiKey, spaceContext) {
     const plainText = item.plainText || this.stripHtml(item.content || item.html || '');
+    const prompt = this.buildHtmlPrompt(item, spaceContext);
     
-    // Get API keys from settings
+    // Priority 1: Try headless Claude first (FREE)
+    try {
+      console.log('[MetadataGen] Trying headless Claude for HTML (free)...');
+      const unifiedClaude = getUnifiedClaudeService();
+      const result = await unifiedClaude.complete(prompt, {
+        operation: 'metadata-generation',
+        saveToSpaces: false,
+        forceHeadless: true
+      });
+      
+      if (result.success && result.response) {
+        console.log('[MetadataGen] ✅ Headless Claude succeeded for HTML (FREE)');
+        const jsonMatch = result.response.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const metadata = JSON.parse(jsonMatch[0]);
+          metadata._model_used = 'claude-headless';
+          metadata._method = 'headless';
+          metadata._cost = 0;
+          return metadata;
+        }
+      }
+    } catch (headlessError) {
+      console.log('[MetadataGen] Headless Claude failed for HTML:', headlessError.message);
+    }
+    
+    // Priority 2: Try OpenAI API (if key available)
     const settingsManager = global.settingsManager;
     const openaiKey = settingsManager?.get('openaiApiKey') || process.env.OPENAI_API_KEY;
     
-    // Use GPT-5.2 for HTML analysis if OpenAI key available
     if (openaiKey) {
-      console.log('[MetadataGen] Using GPT-5.2 for HTML analysis');
+      console.log('[MetadataGen] Trying GPT-5.2 for HTML (OpenAI API)...');
       try {
         const metadata = await this.openaiAPI.generateMetadata(plainText, 'html', openaiKey, {
           spaceContext
         });
         metadata._model_used = 'gpt-5.2';
+        metadata._method = 'openai-api';
         return metadata;
       } catch (error) {
-        console.warn('[MetadataGen] GPT-5.2 failed, falling back to Claude:', error.message);
+        console.warn('[MetadataGen] GPT-5.2 failed for HTML:', error.message);
       }
     }
     
-    // Fallback to Claude
-    const prompt = this.buildHtmlPrompt(item, spaceContext);
+    // Priority 3: Fallback to Claude API
+    console.log('[MetadataGen] Falling back to Claude API for HTML...');
     const messageContent = [{ type: 'text', text: prompt }];
-    const metadata = await this.callClaude(messageContent, apiKey);
+    const metadata = await this.callClaudeDirectAPI(messageContent, apiKey);
     metadata._model_used = 'claude-sonnet-4-5-20250929';
+    metadata._method = 'claude-api';
     return metadata;
   }
 
@@ -686,18 +772,43 @@ Respond with JSON only:
 
   /**
    * DATA FILE METADATA - Specialized for JSON, CSV, YAML, etc.
-   * Uses GPT-5.2 for large data files
+   * Priority: 1) Headless Claude (free), 2) OpenAI API, 3) Claude API
    */
   async generateDataMetadata(item, apiKey, spaceContext) {
     const content = item.content || item.text || item.preview || '';
+    const prompt = this.buildDataPrompt(item, spaceContext);
     
-    // Get API keys from settings
+    // Priority 1: Try headless Claude first (FREE)
+    try {
+      console.log('[MetadataGen] Trying headless Claude for data (free)...');
+      const unifiedClaude = getUnifiedClaudeService();
+      const result = await unifiedClaude.complete(prompt, {
+        operation: 'metadata-generation',
+        saveToSpaces: false,
+        forceHeadless: true
+      });
+      
+      if (result.success && result.response) {
+        console.log('[MetadataGen] ✅ Headless Claude succeeded for data (FREE)');
+        const jsonMatch = result.response.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const metadata = JSON.parse(jsonMatch[0]);
+          metadata._model_used = 'claude-headless';
+          metadata._method = 'headless';
+          metadata._cost = 0;
+          return metadata;
+        }
+      }
+    } catch (headlessError) {
+      console.log('[MetadataGen] Headless Claude failed for data:', headlessError.message);
+    }
+    
+    // Priority 2: Try OpenAI API (if key available)
     const settingsManager = global.settingsManager;
     const openaiKey = settingsManager?.get('openaiApiKey') || process.env.OPENAI_API_KEY;
     
-    // Use GPT-5.2 for data analysis if OpenAI key available
     if (openaiKey) {
-      console.log('[MetadataGen] Using GPT-5.2 for data file analysis');
+      console.log('[MetadataGen] Trying GPT-5.2 for data (OpenAI API)...');
       try {
         const metadata = await this.openaiAPI.generateMetadata(content, 'data', openaiKey, {
           fileName: item.fileName,
@@ -706,17 +817,19 @@ Respond with JSON only:
           spaceContext
         });
         metadata._model_used = 'gpt-5.2';
+        metadata._method = 'openai-api';
         return metadata;
       } catch (error) {
-        console.warn('[MetadataGen] GPT-5.2 failed, falling back to Claude:', error.message);
+        console.warn('[MetadataGen] GPT-5.2 failed for data:', error.message);
       }
     }
     
-    // Fallback to Claude
-    const prompt = this.buildDataPrompt(item, spaceContext);
+    // Priority 3: Fallback to Claude API
+    console.log('[MetadataGen] Falling back to Claude API for data...');
     const messageContent = [{ type: 'text', text: prompt }];
-    const metadata = await this.callClaude(messageContent, apiKey);
+    const metadata = await this.callClaudeDirectAPI(messageContent, apiKey);
     metadata._model_used = 'claude-sonnet-4-5-20250929';
+    metadata._method = 'claude-api';
     return metadata;
   }
 
@@ -973,18 +1086,43 @@ Respond with JSON only:
 
   /**
    * URL/WEB LINK METADATA - Specialized for web URLs
-   * Uses GPT-5.2 for URL analysis
+   * Priority: 1) Headless Claude (free), 2) OpenAI API, 3) Claude API
    */
   async generateUrlMetadata(item, apiKey, spaceContext) {
     const url = item.content || item.text || item.url || '';
+    const prompt = this.buildUrlPrompt(item, spaceContext);
     
-    // Get API keys from settings
+    // Priority 1: Try headless Claude first (FREE)
+    try {
+      console.log('[MetadataGen] Trying headless Claude for URL (free)...');
+      const unifiedClaude = getUnifiedClaudeService();
+      const result = await unifiedClaude.complete(prompt, {
+        operation: 'metadata-generation',
+        saveToSpaces: false,
+        forceHeadless: true
+      });
+      
+      if (result.success && result.response) {
+        console.log('[MetadataGen] ✅ Headless Claude succeeded for URL (FREE)');
+        const jsonMatch = result.response.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const metadata = JSON.parse(jsonMatch[0]);
+          metadata._model_used = 'claude-headless';
+          metadata._method = 'headless';
+          metadata._cost = 0;
+          return metadata;
+        }
+      }
+    } catch (headlessError) {
+      console.log('[MetadataGen] Headless Claude failed for URL:', headlessError.message);
+    }
+    
+    // Priority 2: Try OpenAI API (if key available)
     const settingsManager = global.settingsManager;
     const openaiKey = settingsManager?.get('openaiApiKey') || process.env.OPENAI_API_KEY;
     
-    // Use GPT-5.2 for URL analysis if OpenAI key available
     if (openaiKey) {
-      console.log('[MetadataGen] Using GPT-5.2 for URL analysis');
+      console.log('[MetadataGen] Trying GPT-5.2 for URL (OpenAI API)...');
       try {
         const metadata = await this.openaiAPI.generateMetadata(url, 'url', openaiKey, {
           pageTitle: item.pageTitle,
@@ -992,17 +1130,19 @@ Respond with JSON only:
           spaceContext
         });
         metadata._model_used = 'gpt-5.2';
+        metadata._method = 'openai-api';
         return metadata;
       } catch (error) {
-        console.warn('[MetadataGen] GPT-5.2 failed, falling back to Claude:', error.message);
+        console.warn('[MetadataGen] GPT-5.2 failed for URL:', error.message);
       }
     }
     
-    // Fallback to Claude
-    const prompt = this.buildUrlPrompt(item, spaceContext);
+    // Priority 3: Fallback to Claude API
+    console.log('[MetadataGen] Falling back to Claude API for URL...');
     const messageContent = [{ type: 'text', text: prompt }];
-    const metadata = await this.callClaude(messageContent, apiKey);
+    const metadata = await this.callClaudeDirectAPI(messageContent, apiKey);
     metadata._model_used = 'claude-sonnet-4-5-20250929';
+    metadata._method = 'claude-api';
     return metadata;
   }
 
@@ -1075,16 +1215,42 @@ Respond with JSON only:
 
   /**
    * FILE METADATA - Generic file handler with Space context
-   * Uses GPT-5.2 for file analysis
+   * Priority: 1) Headless Claude (free), 2) OpenAI API, 3) Claude API
    */
   async generateFileMetadata(item, apiKey, spaceContext) {
-    // Get API keys from settings
+    const prompt = this.buildFilePrompt(item, spaceContext);
+    
+    // Priority 1: Try headless Claude first (FREE)
+    try {
+      console.log('[MetadataGen] Trying headless Claude for file (free)...');
+      const unifiedClaude = getUnifiedClaudeService();
+      const result = await unifiedClaude.complete(prompt, {
+        operation: 'metadata-generation',
+        saveToSpaces: false,
+        forceHeadless: true
+      });
+      
+      if (result.success && result.response) {
+        console.log('[MetadataGen] ✅ Headless Claude succeeded for file (FREE)');
+        const jsonMatch = result.response.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const metadata = JSON.parse(jsonMatch[0]);
+          metadata._model_used = 'claude-headless';
+          metadata._method = 'headless';
+          metadata._cost = 0;
+          return metadata;
+        }
+      }
+    } catch (headlessError) {
+      console.log('[MetadataGen] Headless Claude failed for file:', headlessError.message);
+    }
+    
+    // Priority 2: Try OpenAI API (if key available)
     const settingsManager = global.settingsManager;
     const openaiKey = settingsManager?.get('openaiApiKey') || process.env.OPENAI_API_KEY;
     
-    // Use GPT-5.2 for file analysis if OpenAI key available
     if (openaiKey) {
-      console.log('[MetadataGen] Using GPT-5.2 for generic file analysis');
+      console.log('[MetadataGen] Trying GPT-5.2 for file (OpenAI API)...');
       try {
         const content = `File: ${item.fileName || 'Unknown'}`;
         const metadata = await this.openaiAPI.generateMetadata(content, 'file', openaiKey, {
@@ -1094,17 +1260,19 @@ Respond with JSON only:
           spaceContext
         });
         metadata._model_used = 'gpt-5.2';
+        metadata._method = 'openai-api';
         return metadata;
       } catch (error) {
-        console.warn('[MetadataGen] GPT-5.2 failed, falling back to Claude:', error.message);
+        console.warn('[MetadataGen] GPT-5.2 failed for file:', error.message);
       }
     }
     
-    // Fallback to Claude
-    const prompt = this.buildFilePrompt(item, spaceContext);
+    // Priority 3: Fallback to Claude API
+    console.log('[MetadataGen] Falling back to Claude API for file...');
     const messageContent = [{ type: 'text', text: prompt }];
-    const metadata = await this.callClaude(messageContent, apiKey);
+    const metadata = await this.callClaudeDirectAPI(messageContent, apiKey);
     metadata._model_used = 'claude-sonnet-4-5-20250929';
+    metadata._method = 'claude-api';
     return metadata;
   }
 
@@ -1420,8 +1588,46 @@ Respond with JSON only:
 
   /**
    * Helper: Call Claude API
+   * Uses Unified Claude Service for text-only prompts (headless first, then API)
+   * Falls back to direct API for vision requests (which have image content)
    */
   async callClaude(messageContent, apiKey) {
+    // Check if this is a text-only prompt (string) vs vision prompt (array with image)
+    const isVisionRequest = Array.isArray(messageContent);
+    
+    // For text-only prompts, try the unified service (headless first, API fallback)
+    if (!isVisionRequest) {
+      try {
+        console.log('[MetadataGen] Using Unified Claude Service for text prompt');
+        const unifiedClaude = getUnifiedClaudeService();
+        const result = await unifiedClaude.complete(messageContent, {
+          operation: 'metadata-generation',
+          saveToSpaces: false // Don't save metadata generation prompts to Spaces
+        });
+        
+        if (result.success && result.response) {
+          console.log('[MetadataGen] Unified Claude succeeded via', result.method);
+          const jsonMatch = result.response.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const metadata = JSON.parse(jsonMatch[0]);
+            metadata._method = result.method;
+            metadata._cost = result.cost || 0;
+            return metadata;
+          }
+        }
+      } catch (unifiedError) {
+        console.log('[MetadataGen] Unified Claude failed, using direct API:', unifiedError.message);
+      }
+    }
+    
+    // For vision requests or if unified service fails, use direct API
+    return this.callClaudeDirectAPI(messageContent, apiKey);
+  }
+  
+  /**
+   * Helper: Direct Claude API call (for vision requests or fallback)
+   */
+  async callClaudeDirectAPI(messageContent, apiKey) {
     const https = require('https');
     
     const postData = JSON.stringify({
@@ -1470,6 +1676,7 @@ Respond with JSON only:
             
             if (jsonMatch) {
               const metadata = JSON.parse(jsonMatch[0]);
+              metadata._method = 'direct-api';
               resolve(metadata);
             } else {
               reject(new Error('No valid JSON in response'));

@@ -74,6 +74,20 @@
 ## 🟢 Low Priority / Nice to Have
 
 ### UI/UX Polish
+- [x] **Spaces UI redesign** - Tufte-inspired polish with elegant icons (v3.8.13)
+  - ✅ Replaced ALL emoji icons with clean SVG geometric shapes
+  - ✅ Updated asset type icons (video, audio, code, PDF, image, HTML, URL, text, file)
+  - ✅ Updated space container icons (circle, action buttons)
+  - ✅ Applied Tufte principles: consistent spacing, symmetry, minimal decoration
+  - ✅ Removed purple/blue accents → neutral gray palette
+  - ✅ Standardized border-radius to 4px throughout
+  - ✅ Removed gradients → solid colors only
+  - ✅ Improved data density: 280px min columns, 12px gaps (15% more visible)
+  - ✅ Faster transitions: 0.2s → 0.1s
+  - ✅ Removed transform effects (no scale/translateY on hover)
+  - ✅ Created reusable icon library (lib/icon-library.js) with 40+ icons
+  - ✅ Comprehensive documentation (SPACES-DESIGN-SYSTEM.md, SPACES-TUFTE-POLISH-COMPLETE.md)
+  - Files: clipboard-viewer.html (~150+ style changes), clipboard-viewer.js, lib/icon-library.js
 - [ ] **Dark/light theme toggle** - Currently dark only
 - [ ] **Font size preferences** - No global font scaling
 - [ ] **Window position memory** - Some windows don't remember position
@@ -88,7 +102,15 @@
 ### Developer Experience
 - [ ] **Hot reload** - Need full restart for most changes
 - [ ] **Debug logging** - Inconsistent log levels
-- [ ] **Test coverage** - Many features lack automated tests
+- [x] **Test coverage - AI Conversation Capture** - E2E tests for automated conversation capture
+  - ✅ Created comprehensive Playwright test suite (`test/e2e/ai-conversation-capture.spec.js`)
+  - ✅ Tests all AI services: Claude, ChatGPT, Gemini, Grok, Perplexity
+  - ✅ Tests conversation capture, Space creation, formatting, privacy controls
+  - ✅ Added test IPC handlers in main.js
+  - ✅ Quick start guide: `TEST-AI-CONVERSATION-QUICK-START.md`
+  - ✅ Full documentation: `test/README-AI-CONVERSATION-TESTS.md`
+  - Run with: `npm run test:e2e:ai-conversation`
+- [ ] **Test coverage** - Many other features still lack automated tests
 
 ### Documentation
 - [ ] **User guide** - No end-user documentation
@@ -121,6 +143,61 @@
 
 ## ✅ Recently Completed
 
+- [x] **Space Filtering Race Condition Fix** (v3.8.14)
+  - Fixed: Clicking a space would briefly show filtered items then revert to showing all
+  - Root cause: Chunked rendering callbacks from previous renders continued running
+  - Solution: Added render version tracking to cancel stale render operations
+  - Also fixed: `onSpacesUpdate` listener calling non-existent `renderSpacesList()` function
+  - Files: `clipboard-viewer.js`
+- [x] **Bulk Operations for Spaces** (v3.8.16)
+  - **Bulk Delete**: Select and delete multiple items at once
+    - Multi-select checkboxes on all items (hidden by default, appear on hover)
+    - Bulk actions toolbar with Select All, Deselect All, and Delete Selected
+    - Backend API `items.deleteMany()` for efficient bulk deletion
+    - Visual feedback: selected items highlighted, loading states during deletion
+  - **Bulk Move**: Move multiple items to another space
+    - "Move to Space" button in bulk actions toolbar
+    - Dropdown picker showing all available spaces with item counts
+    - Backend API `items.moveMany()` for efficient bulk moving
+    - Excludes current space from dropdown options
+  - IPC handlers: `clipboard:delete-items` and `clipboard:move-items`
+  - Comprehensive error reporting with success/failure counts
+  - Files: `clipboard-viewer.html`, `clipboard-viewer.js`, `spaces-api.js`, `clipboard-manager-v2-adapter.js`, `preload.js`
+- [x] **Grok External AI Agent Integration** (v3.8.15)
+  - Added Grok to external AI agents in setup wizard
+  - Integrated with conversation capture system
+  - Added Grok quick-add button in agent configuration
+  - Conversation capture creates dedicated "Grok Conversations" Space (🚀 Gray)
+  - Full support for URL detection (x.ai, grok.x.com)
+  - Updated documentation: ROADMAP.md, test/EXTERNAL-AI-TEST-README.md
+  - Files: `setup-wizard.html`, `main.js`, `src/ai-conversation-capture.js`
+- [x] **Spaces Upload Integration** (v3.8.14)
+  - Upload files from Spaces directly into ChatGPT, Claude, and file pickers
+  - Native dialog wrapping: Shows "Choose from Computer" | "Choose from Spaces"
+  - WebView button injection: Adds "📦 Spaces" button to file inputs
+  - Settings toggle: Enable/disable in Settings → General
+  - Files: `wrapped-dialog.js`, `spaces-upload-handler.js`, `spaces-picker.html`
+  - Documentation: `SPACES-UPLOAD-QUICK-START.md`, `SPACES-UPLOAD-TESTING-GUIDE.md`
+- [x] **Video Editor prompt() Fix** (v3.8.14)
+  - Fixed crash when opening projects with no videos
+  - Replaced browser prompt() with Electron-compatible modal
+  - Added visual video selection UI with hover effects
+  - Shows video metadata (duration, filename)
+  - Documentation: `VIDEO-EDITOR-PROMPT-FIX.md`
+- [x] **YouTube Download Status Fix** (v3.8.14)
+  - Fixed download status not updating to "complete" after 100%
+  - Fixed title staying as "Loading..." instead of actual video title
+  - Fixed preview text not updating with final title
+  - Added index persistence after download completes
+  - Documentation: `YOUTUBE-DOWNLOAD-STATUS-FIX.md`
+- [x] **Video Editor Spaces API Migration & FFprobe Fix** (v3.8.14)
+  - Migrated to universal Spaces API for consistency
+  - Added `window.spaces.api` with full CRUD operations
+  - Backwards compatible with legacy methods
+  - Created diagnostic tool (`diagnose-videos.js`)
+  - Added FFprobe binary validation and better error messages
+  - Documentation: Multiple guides created (see VIDEO-LOADING-RESOLUTION.md)
+  - Note: Video path resolution works; FFprobe binary may need reinstallation
 - [x] **Missing import fix** (v3.8.13)
   - Fixed closeAllGSXWindows not imported in main.js
   - Rebuilt keytar native module for ARM64 compatibility

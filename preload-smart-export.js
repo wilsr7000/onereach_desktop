@@ -25,12 +25,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // Close the modal
   closeModal: () => {
-    const { getCurrentWindow } = require('@electron/remote') || {};
-    if (getCurrentWindow) {
-      getCurrentWindow().close();
-    } else {
-      window.close();
-    }
+    console.log('[Smart Export Preload] closeModal called');
+    // Use IPC to close - most reliable method
+    ipcRenderer.send('smart-export:close-modal');
+    // Also try window.close as fallback
+    setTimeout(() => {
+      try {
+        window.close();
+      } catch (e) {
+        console.log('[Smart Export Preload] window.close failed:', e);
+      }
+    }, 100);
   },
   
   // Show success notification

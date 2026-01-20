@@ -642,7 +642,156 @@ Make the prompts detailed and specific. Include layered sounds where appropriate
     if (op.includes('agent') || op.includes('diagnos')) return 'agent-diagnosis';
     if (op.includes('code')) return 'code-analysis';
     if (op.includes('text')) return 'text-analysis';
+    if (op.includes('generative') || op.includes('search')) return 'generative-search';
     return 'other';
+  }
+
+  /**
+   * Evaluate items for generative search
+   * Optimized for fast batch evaluation with JSON responses
+   * 
+   * @param {string} prompt - Evaluation prompt with criteria and items
+   * @param {string} apiKey - OpenAI API key
+   * @param {Object} options - Options
+   * @param {boolean} options.jsonMode - Request JSON response (default: true)
+   * @param {number} options.maxTokens - Max response tokens (default: 1500)
+   * @param {number} options.temperature - Temperature (default: 0.2 for consistency)
+   * @returns {Promise<string>} Raw response content
+   */
+  async evaluateForGenerativeSearch(prompt, apiKey, options = {}) {
+    const logger = getLogger();
+    
+    if (!apiKey) {
+      throw new Error('OpenAI API key is required for generative search');
+    }
+
+    const maxTokens = options.maxTokens || 1500;
+    const temperature = options.temperature || 0.2;
+
+    return new Promise((resolve, reject) => {
+      const postData = JSON.stringify({
+        model: this.defaultModel,
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an expert content evaluator. Evaluate items precisely and return only valid JSON. Be consistent in your scoring.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        max_completion_tokens: maxTokens,
+        temperature: temperature,
+        response_format: { type: 'json_object' }
+      });
+
+      const requestOptions = {
+        hostname: this.baseURL,
+        port: 443,
+        path: '/v1/chat/completions',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Length': Buffer.byteLength(postData)
+        }
+      };
+
+      const requestStartTime = Date.now();
+      const req = https.request(requestOptions, (res) => {
+        let data = '';
+
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+
+        res.on('end', () => {
+          const requestDuration = Date.now() - requestStartTime;
+          
+          try {
+            const response = JSON.parse(data);
+            
+            if (res.statusCode !== 200) {
+              const errorMsg = response.error?.message || `API error: ${res.statusCode}`;
+              logger.logAPIError('/v1/chat/completions', new Error(errorMsg), {
+                provider: 'openai',
+                operation: 'generativeSearch',
+                statusCode: res.statusCode
+              });
+              reject(new Error(errorMsg));
+              return;
+            }
+
+            const content = response.choices[0]?.message?.content;
+            if (!content) {
+              reject(new Error('No content in API response'));
+              return;
+            }
+
+            // Track usage
+            const usage = response.usage;
+            if (usage) {
+              try {
+                const llmTracker = getLLMUsageTracker();
+                llmTracker.trackOpenAICall({
+                  model: this.defaultModel,
+                  inputTokens: usage.prompt_tokens || 0,
+                  outputTokens: usage.completion_tokens || 0,
+                  feature: 'generative-search',
+                  purpose: 'generativeSearch',
+                  projectId: options.projectId,
+                  duration: requestDuration,
+                  success: true
+                });
+              } catch (trackingError) {
+                // Ignore tracking errors
+              }
+            }
+
+            resolve(content);
+            
+          } catch (error) {
+            reject(new Error('Failed to parse API response: ' + error.message));
+          }
+        });
+      });
+
+      req.on('error', (error) => {
+        logger.logAPIError('/v1/chat/completions', error, {
+          provider: 'openai',
+          operation: 'generativeSearch',
+          networkError: true
+        });
+        reject(error);
+      });
+
+      req.write(postData);
+      req.end();
+    });
+  }
+
+  /**
+   * Estimate token count for cost calculation
+   * @param {string} text - Text to estimate
+   * @returns {number} Estimated token count
+   */
+  estimateTokens(text) {
+    if (!text) return 0;
+    // Rough estimate: ~4 chars per token for English
+    return Math.ceil(text.length / 4);
+  }
+
+  /**
+   * Get pricing info for cost estimation
+   * @returns {Object} Pricing per 1K tokens
+   */
+  static getPricing() {
+    return {
+      model: 'gpt-5.2',
+      inputPer1k: 0.005,
+      outputPer1k: 0.015
+    };
   }
 }
 

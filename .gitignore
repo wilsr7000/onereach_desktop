@@ -48,6 +48,9 @@ _archive/
 test-report-*.json
 coverage/
 .nyc_output/
+test-results/
+playwright-report/
+*.spec.js.snap
 
 # Scripts directory (optional - remove if you want to track scripts)
 _scripts/

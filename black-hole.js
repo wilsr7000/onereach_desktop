@@ -720,17 +720,237 @@ class BlackHoleWidget {
                 </div>
                 <span class="item-check">✓</span>
             </div>
-        `).join('');
+        `).join('') + `
+            <!-- Create New Space Accordion -->
+            <div id="createNewSpaceAccordionBlackHole" style="margin-top: 8px;">
+                <div class="space-list-item create-space-header-bh" data-action="toggle-create" style="
+                    border: 2px dashed rgba(99, 102, 241, 0.3);
+                    background: rgba(99, 102, 241, 0.1);
+                    cursor: pointer;
+                    transition: all 0.2s;
+                ">
+                    <span class="item-icon" style="transition: transform 0.2s;">▶</span>
+                    <div class="item-info">
+                        <div class="item-name" style="color: rgba(99, 102, 241, 1);">Create New Space</div>
+                        <div class="item-count" style="color: rgba(99, 102, 241, 0.7);">Add a new space</div>
+                    </div>
+                </div>
+                <div class="create-space-form-bh" style="
+                    display: none;
+                    padding: 16px;
+                    background: rgba(0, 0, 0, 0.3);
+                    border-radius: 8px;
+                    margin-top: 8px;
+                    border: 1px solid rgba(99, 102, 241, 0.2);
+                ">
+                    <div style="margin-bottom: 12px;">
+                        <input type="text" id="newSpaceNameBlackHole" placeholder="Enter space name..." style="
+                            width: 100%;
+                            padding: 10px;
+                            background: rgba(255, 255, 255, 0.05);
+                            border: 1px solid rgba(255, 255, 255, 0.2);
+                            border-radius: 6px;
+                            color: #fff;
+                            font-size: 14px;
+                        ">
+                    </div>
+                    <div style="margin-bottom: 12px;">
+                        <div style="font-size: 12px; color: rgba(255, 255, 255, 0.5); margin-bottom: 6px;">Icon</div>
+                        <div id="iconPickerBlackHole" style="display: flex; gap: 8px; flex-wrap: wrap;">
+                            <div class="icon-option-inline-bh selected" data-icon="◆" style="
+                                width: 32px;
+                                height: 32px;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                                border-radius: 6px;
+                                background: rgba(255, 255, 255, 0.1);
+                                cursor: pointer;
+                                transition: all 0.2s;
+                                border: 2px solid transparent;
+                            ">◆</div>
+                            <div class="icon-option-inline-bh" data-icon="●" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: rgba(255, 255, 255, 0.1); cursor: pointer; transition: all 0.2s; border: 2px solid transparent;">●</div>
+                            <div class="icon-option-inline-bh" data-icon="■" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: rgba(255, 255, 255, 0.1); cursor: pointer; transition: all 0.2s; border: 2px solid transparent;">■</div>
+                            <div class="icon-option-inline-bh" data-icon="▲" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: rgba(255, 255, 255, 0.1); cursor: pointer; transition: all 0.2s; border: 2px solid transparent;">▲</div>
+                            <div class="icon-option-inline-bh" data-icon="◉" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: rgba(255, 255, 255, 0.1); cursor: pointer; transition: all 0.2s; border: 2px solid transparent;">◉</div>
+                            <div class="icon-option-inline-bh" data-icon="◎" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: rgba(255, 255, 255, 0.1); cursor: pointer; transition: all 0.2s; border: 2px solid transparent;">◎</div>
+                            <div class="icon-option-inline-bh" data-icon="◇" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: rgba(255, 255, 255, 0.1); cursor: pointer; transition: all 0.2s; border: 2px solid transparent;">◇</div>
+                            <div class="icon-option-inline-bh" data-icon="○" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: rgba(255, 255, 255, 0.1); cursor: pointer; transition: all 0.2s; border: 2px solid transparent;">○</div>
+                            <div class="icon-option-inline-bh" data-icon="□" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: rgba(255, 255, 255, 0.1); cursor: pointer; transition: all 0.2s; border: 2px solid transparent;">□</div>
+                            <div class="icon-option-inline-bh" data-icon="△" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: rgba(255, 255, 255, 0.1); cursor: pointer; transition: all 0.2s; border: 2px solid transparent;">△</div>
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                        <button id="cancelCreateBlackHole" style="
+                            flex: 1;
+                            padding: 10px;
+                            background: rgba(255, 255, 255, 0.1);
+                            border: 1px solid rgba(255, 255, 255, 0.2);
+                            border-radius: 6px;
+                            color: #fff;
+                            cursor: pointer;
+                            font-size: 14px;
+                            transition: all 0.2s;
+                        ">Cancel</button>
+                        <button id="confirmCreateBlackHole" style="
+                            flex: 1;
+                            padding: 10px;
+                            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+                            border: none;
+                            border-radius: 6px;
+                            color: #fff;
+                            cursor: pointer;
+                            font-size: 14px;
+                            font-weight: 500;
+                            transition: all 0.2s;
+                        ">Create & Select</button>
+                    </div>
+                </div>
+            </div>
+        `;
         
         // Add click handlers
         const items = this.spaceList.querySelectorAll('.space-list-item');
-        items.forEach(item => {
-            item.addEventListener('click', () => {
-                const spaceId = item.getAttribute('data-space-id');
-                console.log('[BlackHole] Space clicked:', spaceId);
-                this.selectSpace(spaceId);
+        console.log('[BlackHole] Found', items.length, 'space items to attach handlers');
+        
+        // Setup accordion for "Create New Space"
+        const createHeaderBH = this.spaceList.querySelector('.create-space-header-bh');
+        const createFormBH = this.spaceList.querySelector('.create-space-form-bh');
+        const chevronBH = createHeaderBH ? createHeaderBH.querySelector('.item-icon') : null;
+        const newSpaceInputBH = document.getElementById('newSpaceNameBlackHole');
+        const iconPickerBH = document.getElementById('iconPickerBlackHole');
+        const cancelBtnBH = document.getElementById('cancelCreateBlackHole');
+        const confirmBtnBH = document.getElementById('confirmCreateBlackHole');
+        
+        if (createHeaderBH && createFormBH) {
+            // Hover effects
+            createHeaderBH.addEventListener('mouseenter', () => {
+                createHeaderBH.style.background = 'rgba(99, 102, 241, 0.2)';
+                createHeaderBH.style.borderColor = 'rgba(99, 102, 241, 0.5)';
             });
+            createHeaderBH.addEventListener('mouseleave', () => {
+                createHeaderBH.style.background = 'rgba(99, 102, 241, 0.1)';
+                createHeaderBH.style.borderColor = 'rgba(99, 102, 241, 0.3)';
+            });
+            
+            // Toggle accordion
+            createHeaderBH.addEventListener('click', () => {
+                const isExpanded = createFormBH.style.display !== 'none';
+                if (isExpanded) {
+                    createFormBH.style.display = 'none';
+                    if (chevronBH) chevronBH.style.transform = 'rotate(0deg)';
+                } else {
+                    createFormBH.style.display = 'block';
+                    if (chevronBH) chevronBH.style.transform = 'rotate(90deg)';
+                    setTimeout(() => newSpaceInputBH.focus(), 100);
+                }
+            });
+            
+            // Icon picker selection
+            if (iconPickerBH) {
+                iconPickerBH.querySelectorAll('.icon-option-inline-bh').forEach(option => {
+                    option.addEventListener('click', () => {
+                        iconPickerBH.querySelectorAll('.icon-option-inline-bh').forEach(opt => {
+                            opt.classList.remove('selected');
+                            opt.style.borderColor = 'transparent';
+                            opt.style.background = 'rgba(255, 255, 255, 0.1)';
+                        });
+                        option.classList.add('selected');
+                        option.style.borderColor = 'rgba(99, 102, 241, 0.8)';
+                        option.style.background = 'rgba(99, 102, 241, 0.2)';
+                    });
+                    option.addEventListener('mouseenter', () => {
+                        if (!option.classList.contains('selected')) {
+                            option.style.background = 'rgba(255, 255, 255, 0.15)';
+                        }
+                    });
+                    option.addEventListener('mouseleave', () => {
+                        if (!option.classList.contains('selected')) {
+                            option.style.background = 'rgba(255, 255, 255, 0.1)';
+                        }
+                    });
+                });
+            }
+            
+            // Cancel button
+            if (cancelBtnBH) {
+                cancelBtnBH.addEventListener('click', () => {
+                    createFormBH.style.display = 'none';
+                    if (chevronBH) chevronBH.style.transform = 'rotate(0deg)';
+                    newSpaceInputBH.value = '';
+                });
+            }
+            
+            // Create button - inline create
+            if (confirmBtnBH) {
+                confirmBtnBH.addEventListener('click', async () => {
+                    const name = newSpaceInputBH.value.trim();
+                    if (!name) {
+                        this.showStatus('Please enter a space name', true);
+                        return;
+                    }
+                    
+                    const selectedIcon = iconPickerBH.querySelector('.icon-option-inline-bh.selected');
+                    const icon = selectedIcon ? selectedIcon.dataset.icon : '◆';
+                    
+                    try {
+                        // Create the space inline
+                        const result = await window.clipboard.createSpace({ name, icon, notebook: {} });
+                        const newSpaceId = result?.space?.id;
+                        
+                        if (newSpaceId) {
+                            // Reload spaces
+                            await this.loadSpaces();
+                            
+                            // Select the newly created space
+                            this.selectSpace(newSpaceId);
+                            
+                            // Close the accordion
+                            createFormBH.style.display = 'none';
+                            if (chevronBH) chevronBH.style.transform = 'rotate(0deg)';
+                            newSpaceInputBH.value = '';
+                            
+                            // Re-render to show the new space
+                            this.renderSpaces();
+                            
+                            this.showStatus(`✓ Created and selected "${name}"`);
+                        } else {
+                            throw new Error('Failed to create space');
+                        }
+                    } catch (error) {
+                        console.error('[BlackHole] Error creating space:', error);
+                        this.showStatus('Failed to create space: ' + error.message, true);
+                    }
+                });
+            }
+            
+            // Enter key to submit
+            if (newSpaceInputBH) {
+                newSpaceInputBH.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        confirmBtnBH.click();
+                    } else if (e.key === 'Escape') {
+                        cancelBtnBH.click();
+                    }
+                });
+            }
+        }
+        
+        // Regular space items
+        items.forEach(item => {
+            const action = item.getAttribute('data-action');
+            if (action === 'toggle-create') {
+                // Already handled above
+                return;
+            } else {
+                item.addEventListener('click', () => {
+                    const spaceId = item.getAttribute('data-space-id');
+                    console.log('[BlackHole] Space clicked:', spaceId);
+                    this.selectSpace(spaceId);
+                });
+            }
         });
+        console.log('[BlackHole] Create button found:', !!createHeaderBH);
         
         // If current selection is not in filtered results, select first
         if (this.selectedSpaceId && !filteredSpaces.find(s => s.id === this.selectedSpaceId)) {

@@ -417,6 +417,7 @@ contextBridge.exposeInMainWorld(
         'get-clipboard-data',
         'get-clipboard-files',
         'black-hole:get-pending-data',
+        'black-hole:create-space',
         // Smart export channels
         'smart-export:extract-styles',
         'smart-export:extract-content-guidelines',
@@ -465,7 +466,21 @@ contextBridge.exposeInMainWorld(
     
     // AI log analysis
     analyzeLogsWithAI: (options) => ipcRenderer.invoke('ai:analyze-logs', options),
-    generateCursorPrompt: (analysis) => ipcRenderer.invoke('ai:generate-cursor-prompt', analysis)
+    generateCursorPrompt: (analysis) => ipcRenderer.invoke('ai:generate-cursor-prompt', analysis),
+    
+    // Headless AI prompts - run prompts in hidden windows
+    runHeadlessClaudePrompt: (prompt, options) => ipcRenderer.invoke('claude:runHeadlessPrompt', prompt, options),
+    
+    // Unified Claude Service - headless first, API fallback
+    // Use this for all Claude completions - it will try free headless first, then API
+    unifiedClaude: {
+      // Main completion method
+      complete: (prompt, options) => ipcRenderer.invoke('claude:unified-complete', prompt, options),
+      // Get status of headless and API availability
+      getStatus: () => ipcRenderer.invoke('claude:unified-status'),
+      // Update settings (preferHeadless, headlessTimeout, apiFallbackEnabled)
+      updateSettings: (settings) => ipcRenderer.invoke('claude:unified-update-settings', settings)
+    }
   }
 );
 
@@ -1266,6 +1281,8 @@ contextBridge.exposeInMainWorld('clipboard', {
   getHistory: () => ipcRenderer.invoke('clipboard:get-history'),
   clearHistory: () => ipcRenderer.invoke('clipboard:clear-history'),
   deleteItem: (id) => ipcRenderer.invoke('clipboard:delete-item', id),
+  deleteItems: (itemIds) => ipcRenderer.invoke('clipboard:delete-items', itemIds),
+  moveItems: (itemIds, toSpaceId) => ipcRenderer.invoke('clipboard:move-items', itemIds, toSpaceId),
   togglePin: (id) => ipcRenderer.invoke('clipboard:toggle-pin', id),
   pasteItem: (id) => ipcRenderer.invoke('clipboard:paste-item', id),
   search: (query) => ipcRenderer.invoke('clipboard:search', query),
@@ -1290,7 +1307,15 @@ contextBridge.exposeInMainWorld('clipboard', {
   // Metadata methods
   getMetadata: (itemId) => ipcRenderer.invoke('clipboard:get-metadata', itemId),
   updateMetadata: (itemId, updates) => ipcRenderer.invoke('clipboard:update-metadata', itemId, updates),
-  generateMetadataAI: (itemId, apiKey, customPrompt) => ipcRenderer.invoke('clipboard:generate-metadata-ai', { itemId, apiKey, customPrompt }),
+  generateMetadataAI: (itemId, apiKey, customPrompt) => {
+    console.log('[Preload] generateMetadataAI called with:', { itemId, hasApiKey: !!apiKey });
+    return ipcRenderer.invoke('clipboard:generate-metadata-ai', { itemId, apiKey, customPrompt });
+  },
+  // Test function to verify IPC works
+  testIPC: () => {
+    console.log('[Preload] testIPC called');
+    return Promise.resolve({ success: true, message: 'IPC is working!' });
+  },
   searchByTags: (tags) => ipcRenderer.invoke('clipboard:search-by-tags', tags),
   
   // Video Scenes (for Agentic Player)
@@ -1303,6 +1328,18 @@ contextBridge.exposeInMainWorld('clipboard', {
   // Content methods (for preview/edit)
   getItemContent: (itemId) => ipcRenderer.invoke('clipboard:get-item-content', itemId),
   updateItemContent: (itemId, content) => ipcRenderer.invoke('clipboard:update-item-content', itemId, content),
+  
+  // Open file in system default app
+  openInSystem: (filePath) => ipcRenderer.invoke('clipboard:open-in-system', filePath),
+  
+  // Open URL in external browser
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  
+  // Open URL in internal GSX window
+  openGSXWindow: (url, title) => ipcRenderer.send('open-gsx-link', { url, title }),
+  
+  // Convert DOCX to HTML for preview/editing
+  convertDocxToHtml: (filePath) => ipcRenderer.invoke('clipboard:convert-docx-to-html', filePath),
   
   // AI Image editing
   editImageWithAI: (options) => ipcRenderer.invoke('clipboard:edit-image-ai', options),
@@ -1340,6 +1377,12 @@ contextBridge.exposeInMainWorld('clipboard', {
   forceResume: () => ipcRenderer.invoke('clipboard:force-resume'),
   manualCheck: () => ipcRenderer.invoke('clipboard:manual-check'),
   showItemInFinder: (itemId) => ipcRenderer.invoke('clipboard:show-item-in-finder', itemId),
+  
+  // Web Monitor methods
+  checkMonitorNow: (itemId) => ipcRenderer.invoke('clipboard:check-monitor-now', itemId),
+  setMonitorStatus: (itemId, status) => ipcRenderer.invoke('clipboard:set-monitor-status', itemId, status),
+  setMonitorAiEnabled: (itemId, enabled) => ipcRenderer.invoke('clipboard:set-monitor-ai-enabled', itemId, enabled),
+  setMonitorCheckInterval: (itemId, minutes) => ipcRenderer.invoke('clipboard:set-monitor-check-interval', itemId, minutes),
   
   // Video Editor
   getVideoPath: (itemId) => ipcRenderer.invoke('clipboard:get-video-path', itemId),
@@ -1400,6 +1443,57 @@ contextBridge.exposeInMainWorld('clipboard', {
   setApproval: (spaceId, assetName, approved) => ipcRenderer.invoke('aider:set-approval', spaceId, assetName, approved),
   addVersion: (spaceId, version) => ipcRenderer.invoke('aider:add-version', spaceId, version),
   updateProjectConfig: (spaceId, config) => ipcRenderer.invoke('aider:update-project-config', spaceId, config),
+  
+  // ---- GENERATIVE SEARCH ----
+  // LLM-powered semantic search with customizable filters
+  generativeSearch: {
+    /**
+     * Run a generative search with LLM evaluation
+     * @param {Object} options - Search options
+     * @param {Array} options.filters - Active filters with thresholds and weights
+     * @param {string} options.spaceId - Space to search in (null for all)
+     * @param {string} options.mode - 'quick' (metadata only) or 'deep' (full content)
+     * @param {string} options.userQuery - Optional free-form query
+     * @returns {Promise<Array>} Scored and ranked items
+     */
+    search: (options) => ipcRenderer.invoke('generative-search:search', options),
+    
+    /**
+     * Estimate cost before running search
+     * @param {Object} options - Options with filters, spaceId, mode
+     * @returns {Promise<Object>} Cost estimate with formatted string
+     */
+    estimateCost: (options) => ipcRenderer.invoke('generative-search:estimate-cost', options),
+    
+    /**
+     * Cancel ongoing search
+     * @returns {Promise<boolean>}
+     */
+    cancel: () => ipcRenderer.invoke('generative-search:cancel'),
+    
+    /**
+     * Get available filter types
+     * @returns {Promise<Object>} Filter definitions and categories
+     */
+    getFilterTypes: () => ipcRenderer.invoke('generative-search:get-filter-types'),
+    
+    /**
+     * Clear search cache
+     * @returns {Promise<boolean>}
+     */
+    clearCache: () => ipcRenderer.invoke('generative-search:clear-cache'),
+    
+    /**
+     * Listen for progress updates during search
+     * @param {Function} callback - Progress callback
+     * @returns {Function} Cleanup function to remove listener
+     */
+    onProgress: (callback) => {
+      const handler = (event, data) => callback(data);
+      ipcRenderer.on('generative-search:progress', handler);
+      return () => ipcRenderer.removeListener('generative-search:progress', handler);
+    }
+  },
   
   // Event listeners
   onHistoryUpdate: (callback) => {
@@ -1918,6 +2012,12 @@ contextBridge.exposeInMainWorld('youtube', {
   
   // Download video only (returns file path)
   download: (url, options) => ipcRenderer.invoke('youtube:download', url, options),
+  
+  // Cancel an active download
+  cancelDownload: (placeholderId) => ipcRenderer.invoke('youtube:cancel-download', placeholderId),
+  
+  // Get list of active downloads
+  getActiveDownloads: () => ipcRenderer.invoke('youtube:get-active-downloads'),
   
   // Get transcript/captions from YouTube video (uses YouTube's captions)
   getTranscript: (url, lang = 'en') => ipcRenderer.invoke('youtube:get-transcript', url, lang),

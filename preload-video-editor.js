@@ -68,6 +68,9 @@ contextBridge.exposeInMainWorld('videoEditor', {
   // Multi-track export (video + multiple audio tracks combined)
   exportMultiTrack: (videoPath, options) => ipcRenderer.invoke('video-editor:export-multitrack', videoPath, options),
   
+  // Concatenate multiple video clips (multi-source editing)
+  concatenateClips: (clips, sources, options) => ipcRenderer.invoke('video-editor:concatenate-clips', clips, sources, options),
+  
   // Replace video segment with new video content
   replaceVideoSegment: (videoPath, options) => ipcRenderer.invoke('video-editor:replace-segment', videoPath, options),
   
@@ -437,15 +440,47 @@ contextBridge.exposeInMainWorld('videoEditor', {
   // ==================== END PROJECT PERSISTENCE ====================
 });
 
-// Expose spaces integration
+// Expose spaces integration (Universal Spaces API)
 contextBridge.exposeInMainWorld('spaces', {
+  // Legacy methods (maintained for compatibility)
   getAll: () => ipcRenderer.invoke('clipboard:get-spaces'),
   getItems: (spaceId) => ipcRenderer.invoke('clipboard:get-space-items', spaceId),
   getVideos: (spaceId) => ipcRenderer.invoke('clipboard:get-space-videos', spaceId),
   getAudio: (spaceId) => ipcRenderer.invoke('clipboard:get-space-audio', spaceId),
   getVideoPath: (itemId) => ipcRenderer.invoke('clipboard:get-video-path', itemId),
   getItemPath: (itemId) => ipcRenderer.invoke('clipboard:get-item-path', itemId),
-  addFile: (data) => ipcRenderer.invoke('black-hole:add-file', data)
+  addFile: (data) => ipcRenderer.invoke('black-hole:add-file', data),
+  
+  // Universal Spaces API methods
+  api: {
+    // Convenience method for getting video paths (wraps legacy for now)
+    getVideoPath: (itemId) => ipcRenderer.invoke('spaces-api:getVideoPath', itemId),
+    
+    // Space management
+    list: () => ipcRenderer.invoke('spaces-api:list'),
+    get: (spaceId) => ipcRenderer.invoke('spaces-api:get', spaceId),
+    create: (name, options) => ipcRenderer.invoke('spaces-api:create', name, options),
+    update: (spaceId, data) => ipcRenderer.invoke('spaces-api:update', spaceId, data),
+    delete: (spaceId) => ipcRenderer.invoke('spaces-api:delete', spaceId),
+    
+    // Item management
+    items: {
+      list: (spaceId, options) => ipcRenderer.invoke('spaces-api:items:list', spaceId, options),
+      get: (spaceId, itemId) => ipcRenderer.invoke('spaces-api:items:get', spaceId, itemId),
+      add: (spaceId, item) => ipcRenderer.invoke('spaces-api:items:add', spaceId, item),
+      update: (spaceId, itemId, data) => ipcRenderer.invoke('spaces-api:items:update', spaceId, itemId, data),
+      delete: (spaceId, itemId) => ipcRenderer.invoke('spaces-api:items:delete', spaceId, itemId),
+      move: (itemId, fromSpaceId, toSpaceId) => ipcRenderer.invoke('spaces-api:items:move', itemId, fromSpaceId, toSpaceId)
+    },
+    
+    // File access
+    files: {
+      getSpacePath: (spaceId) => ipcRenderer.invoke('spaces-api:files:getSpacePath', spaceId),
+      list: (spaceId, subPath) => ipcRenderer.invoke('spaces-api:files:list', spaceId, subPath),
+      read: (spaceId, filePath) => ipcRenderer.invoke('spaces-api:files:read', spaceId, filePath),
+      write: (spaceId, filePath, content) => ipcRenderer.invoke('spaces-api:files:write', spaceId, filePath, content)
+    }
+  }
 });
 
 // Expose clipboard API for transcription access

@@ -14,9 +14,30 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { app } = require('electron');
 
-// Set FFmpeg paths
-ffmpegLib.setFfmpegPath(ffmpegInstaller.path);
-ffmpegLib.setFfprobePath(ffprobeInstaller.path);
+// Set FFmpeg paths with validation
+const ffmpegPath = ffmpegInstaller.path;
+const ffprobePath = ffprobeInstaller.path;
+
+console.log('[VideoProcessor] FFmpeg path:', ffmpegPath);
+console.log('[VideoProcessor] FFprobe path:', ffprobePath);
+
+// Validate paths exist
+if (!fs.existsSync(ffmpegPath)) {
+  console.error('[VideoProcessor] FFmpeg binary not found at:', ffmpegPath);
+} else {
+  const stats = fs.statSync(ffmpegPath);
+  console.log('[VideoProcessor] FFmpeg exists:', stats.isFile() ? 'file' : 'directory', 'size:', stats.size);
+}
+
+if (!fs.existsSync(ffprobePath)) {
+  console.error('[VideoProcessor] FFprobe binary not found at:', ffprobePath);
+} else {
+  const stats = fs.statSync(ffprobePath);
+  console.log('[VideoProcessor] FFprobe exists:', stats.isFile() ? 'file' : 'directory', 'size:', stats.size);
+}
+
+ffmpegLib.setFfmpegPath(ffmpegPath);
+ffmpegLib.setFfprobePath(ffprobePath);
 
 // Export ffmpeg instance for use by other services
 export const ffmpeg = ffmpegLib;
@@ -154,11 +175,25 @@ export class VideoProcessor {
       }
 
       console.log('[VideoProcessor] Getting info for:', inputPath);
+      console.log('[VideoProcessor] File size:', (stats.size / 1024 / 1024).toFixed(2), 'MB');
 
       ffmpegLib.ffprobe(inputPath, (err, metadata) => {
         if (err) {
           console.error('[VideoProcessor] FFprobe error:', err);
-          reject(new Error(`Failed to analyze video: ${err.message}`));
+          console.error('[VideoProcessor] FFprobe path:', ffprobeInstaller.path);
+          console.error('[VideoProcessor] Input path:', inputPath);
+          
+          // Provide more helpful error message for spawn ENOTDIR
+          if (err.message && err.message.includes('ENOTDIR')) {
+            reject(new Error(`FFprobe execution failed (spawn ENOTDIR). This usually means:\n` +
+              `1. FFprobe binary path is incorrect or points to a directory\n` +
+              `2. FFprobe binary doesn't have execute permissions\n` +
+              `3. FFprobe binary is corrupted\n` +
+              `Current FFprobe path: ${ffprobeInstaller.path}\n` +
+              `Please try reinstalling @ffprobe-installer/ffprobe: npm install @ffprobe-installer/ffprobe`));
+          } else {
+            reject(new Error(`Failed to analyze video: ${err.message}`));
+          }
           return;
         }
 

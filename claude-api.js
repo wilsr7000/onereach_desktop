@@ -650,6 +650,36 @@ Respond with valid JSON only, no markdown formatting.`;
   }
 
   /**
+   * Simple text completion - convenience wrapper around chat
+   * @param {string} prompt - The prompt to complete
+   * @param {Object} options - Options including systemPrompt, maxTokens, temperature, model
+   * @returns {Promise<string>} The completion text
+   */
+  async complete(prompt, options = {}) {
+    const {
+      systemPrompt = null,
+      maxTokens = this.maxTokens,
+      temperature = 0.3,
+      model = this.defaultModel
+    } = options;
+
+    const messages = [{ role: 'user', content: prompt }];
+    
+    const chatOptions = {
+      maxTokens,
+      temperature,
+      model
+    };
+    
+    if (systemPrompt) {
+      chatOptions.system = systemPrompt;
+    }
+
+    const response = await this.chat(messages, null, chatOptions);
+    return response?.content || null;
+  }
+
+  /**
    * Test the API connection with a simple request
    */
   async testConnection(apiKey) {

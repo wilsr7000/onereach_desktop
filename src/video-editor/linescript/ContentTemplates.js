@@ -439,6 +439,233 @@ export const CONTENT_TEMPLATES = {
       { id: 'actionability', name: 'Actionability', weight: 10,
         prompt: 'Can viewers apply what they learned immediately?' }
     ]
+  },
+  
+  // Production Script Templates
+  narrative: {
+    id: 'narrative',
+    name: 'Narrative / Fiction',
+    icon: '🎬',
+    description: 'Full production script with extensive camera directions and technical notes',
+    primaryColor: '#dc2626', // Red
+    productionStyle: true,
+    
+    aiPrompts: {
+      sceneAnalysis: `Analyze this narrative scene. Identify:
+        - Scene type (action, dialogue, establishing, transition)
+        - Recommended camera angles for dramatic effect
+        - Pacing and rhythm
+        - Emotional beats
+        - Character blocking needs
+        - Lighting atmosphere (high-key, low-key, motivated)
+        Return structured JSON with shot suggestions.`,
+      
+      shotSuggestions: `Based on this dialogue/action, suggest appropriate:
+        - Shot types (wide, medium, close-up, etc.)
+        - Camera movements (dolly, pan, tilt, steadicam)
+        - Coverage options (master, over-shoulder, singles)
+        - Insert shots needed
+        - B-roll requirements
+        Prioritize storytelling over technical showiness.`
+    },
+    
+    markerTypes: [
+      { id: 'scene', name: 'Scene', icon: '🎬', color: '#dc2626', description: 'Scene boundary' },
+      { id: 'action', name: 'Action', icon: '💥', color: '#f97316', description: 'Action sequence' },
+      { id: 'dialogue', name: 'Dialogue', icon: '💬', color: '#8b5cf6', description: 'Dialogue beat' },
+      { id: 'emotional', name: 'Emotional Beat', icon: '💓', color: '#ec4899', description: 'Key emotional moment' },
+      { id: 'reveal', name: 'Reveal', icon: '👁️', color: '#eab308', description: 'Plot reveal or surprise' },
+      { id: 'transition', name: 'Transition', icon: '↔️', color: '#06b6d4', description: 'Scene transition' }
+    ],
+    
+    keyboardShortcuts: {
+      's': { action: 'addSceneMarker', label: 'S - Scene' },
+      'a': { action: 'addActionMarker', label: 'A - Action' },
+      'd': { action: 'addDialogueMarker', label: 'D - Dialogue' },
+      'c': { action: 'addCameraDirection', label: 'C - Camera' },
+      'i': { action: 'setInPoint', label: 'I - In Point' },
+      'o': { action: 'setOutPoint', label: 'O - Out Point' }
+    },
+    
+    exports: [
+      { id: 'production-script', name: 'Production Script', format: 'pdf', icon: '📄' },
+      { id: 'shot-list', name: 'Shot List', format: 'csv', icon: '📋' },
+      { id: 'shooting-schedule', name: 'Shooting Schedule', format: 'xlsx', icon: '📅' },
+      { id: 'camera-report', name: 'Camera Report', format: 'pdf', icon: '📷' },
+      { id: 'edl', name: 'EDL', format: 'edl', icon: '✂️' }
+    ],
+    
+    ui: {
+      showCameraDirections: true,
+      showShotTypes: true,
+      showLightingNotes: true,
+      showSceneNumbers: true,
+      dialogueWidth: 'narrow',
+      emphasisElements: ['cameras', 'shots', 'emotions', 'timing']
+    },
+    
+    ratingCriteria: [
+      { id: 'coverage', name: 'Coverage Completeness', weight: 25,
+        prompt: 'Are all necessary angles and shots covered?' },
+      { id: 'storytelling', name: 'Visual Storytelling', weight: 25,
+        prompt: 'Do camera choices support the story effectively?' },
+      { id: 'technical_clarity', name: 'Technical Clarity', weight: 20,
+        prompt: 'Are camera directions clear and achievable?' },
+      { id: 'pacing', name: 'Pacing', weight: 15,
+        prompt: 'Does the rhythm of shots support the narrative?' },
+      { id: 'production_value', name: 'Production Value', weight: 15,
+        prompt: 'Will this be achievable within typical budget constraints?' }
+    ]
+  },
+  
+  documentary: {
+    id: 'documentary',
+    name: 'Documentary',
+    icon: '🎥',
+    description: 'Documentary style with observational shots and interview coverage',
+    primaryColor: '#059669', // Emerald
+    productionStyle: true,
+    
+    aiPrompts: {
+      momentAnalysis: `Analyze this documentary moment. Identify:
+        - Type of shot (interview, B-roll, observational, archive)
+        - Story significance
+        - Emotional weight
+        - Cutaway opportunities
+        - Sound design needs
+        - Narrative function
+        Return structured analysis.`,
+      
+      brollSuggestions: `Suggest B-roll needs for this segment:
+        - Relevant B-roll themes
+        - Timing for B-roll overlays
+        - Transition opportunities
+        - Visual metaphors
+        - Location establishing shots needed`
+    },
+    
+    markerTypes: [
+      { id: 'interview', name: 'Interview', icon: '🎤', color: '#059669', description: 'Interview segment' },
+      { id: 'broll', name: 'B-Roll', icon: '🎞️', color: '#06b6d4', description: 'B-roll footage' },
+      { id: 'observational', name: 'Observational', icon: '👁️', color: '#8b5cf6', description: 'Fly-on-wall moment' },
+      { id: 'archive', name: 'Archive', icon: '📚', color: '#6b7280', description: 'Archive footage' },
+      { id: 'reenactment', name: 'Reenactment', icon: '🎭', color: '#f97316', description: 'Dramatized recreation' },
+      { id: 'location', name: 'Location', icon: '📍', color: '#22c55e', description: 'Location establishing' }
+    ],
+    
+    keyboardShortcuts: {
+      'i': { action: 'addInterviewMarker', label: 'I - Interview' },
+      'b': { action: 'addBrollMarker', label: 'B - B-Roll' },
+      'o': { action: 'addObservationalMarker', label: 'O - Observational' },
+      'c': { action: 'addCameraDirection', label: 'C - Camera' },
+      '[': { action: 'setInPoint', label: '[ - In Point' },
+      ']': { action: 'setOutPoint', label: '] - Out Point' }
+    },
+    
+    exports: [
+      { id: 'rough-cut-notes', name: 'Rough Cut Notes', format: 'md', icon: '📝' },
+      { id: 'broll-list', name: 'B-Roll List', format: 'csv', icon: '🎞️' },
+      { id: 'interview-transcript', name: 'Interview Transcript', format: 'docx', icon: '📄' },
+      { id: 'shot-log', name: 'Shot Log', format: 'xlsx', icon: '📋' },
+      { id: 'sequence-breakdown', name: 'Sequence Breakdown', format: 'pdf', icon: '🎬' }
+    ],
+    
+    ui: {
+      showNaturalisticShots: true,
+      showBrollMarkers: true,
+      showInterviewCoverage: true,
+      showAudioNotes: true,
+      dialogueWidth: 'wide',
+      emphasisElements: ['interviews', 'broll', 'locations', 'moments']
+    },
+    
+    ratingCriteria: [
+      { id: 'authenticity', name: 'Authenticity', weight: 25,
+        prompt: 'Does it feel genuine and unforced?' },
+      { id: 'story_arc', name: 'Story Arc', weight: 25,
+        prompt: 'Is there a clear narrative through-line?' },
+      { id: 'coverage', name: 'Coverage Variety', weight: 20,
+        prompt: 'Good mix of interviews, B-roll, and observational?' },
+      { id: 'pacing', name: 'Pacing', weight: 15,
+        prompt: 'Does it maintain interest without feeling manipulative?' },
+      { id: 'context', name: 'Context & Clarity', weight: 15,
+        prompt: 'Is the story context clear to viewers?' }
+    ]
+  },
+  
+  commercial: {
+    id: 'commercial',
+    name: 'Commercial / Promo',
+    icon: '📺',
+    description: 'Commercial production with product shots and brand guidelines',
+    primaryColor: '#f59e0b', // Amber
+    productionStyle: true,
+    
+    aiPrompts: {
+      shotAnalysis: `Analyze this commercial shot. Identify:
+        - Shot type (product beauty, lifestyle, testimonial, brand moment)
+        - Brand alignment
+        - Call-to-action presence
+        - Emotional appeal
+        - Visual hooks
+        - Color grading needs
+        Return structured analysis.`,
+      
+      productFocus: `For this product shot, suggest:
+        - Optimal camera angles to show features
+        - Lighting for product beauty
+        - Movement to add dynamism
+        - Insert shots of details
+        - Lifestyle context shots`
+    },
+    
+    markerTypes: [
+      { id: 'product-shot', name: 'Product Shot', icon: '📦', color: '#f59e0b', description: 'Product focus' },
+      { id: 'lifestyle', name: 'Lifestyle', icon: '✨', color: '#22c55e', description: 'Lifestyle context' },
+      { id: 'testimonial', name: 'Testimonial', icon: '💬', color: '#8b5cf6', description: 'Customer testimonial' },
+      { id: 'brand-moment', name: 'Brand Moment', icon: '⭐', color: '#dc2626', description: 'Brand identity shot' },
+      { id: 'cta', name: 'Call-to-Action', icon: '🎯', color: '#06b6d4', description: 'CTA moment' },
+      { id: 'beauty-shot', name: 'Beauty Shot', icon: '💎', color: '#ec4899', description: 'Hero product shot' }
+    ],
+    
+    keyboardShortcuts: {
+      'p': { action: 'addProductShotMarker', label: 'P - Product' },
+      'l': { action: 'addLifestyleMarker', label: 'L - Lifestyle' },
+      't': { action: 'addTestimonialMarker', label: 'T - Testimonial' },
+      'c': { action: 'addCTAMarker', label: 'C - CTA' },
+      'i': { action: 'setInPoint', label: 'I - In Point' },
+      'o': { action: 'setOutPoint', label: 'O - Out Point' }
+    },
+    
+    exports: [
+      { id: 'storyboard', name: 'Storyboard', format: 'pdf', icon: '🎨' },
+      { id: 'shot-list-commercial', name: 'Commercial Shot List', format: 'xlsx', icon: '📋' },
+      { id: 'brand-compliance', name: 'Brand Compliance Check', format: 'pdf', icon: '✅' },
+      { id: 'delivery-specs', name: 'Delivery Specs', format: 'txt', icon: '📐' },
+      { id: 'social-cutdowns', name: 'Social Cut-downs', format: 'json', icon: '📱' }
+    ],
+    
+    ui: {
+      showProductFocus: true,
+      showBrandGuidelines: true,
+      showCTAMarkers: true,
+      showFramingGuides: true,
+      dialogueWidth: 'narrow',
+      emphasisElements: ['product', 'brand', 'cta', 'beauty']
+    },
+    
+    ratingCriteria: [
+      { id: 'brand_alignment', name: 'Brand Alignment', weight: 25,
+        prompt: 'Does it align with brand guidelines and identity?' },
+      { id: 'product_showcase', name: 'Product Showcase', weight: 25,
+        prompt: 'Is the product shown clearly and attractively?' },
+      { id: 'cta_clarity', name: 'CTA Clarity', weight: 20,
+        prompt: 'Is the call-to-action clear and compelling?' },
+      { id: 'emotional_connection', name: 'Emotional Connection', weight: 15,
+        prompt: 'Does it create an emotional connection with viewers?' },
+      { id: 'production_quality', name: 'Production Quality', weight: 15,
+        prompt: 'Does it look polished and professional?' }
+    ]
   }
 };
 

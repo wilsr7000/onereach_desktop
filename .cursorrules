@@ -80,6 +80,80 @@ These documents are the source of truth for project planning and must be kept cu
 - Use Spaces API for content storage
 - Save state on beforeunload for graceful shutdown
 
+## UI Design Standards
+
+### No Emojis Policy (MANDATORY)
+**Never use emojis in UI elements.** This applies to:
+- Buttons and controls
+- Labels and headers
+- Status indicators
+- Menu items
+- Toast notifications
+- Error/warning messages
+- Tooltips
+- Any user-facing text
+
+### Use the Icon Library
+Always use `lib/icon-library.js` for icons. This library provides:
+- Tufte-inspired minimalist SVG icons
+- Consistent 1.5px stroke weight
+- 24x24 viewport
+- Outline-only design (no fills)
+- Geometric primitives
+
+**Usage:**
+```javascript
+import { ICONS, getIcon, getTypeIcon } from './lib/icon-library.js';
+
+// Get icon by name
+const html = `<span class="icon">${getIcon('file')}</span>`;
+
+// Get icon for content type
+const typeIcon = getTypeIcon('video');
+```
+
+**Available Icons:**
+- Content types: `file`, `image`, `text`, `code`, `html`, `video`, `audio`, `pdf`, `url`
+- Containers: `space`, `folder`, `box`
+- States: `empty`, `warning`, `error`, `success`, `info`
+- Actions: `search`, `plus`, `minus`, `check`, `x`, `edit`, `trash`, `download`, `upload`
+- Navigation: `chevronLeft`, `chevronRight`, `chevronUp`, `chevronDown`
+- UI: `settings`, `more`, `moreVertical`, `filter`
+
+### Design Principles
+1. **Minimalism**: Less is more. Remove decorative elements.
+2. **Clarity**: Icons should communicate meaning instantly.
+3. **Consistency**: Use the same icon for the same action everywhere.
+4. **Elegance**: Follow Tufte's data-ink ratio principle - maximize data, minimize ink.
+
+### When You Need a New Icon
+If the icon library doesn't have what you need:
+1. Add it to `lib/icon-library.js` following the existing pattern
+2. Use 1.5px stroke, 24x24 viewport, outline-only
+3. Keep it geometrically simple
+4. Document the icon name in the appropriate category
+
+### Examples of What NOT to Do
+```javascript
+// BAD - emoji in button
+button.innerHTML = '📁 Open Folder';
+
+// GOOD - icon from library  
+button.innerHTML = `${getIcon('folder')} Open Folder`;
+
+// BAD - emoji in status
+status.textContent = '✅ Success!';
+
+// GOOD - icon from library
+status.innerHTML = `${getIcon('success')} Success`;
+
+// BAD - emoji in menu
+menuItem.textContent = '⚙️ Settings';
+
+// GOOD - icon from library
+menuItem.innerHTML = `${getIcon('settings')} Settings`;
+```
+
 ## Release Process
 
 Use `npm run release` which runs `scripts/release-master.sh`:

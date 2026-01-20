@@ -10,6 +10,8 @@
  */
 
 import { ContentTemplates, getTemplate, getAllTemplates } from './ContentTemplates.js';
+import { ProductionScriptManager } from './ProductionScript.js';
+import { ProductionScriptUI, renderProductionScriptFormat } from './ProductionScriptUI.js';
 
 /**
  * View modes for the Line Script panel
@@ -18,6 +20,7 @@ export const VIEW_MODES = {
   SPOTTING: 'spotting',   // Minimal UI, large timecode, voice status - for marking while watching
   EDIT: 'edit',           // Full controls, metadata fields - for editing markers
   REVIEW: 'review',       // Thumbnails, quick preview - for reviewing marked content
+  PRODUCTION: 'production', // Camera angles, shots, technical directions - for production scripts
   EXPORT: 'export'        // EDL format, technical notes - for export preparation
 };
 
@@ -42,6 +45,10 @@ export class LineScriptPanel {
     this.dialogueBlocks = [];
     this.speakers = [];
     this.transcriptSegments = [];
+    
+    // Production script management
+    this.productionScriptManager = new ProductionScriptManager();
+    this.productionScriptUI = new ProductionScriptUI(appContext, this.productionScriptManager);
     
     // UI state
     this.visible = false;
@@ -381,6 +388,11 @@ export class LineScriptPanel {
     
     // Update timecode display
     this.updateTimecodeDisplay();
+    
+    // Update production script UI current time
+    if (this.productionScriptUI) {
+      this.productionScriptUI.setCurrentTime(this.currentTime);
+    }
   }
 
   /**
@@ -678,6 +690,9 @@ export class LineScriptPanel {
           break;
         case VIEW_MODES.REVIEW:
           html += this.renderReviewMode(template);
+          break;
+        case VIEW_MODES.PRODUCTION:
+          html += this.renderProductionMode(template);
           break;
         case VIEW_MODES.EXPORT:
           html += this.renderExportMode(template);
@@ -1069,6 +1084,66 @@ export class LineScriptPanel {
   }
 
   /**
+   * Render production mode (camera angles, shots, technical directions)
+   * @param {Object} template - Current template
+   * @returns {string} HTML
+   */
+  renderProductionMode(template) {
+    return `
+      <div class="linescript-production-mode">
+        <div class="production-sidebar-container">
+          ${this.productionScriptUI.renderSidebar()}
+        </div>
+        
+        <div class="production-main">
+          <div class="production-toolbar">
+            <button class="btn-sm" id="importProductionScript">
+              📥 Import Script
+            </button>
+            <button class="btn-sm" id="exportProductionScript">
+              📤 Export Production Script
+            </button>
+            <button class="btn-sm" id="exportShotList">
+              📋 Export Shot List
+            </button>
+            <button class="btn-sm" id="clearAllDirections">
+              🗑️ Clear All Directions
+            </button>
+          </div>
+          
+          <div class="production-script-display">
+            ${this.renderProductionScriptContent(template)}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  /**
+   * Render production script content with camera directions
+   * @param {Object} template - Current template
+   * @returns {string} HTML
+   */
+  renderProductionScriptContent(template) {
+    if (this.dialogueBlocks.length === 0) {
+      return `
+        <div class="production-script-empty">
+          <p>No transcript available. Load a video with transcript to add camera directions.</p>
+        </div>
+      `;
+    }
+    
+    return renderProductionScriptFormat(
+      this.words,
+      this.dialogueBlocks,
+      this.productionScriptManager.getAll(),
+      this.markers,
+      this.speakers,
+      template
+    );
+  }
+
+  /**
    * Render review mode
    * @param {Object} template - Current template
    * @returns {string} HTML
@@ -1319,6 +1394,45 @@ export class LineScriptPanel {
         }
       });
     });
+    
+    // Production mode specific listeners
+    if (this.viewMode === VIEW_MODES.PRODUCTION) {
+      const sidebar = this.container.querySelector('.production-sidebar-container');
+      if (sidebar && this.productionScriptUI) {
+        this.productionScriptUI.attachEventListeners(sidebar);
+      }
+      
+      // Production toolbar buttons
+      this.container.querySelector('#exportProductionScript')?.addEventListener('click', () => {
+        this.exportProductionScript();
+      });
+      
+      this.container.querySelector('#exportShotList')?.addEventListener('click', () => {
+        this.exportShotList();
+      });
+      
+      this.container.querySelector('#clearAllDirections')?.addEventListener('click', () => {
+        if (confirm('Clear all camera directions? This cannot be undone.')) {
+          this.productionScriptManager.clear();
+          this.render();
+          this.showToast('All directions cleared', 'info');
+        }
+      });
+      
+      this.container.querySelector('#importProductionScript')?.addEventListener('click', () => {
+        this.importProductionScript();
+      });
+      
+      // Click on camera direction to edit
+      this.container.querySelectorAll('.camera-direction').forEach(el => {
+        el.addEventListener('click', () => {
+          const directionId = parseFloat(el.dataset.directionId);
+          const time = parseFloat(el.dataset.time);
+          this.seekToTime(time);
+          // Could open edit modal here
+        });
+      });
+    }
   }
 
   /**
@@ -1643,6 +1757,7 @@ export class LineScriptPanel {
       [VIEW_MODES.SPOTTING]: '🎯',
       [VIEW_MODES.EDIT]: '✏️',
       [VIEW_MODES.REVIEW]: '👁️',
+      [VIEW_MODES.PRODUCTION]: '🎬',
       [VIEW_MODES.EXPORT]: '📤'
     };
     return icons[mode] || '📝';
@@ -1658,6 +1773,7 @@ export class LineScriptPanel {
       [VIEW_MODES.SPOTTING]: 'Mark points while watching video',
       [VIEW_MODES.EDIT]: 'Edit marker details and metadata',
       [VIEW_MODES.REVIEW]: 'Review and preview markers',
+      [VIEW_MODES.PRODUCTION]: 'Add camera angles and technical directions',
       [VIEW_MODES.EXPORT]: 'Export markers and content'
     };
     return descriptions[mode] || '';
@@ -1831,6 +1947,163 @@ export class LineScriptPanel {
     // Clear state
     this.eventListeners = {};
     this.visible = false;
+  }
+  
+  /**
+   * Export production script
+   */
+  exportProductionScript() {
+    const directions = this.productionScriptManager.getAll();
+    
+    if (directions.length === 0) {
+      this.showToast('No camera directions to export', 'warning');
+      return;
+    }
+    
+    // Generate production script text
+    let scriptText = '# PRODUCTION SCRIPT\n\n';
+    scriptText += `Generated: ${new Date().toLocaleString()}\n\n`;
+    scriptText += '---\n\n';
+    
+    // Group by scenes
+    const scenes = this.markers.filter(m => m.type === 'range');
+    
+    if (scenes.length > 0) {
+      scenes.forEach((scene, sceneIdx) => {
+        const sceneDirections = directions.filter(
+          d => d.time >= scene.inTime && d.time <= scene.outTime
+        );
+        
+        scriptText += `## SCENE ${sceneIdx + 1} - ${scene.name}\n`;
+        scriptText += `[${this.formatTimecode(scene.inTime)} → ${this.formatTimecode(scene.outTime)}]\n\n`;
+        
+        if (scene.description) {
+          scriptText += `${scene.description}\n\n`;
+        }
+        
+        sceneDirections.forEach(direction => {
+          scriptText += `[${this.formatTimecode(direction.time)}] ${direction.getIcon()} ${direction.getDisplayText()}\n`;
+          if (direction.notes) {
+            scriptText += `  Notes: ${direction.notes}\n`;
+          }
+        });
+        
+        scriptText += '\n';
+      });
+    } else {
+      // No scenes, just list all directions
+      directions.forEach(direction => {
+        scriptText += `[${this.formatTimecode(direction.time)}] ${direction.getIcon()} ${direction.getDisplayText()}\n`;
+        if (direction.notes) {
+          scriptText += `  Notes: ${direction.notes}\n`;
+        }
+        scriptText += '\n';
+      });
+    }
+    
+    // Download
+    const blob = new Blob([scriptText], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'production-script.txt';
+    a.click();
+    URL.revokeObjectURL(url);
+    
+    this.showToast('Production script exported', 'success');
+  }
+  
+  /**
+   * Export shot list
+   */
+  exportShotList() {
+    const directions = this.productionScriptManager.getAll();
+    
+    if (directions.length === 0) {
+      this.showToast('No camera directions to export', 'warning');
+      return;
+    }
+    
+    // Generate shot list CSV
+    let csv = 'Shot #,Timecode,Type,Description,Scene,Notes\n';
+    
+    directions.forEach((direction, idx) => {
+      const scene = this.markers.find(m => 
+        m.type === 'range' && 
+        direction.time >= m.inTime && 
+        direction.time <= m.outTime
+      );
+      
+      csv += `${idx + 1},`;
+      csv += `${this.formatTimecode(direction.time)},`;
+      csv += `"${direction.getFullName()}",`;
+      csv += `"${direction.description || ''}",`;
+      csv += `"${scene ? scene.name : ''}",`;
+      csv += `"${direction.notes || ''}"\n`;
+    });
+    
+    // Download
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'shot-list.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+    
+    this.showToast('Shot list exported', 'success');
+  }
+  
+  /**
+   * Import production script
+   */
+  importProductionScript() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    
+    input.onchange = (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const json = JSON.parse(event.target.result);
+          this.productionScriptManager.fromJSON(json);
+          this.render();
+          this.showToast(`Imported ${this.productionScriptManager.directions.length} directions`, 'success');
+        } catch (error) {
+          console.error('Import error:', error);
+          this.showToast('Failed to import production script', 'error');
+        }
+      };
+      reader.readAsText(file);
+    };
+    
+    input.click();
+  }
+  
+  /**
+   * Save production directions to project
+   */
+  saveProductionDirections() {
+    if (!this.app.projectManager) return;
+    
+    const json = this.productionScriptManager.toJSON();
+    this.app.projectManager.saveMetadata('productionDirections', json);
+  }
+  
+  /**
+   * Load production directions from project
+   */
+  loadProductionDirections() {
+    if (!this.app.projectManager) return;
+    
+    const json = this.app.projectManager.loadMetadata('productionDirections');
+    if (json) {
+      this.productionScriptManager.fromJSON(json);
+    }
   }
 }
 

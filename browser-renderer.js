@@ -12,6 +12,40 @@ let llmBadgeTimeout = null;
 let llmBadgeHideTimeout = null;
 
 /**
+ * Inject Spaces upload enhancer into webview
+ * Adds "Spaces" buttons next to file inputs
+ */
+function injectSpacesUploadEnhancer(webview) {
+    // Check if feature is enabled
+    window.api.getSettings().then(settings => {
+        const spacesEnabled = settings.spacesUploadIntegration !== false;
+        
+        if (!spacesEnabled) {
+            console.log('[Spaces Upload] Feature disabled, not injecting');
+            return;
+        }
+        
+        // Read and inject the enhancer script
+        fetch('browser-file-input-enhancer.js')
+            .then(res => res.text())
+            .then(script => {
+                webview.executeJavaScript(script)
+                    .then(() => {
+                        console.log('[Spaces Upload] Injected file input enhancer');
+                    })
+                    .catch(err => {
+                        console.error('[Spaces Upload] Error injecting enhancer:', err);
+                    });
+            })
+            .catch(err => {
+                console.error('[Spaces Upload] Error loading enhancer script:', err);
+            });
+    }).catch(err => {
+        console.error('[Spaces Upload] Error checking settings:', err);
+    });
+}
+
+/**
  * Initialize LLM Badge handler
  * Shows a badge in the tab bar when LLM API calls are made
  */
@@ -1581,6 +1615,9 @@ function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = 
         console.log(`Webview ${tabId} finished loading (initial load: ${isInitialLoad})`);
         webviewReady = true;
         clearTimeout(loadingTimeout);
+        
+        // Inject Spaces upload enhancer (if enabled)
+        injectSpacesUploadEnhancer(webview);
         
         // Update tab title with actual page title
         webview.executeJavaScript('document.title').then(title => {

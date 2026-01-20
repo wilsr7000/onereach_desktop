@@ -52,6 +52,9 @@
    * @param {object} metadata - Project metadata (transcriptSegments, transcriptSource, etc.)
    * @returns {Promise<object>} - { missing: [], existing: [] }
    */
+//#region agent log
+fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'video-editor-preloader.js:55',message:'checkAssets called',data:{hasMetadata:!!metadata,transcriptSource:metadata?.transcriptSource,segmentsCount:metadata?.transcriptSegments?.length||0,allMetadataKeys:metadata?Object.keys(metadata):[]},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A,B,D'})}).catch(()=>{});
+//#endregion
   async function checkAssets(videoPath, metadata) {
     const missing = [];
     const existing = [];
@@ -61,6 +64,9 @@
     const hasAccurateTranscript = accurateTranscriptSources.includes(metadata.transcriptSource) && 
                                   metadata.transcriptSegments && 
                                   metadata.transcriptSegments.length > 0;
+//#region agent log
+fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'video-editor-preloader.js:64',message:'transcript check result',data:{hasAccurateTranscript,transcriptSource:metadata.transcriptSource,isInAccurateList:accurateTranscriptSources.includes(metadata.transcriptSource),hasSegments:!!(metadata.transcriptSegments&&metadata.transcriptSegments.length>0)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A,D'})}).catch(()=>{});
+//#endregion
     
     if (hasAccurateTranscript) {
       existing.push({ type: 'transcript', ...ASSET_TYPES.transcript });

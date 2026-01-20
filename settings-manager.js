@@ -143,7 +143,27 @@ class SettingsManager {
       // Budget settings
       budgetEnabled: true, // Enable budget tracking and warnings
       budgetShowEstimates: true, // Show cost estimates before AI operations
-      budgetConfirmThreshold: 0.05 // Ask confirmation for costs above this amount ($)
+      budgetConfirmThreshold: 0.05, // Ask confirmation for costs above this amount ($)
+      // Spaces upload integration
+      spacesUploadIntegration: true, // Show "Choose from Spaces" option in file pickers
+      // AI Conversation Capture settings
+      aiConversationCapture: {
+        enabled: true,
+        captureImages: true,
+        captureFiles: true,
+        captureCode: true,
+        autoCreateSpaces: true,
+        conversationTimeoutMinutes: 30,
+        showRecordingIndicator: true,
+        enableUndoWindow: true,
+        undoWindowMinutes: 5,
+        clearPauseOnRestart: true,
+        privateModeBySefault: false
+      },
+      // Unified Claude Service settings (headless-first, API-fallback)
+      claudePreferHeadless: true,      // Try headless Claude first (uses web login, free)
+      claudeHeadlessTimeout: 60000,    // Timeout for headless method (60s default)
+      claudeApiFallback: true          // Fall back to API if headless fails
     };
   }
 
@@ -218,7 +238,25 @@ class SettingsManager {
       // Budget settings
       budgetEnabled: true,
       budgetShowEstimates: true,
-      budgetConfirmThreshold: 0.05
+      budgetConfirmThreshold: 0.05,
+      // AI Conversation Capture settings
+      aiConversationCapture: {
+        enabled: true,
+        captureImages: true,
+        captureFiles: true,
+        captureCode: true,
+        autoCreateSpaces: true,
+        conversationTimeoutMinutes: 30,
+        showRecordingIndicator: true,
+        enableUndoWindow: true,
+        undoWindowMinutes: 5,
+        clearPauseOnRestart: true,
+        privateModeBySefault: false
+      },
+      // Unified Claude Service settings
+      claudePreferHeadless: true,
+      claudeHeadlessTimeout: 60000,
+      claudeApiFallback: true
     };
     
     return defaults[key];
@@ -349,6 +387,15 @@ class SettingsManager {
   
   setBudgetConfirmThreshold(threshold) {
     return this.set('budgetConfirmThreshold', threshold);
+  }
+  
+  // Spaces upload integration methods
+  getSpacesUploadEnabled() {
+    return this.get('spacesUploadIntegration') !== false; // Default true
+  }
+  
+  setSpacesUploadEnabled(enabled) {
+    return this.set('spacesUploadIntegration', enabled);
   }
 }
 

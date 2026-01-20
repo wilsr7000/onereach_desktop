@@ -2659,6 +2659,144 @@ Select the appropriate scenes and return JSON.`;
   }
 
   /**
+   * Concatenate multiple video clips into a single output video
+   * @param {Array} clips - Array of clip objects with { sourceId, sourceIn, sourceOut, timelineStart }
+   * @param {Array} sources - Array of source objects with { id, path }
+   * @param {Object} options - Export options
+   * @param {string} options.outputPath - Output file path
+   * @param {string} options.format - Output format (default: mp4)
+   * @param {string} options.quality - Quality preset (default: medium)
+   * @param {Function} progressCallback - Progress callback function
+   * @returns {Promise} - Resolves with output path
+   */
+  async concatenateVideoClips(clips, sources, options = {}, progressCallback = null) {
+    const {
+      outputPath = null,
+      format = 'mp4',
+      quality = 'medium'
+    } = options;
+
+    const output = outputPath || path.join(this.outputDir, `multiclip_${Date.now()}.${format}`);
+    const tempDir = path.join(this.outputDir, `temp_concat_${Date.now()}`);
+
+    try {
+      // Create temp directory
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+      }
+
+      if (progressCallback) {
+        progressCallback({ status: 'Extracting segments...', percent: 0 });
+      }
+
+      console.log('[VideoEditor] Concatenating', clips.length, 'clips');
+
+      // Extract each clip as a segment
+      const segmentFiles = [];
+      for (let i = 0; i < clips.length; i++) {
+        const clip = clips[i];
+        const source = sources.find(s => s.id === clip.sourceId);
+        
+        if (!source) {
+          throw new Error(`Source not found for clip: ${clip.id}`);
+        }
+
+        const segmentPath = path.join(tempDir, `segment_${i.toString().padStart(3, '0')}.mp4`);
+        
+        if (progressCallback) {
+          const percent = (i / clips.length) * 50;
+          progressCallback({ status: `Extracting clip ${i + 1}/${clips.length}...`, percent });
+        }
+
+        // Extract segment from source (trim)
+        await new Promise((resolve, reject) => {
+          const command = ffmpeg(source.path);
+
+          // Seek to start
+          if (clip.sourceIn > 0) {
+            command.seekInput(clip.sourceIn);
+          }
+
+          command
+            .duration(clip.duration)
+            .videoCodec('libx264')
+            .audioCodec('aac')
+            .outputOptions([
+              '-preset', 'medium',
+              '-crf', '23'
+            ])
+            .output(segmentPath)
+            .on('end', () => {
+              console.log(`[VideoEditor] Segment ${i + 1} extracted:`, segmentPath);
+              resolve();
+            })
+            .on('error', (err) => {
+              console.error(`[VideoEditor] Segment ${i + 1} error:`, err);
+              reject(err);
+            })
+            .run();
+        });
+
+        segmentFiles.push(segmentPath);
+      }
+
+      if (progressCallback) {
+        progressCallback({ status: 'Concatenating segments...', percent: 60 });
+      }
+
+      // Create concat list file
+      const concatListPath = path.join(tempDir, 'concat_list.txt');
+      const concatContent = segmentFiles.map(f => `file '${f}'`).join('\n');
+      fs.writeFileSync(concatListPath, concatContent);
+
+      // Concatenate using FFmpeg concat demuxer
+      await new Promise((resolve, reject) => {
+        ffmpeg()
+          .input(concatListPath)
+          .inputOptions(['-f', 'concat', '-safe', '0'])
+          .videoCodec('copy')
+          .audioCodec('copy')
+          .output(output)
+          .on('progress', (progress) => {
+            if (progressCallback && progress.percent) {
+              const percent = 60 + (progress.percent * 0.4);
+              progressCallback({ status: `Finalizing... ${Math.round(progress.percent)}%`, percent });
+            }
+          })
+          .on('end', () => {
+            console.log('[VideoEditor] Concatenation complete:', output);
+            resolve();
+          })
+          .on('error', (err) => {
+            console.error('[VideoEditor] Concatenation error:', err);
+            reject(err);
+          })
+          .run();
+      });
+
+      // Cleanup temp directory
+      fs.rmSync(tempDir, { recursive: true, force: true });
+
+      if (progressCallback) {
+        progressCallback({ status: 'Complete!', percent: 100 });
+      }
+
+      return {
+        success: true,
+        outputPath: output,
+        clipsProcessed: clips.length
+      };
+
+    } catch (error) {
+      // Cleanup on error
+      if (fs.existsSync(tempDir)) {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Export multi-track video - combines video with multiple audio tracks
    * @param {string} inputPath - Path to source video
    * @param {Object} options - Export options
@@ -4886,6 +5024,18 @@ IMPROVED TRANSLATION:`;
         return await this.exportPlaylist(videoPath, options);
       } catch (error) {
         return { error: error.message };
+      }
+    });
+
+    // Concatenate multiple video clips
+    ipcMain.handle('video-editor:concatenate-clips', async (event, clips, sources, options) => {
+      try {
+        return await this.concatenateVideoClips(clips, sources, options, (progress) => {
+          mainWindow?.webContents.send('video-editor:progress', progress);
+        });
+      } catch (error) {
+        console.error('[VideoEditor] Concatenate clips error:', error);
+        return { success: false, error: error.message };
       }
     });
 

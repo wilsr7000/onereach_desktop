@@ -298,10 +298,6 @@ class SpacesAPI {
             const tagsFromFile = this._getItemTags(itemId);
             const finalTags = tagsFromMetadata || tagsFromFile;
             
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'spaces-api.js:items.get',message:'Getting item with tags',data:{itemId,tagsFromMetadata,tagsFromFile,finalTags,hasMetadata:!!item.metadata},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'D'})}).catch(()=>{});
-            // #endregion
-            
             return {
               ...item,
               tags: finalTags
@@ -380,8 +376,20 @@ class SpacesAPI {
           
           // Fallback to direct storage (less ideal but still works)
           console.warn('[SpacesAPI] clipboardManager not available, using direct storage (may cause sync issues)');
+          
+          // Generate thumbnail for images if not provided
+          const itemWithThumbnail = { ...item };
+          if (type === 'image' && !item.thumbnail) {
+            const imageData = item.content || item.dataUrl;
+            if (imageData && typeof imageData === 'string' && imageData.startsWith('data:image/')) {
+              // For small images, use full image; for large, we'd need nativeImage (not available here)
+              itemWithThumbnail.thumbnail = imageData;
+              console.log('[SpacesAPI] Using image content as thumbnail (fallback path)');
+            }
+          }
+          
           const newItem = this.storage.addItem({
-            ...item,
+            ...itemWithThumbnail,
             type,
             spaceId: spaceId || 'unclassified',
             timestamp: Date.now()
@@ -448,6 +456,64 @@ class SpacesAPI {
       },
 
       /**
+       * Delete multiple items at once
+       * @param {string} spaceId - The space ID (for validation)
+       * @param {Array<string>} itemIds - Array of item IDs to delete
+       * @returns {Promise<Object>} Result object with { success: boolean, deleted: number, failed: number, errors: Array }
+       */
+      deleteMany: async (spaceId, itemIds) => {
+        try {
+          if (!Array.isArray(itemIds) || itemIds.length === 0) {
+            return { success: false, deleted: 0, failed: 0, errors: ['No items provided'] };
+          }
+          
+          const results = {
+            success: true,
+            deleted: 0,
+            failed: 0,
+            errors: []
+          };
+          
+          for (const itemId of itemIds) {
+            try {
+              const success = this.storage.deleteItem(itemId);
+              if (success) {
+                results.deleted++;
+                this._emit('item:deleted', { spaceId, itemId });
+              } else {
+                results.failed++;
+                results.errors.push(`Failed to delete item: ${itemId}`);
+              }
+            } catch (error) {
+              results.failed++;
+              results.errors.push(`Error deleting ${itemId}: ${error.message}`);
+              console.error('[SpacesAPI] Error deleting item in bulk:', itemId, error);
+            }
+          }
+          
+          // Consider overall success if at least one item was deleted
+          results.success = results.deleted > 0;
+          
+          console.log('[SpacesAPI] Bulk delete completed:', results);
+          this._emit('items:bulk-deleted', { 
+            spaceId, 
+            itemIds: itemIds.slice(0, results.deleted), // Only successfully deleted IDs
+            count: results.deleted 
+          });
+          
+          return results;
+        } catch (error) {
+          console.error('[SpacesAPI] Error in bulk delete:', error);
+          return { 
+            success: false, 
+            deleted: 0, 
+            failed: itemIds.length, 
+            errors: [error.message] 
+          };
+        }
+      },
+
+      /**
        * Move an item to a different space
        * @param {string} itemId - The item ID
        * @param {string} fromSpaceId - Current space ID
@@ -467,6 +533,78 @@ class SpacesAPI {
         } catch (error) {
           console.error('[SpacesAPI] Error moving item:', error);
           throw error;
+        }
+      },
+
+      /**
+       * Move multiple items to a different space at once
+       * @param {Array<string>} itemIds - Array of item IDs to move
+       * @param {string} fromSpaceId - Current space ID (for reference)
+       * @param {string} toSpaceId - Target space ID
+       * @returns {Promise<Object>} Result object with { success: boolean, moved: number, failed: number, errors: Array }
+       */
+      moveMany: async (itemIds, fromSpaceId, toSpaceId) => {
+        try {
+          if (!Array.isArray(itemIds) || itemIds.length === 0) {
+            return { success: false, moved: 0, failed: 0, errors: ['No items provided'] };
+          }
+          
+          if (!toSpaceId || toSpaceId === 'null') {
+            toSpaceId = 'unclassified';
+          }
+          
+          // Validate target space exists (unless unclassified)
+          if (toSpaceId !== 'unclassified') {
+            const spaceExists = this.storage.index.spaces.some(s => s.id === toSpaceId);
+            if (!spaceExists) {
+              return { success: false, moved: 0, failed: itemIds.length, errors: ['Target space does not exist'] };
+            }
+          }
+          
+          const results = {
+            success: true,
+            moved: 0,
+            failed: 0,
+            errors: []
+          };
+          
+          for (const itemId of itemIds) {
+            try {
+              const success = this.storage.moveItem(itemId, toSpaceId);
+              if (success) {
+                results.moved++;
+                this._emit('item:moved', { itemId, fromSpaceId, toSpaceId });
+              } else {
+                results.failed++;
+                results.errors.push(`Failed to move item: ${itemId}`);
+              }
+            } catch (error) {
+              results.failed++;
+              results.errors.push(`Error moving ${itemId}: ${error.message}`);
+              console.error('[SpacesAPI] Error moving item in bulk:', itemId, error);
+            }
+          }
+          
+          // Consider overall success if at least one item was moved
+          results.success = results.moved > 0;
+          
+          console.log('[SpacesAPI] Bulk move completed:', results);
+          this._emit('items:bulk-moved', { 
+            itemIds: itemIds.slice(0, results.moved), // Only successfully moved IDs
+            fromSpaceId,
+            toSpaceId,
+            count: results.moved 
+          });
+          
+          return results;
+        } catch (error) {
+          console.error('[SpacesAPI] Error in bulk move:', error);
+          return { 
+            success: false, 
+            moved: 0, 
+            failed: itemIds.length, 
+            errors: [error.message] 
+          };
         }
       },
 
@@ -1070,23 +1208,43 @@ class SpacesAPI {
   }
 
   // ============================================
-  // SEARCH & QUERY
+  // SEARCH & QUERY (Awesome Search Engine!)
   // ============================================
 
   /**
-   * Search across all spaces
-   * @param {string} query - Search query
+   * Awesome search across all spaces with comprehensive metadata search,
+   * relevance scoring, fuzzy matching, and search highlights.
+   * 
+   * @param {string} query - Search query (supports multiple words)
    * @param {Object} options - Search options
    * @param {string} options.spaceId - Limit to specific space
    * @param {string} options.type - Filter by item type
-   * @param {boolean} options.searchTags - Also search in tags (default: true)
+   * @param {boolean} options.searchTags - Search in tags (default: true)
+   * @param {boolean} options.searchMetadata - Search in all metadata fields (default: true)
+   * @param {boolean} options.searchContent - Search in full content for text items (default: false, slower)
+   * @param {boolean} options.fuzzy - Enable fuzzy matching for typo tolerance (default: true)
+   * @param {number} options.fuzzyThreshold - Fuzzy match threshold 0-1 (default: 0.7)
    * @param {number} options.limit - Max results
-   * @returns {Promise<Array<Object>>} Matching items with tags
+   * @param {boolean} options.includeHighlights - Include match highlights in results (default: true)
+   * @returns {Promise<Array<Object>>} Matching items sorted by relevance score
    */
   async search(query, options = {}) {
     try {
-      const queryLower = query.toLowerCase();
-      const searchTags = options.searchTags !== false; // Default to true
+      if (!query || typeof query !== 'string' || query.trim().length === 0) {
+        return [];
+      }
+      
+      const queryLower = query.toLowerCase().trim();
+      const queryWords = queryLower.split(/\s+/).filter(w => w.length > 0);
+      
+      // Options with defaults
+      const searchTags = options.searchTags !== false;
+      const searchMetadata = options.searchMetadata !== false;
+      const searchContent = options.searchContent === true;
+      const fuzzy = options.fuzzy !== false;
+      const fuzzyThreshold = options.fuzzyThreshold || 0.7;
+      const includeHighlights = options.includeHighlights !== false;
+      
       let items = this.storage.getAllItems();
       
       // Filter by space if specified
@@ -1099,39 +1257,394 @@ class SpacesAPI {
         items = items.filter(item => item.type === options.type);
       }
       
-      // Search in preview, filename, and optionally tags
-      items = items.filter(item => {
-        if (item.preview && item.preview.toLowerCase().includes(queryLower)) {
-          return true;
-        }
-        if (item.fileName && item.fileName.toLowerCase().includes(queryLower)) {
-          return true;
-        }
-        // Search in tags
-        if (searchTags) {
-          const tags = this._getItemTags(item.id);
-          if (tags.some(tag => tag.toLowerCase().includes(queryLower))) {
-            return true;
-          }
-        }
-        return false;
-      });
+      // Score and filter items
+      const scoredItems = [];
       
-      // Add tags to results
-      items = items.map(item => ({
-        ...item,
-        tags: this._getItemTags(item.id)
-      }));
-      
-      // Apply limit
-      if (options.limit) {
-        items = items.slice(0, options.limit);
+      for (const item of items) {
+        const result = this._scoreItem(item, queryLower, queryWords, {
+          searchTags,
+          searchMetadata,
+          searchContent,
+          fuzzy,
+          fuzzyThreshold,
+          includeHighlights
+        });
+        
+        if (result.score > 0) {
+          scoredItems.push({
+            ...item,
+            tags: result.tags,
+            metadata: result.metadata,
+            _search: {
+              score: result.score,
+              matches: result.matches,
+              highlights: includeHighlights ? result.highlights : undefined
+            }
+          });
+        }
       }
       
-      return items;
+      // Sort by relevance score (highest first), then by timestamp (most recent)
+      scoredItems.sort((a, b) => {
+        if (b._search.score !== a._search.score) {
+          return b._search.score - a._search.score;
+        }
+        return new Date(b.timestamp) - new Date(a.timestamp);
+      });
+      
+      // Apply limit
+      if (options.limit && options.limit > 0) {
+        return scoredItems.slice(0, options.limit);
+      }
+      
+      return scoredItems;
     } catch (error) {
       console.error('[SpacesAPI] Error searching:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Score an item against search query
+   * @private
+   */
+  _scoreItem(item, queryLower, queryWords, options) {
+    let totalScore = 0;
+    const matches = [];
+    const highlights = {};
+    
+    // Get tags and metadata
+    const tags = this._getItemTags(item.id);
+    const metadata = this._getItemMetadataForSearch(item.id);
+    
+    // Field weights (higher = more important)
+    const WEIGHTS = {
+      title: 10,        // Title is most important
+      fileName: 8,      // Filename is very important
+      tags: 7,          // Tags are explicit categorization
+      preview: 5,       // Preview/content preview
+      description: 4,   // Description
+      notes: 4,         // User notes
+      author: 3,        // Author name
+      source: 2,        // Source URL/info
+      content: 1        // Full content (lower weight, more text)
+    };
+    
+    // Bonus for exact phrase match
+    const EXACT_PHRASE_BONUS = 5;
+    
+    // Helper to check and score a field
+    const scoreField = (fieldName, fieldValue, weight) => {
+      if (!fieldValue || typeof fieldValue !== 'string') return 0;
+      
+      const valueLower = fieldValue.toLowerCase();
+      let fieldScore = 0;
+      const fieldMatches = [];
+      
+      // Check exact phrase match first (bonus points)
+      if (valueLower.includes(queryLower)) {
+        fieldScore += weight * EXACT_PHRASE_BONUS;
+        fieldMatches.push({ type: 'exact', query: queryLower });
+        
+        // Add highlight
+        if (options.includeHighlights) {
+          highlights[fieldName] = this._highlightMatches(fieldValue, [queryLower]);
+        }
+      }
+      
+      // Check individual word matches
+      for (const word of queryWords) {
+        if (valueLower.includes(word)) {
+          fieldScore += weight;
+          if (!fieldMatches.some(m => m.query === word)) {
+            fieldMatches.push({ type: 'word', query: word });
+          }
+        } else if (options.fuzzy) {
+          // Fuzzy matching - find similar words
+          const words = valueLower.split(/\s+/);
+          for (const fieldWord of words) {
+            const similarity = this._stringSimilarity(word, fieldWord);
+            if (similarity >= options.fuzzyThreshold) {
+              fieldScore += weight * similarity;
+              fieldMatches.push({ type: 'fuzzy', query: word, matched: fieldWord, similarity });
+            }
+          }
+        }
+      }
+      
+      if (fieldMatches.length > 0) {
+        matches.push({ field: fieldName, matches: fieldMatches });
+      }
+      
+      return fieldScore;
+    };
+    
+    // Score each field
+    
+    // Title (from metadata)
+    totalScore += scoreField('title', metadata.title, WEIGHTS.title);
+    
+    // File name
+    totalScore += scoreField('fileName', item.fileName, WEIGHTS.fileName);
+    
+    // Tags
+    if (options.searchTags && tags.length > 0) {
+      const tagsString = tags.join(' ');
+      totalScore += scoreField('tags', tagsString, WEIGHTS.tags);
+    }
+    
+    // Preview
+    totalScore += scoreField('preview', item.preview, WEIGHTS.preview);
+    
+    // Metadata fields
+    if (options.searchMetadata) {
+      totalScore += scoreField('description', metadata.description, WEIGHTS.description);
+      totalScore += scoreField('notes', metadata.notes, WEIGHTS.notes);
+      totalScore += scoreField('author', metadata.author, WEIGHTS.author);
+      totalScore += scoreField('source', metadata.source, WEIGHTS.source);
+      
+      // Also search in youtubeDescription for videos
+      if (metadata.youtubeDescription) {
+        totalScore += scoreField('youtubeDescription', metadata.youtubeDescription, WEIGHTS.description);
+      }
+      
+      // Search uploader for videos
+      if (metadata.uploader) {
+        totalScore += scoreField('uploader', metadata.uploader, WEIGHTS.author);
+      }
+    }
+    
+    // Full content search (optional, slower)
+    if (options.searchContent && (item.type === 'text' || item.type === 'html')) {
+      try {
+        const contentPath = path.join(this.storage.storageRoot, item.contentPath);
+        if (fs.existsSync(contentPath)) {
+          const content = fs.readFileSync(contentPath, 'utf8');
+          totalScore += scoreField('content', content, WEIGHTS.content);
+        }
+      } catch (e) {
+        // Silently ignore content read errors
+      }
+    }
+    
+    return {
+      score: totalScore,
+      matches,
+      highlights,
+      tags,
+      metadata
+    };
+  }
+
+  /**
+   * Get item metadata for search (lightweight version)
+   * @private
+   */
+  _getItemMetadataForSearch(itemId) {
+    try {
+      const metaPath = path.join(this.storage.itemsDir, itemId, 'metadata.json');
+      if (fs.existsSync(metaPath)) {
+        return JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+      }
+    } catch (error) {
+      // Silently fail
+    }
+    return {};
+  }
+
+  /**
+   * Calculate string similarity using Levenshtein distance
+   * Returns value between 0 (no match) and 1 (exact match)
+   * @private
+   */
+  _stringSimilarity(str1, str2) {
+    if (str1 === str2) return 1;
+    if (str1.length === 0 || str2.length === 0) return 0;
+    
+    // Quick check for containment
+    if (str1.includes(str2) || str2.includes(str1)) {
+      return Math.min(str1.length, str2.length) / Math.max(str1.length, str2.length);
+    }
+    
+    // Levenshtein distance for fuzzy matching
+    const matrix = [];
+    const len1 = str1.length;
+    const len2 = str2.length;
+    
+    // Quick reject if strings are too different in length
+    if (Math.abs(len1 - len2) / Math.max(len1, len2) > 0.5) {
+      return 0;
+    }
+    
+    for (let i = 0; i <= len1; i++) {
+      matrix[i] = [i];
+    }
+    for (let j = 0; j <= len2; j++) {
+      matrix[0][j] = j;
+    }
+    
+    for (let i = 1; i <= len1; i++) {
+      for (let j = 1; j <= len2; j++) {
+        const cost = str1[i - 1] === str2[j - 1] ? 0 : 1;
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j] + 1,     // deletion
+          matrix[i][j - 1] + 1,     // insertion
+          matrix[i - 1][j - 1] + cost  // substitution
+        );
+      }
+    }
+    
+    const distance = matrix[len1][len2];
+    const maxLen = Math.max(len1, len2);
+    return 1 - distance / maxLen;
+  }
+
+  /**
+   * Create highlighted version of text with matches marked
+   * @private
+   */
+  _highlightMatches(text, queries) {
+    if (!text) return '';
+    
+    let highlighted = text;
+    const lowerText = text.toLowerCase();
+    
+    // Find all match positions
+    const positions = [];
+    for (const query of queries) {
+      let pos = 0;
+      while ((pos = lowerText.indexOf(query, pos)) !== -1) {
+        positions.push({ start: pos, end: pos + query.length });
+        pos += 1;
+      }
+    }
+    
+    if (positions.length === 0) return text;
+    
+    // Sort and merge overlapping positions
+    positions.sort((a, b) => a.start - b.start);
+    const merged = [positions[0]];
+    for (let i = 1; i < positions.length; i++) {
+      const last = merged[merged.length - 1];
+      if (positions[i].start <= last.end) {
+        last.end = Math.max(last.end, positions[i].end);
+      } else {
+        merged.push(positions[i]);
+      }
+    }
+    
+    // Build highlighted string (from end to preserve positions)
+    for (let i = merged.length - 1; i >= 0; i--) {
+      const { start, end } = merged[i];
+      highlighted = 
+        highlighted.slice(0, start) + 
+        '**' + highlighted.slice(start, end) + '**' + 
+        highlighted.slice(end);
+    }
+    
+    // Truncate long text around matches for readability
+    if (highlighted.length > 200) {
+      const firstMatch = highlighted.indexOf('**');
+      if (firstMatch > 50) {
+        highlighted = '...' + highlighted.slice(firstMatch - 30);
+      }
+      if (highlighted.length > 200) {
+        highlighted = highlighted.slice(0, 197) + '...';
+      }
+    }
+    
+    return highlighted;
+  }
+
+  /**
+   * Quick search - faster but less comprehensive (searches index only)
+   * Good for autocomplete/typeahead
+   * @param {string} query - Search query
+   * @param {Object} options - Search options
+   * @returns {Promise<Array<Object>>} Matching items
+   */
+  async quickSearch(query, options = {}) {
+    return this.search(query, {
+      ...options,
+      searchMetadata: false,
+      searchContent: false,
+      fuzzy: false,
+      includeHighlights: false,
+      limit: options.limit || 10
+    });
+  }
+
+  /**
+   * Deep search - comprehensive but slower (includes full content)
+   * Good for thorough searches
+   * @param {string} query - Search query
+   * @param {Object} options - Search options
+   * @returns {Promise<Array<Object>>} Matching items
+   */
+  async deepSearch(query, options = {}) {
+    return this.search(query, {
+      ...options,
+      searchMetadata: true,
+      searchContent: true,
+      fuzzy: true,
+      includeHighlights: true
+    });
+  }
+
+  /**
+   * Get search suggestions based on existing tags and titles
+   * @param {string} prefix - Search prefix
+   * @param {number} limit - Max suggestions
+   * @returns {Promise<Array<{text: string, type: string, count: number}>>}
+   */
+  async getSearchSuggestions(prefix, limit = 10) {
+    try {
+      const prefixLower = prefix.toLowerCase().trim();
+      if (prefixLower.length === 0) return [];
+      
+      const suggestions = new Map();
+      const items = this.storage.getAllItems();
+      
+      for (const item of items) {
+        // Get tags
+        const tags = this._getItemTags(item.id);
+        for (const tag of tags) {
+          if (tag.toLowerCase().startsWith(prefixLower)) {
+            const key = `tag:${tag.toLowerCase()}`;
+            if (!suggestions.has(key)) {
+              suggestions.set(key, { text: tag, type: 'tag', count: 0 });
+            }
+            suggestions.get(key).count++;
+          }
+        }
+        
+        // Get title from metadata
+        const metadata = this._getItemMetadataForSearch(item.id);
+        if (metadata.title && metadata.title.toLowerCase().includes(prefixLower)) {
+          const key = `title:${metadata.title.toLowerCase()}`;
+          if (!suggestions.has(key)) {
+            suggestions.set(key, { text: metadata.title, type: 'title', count: 0 });
+          }
+          suggestions.get(key).count++;
+        }
+        
+        // Check fileName
+        if (item.fileName && item.fileName.toLowerCase().includes(prefixLower)) {
+          const key = `file:${item.fileName.toLowerCase()}`;
+          if (!suggestions.has(key)) {
+            suggestions.set(key, { text: item.fileName, type: 'file', count: 0 });
+          }
+          suggestions.get(key).count++;
+        }
+      }
+      
+      // Sort by count and return top suggestions
+      return Array.from(suggestions.values())
+        .sort((a, b) => b.count - a.count)
+        .slice(0, limit);
+    } catch (error) {
+      console.error('[SpacesAPI] Error getting search suggestions:', error);
+      return [];
     }
   }
 
@@ -1460,16 +1973,8 @@ class SpacesAPI {
       const metaPath = path.join(this.storage.itemsDir, itemId, 'metadata.json');
       const fileExists = fs.existsSync(metaPath);
       
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'spaces-api.js:_getItemTags',message:'Reading tags from metadata file',data:{itemId,metaPath,fileExists},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'E'})}).catch(()=>{});
-      // #endregion
-      
       if (fileExists) {
         const metadata = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
-        
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'spaces-api.js:_getItemTags:read',message:'Read metadata file',data:{itemId,tags:metadata.tags,hasTags:!!metadata.tags},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'E'})}).catch(()=>{});
-        // #endregion
         
         return metadata.tags || [];
       }
@@ -1575,11 +2080,41 @@ class SpacesAPI {
 
         // Get the metadata generator
         const MetadataGenerator = require('./metadata-generator');
+        const storageRef = this.storage;
         
-        // Create a minimal clipboard manager interface for the generator
+        // Create a clipboard manager interface with updateItemMetadata method
         const clipboardInterface = {
           storage: this.storage,
-          spaces: this.storage.index.spaces || []
+          spaces: this.storage.index.spaces || [],
+          // Add the updateItemMetadata method that MetadataGenerator expects
+          async updateItemMetadata(itemId, metadata) {
+            try {
+              const item = storageRef.loadItem(itemId);
+              if (!item) return { success: false, error: 'Item not found' };
+              
+              const fs = require('fs');
+              const path = require('path');
+              const metadataPath = path.join(storageRef.storageRoot, 'items', itemId, 'metadata.json');
+              
+              // Read existing metadata and merge
+              let existingMetadata = {};
+              if (fs.existsSync(metadataPath)) {
+                try {
+                  existingMetadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+                } catch (parseErr) {
+                  console.warn('[SpacesAPI] Could not parse existing metadata:', parseErr.message);
+                }
+              }
+              
+              const mergedMetadata = { ...existingMetadata, ...metadata };
+              fs.writeFileSync(metadataPath, JSON.stringify(mergedMetadata, null, 2));
+              
+              return { success: true };
+            } catch (err) {
+              console.error('[SpacesAPI] updateItemMetadata error:', err);
+              return { success: false, error: err.message };
+            }
+          }
         };
         
         const generator = new MetadataGenerator(clipboardInterface);
@@ -1627,11 +2162,41 @@ class SpacesAPI {
 
       // Get the metadata generator
       const MetadataGenerator = require('./metadata-generator');
+      const storageRef = this.storage;
       
-      // Create a minimal clipboard manager interface for the generator
+      // Create a clipboard manager interface with updateItemMetadata method
       const clipboardInterface = {
         storage: this.storage,
-        spaces: this.storage.index.spaces || []
+        spaces: this.storage.index.spaces || [],
+        // Add the updateItemMetadata method that MetadataGenerator expects
+        async updateItemMetadata(itemId, metadata) {
+          try {
+            const item = storageRef.loadItem(itemId);
+            if (!item) return { success: false, error: 'Item not found' };
+            
+            const fs = require('fs');
+            const path = require('path');
+            const metadataPath = path.join(storageRef.storageRoot, 'items', itemId, 'metadata.json');
+            
+            // Read existing metadata and merge
+            let existingMetadata = {};
+            if (fs.existsSync(metadataPath)) {
+              try {
+                existingMetadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+              } catch (parseErr) {
+                console.warn('[SpacesAPI] Could not parse existing metadata:', parseErr.message);
+              }
+            }
+            
+            const mergedMetadata = { ...existingMetadata, ...metadata };
+            fs.writeFileSync(metadataPath, JSON.stringify(mergedMetadata, null, 2));
+            
+            return { success: true };
+          } catch (err) {
+            console.error('[SpacesAPI] updateItemMetadata error:', err);
+            return { success: false, error: err.message };
+          }
+        }
       };
       
       const generator = new MetadataGenerator(clipboardInterface);

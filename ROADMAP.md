@@ -118,7 +118,7 @@
 - [ ] **Smart folders** - Auto-organize by rules
 - [ ] **Tags system** - Cross-space tagging
 - [ ] **Version history** - Track item changes
-- [ ] **Bulk operations** - Multi-select actions
+- [x] **Bulk operations** - Multi-select actions (v3.8.16 - Multi-select delete implemented)
 
 #### Q2 2026
 - [ ] **Collections** - Curated item groups
@@ -219,6 +219,8 @@
 - ✅ ChatGPT integration
 - ✅ Claude integration
 - ✅ Perplexity integration
+- ✅ Gemini integration
+- ✅ Grok integration
 - ✅ Custom agent support
 - ✅ AI Image creators (Midjourney, DALL-E, etc.)
 - ✅ AI Video creators (Veo3, Runway, Pika, etc.)

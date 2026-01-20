@@ -7,6 +7,7 @@
   <title>Video Editor - Onereach.ai</title>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="video-editor.css">
+  <link rel="stylesheet" href="src/video-editor/linescript/production-script.css">
 </head>
 <body>
   <!-- Header -->
@@ -142,6 +143,7 @@
       <div class="sidebar-tabs">
         <!-- Edit Mode Tabs -->
         <button class="sidebar-tab mode-edit-only active" data-tab="edit" onclick="app.switchTab('edit')">Tools</button>
+        <button class="sidebar-tab mode-edit-only" data-tab="sources" onclick="app.switchTab('sources')">Sources</button>
         
         <!-- Annotate Mode Tabs -->
         <button class="sidebar-tab mode-annotate-only" data-tab="scenes" onclick="app.switchTab('scenes')">Annotations</button>
@@ -468,6 +470,79 @@
         </div>
       </div>
 
+      <!-- Video Sources Tab (Multi-Camera) -->
+      <div class="sidebar-content mode-edit-only hidden" id="sourcesTab">
+        <!-- Sources Header -->
+        <div class="mode-header">
+          <div class="mode-header-icon">
+            <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" stroke-width="1.5">
+              <rect x="2" y="7" width="20" height="15" rx="2"/><polyline points="17 2 12 7 7 2"/>
+            </svg>
+          </div>
+          <div class="mode-header-text">
+            <span class="mode-header-title">Video Sources</span>
+            <span class="mode-header-subtitle">Multi-camera & multi-take editing</span>
+          </div>
+        </div>
+
+        <!-- Video Sources List -->
+        <div class="sidebar-section">
+          <div class="sidebar-section-title" style="display: flex; justify-content: space-between; align-items: center;">
+            <span>📹 Sources</span>
+            <button class="btn btn-ghost btn-sm" onclick="app.addVideoSourceDialog()" title="Add Video">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+              Add
+            </button>
+          </div>
+          <div class="video-sources-list" id="videoSourcesList">
+            <div class="empty-state">No video sources. Click + to add.</div>
+          </div>
+        </div>
+
+        <!-- Export Section -->
+        <div class="sidebar-section collapsed">
+          <div class="sidebar-section-title" onclick="app.toggleSection(this.parentElement)">
+            <span>📤 Export</span>
+            <span class="section-toggle">▼</span>
+          </div>
+          <div class="sidebar-section-content">
+            <button class="btn btn-primary" style="width: 100%;" onclick="app.exportMultiSourceVideo()" id="exportMultiSourceBtn">
+              Export Stitched Video
+            </button>
+            <p style="font-size: 11px; color: var(--text-muted); margin-top: 8px; line-height: 1.5;">
+              Combines all clips on timeline into a single video file
+            </p>
+          </div>
+        </div>
+
+        <!-- Help Section -->
+        <div class="sidebar-section collapsed">
+          <div class="sidebar-section-title" onclick="app.toggleSection(this.parentElement)">
+            <span>ℹ️ Multi-Camera Workflow</span>
+            <span class="section-toggle">▼</span>
+          </div>
+          <div class="sidebar-section-content">
+            <p style="font-size: 11px; color: var(--text-muted); line-height: 1.5; margin-bottom: 8px;">
+              <strong>Add multiple videos:</strong><br>
+              1. Click + to add video sources<br>
+              2. Drag sources to timeline or click ➕<br>
+              3. Arrange clips in sequence<br>
+              4. Export to stitch together
+            </p>
+            <p style="font-size: 11px; color: var(--text-muted); line-height: 1.5;">
+              <strong>Use cases:</strong><br>
+              • Multi-camera angles<br>
+              • Different takes<br>
+              • B-roll insertion<br>
+              • Scene stitching
+            </p>
+          </div>
+        </div>
+      </div>
+
       <!-- Spaces Tab (Projects) -->
       <div class="sidebar-content hidden" id="spacesTab">
         <!-- Space Selection -->
@@ -761,14 +836,16 @@
                   <span class="track-badge video">V1</span>
                   <div class="track-info">
                     <span class="track-name">Video 1</span>
-                    <span class="track-clip-count">1 Clip</span>
+                    <span class="track-clip-count">0 Clips</span>
                   </div>
                 </div>
               </div>
-              <div class="timeline-track" id="timelineTrack" onclick="app.seekToPosition(event)"
+              <div class="timeline-track" id="videoTrack" onclick="app.seekToPosition(event)"
                    onmousemove="app.showTimelineTime(event)" onmouseleave="app.hideTimelineTime()">
-                <!-- Main Clip Container -->
-                <div class="timeline-clip" id="videoClip" style="left: 0; width: 100%;" onclick="app.selectClip('video', event)">
+                <!-- Video clips will be rendered here by renderVideoClips() -->
+                
+                <!-- Legacy single clip (for backwards compatibility, hidden when using multi-source) -->
+                <div class="timeline-clip legacy-video-clip" id="videoClip" style="left: 0; width: 100%; display: none;" onclick="app.selectClip('video', event)">
                     <div class="timeline-thumbnails" id="timelineThumbnails"></div>
                     <span class="timeline-clip-name" id="videoClipName"></span>
                     <!-- Marker Range Overlays -->

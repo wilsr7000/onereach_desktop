@@ -41,6 +41,9 @@ class ClipboardManagerV2 {
     // Initialize app context capture
     this.contextCapture = new AppContextCapture();
     
+    // Track active YouTube downloads for cancellation
+    this.activeDownloads = new Map(); // Map<placeholderId, { controller: AbortController, progress: number }>
+    
     // PERFORMANCE: Defer loading history until first access
     // This speeds up initial startup significantly
     this.history = null; // Will be loaded lazily
@@ -61,6 +64,9 @@ class ClipboardManagerV2 {
     // Load preferences (lightweight, do immediately)
     this.loadPreferences();
     
+    // Migrate existing web monitor items BEFORE IPC handlers (so clients get correct data)
+    this.migrateWebMonitorItems();
+    
     // Set up IPC handlers (needed immediately for IPC)
     this.setupIPC();
     
@@ -74,6 +80,9 @@ class ClipboardManagerV2 {
     
     // PERFORMANCE: Defer heavy initialization to next tick
     setImmediate(() => {
+      // Clean up orphaned downloading items from crashes
+      this.cleanupOrphanedDownloads();
+      
       // Set up screenshot monitoring if enabled
       if (this.screenshotCaptureEnabled) {
         this.setupScreenshotWatcher();
@@ -242,6 +251,20 @@ class ClipboardManagerV2 {
         if (hasColorTokens && hasTypographyTokens) {
           console.log('[JsonSubtype] Detected style-guide');
           return 'style-guide';
+        }
+      }
+      
+      // Chatbot Conversation detection
+      // Matches AI conversations with messages array + AI service metadata
+      if (data.messages && Array.isArray(data.messages)) {
+        const hasAIMetadata = data.aiService || data.conversationId;
+        const hasMessageStructure = data.messages.some(m => 
+          m.role && m.content && (m.role === 'user' || m.role === 'assistant')
+        );
+        
+        if (hasAIMetadata && hasMessageStructure) {
+          console.log('[JsonSubtype] Detected chatbot-conversation');
+          return 'chatbot-conversation';
         }
       }
       
@@ -416,6 +439,68 @@ class ClipboardManagerV2 {
     // END VALIDATION
     // ========================================
     
+    // ========================================
+    // WEB MONITORS: URL DETECTION & MONITORING
+    // ========================================
+    const targetSpaceId = item.spaceId || this.currentSpace || 'unclassified';
+    if (targetSpaceId === 'web-monitors') {
+      const content = item.content || item.preview || '';
+      
+      // Skip SVG-only content (likely UI elements, not user content)
+      const trimmedContent = content.trim();
+      if (trimmedContent.startsWith('<svg') && trimmedContent.endsWith('</svg>')) {
+        console.log('[WebMonitors] Skipping SVG-only content (likely UI element)');
+        return null;
+      }
+      
+      // Check if content contains a URL
+      const url = this.extractURL(content);
+      console.log('[WebMonitors] Content received:', content.substring(0, 100));
+      console.log('[WebMonitors] Extracted URL:', url);
+      
+      if (url) {
+        console.log('[WebMonitors] URL detected, creating website monitor...');
+        
+        try {
+          // Try to create a full website monitor with scanning
+          const result = await this.createWebsiteMonitorFromURL(url);
+          if (result) {
+            console.log('[WebMonitors] Monitor created successfully:', result.id);
+            return result;
+          }
+        } catch (error) {
+          console.error('[WebMonitors] Failed to create monitor:', error.message);
+          console.log('[WebMonitors] Falling back to simple URL item');
+          
+          // Notify user of the failure
+          const { BrowserWindow } = require('electron');
+          BrowserWindow.getAllWindows().forEach(window => {
+            window.webContents.send('show-notification', {
+              title: 'Web Monitor Partial Setup',
+              body: `Saved URL, but monitoring disabled: ${error.message}`,
+              type: 'warning'
+            });
+          });
+          
+          // Fall back to simple URL item
+          item.type = 'url';
+          item.url = url;
+          item.content = url;
+          try {
+            const hostname = new URL(url).hostname;
+            item.preview = `URL (not monitored): ${hostname}`;
+          } catch (e) {
+            item.preview = `URL: ${url}`;
+          }
+        }
+      } else {
+        console.log('[WebMonitors] No URL found in content, adding as regular item');
+      }
+    }
+    // ========================================
+    // END WEB MONITORS
+    // ========================================
+    
     logger.logClipboardOperation('add', item.type, { 
       hasMetadata: !!item.metadata,
       spaceId: this.currentSpace
@@ -458,6 +543,29 @@ class ClipboardManagerV2 {
       };
     }
     
+    // Generate thumbnail for image items if not already provided
+    // This ensures images added via SpacesAPI get thumbnails
+    if (item.type === 'image' && !item.thumbnail) {
+      const imageData = item.content || item.dataUrl;
+      if (imageData && typeof imageData === 'string' && imageData.startsWith('data:image/')) {
+        try {
+          // For smaller images, use the full image as thumbnail
+          // For larger images (>100KB), generate a smaller thumbnail
+          if (imageData.length > 100000) {
+            item.thumbnail = this.generateImageThumbnail(imageData);
+            console.log('[addToHistory] Generated thumbnail for large image');
+          } else {
+            item.thumbnail = imageData;
+            console.log('[addToHistory] Using full image as thumbnail (small image)');
+          }
+        } catch (thumbError) {
+          console.error('[addToHistory] Error generating image thumbnail:', thumbError);
+          // Fallback: use the content as thumbnail
+          item.thumbnail = imageData;
+        }
+      }
+    }
+    
     // Add to new storage
     const indexEntry = this.storage.addItem({
       ...item,
@@ -493,15 +601,15 @@ class ClipboardManagerV2 {
     this.updateSpaceCounts();
     
     // Update lastUsed timestamp for the space
-    const targetSpaceId = indexEntry.spaceId;
-    if (targetSpaceId && targetSpaceId !== 'unclassified') {
-      this.updateSpaceLastUsed(targetSpaceId);
+    const itemSpaceId = indexEntry.spaceId;
+    if (itemSpaceId && itemSpaceId !== 'unclassified') {
+      this.updateSpaceLastUsed(itemSpaceId);
     }
     
     // Sync to unified space-metadata.json if item belongs to a space
-    if (targetSpaceId) {
+    if (itemSpaceId) {
       try {
-        const spaceMeta = this.storage.getSpaceMetadata(targetSpaceId);
+        const spaceMeta = this.storage.getSpaceMetadata(itemSpaceId);
         if (spaceMeta) {
           const fileKey = item.fileName || `item-${indexEntry.id}`;
           spaceMeta.files[fileKey] = {
@@ -515,7 +623,7 @@ class ClipboardManagerV2 {
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
           };
-          this.storage.updateSpaceMetadata(targetSpaceId, { files: spaceMeta.files });
+          this.storage.updateSpaceMetadata(itemSpaceId, { files: spaceMeta.files });
           console.log('[Clipboard] Synced new item to space-metadata.json:', fileKey);
         }
       } catch (syncError) {
@@ -1085,36 +1193,82 @@ class ClipboardManagerV2 {
   }
   
   getSpaceItems(spaceId) {
-    this.ensureHistoryLoaded(); // Ensure history is loaded before accessing
+    // Query directly from storage index (source of truth) instead of potentially stale history
+    const indexItems = this.storage.index.items || [];
     
-    // Filter items by space
-    const items = this.history.filter(item => 
+    console.log(`[getSpaceItems] Querying spaceId: "${spaceId}", index items: ${indexItems.length}`);
+    
+    // Debug: show all unique spaceIds in index
+    const uniqueSpaceIds = [...new Set(indexItems.map(item => item.spaceId))];
+    console.log(`[getSpaceItems] Unique spaceIds in index:`, uniqueSpaceIds);
+    
+    // Filter items by space from the storage index
+    const filteredItems = indexItems.filter(item => 
       spaceId === null ? true : item.spaceId === spaceId
     );
     
-    // Load content and thumbnails on demand (same as getHistory does)
-    return items.map(item => {
-      if (item._needsContent || !item.thumbnail) {
-        try {
-          const fullItem = this.storage.loadItem(item.id);
-          item.content = fullItem.content;
-          item.thumbnail = fullItem.thumbnail;
-          item._needsContent = false;
+    console.log(`[getSpaceItems] Found ${filteredItems.length} items for spaceId "${spaceId}"`);
+    
+    // Load content and thumbnails on demand
+    return filteredItems.map(item => {
+      const historyItem = {
+        id: item.id,
+        type: item.type,
+        content: null,
+        thumbnail: null,
+        preview: item.preview,
+        timestamp: item.timestamp,
+        pinned: item.pinned,
+        spaceId: item.spaceId,
+        fileName: item.fileName,
+        fileSize: item.fileSize,
+        fileType: item.fileType,
+        fileCategory: item.fileCategory,
+        fileExt: item.fileExt,
+        isScreenshot: item.isScreenshot,
+        filePath: item.filePath,
+        jsonSubtype: item.jsonSubtype,
+        // Web monitor fields (from index)
+        url: item.url,
+        name: item.name,
+        monitorId: item.monitorId,
+        lastChecked: item.lastChecked,
+        status: item.status,
+        changeCount: item.changeCount,
+        timeline: item.timeline,
+        settings: item.settings,
+        _needsContent: true
+      };
+      
+      // Load full content
+      try {
+        const fullItem = this.storage.loadItem(item.id);
+        historyItem.content = fullItem.content;
+        historyItem.thumbnail = fullItem.thumbnail;
+        historyItem._needsContent = false;
+        
+        // Merge metadata from storage
+        if (fullItem.metadata) {
+          historyItem.metadata = { ...historyItem.metadata, ...fullItem.metadata };
           
-          // Merge metadata from storage
-          if (fullItem.metadata) {
-            item.metadata = { ...item.metadata, ...fullItem.metadata };
-            
-            // Update fileSize from metadata if not set
-            if (!item.fileSize && fullItem.metadata.fileSize) {
-              item.fileSize = fullItem.metadata.fileSize;
-            }
+          // Update fileSize from metadata if not set
+          if (!historyItem.fileSize && fullItem.metadata.fileSize) {
+            historyItem.fileSize = fullItem.metadata.fileSize;
           }
-        } catch (error) {
-          console.warn('[getSpaceItems] Failed to load content for item:', item.id, error.message);
+          
+          // For web-monitor items, also check metadata for updated values
+          if (item.type === 'web-monitor') {
+            if (fullItem.metadata.lastChecked) historyItem.lastChecked = fullItem.metadata.lastChecked;
+            if (fullItem.metadata.status) historyItem.status = fullItem.metadata.status;
+            if (fullItem.metadata.changeCount !== undefined) historyItem.changeCount = fullItem.metadata.changeCount;
+            if (fullItem.metadata.timeline) historyItem.timeline = fullItem.metadata.timeline;
+          }
         }
+      } catch (error) {
+        console.warn('[getSpaceItems] Failed to load content for item:', item.id, error.message);
       }
-      return item;
+      
+      return historyItem;
     });
   }
   
@@ -1434,11 +1588,182 @@ Respond ONLY with valid JSON, no other text.`;
     return null;
   }
   
+  /**
+   * Clean up orphaned downloading items on startup
+   * Handles items stuck in "downloading" state from app crashes
+   */
+  cleanupOrphanedDownloads() {
+    try {
+      console.log('[Cleanup] Checking for orphaned downloads...');
+      
+      const allItems = this.storage.getAllItems();
+      let cleaned = 0;
+      
+      for (const item of allItems) {
+        // Load full metadata to check download status
+        try {
+          const metaPath = path.join(this.storage.itemsDir, item.id, 'metadata.json');
+          if (!fs.existsSync(metaPath)) continue;
+          
+          const metadata = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+          
+          // Check if stuck in downloading state
+          if (metadata.downloadStatus === 'downloading') {
+            console.log('[Cleanup] Found orphaned download:', item.id, metadata.title || 'Unknown');
+            
+            // Check if video file actually exists (download completed but state not updated)
+            const itemDir = path.join(this.storage.itemsDir, item.id);
+            const files = fs.readdirSync(itemDir);
+            const videoFile = files.find(f => f.endsWith('.mp4') && !f.startsWith('.'));
+            
+            if (videoFile) {
+              // Download completed but state wasn't updated - fix it
+              console.log('[Cleanup] Found completed video file, updating state...');
+              const stats = fs.statSync(path.join(itemDir, videoFile));
+              const title = videoFile.replace(/-[a-zA-Z0-9_-]{11}\.mp4$/, '');
+              
+              // Update metadata
+              metadata.downloadStatus = 'complete';
+              metadata.downloadProgress = 100;
+              metadata.title = title;
+              fs.writeFileSync(metaPath, JSON.stringify(metadata, null, 2));
+              
+              // Update index
+              this.storage.updateItemIndex(item.id, {
+                preview: title,
+                fileName: videoFile,
+                fileSize: stats.size,
+                metadata: {
+                  title: title,
+                  downloadStatus: 'complete',
+                  downloadProgress: 100
+                }
+              });
+              
+              console.log('[Cleanup] ✅ Fixed completed download:', title);
+              cleaned++;
+            } else {
+              // Download never completed - mark as failed
+              console.log('[Cleanup] No video file found, marking as failed...');
+              
+              metadata.downloadStatus = 'error';
+              metadata.downloadError = 'Download interrupted (app crash or restart)';
+              fs.writeFileSync(metaPath, JSON.stringify(metadata, null, 2));
+              
+              this.storage.updateItemIndex(item.id, {
+                preview: `❌ Download interrupted: ${metadata.title || 'Video'}`,
+                metadata: {
+                  downloadStatus: 'error',
+                  downloadError: 'Download interrupted'
+                }
+              });
+              
+              console.log('[Cleanup] ❌ Marked as failed:', metadata.title || item.id);
+              cleaned++;
+            }
+          }
+        } catch (err) {
+          console.error('[Cleanup] Error processing item:', item.id, err.message);
+        }
+      }
+      
+      if (cleaned > 0) {
+        console.log(`[Cleanup] Cleaned up ${cleaned} orphaned downloads`);
+        // Reload history to reflect changes
+        if (this._historyLoaded) {
+          this._ensureHistoryLoaded();
+          this.notifyHistoryUpdate();
+        }
+      } else {
+        console.log('[Cleanup] No orphaned downloads found');
+      }
+    } catch (error) {
+      console.error('[Cleanup] Error cleaning orphaned downloads:', error);
+    }
+  }
+  
+  /**
+   * Cancel an active YouTube download
+   * @param {string} placeholderId - ID of the item being downloaded
+   * @returns {boolean} Success status
+   */
+  cancelDownload(placeholderId) {
+    const download = this.activeDownloads.get(placeholderId);
+    
+    if (!download) {
+      console.log('[Cancel] No active download found for:', placeholderId);
+      return false;
+    }
+    
+    try {
+      // Abort the download
+      if (download.controller) {
+        download.controller.abort();
+      }
+      
+      // Clear from active downloads
+      this.activeDownloads.delete(placeholderId);
+      
+      // Update the item to show cancellation
+      const historyItem = this.history?.find(h => h.id === placeholderId);
+      if (historyItem) {
+        historyItem.preview = '🚫 Download cancelled';
+        if (historyItem.metadata) {
+          historyItem.metadata.downloadStatus = 'cancelled';
+          historyItem.metadata.downloadError = 'Cancelled by user';
+        }
+      }
+      
+      // Update metadata file
+      try {
+        const metaPath = path.join(this.storage.itemsDir, placeholderId, 'metadata.json');
+        if (fs.existsSync(metaPath)) {
+          const metadata = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+          metadata.downloadStatus = 'cancelled';
+          metadata.downloadError = 'Cancelled by user';
+          fs.writeFileSync(metaPath, JSON.stringify(metadata, null, 2));
+        }
+      } catch (err) {
+        console.error('[Cancel] Error updating metadata:', err);
+      }
+      
+      // Update index
+      this.storage.updateItemIndex(placeholderId, {
+        preview: '🚫 Download cancelled',
+        metadata: {
+          downloadStatus: 'cancelled'
+        }
+      });
+      
+      this.notifyHistoryUpdate();
+      
+      console.log('[Cancel] ✅ Download cancelled:', placeholderId);
+      return true;
+      
+    } catch (error) {
+      console.error('[Cancel] Error cancelling download:', error);
+      return false;
+    }
+  }
+  
   // Background YouTube download - creates placeholder immediately, downloads in background
   async downloadYouTubeInBackground(url, spaceId, placeholderId, sender) {
     const { Notification } = require('electron');
     
     console.log('[YouTube-BG] Starting background download for:', url, 'placeholder:', placeholderId);
+    
+    // Create abort controller for cancellation
+    const abortController = new AbortController();
+    
+    // Track this download
+    this.activeDownloads.set(placeholderId, {
+      controller: abortController,
+      progress: 0,
+      url: url,
+      startTime: Date.now()
+    });
+    
+    let progressInterval;
     
     try {
       // Get the downloader instance
@@ -1447,7 +1772,18 @@ Respond ONLY with valid JSON, no other text.`;
       
       // Set up progress callback - update UI on every progress report
       const progressCallback = (percent, status) => {
+        // Check if cancelled
+        if (abortController.signal.aborted) {
+          throw new Error('Download cancelled by user');
+        }
+        
         console.log('[YouTube-BG] Progress:', percent, '%', status);
+        
+        // Update progress tracking
+        const download = this.activeDownloads.get(placeholderId);
+        if (download) {
+          download.progress = percent;
+        }
         
         // Update progress in memory
         const historyItem = this.history.find(h => h.id === placeholderId);
@@ -1467,7 +1803,13 @@ Respond ONLY with valid JSON, no other text.`;
       
       // Start a simulated progress indicator while downloading
       let simulatedProgress = 10;
-      const progressInterval = setInterval(() => {
+      progressInterval = setInterval(() => {
+        // Check if cancelled
+        if (abortController.signal.aborted) {
+          clearInterval(progressInterval);
+          return;
+        }
+        
         if (simulatedProgress < 85) {
           simulatedProgress += Math.random() * 5 + 2; // Random increment 2-7%
           const historyItem = this.history.find(h => h.id === placeholderId);
@@ -1483,6 +1825,11 @@ Respond ONLY with valid JSON, no other text.`;
       
       // Stop the simulated progress
       clearInterval(progressInterval);
+      
+      // Check if cancelled during download
+      if (abortController.signal.aborted) {
+        throw new Error('Download cancelled by user');
+      }
       
       console.log('[YouTube-BG] Download completed:', JSON.stringify(result));
       
@@ -1702,15 +2049,41 @@ Respond ONLY with valid JSON, no other text.`;
           
           // Update in-memory history with new metadata
           if (historyItem && historyItem.metadata) {
+            historyItem.metadata.downloadStatus = 'complete';
+            historyItem.metadata.downloadProgress = 100;
+            historyItem.metadata.downloadStatusText = 'Complete!';
             historyItem.metadata.title = metadata.title;
             historyItem.metadata.shortDescription = metadata.shortDescription;
             historyItem.metadata.longDescription = metadata.longDescription;
             historyItem.metadata.audioPath = audioPath;
+            
+            // Update the main item preview with the final title
+            historyItem.preview = metadata.title;
           }
+          
+          // CRITICAL FIX: Update the storage index entry with the completed metadata
+          // This ensures the item shows correctly in Spaces menu after app restart
+          this.storage.updateItemIndex(placeholderId, {
+            preview: metadata.title,  // Change from "🎬 Downloading..." to actual title
+            fileName: result.fileName,
+            fileSize: result.fileSize,
+            metadata: {
+              title: metadata.title,
+              downloadStatus: 'complete',
+              downloadProgress: 100
+            }
+          });
           
         } catch (err) {
           console.error('[YouTube-BG] Error updating metadata:', err);
         }
+        
+        // Remove from active downloads
+        this.activeDownloads.delete(placeholderId);
+        
+        // Save the updated index to persist changes
+        this.storage.saveIndexSync();  // Use sync save to ensure persistence
+        console.log('[YouTube-BG] Index saved with updated metadata');
         
         // Notify UI
         this.notifyHistoryUpdate();
@@ -1749,6 +2122,9 @@ Respond ONLY with valid JSON, no other text.`;
           }
         }
         
+        // Remove from active downloads
+        this.activeDownloads.delete(placeholderId);
+        
         this.notifyHistoryUpdate();
         
         // Show error notification
@@ -1782,16 +2158,22 @@ Respond ONLY with valid JSON, no other text.`;
       });
       
       // Make sure to clear the progress interval
-      if (typeof progressInterval !== 'undefined') {
+      if (progressInterval) {
         clearInterval(progressInterval);
       }
+      
+      // Remove from active downloads
+      this.activeDownloads.delete(placeholderId);
       
       // Update placeholder with error
       const historyItem = this.history.find(h => h.id === placeholderId);
       if (historyItem) {
-        historyItem.preview = `❌ Download error: ${historyItem.metadata?.title || 'Video'}`;
+        const isCancelled = error.message && error.message.includes('cancelled');
+        historyItem.preview = isCancelled 
+          ? '🚫 Download cancelled' 
+          : `❌ Download error: ${historyItem.metadata?.title || 'Video'}`;
         if (historyItem.metadata) {
-          historyItem.metadata.downloadStatus = 'error';
+          historyItem.metadata.downloadStatus = isCancelled ? 'cancelled' : 'error';
           historyItem.metadata.downloadError = error.message;
         }
       }
@@ -1879,7 +2261,13 @@ Respond ONLY with valid JSON, no other text.`;
       this.clipboardWindow.show();
     });
     
-    this.clipboardWindow.loadFile('clipboard-viewer.html');
+    // Add cache-busting query string to force fresh load
+    this.clipboardWindow.loadFile('clipboard-viewer.html', {
+      query: { t: Date.now() }
+    });
+    
+    // Clear cache to ensure fresh HTML loads
+    this.clipboardWindow.webContents.session.clearCache();
     
     // Add debug logging
     this.clipboardWindow.webContents.on('did-finish-load', () => {
@@ -2403,6 +2791,85 @@ Respond ONLY with valid JSON, no other text.`;
       } catch (error) {
         console.error('[Clipboard] Failed to delete item:', id, error);
         return { success: false, error: error.message };
+      }
+    });
+
+    safeHandle('clipboard:delete-items', async (event, itemIds) => {
+      try {
+        if (!Array.isArray(itemIds) || itemIds.length === 0) {
+          return { success: false, error: 'No items provided' };
+        }
+        
+        const results = {
+          success: true,
+          deleted: 0,
+          failed: 0,
+          errors: []
+        };
+        
+        for (const id of itemIds) {
+          try {
+            await this.deleteItem(id);
+            results.deleted++;
+            console.log('[Clipboard] Deleted item:', id);
+          } catch (error) {
+            results.failed++;
+            results.errors.push(`Failed to delete ${id}: ${error.message}`);
+            console.error('[Clipboard] Failed to delete item:', id, error);
+          }
+        }
+        
+        results.success = results.deleted > 0;
+        console.log('[Clipboard] Bulk delete completed:', results);
+        
+        return results;
+      } catch (error) {
+        console.error('[Clipboard] Failed to delete items:', error);
+        return { success: false, error: error.message, deleted: 0, failed: itemIds.length };
+      }
+    });
+
+    safeHandle('clipboard:move-items', async (event, itemIds, toSpaceId) => {
+      try {
+        if (!Array.isArray(itemIds) || itemIds.length === 0) {
+          return { success: false, error: 'No items provided' };
+        }
+        
+        if (!toSpaceId) {
+          return { success: false, error: 'No target space provided' };
+        }
+        
+        const results = {
+          success: true,
+          moved: 0,
+          failed: 0,
+          errors: []
+        };
+        
+        for (const id of itemIds) {
+          try {
+            const success = this.storage.moveItem(id, toSpaceId);
+            if (success) {
+              results.moved++;
+              console.log('[Clipboard] Moved item:', id, 'to space:', toSpaceId);
+            } else {
+              results.failed++;
+              results.errors.push(`Failed to move ${id}`);
+            }
+          } catch (error) {
+            results.failed++;
+            results.errors.push(`Failed to move ${id}: ${error.message}`);
+            console.error('[Clipboard] Failed to move item:', id, error);
+          }
+        }
+        
+        results.success = results.moved > 0;
+        console.log('[Clipboard] Bulk move completed:', results);
+        
+        return results;
+      } catch (error) {
+        console.error('[Clipboard] Failed to move items:', error);
+        return { success: false, error: error.message, moved: 0, failed: itemIds.length };
       }
     });
     
@@ -3173,6 +3640,74 @@ Respond ONLY with valid JSON, no other text.`;
         return { success: true };
       } catch (error) {
         console.error('Error updating item content:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Convert DOCX to HTML for preview/editing
+    safeHandle('clipboard:convert-docx-to-html', async (event, filePath) => {
+      try {
+        if (!filePath) {
+          return { success: false, error: 'No file path provided' };
+        }
+        
+        // Verify file exists
+        if (!fs.existsSync(filePath)) {
+          return { success: false, error: 'File not found: ' + filePath };
+        }
+        
+        // Check if it's a docx file
+        const ext = path.extname(filePath).toLowerCase();
+        if (ext !== '.docx') {
+          return { success: false, error: 'Only .docx files are supported' };
+        }
+        
+        // Use mammoth to convert
+        const mammoth = require('mammoth');
+        const result = await mammoth.convertToHtml({ path: filePath });
+        
+        console.log(`[Clipboard] Converted DOCX to HTML: ${filePath}`);
+        if (result.messages && result.messages.length > 0) {
+          console.log('[Clipboard] Mammoth messages:', result.messages);
+        }
+        
+        return { 
+          success: true, 
+          html: result.value,
+          messages: result.messages || []
+        };
+      } catch (error) {
+        console.error('Error converting DOCX to HTML:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Open file in system default application
+    safeHandle('clipboard:open-in-system', async (event, filePath) => {
+      try {
+        if (!filePath) {
+          return { success: false, error: 'No file path provided' };
+        }
+        
+        // Verify file exists
+        if (!fs.existsSync(filePath)) {
+          return { success: false, error: 'File not found: ' + filePath };
+        }
+        
+        // Use Electron shell to open file in default app
+        const { shell } = require('electron');
+        const result = await shell.openPath(filePath);
+        
+        // shell.openPath returns empty string on success, error message on failure
+        if (result === '') {
+          console.log(`[Clipboard] Opened file: ${filePath}`);
+          return { success: true };
+        } else {
+          console.error(`[Clipboard] Failed to open file: ${result}`);
+          return { success: false, error: result };
+        }
+      } catch (error) {
+        console.error('Error opening file in system:', error);
         return { success: false, error: error.message };
       }
     });
@@ -5024,6 +5559,175 @@ ${chunks[i]}`;
       return this.showItemInFinder(itemId);
     });
     
+    // ========================================
+    // WEB MONITOR IPC HANDLERS
+    // ========================================
+    
+    safeHandle('clipboard:check-monitor-now', async (event, itemId) => {
+      console.log('[WebMonitor] Check now requested for:', itemId);
+      try {
+        // Find the monitor item - check both history and storage
+        let item = this.history.find(h => h.id === itemId);
+        if (!item) {
+          // Try loading from storage
+          const storageItem = this.storage.index.items.find(i => i.id === itemId);
+          if (storageItem) {
+            try {
+              item = this.storage.loadItem(itemId);
+            } catch (e) {
+              console.error('[WebMonitor] Failed to load item from storage:', e);
+            }
+          }
+        }
+        
+        if (!item || item.type !== 'web-monitor') {
+          return { success: false, error: 'Item not found or not a monitor' };
+        }
+        
+        // Initialize website monitor if needed
+        if (!this.websiteMonitor) {
+          const WebsiteMonitor = require('./website-monitor');
+          this.websiteMonitor = new WebsiteMonitor();
+          await this.websiteMonitor.initialize();
+        }
+        
+        // Get the actual monitor ID (without 'monitor-' prefix if present)
+        let monitorId = item.monitorId;
+        if (!monitorId && item.id.startsWith('monitor-')) {
+          monitorId = item.id.replace('monitor-', '');
+        }
+        console.log('[WebMonitor] Using monitorId:', monitorId);
+        
+        // Ensure the monitor is registered in WebsiteMonitor
+        // (monitors are lost when app restarts since they're in-memory)
+        if (!this.websiteMonitor.monitors.has(monitorId)) {
+          console.log('[WebMonitor] Re-registering monitor from item data...');
+          // Re-add the monitor to WebsiteMonitor's in-memory list
+          this.websiteMonitor.monitors.set(monitorId, {
+            id: monitorId,
+            url: item.url,
+            name: item.name,
+            selector: item.selector || 'body',
+            includeScreenshot: true,
+            lastChecked: item.lastChecked,
+            lastContentHash: null,
+            spaceId: 'web-monitors'
+          });
+        }
+        
+        // Run the check
+        const result = await this.websiteMonitor.checkWebsite(monitorId);
+        
+        // Update item if changed
+        if (result && result.changed) {
+          await this.handleWebsiteChange(result);
+        }
+        
+        // Update last checked time on the item
+        const now = new Date().toISOString();
+        item.lastChecked = now;
+        
+        // Update in history array
+        const historyIndex = this.history.findIndex(h => h.id === itemId);
+        if (historyIndex >= 0) {
+          this.history[historyIndex].lastChecked = now;
+        }
+        
+        // Update in storage
+        await this.updateItemMetadata(itemId, { lastChecked: now });
+        
+        // Notify UI to refresh
+        this.notifyHistoryUpdate();
+        
+        return { success: true, changed: result?.changed || false };
+      } catch (error) {
+        console.error('[WebMonitor] Check now failed:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    safeHandle('clipboard:set-monitor-status', async (event, itemId, status) => {
+      console.log('[WebMonitor] Set status:', itemId, status);
+      try {
+        const item = this.history.find(h => h.id === itemId);
+        if (!item || item.type !== 'web-monitor') {
+          return { success: false, error: 'Item not found or not a monitor' };
+        }
+        
+        item.status = status;
+        item.pauseReason = status === 'paused' ? 'user' : null;
+        
+        // Update in WebsiteMonitor too
+        if (this.websiteMonitor && item.monitorId) {
+          if (status === 'paused') {
+            await this.websiteMonitor.pauseMonitor(item.monitorId);
+          } else {
+            await this.websiteMonitor.resumeMonitor(item.monitorId);
+          }
+        }
+        
+        await this.updateItemMetadata(itemId, { status, pauseReason: item.pauseReason });
+        this.notifyHistoryUpdate();
+        
+        return { success: true };
+      } catch (error) {
+        console.error('[WebMonitor] Set status failed:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    safeHandle('clipboard:set-monitor-ai-enabled', async (event, itemId, enabled) => {
+      console.log('[WebMonitor] Set AI enabled:', itemId, enabled);
+      try {
+        const item = this.history.find(h => h.id === itemId);
+        if (!item || item.type !== 'web-monitor') {
+          return { success: false, error: 'Item not found or not a monitor' };
+        }
+        
+        if (!item.settings) item.settings = {};
+        item.settings.aiDescriptions = enabled;
+        
+        await this.updateItemMetadata(itemId, { settings: item.settings });
+        
+        return { success: true };
+      } catch (error) {
+        console.error('[WebMonitor] Set AI enabled failed:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    safeHandle('clipboard:set-monitor-check-interval', async (event, itemId, minutes) => {
+      console.log('[WebMonitor] Set check interval:', itemId, minutes, 'minutes');
+      try {
+        const item = this.history.find(h => h.id === itemId);
+        if (!item || item.type !== 'web-monitor') {
+          return { success: false, error: 'Item not found or not a monitor' };
+        }
+        
+        if (!item.settings) item.settings = {};
+        item.settings.checkInterval = minutes;
+        
+        // Update in WebsiteMonitor too if it's running
+        if (this.websiteMonitor && item.monitorId) {
+          const monitor = this.websiteMonitor.monitors.get(item.monitorId);
+          if (monitor) {
+            monitor.checkInterval = minutes;
+          }
+        }
+        
+        await this.updateItemMetadata(itemId, { settings: item.settings });
+        
+        return { success: true };
+      } catch (error) {
+        console.error('[WebMonitor] Set check interval failed:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // ========================================
+    // END WEB MONITOR IPC HANDLERS
+    // ========================================
+    
     // Get video file path from item ID (with optional scenes from metadata)
     safeHandle('clipboard:get-video-path', async (event, itemId) => {
       try {
@@ -5186,22 +5890,33 @@ ${chunks[i]}`;
     
     // AI metadata generation
     safeHandle('clipboard:generate-metadata-ai', async (event, { itemId, apiKey, customPrompt }) => {
-      // Use the NEW specialized metadata generator
-      const MetadataGenerator = require('./metadata-generator');
-      const metadataGen = new MetadataGenerator(this);
+      console.log('[MetadataGen IPC] Generate metadata request received:', { itemId, hasApiKey: !!apiKey, hasCustomPrompt: !!customPrompt });
       
-      const result = await metadataGen.generateMetadataForItem(itemId, apiKey, customPrompt);
+      try {
+        // Use the NEW specialized metadata generator
+        const MetadataGenerator = require('./metadata-generator');
+        const metadataGen = new MetadataGenerator(this);
+        
+        console.log('[MetadataGen IPC] Calling generateMetadataForItem...');
+        const result = await metadataGen.generateMetadataForItem(itemId, apiKey, customPrompt);
+        console.log('[MetadataGen IPC] Result:', { success: result.success, error: result.error });
 
-      if (result.success) {
-        // Get the updated item to return full metadata
-        const item = this.storage.loadItem(itemId);
+        if (result.success) {
+          // Get the updated item to return full metadata
+          const item = this.storage.loadItem(itemId);
+          console.log('[MetadataGen IPC] Returning success with metadata');
           return {
             success: true,
-          metadata: item.metadata,
+            metadata: item.metadata,
             message: 'Metadata generated successfully'
           };
         } else {
-        return result;
+          console.log('[MetadataGen IPC] Returning failure:', result.error);
+          return result;
+        }
+      } catch (err) {
+        console.error('[MetadataGen IPC] Exception:', err.message);
+        return { success: false, error: err.message };
       }
     });
     
@@ -5817,6 +6532,9 @@ ${chunks[i]}`;
         fileCategory = 'notebook';
       } else if (['.doc', '.docx', '.txt', '.rtf', '.odt', '.md'].includes(ext)) {
         fileCategory = 'document';
+      } else if (['.ppt', '.pptx', '.key', '.odp'].includes(ext)) {
+        fileCategory = 'presentation';
+        fileType = 'presentation';
       } else if (['.js', '.ts', '.jsx', '.tsx', '.py', '.java', '.cpp', '.c', '.h', '.cs', '.php', '.rb', '.go', '.rs', '.swift', '.kt', '.html', '.htm', '.css', '.scss', '.sass', '.less'].includes(ext)) {
         fileCategory = 'code';
       } else if (['.fig', '.sketch', '.xd', '.ai', '.psd', '.psb', '.indd', '.afdesign', '.afphoto'].includes(ext)) {
@@ -6646,6 +7364,33 @@ ${chunks[i]}`;
       }
     });
     
+    // Cancel YouTube download
+    ipcMain.handle('youtube:cancel-download', async (event, placeholderId) => {
+      console.log('[YouTube] Cancel download requested for:', placeholderId);
+      try {
+        const success = this.cancelDownload(placeholderId);
+        return { success };
+      } catch (error) {
+        console.error('[YouTube] Cancel error:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Get active downloads
+    ipcMain.handle('youtube:get-active-downloads', async (event) => {
+      try {
+        const downloads = Array.from(this.activeDownloads.entries()).map(([id, info]) => ({
+          placeholderId: id,
+          progress: info.progress,
+          url: info.url,
+          duration: Date.now() - info.startTime
+        }));
+        return { success: true, downloads };
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
+    });
+    
     // Get transcript from YouTube video (using YouTube captions)
     ipcMain.handle('youtube:get-transcript', async (event, url, lang = 'en') => {
       console.log('[YouTube] get-transcript called for:', url, 'lang:', lang);
@@ -6856,8 +7601,28 @@ ${chunks[i]}`;
       const historyItem = this.history.find(h => h.id === itemId);
       if (historyItem) {
         historyItem.metadata = mergedMetadata;
-        this.notifyHistoryUpdate();
+        
+        // For web-monitor items, also update the direct fields
+        if (historyItem.type === 'web-monitor') {
+          if (metadata.lastChecked !== undefined) historyItem.lastChecked = metadata.lastChecked;
+          if (metadata.status !== undefined) historyItem.status = metadata.status;
+          if (metadata.changeCount !== undefined) historyItem.changeCount = metadata.changeCount;
+          if (metadata.timeline !== undefined) historyItem.timeline = metadata.timeline;
+        }
       }
+      
+      // Also update the storage index for web-monitor items
+      const indexItem = this.storage.index.items.find(i => i.id === itemId);
+      if (indexItem && indexItem.type === 'web-monitor') {
+        if (metadata.lastChecked !== undefined) indexItem.lastChecked = metadata.lastChecked;
+        if (metadata.status !== undefined) indexItem.status = metadata.status;
+        if (metadata.changeCount !== undefined) indexItem.changeCount = metadata.changeCount;
+        if (metadata.timeline !== undefined) indexItem.timeline = metadata.timeline;
+        // Save the updated index
+        this.storage.saveIndex();
+      }
+      
+      this.notifyHistoryUpdate();
       
       return { success: true, metadata: mergedMetadata };
     } catch (error) {
@@ -7281,6 +8046,118 @@ ${chunks[i]}`;
       }
     } catch (error) {
       console.error('[V2] Error checking migration status:', error);
+    }
+  }
+  
+  /**
+   * Migrate existing web monitor items to fix missing index fields
+   * This runs on startup to repair items created before the fix
+   */
+  migrateWebMonitorItems() {
+    try {
+      console.log('[WebMonitor Migration] Checking for items needing migration...');
+      
+      const indexItems = this.storage.index.items || [];
+      let migratedCount = 0;
+      
+      // Find items in web-monitors space that need migration
+      for (const item of indexItems) {
+        // Check if it's in web-monitors space but missing type or web-monitor fields
+        if (item.spaceId === 'web-monitors' && item.type !== 'web-monitor') {
+          console.log(`[WebMonitor Migration] Fixing item ${item.id} - setting type to web-monitor`);
+          
+          // Try to load the full item to get monitor data
+          try {
+            const fullItem = this.storage.loadItem(item.id);
+            let monitorData = {};
+            
+            // Parse content if it's JSON
+            if (fullItem.content) {
+              try {
+                monitorData = JSON.parse(fullItem.content);
+              } catch (e) {
+                // Not JSON, might be a URL
+                if (typeof fullItem.content === 'string' && fullItem.content.startsWith('http')) {
+                  monitorData.url = fullItem.content;
+                  try {
+                    monitorData.name = new URL(fullItem.content).hostname;
+                  } catch (e2) {
+                    monitorData.name = 'Website';
+                  }
+                }
+              }
+            }
+            
+            // Also check metadata
+            if (fullItem.metadata) {
+              monitorData = { ...monitorData, ...fullItem.metadata };
+            }
+            
+            // Update the index entry with web-monitor fields
+            item.type = 'web-monitor';
+            item.url = monitorData.url || item.url || '';
+            item.name = monitorData.name || item.name || 'Website';
+            item.monitorId = monitorData.monitorId || item.id.replace('monitor-', '');
+            item.lastChecked = monitorData.lastChecked || null;
+            item.status = monitorData.status || 'active';
+            item.changeCount = monitorData.changeCount || 0;
+            item.timeline = monitorData.timeline || [];
+            item.settings = monitorData.settings || { aiDescriptions: false };
+            
+            migratedCount++;
+            console.log(`[WebMonitor Migration] Fixed item ${item.id}:`, {
+              type: item.type,
+              url: item.url,
+              name: item.name
+            });
+          } catch (loadError) {
+            console.error(`[WebMonitor Migration] Failed to load item ${item.id}:`, loadError.message);
+          }
+        }
+        
+        // Also check items that have type=web-monitor but missing fields
+        if (item.type === 'web-monitor' && (!item.url || !item.monitorId)) {
+          console.log(`[WebMonitor Migration] Fixing incomplete web-monitor item ${item.id}`);
+          
+          try {
+            const fullItem = this.storage.loadItem(item.id);
+            let monitorData = {};
+            
+            if (fullItem.content) {
+              try {
+                monitorData = JSON.parse(fullItem.content);
+              } catch (e) {}
+            }
+            if (fullItem.metadata) {
+              monitorData = { ...monitorData, ...fullItem.metadata };
+            }
+            
+            // Fill in missing fields
+            if (!item.url) item.url = monitorData.url || '';
+            if (!item.name) item.name = monitorData.name || 'Website';
+            if (!item.monitorId) item.monitorId = monitorData.monitorId || item.id.replace('monitor-', '');
+            if (item.lastChecked === undefined) item.lastChecked = monitorData.lastChecked || null;
+            if (!item.status) item.status = monitorData.status || 'active';
+            if (item.changeCount === undefined) item.changeCount = monitorData.changeCount || 0;
+            if (!item.timeline) item.timeline = monitorData.timeline || [];
+            if (!item.settings) item.settings = monitorData.settings || { aiDescriptions: false };
+            
+            migratedCount++;
+          } catch (loadError) {
+            console.error(`[WebMonitor Migration] Failed to fix item ${item.id}:`, loadError.message);
+          }
+        }
+      }
+      
+      if (migratedCount > 0) {
+        // Save the updated index
+        this.storage.saveIndex();
+        console.log(`[WebMonitor Migration] Migrated ${migratedCount} items, index saved`);
+      } else {
+        console.log('[WebMonitor Migration] No items needed migration');
+      }
+    } catch (error) {
+      console.error('[WebMonitor Migration] Error:', error);
     }
   }
   
@@ -8163,45 +9040,387 @@ ${chunks[i]}`;
     console.log(`Registered global shortcut: ${shortcut}`);
   }
   
+  // ========================================
+  // WEB MONITORS FEATURE
+  // ========================================
+  
+  /**
+   * Extract URL from text content
+   * Returns the first valid URL found or null
+   */
+  extractURL(content) {
+    if (!content || typeof content !== 'string') return null;
+    
+    // Match http/https URLs
+    const urlRegex = /https?:\/\/[^\s<>"{}|\\^`\[\]]+/gi;
+    const matches = content.match(urlRegex);
+    
+    if (!matches || matches.length === 0) return null;
+    
+    // Clean up the URL (remove trailing punctuation)
+    let url = matches[0];
+    url = url.replace(/[.,;:!?)]+$/, '');
+    
+    // Validate URL
+    try {
+      new URL(url);
+      return url;
+    } catch (e) {
+      return null;
+    }
+  }
+  
+  /**
+   * Find existing monitor by URL
+   */
+  findMonitorByURL(url) {
+    if (!this.websiteMonitor || !this.websiteMonitor.monitors) return null;
+    
+    for (const [id, monitor] of this.websiteMonitor.monitors) {
+      if (monitor.url === url) {
+        return monitor;
+      }
+    }
+    return null;
+  }
+  
+  /**
+   * Create a website monitor from a URL
+   * This is called when a URL is pasted into the Web Monitors space
+   */
+  async createWebsiteMonitorFromURL(url) {
+    const WebsiteMonitor = require('./website-monitor');
+    const { BrowserWindow } = require('electron');
+    
+    console.log('[WebMonitors] createWebsiteMonitorFromURL called with:', url);
+    
+    // Initialize website monitor if needed
+    if (!this.websiteMonitor) {
+      console.log('[WebMonitors] Initializing WebsiteMonitor...');
+      try {
+        this.websiteMonitor = new WebsiteMonitor();
+        await this.websiteMonitor.initialize();
+        console.log('[WebMonitors] WebsiteMonitor initialized successfully');
+      } catch (initError) {
+        console.error('[WebMonitors] Failed to initialize WebsiteMonitor:', initError);
+        throw new Error(`Website Monitor initialization failed: ${initError.message}`);
+      }
+    }
+    
+    // Check for duplicate
+    const existingMonitor = this.findMonitorByURL(url);
+    if (existingMonitor) {
+      console.log('[WebMonitors] URL already being monitored:', url);
+      
+      // Check if a clipboard item exists for this monitor
+      // Check both history cache AND storage index (source of truth)
+      const existingItemInHistory = this.history.find(h => 
+        h.type === 'web-monitor' && h.url === url
+      );
+      const existingItemInStorage = this.storage.index.items.find(i => 
+        i.type === 'web-monitor' && i.spaceId === 'web-monitors'
+      );
+      
+      if (existingItemInHistory || existingItemInStorage) {
+        // Show notification
+        BrowserWindow.getAllWindows().forEach(window => {
+          window.webContents.send('show-notification', {
+            title: 'Already Monitoring',
+            body: `${new URL(url).hostname} is already being monitored`,
+            type: 'warning'
+          });
+        });
+        return existingItemInHistory || existingItemInStorage;
+      }
+      
+      // Monitor exists in WebsiteMonitor but no clipboard item - create one
+      console.log('[WebMonitors] Monitor exists but no clipboard item, creating item...');
+      // Use the existing monitor data, don't call addMonitor again
+      var monitor = existingMonitor;
+    } else {
+      console.log('[WebMonitors] Creating new monitor for:', url);
+      
+      // Create the monitor
+      var monitor = await this.websiteMonitor.addMonitor({
+        url: url,
+        name: new URL(url).hostname,
+        spaceId: 'web-monitors',
+        selector: 'body', // Default to full page, user can change later
+        includeScreenshot: true
+      });
+    }
+    
+    // Create a web-monitor item in the space
+    const monitorData = {
+      monitorId: monitor.id,
+      url: url,
+      name: monitor.name,
+      selector: monitor.selector || 'body',
+      selectorDescription: 'Full Page',
+      lastChecked: monitor.lastChecked,
+      status: 'active',
+      settings: {
+        aiDescriptions: false // Default OFF to save costs
+      },
+      checkCount: 0,
+      changeCount: 0,
+      timeline: []
+    };
+    
+    const monitorItem = {
+      id: `monitor-${monitor.id}`,
+      type: 'web-monitor',
+      url: url,
+      name: monitor.name,
+      spaceId: 'web-monitors',
+      timestamp: Date.now(),
+      preview: `Monitoring: ${monitor.name}`,
+      // Content is required for storage - store the monitor data as JSON
+      content: JSON.stringify(monitorData, null, 2),
+      
+      // Monitor-specific fields (also stored in metadata)
+      monitorId: monitor.id,
+      selector: monitor.selector || 'body',
+      selectorDescription: 'Full Page',
+      currentScreenshotPath: null, // Will be set after first check
+      lastChecked: monitor.lastChecked,
+      nextCheck: null,
+      status: 'active',
+      errorMessage: null,
+      
+      // Settings
+      settings: {
+        aiDescriptions: false // Default OFF to save costs
+      },
+      
+      // Stats
+      checkCount: 0,
+      changeCount: 0,
+      ignoredChangeCount: 0,
+      pauseReason: null,
+      
+      // Badge tracking
+      unviewedChanges: 0,
+      lastViewedAt: new Date().toISOString(),
+      
+      // Cost tracking
+      costTracking: {
+        monthlyTokensUsed: 0,
+        monthlyCost: 0,
+        currentMonth: new Date().toISOString().slice(0, 7)
+      },
+      
+      // Timeline (changes history)
+      timeline: []
+    };
+    
+    // Add to storage
+    const indexEntry = this.storage.addItem(monitorItem);
+    
+    // Add to in-memory history
+    this.history.unshift({
+      ...monitorItem,
+      id: indexEntry.id
+    });
+    
+    // Update space count
+    this.updateSpaceCounts();
+    
+    // Notify UI
+    this.notifyHistoryUpdate();
+    
+    // Show success notification
+    BrowserWindow.getAllWindows().forEach(window => {
+      window.webContents.send('show-notification', {
+        title: 'Website Monitor Created',
+        body: `Now monitoring ${monitor.name}. Checks every 30 minutes.`,
+        type: 'success'
+      });
+    });
+    
+    console.log('[WebMonitors] Monitor created successfully:', monitorItem.id);
+    return monitorItem;
+  }
+  
+  // ========================================
+  // END WEB MONITORS FEATURE
+  // ========================================
   
   startWebsiteMonitoring() {
     // Check websites every 30 minutes
     this.websiteCheckInterval = setInterval(async () => {
       try {
+        // Skip if no monitors configured (optimization to avoid unnecessary work)
         if (!this.websiteMonitor) {
           const WebsiteMonitor = require('./website-monitor');
           this.websiteMonitor = new WebsiteMonitor();
           await this.websiteMonitor.initialize();
         }
         
-        console.log('Running periodic website checks...');
+        // Check if there are any active monitors
+        const monitorCount = this.websiteMonitor.monitors?.size || 0;
+        if (monitorCount === 0) {
+          console.log('[WebsiteMonitor] No monitors configured, skipping check');
+          return;
+        }
+        
+        console.log(`[WebsiteMonitor] Running periodic check for ${monitorCount} monitors...`);
         const results = await this.websiteMonitor.checkAllMonitors();
         
-        // Process results and add changes to clipboard
-        results.forEach(result => {
-          if (result.changed && result.monitor && result.monitor.spaceId) {
-            const change = {
-              type: 'text',
-              content: `Website Changed: ${result.monitor.name}\n\nURL: ${result.monitor.url}\n\nLast Changed: ${new Date(result.monitor.lastChanged).toLocaleString()}\n\nView changes in the website monitor.`,
-              preview: `Website Changed: ${result.monitor.name}`,
-              source: 'website-monitor',
-              spaceId: result.monitor.spaceId,
-              metadata: {
-                monitorId: result.monitor.id,
-                url: result.monitor.url,
-                screenshot: result.snapshot.screenshot
-              }
-            };
-            
-            this.addToHistory(change);
+        // Process results and update monitor items
+        for (const result of results) {
+          if (result.changed && result.monitor) {
+            await this.handleWebsiteChange(result);
           }
-        });
+        }
         
-        console.log(`Website monitoring check complete. ${results.filter(r => r.changed).length} changes detected.`);
+        const changedCount = results.filter(r => r.changed).length;
+        console.log(`[WebsiteMonitor] Check complete. ${changedCount}/${monitorCount} sites changed.`);
       } catch (error) {
-        console.error('Error in periodic website check:', error);
+        console.error('[WebsiteMonitor] Error in periodic check:', error);
       }
     }, 30 * 60 * 1000); // 30 minutes
+  }
+  
+  /**
+   * Handle a website change detected by the monitor
+   * Updates the monitor item's timeline and optionally generates AI description
+   */
+  async handleWebsiteChange(result) {
+    const { monitor, snapshot, previousSnapshot } = result;
+    const { BrowserWindow, Notification } = require('electron');
+    
+    console.log(`[WebsiteMonitor] Change detected for ${monitor.name}`);
+    
+    // Find the monitor item in history
+    const monitorItem = this.history.find(h => 
+      h.type === 'web-monitor' && h.monitorId === monitor.id
+    );
+    
+    if (!monitorItem) {
+      console.warn('[WebsiteMonitor] Monitor item not found in history:', monitor.id);
+      return;
+    }
+    
+    // ========================================
+    // AUTO-PAUSE: Check for high-frequency changes
+    // ========================================
+    const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
+    const recentChanges = (monitorItem.timeline || []).filter(c => 
+      new Date(c.timestamp).getTime() > oneDayAgo
+    );
+    
+    if (recentChanges.length >= 5) {
+      // Auto-pause this monitor - too dynamic
+      console.log(`[WebsiteMonitor] Auto-pausing ${monitor.name}: ${recentChanges.length} changes in 24h`);
+      
+      monitorItem.status = 'paused';
+      monitorItem.pauseReason = 'high_frequency';
+      
+      // Also pause in the WebsiteMonitor
+      if (this.websiteMonitor) {
+        await this.websiteMonitor.pauseMonitor(monitor.id);
+      }
+      
+      // Update storage
+      try {
+        await this.updateItemMetadata(monitorItem.id, {
+          status: 'paused',
+          pauseReason: 'high_frequency'
+        });
+      } catch (e) {
+        console.error('[WebsiteMonitor] Failed to update pause status:', e);
+      }
+      
+      // Send notification about auto-pause
+      if (Notification.isSupported()) {
+        new Notification({
+          title: 'Monitor Paused: Too Many Changes',
+          body: `${monitor.name} changed ${recentChanges.length}+ times in 24h. This site may be too dynamic.`,
+          silent: false
+        }).show();
+      }
+      
+      // Notify UI
+      this.notifyHistoryUpdate();
+      return; // Don't record this change
+    }
+    // ========================================
+    // END AUTO-PAUSE
+    // ========================================
+    
+    // Create change entry for timeline
+    const changeId = `change-${Date.now()}`;
+    const changeEntry = {
+      id: changeId,
+      timestamp: new Date().toISOString(),
+      beforeScreenshotPath: previousSnapshot?.screenshot || null,
+      afterScreenshotPath: snapshot?.screenshot || null,
+      diffScreenshotPath: null, // TODO: Generate diff image
+      aiSummary: 'Content updated', // Default summary (no AI)
+      diffPercentage: 0, // TODO: Calculate
+      contentDiff: {
+        added: 0,
+        removed: 0,
+        modified: 0
+      }
+    };
+    
+    // Add to timeline (newest first, max 50)
+    monitorItem.timeline = monitorItem.timeline || [];
+    monitorItem.timeline.unshift(changeEntry);
+    if (monitorItem.timeline.length > 50) {
+      monitorItem.timeline = monitorItem.timeline.slice(0, 50);
+    }
+    
+    // Update stats
+    monitorItem.changeCount = (monitorItem.changeCount || 0) + 1;
+    monitorItem.lastChecked = new Date().toISOString();
+    monitorItem.unviewedChanges = (monitorItem.unviewedChanges || 0) + 1;
+    monitorItem.currentScreenshotPath = snapshot?.screenshot || null;
+    
+    // Update in storage
+    try {
+      await this.updateItemMetadata(monitorItem.id, {
+        timeline: monitorItem.timeline,
+        changeCount: monitorItem.changeCount,
+        lastChecked: monitorItem.lastChecked,
+        unviewedChanges: monitorItem.unviewedChanges,
+        currentScreenshotPath: monitorItem.currentScreenshotPath
+      });
+    } catch (e) {
+      console.error('[WebsiteMonitor] Failed to update storage:', e);
+    }
+    
+    // Update space badge count
+    this.updateWebMonitorsBadge();
+    
+    // Send system notification
+    if (Notification.isSupported()) {
+      new Notification({
+        title: `Website Changed: ${monitor.name}`,
+        body: changeEntry.aiSummary,
+        silent: false
+      }).show();
+    }
+    
+    // Notify UI
+    this.notifyHistoryUpdate();
+  }
+  
+  /**
+   * Update the unviewedChanges count for the Web Monitors space badge
+   */
+  updateWebMonitorsBadge() {
+    const webMonitorsSpace = this.storage.index?.spaces?.find(s => s.id === 'web-monitors');
+    if (!webMonitorsSpace) return;
+    
+    // Count total unviewed changes across all monitors
+    const totalUnviewed = this.history
+      .filter(h => h.type === 'web-monitor')
+      .reduce((sum, m) => sum + (m.unviewedChanges || 0), 0);
+    
+    webMonitorsSpace.unviewedChanges = totalUnviewed;
   }
 }
 

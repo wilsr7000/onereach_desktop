@@ -456,6 +456,32 @@
         [data-active-category="web"] .format-card[data-category="web"] {
             display: block;
         }
+
+        /* Dark scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        /* Firefox scrollbar */
+        * {
+            scrollbar-width: thin;
+            scrollbar-color: rgba(255, 255, 255, 0.1) rgba(0, 0, 0, 0.2);
+        }
     </style>
 </head>
 <body>
@@ -594,7 +620,7 @@
                 <span id="formatHint">Select a format to continue</span>
             </div>
             <div class="footer-actions">
-                <button class="btn btn-secondary" id="cancelBtn">Cancel</button>
+                <button class="btn btn-secondary" id="cancelBtn" onclick="closeModal()">Cancel</button>
                 <button class="btn btn-primary" id="createBtn" disabled>Create Document</button>
             </div>
         </div>
@@ -742,10 +768,22 @@
         }
 
         function closeModal() {
-            if (window.electronAPI && window.electronAPI.closeModal) {
-                window.electronAPI.closeModal();
-            } else {
-                window.close();
+            console.log('[Create Document] closeModal called');
+            try {
+                if (window.electronAPI && window.electronAPI.closeModal) {
+                    console.log('[Create Document] Using electronAPI.closeModal');
+                    window.electronAPI.closeModal();
+                } else if (window.close) {
+                    console.log('[Create Document] Using window.close');
+                    window.close();
+                } else {
+                    console.log('[Create Document] No close method available, hiding modal');
+                    document.querySelector('.modal-container').style.display = 'none';
+                }
+            } catch (error) {
+                console.error('[Create Document] Error closing modal:', error);
+                // Last resort: try to hide the modal
+                document.querySelector('.modal-container').style.display = 'none';
             }
         }
 
