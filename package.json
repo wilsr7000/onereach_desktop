@@ -1,11 +1,12 @@
 {
-  "name": "onereach-ai",
-  "productName": "Onereach.ai",
-  "version": "3.8.15",
-  "description": "Onereach.ai Desktop Application",
+  "name": "gsx-power-user",
+  "productName": "GSX Power User",
+  "version": "3.8.16",
+  "description": "GSX Power User Desktop Application",
   "main": "main.js",
   "icon": "assets/icon.icns",
   "scripts": {
+    "postinstall": "node scripts/download-claude-code.js",
     "start": "electron .",
     "dev": "NODE_ENV=development npx electron .",
     "dev:win": "set NODE_ENV=development && npx electron .",
@@ -41,14 +42,16 @@
     "test:metadata": "node test/test-metadata-generation.js",
     "test:metadata-api": "node test/test-metadata-api-integration.js",
     "dist": "electron-builder",
+    "download-claude": "node scripts/download-claude-code.js",
+    "download-claude:all": "node scripts/download-claude-code.js --all",
     "build:signed": "./scripts/build-signed.sh",
     "build:signed:skip-notarize": "./scripts/build-signed.sh --skip-notarize",
     "release": "./scripts/release-master.sh",
     "release:quick": "./scripts/release-master.sh --quick"
   },
   "build": {
-    "appId": "com.onereach.app",
-    "productName": "Onereach.ai",
+    "appId": "com.gsx.poweruser",
+    "productName": "GSX Power User",
     "asarUnpack": [
       "aider_bridge/**/*"
     ],
@@ -125,6 +128,15 @@
     "directories": {
       "output": "dist"
     },
+    "extraResources": [
+      {
+        "from": "resources/claude-code/${platform}-${arch}",
+        "to": "claude-code/${platform}-${arch}",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
     "publish": [
       {
         "provider": "github",
@@ -149,7 +161,7 @@
     "@electron/notarize": "^3.0.1",
     "@playwright/test": "^1.57.0",
     "@vitest/coverage-v8": "^4.0.16",
-    "electron": "^39.2.7",
+    "electron": "39.2.7",
     "electron-builder": "^24.9.1",
     "husky": "^9.1.7",
     "promptfoo": "^0.120.11",
@@ -171,10 +183,13 @@
     "fluent-ffmpeg": "^2.1.3",
     "keytar": "^7.9.0",
     "mammoth": "^1.11.0",
+    "node-pty": "^1.1.0",
     "playwright": "^1.40.1",
     "pptxgenjs": "^4.0.1",
     "puppeteer": "^24.31.0",
     "unzipper": "^0.10.14",
+    "xterm": "^5.3.0",
+    "xterm-addon-fit": "^0.8.0",
     "youtube-dl-exec": "^3.0.10"
   }
 }

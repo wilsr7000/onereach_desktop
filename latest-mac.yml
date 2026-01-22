@@ -1,13 +1,8 @@
-version: 3.8.13
+version: 3.8.16
 files:
-  - url: Onereach.ai-3.8.13-arm64.dmg
-    sha512: eWnRrzQnBdHq5KA1CXMl9oNuoCVPuabDig1QzQkPlTWTPSzazsI080Mhy6QhmvabXtBGN3e5n0C17j8upBqMWQ==
-    size: 223564551
-    isAdminRightsRequired: false
-  - url: Onereach.ai-3.8.13.dmg
-    sha512: /HnvHY/MygT5a3eSKEqE2PWgPVA3Tc03EGM1cXw9Cx/sR8qkCdXJFhO3PKQViv3z9td9sn7ZAqp46BDHNjeGXA==
-    size: 231205729
-    isAdminRightsRequired: false
-path: Onereach.ai-3.8.13-arm64.dmg
-sha512: eWnRrzQnBdHq5KA1CXMl9oNuoCVPuabDig1QzQkPlTWTPSzazsI080Mhy6QhmvabXtBGN3e5n0C17j8upBqMWQ==
-releaseDate: '2026-01-17T05:31:00.000Z'
+  - url: GSX%20Power%20User-3.8.16-arm64-mac.zip
+    sha512: vWrxjyTiTECGWlf+2xRVrvP2+8lPnkh6dwfvDzhAR9X3/ZqwjJ+oRNizzXxfah2cHTqAQcfP6ZHkx2/x20vj6w==
+    size: 256042497
+path: GSX%20Power%20User-3.8.16-arm64-mac.zip
+sha512: vWrxjyTiTECGWlf+2xRVrvP2+8lPnkh6dwfvDzhAR9X3/ZqwjJ+oRNizzXxfah2cHTqAQcfP6ZHkx2/x20vj6w==
+releaseDate: '2026-01-22T22:01:25.000Z'
