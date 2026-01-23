@@ -1,7 +1,7 @@
 {
   "name": "gsx-power-user",
-  "productName": "GSX Power User",
-  "version": "3.8.16",
+  "productName": "Onereach.ai",
+  "version": "3.8.17",
   "description": "GSX Power User Desktop Application",
   "main": "main.js",
   "icon": "assets/icon.icns",
@@ -51,7 +51,7 @@
   },
   "build": {
     "appId": "com.gsx.poweruser",
-    "productName": "GSX Power User",
+    "productName": "Onereach.ai",
     "asarUnpack": [
       "aider_bridge/**/*"
     ],
