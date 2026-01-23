@@ -83,10 +83,14 @@ class WebsiteMonitor {
     
     try {
       // Navigate to the URL
+      // Use 'load' instead of 'networkidle' to avoid timeout on sites with constant network activity
       await page.goto(monitor.url, { 
-        waitUntil: 'networkidle',
-        timeout: 30000 
+        waitUntil: 'load',
+        timeout: 60000 
       });
+      
+      // Give the page a moment to settle
+      await page.waitForTimeout(2000);
 
       // Get content of the monitored element
       const content = await page.evaluate((selector) => {

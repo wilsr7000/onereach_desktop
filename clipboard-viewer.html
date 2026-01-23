@@ -4006,7 +4006,34 @@
         .metadata-content {
             flex: 1;
             overflow-y: auto;
+            overflow-x: hidden;
             padding: 24px;
+            min-height: 300px;
+            max-height: calc(90vh - 180px);
+        }
+
+        /* Metadata modal scrollbar styling */
+        .metadata-content::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .metadata-content::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 4px;
+        }
+
+        .metadata-content::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 4px;
+        }
+
+        .metadata-content::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.25);
+        }
+
+        #tabMonitor {
+            overflow-y: visible;
+            overflow-x: hidden;
         }
 
         .metadata-tab-panel {
@@ -4132,22 +4159,40 @@
         }
 
         .monitor-timeline-section {
+            margin-top: 20px;
             margin-bottom: 20px;
+            min-height: 80px;
         }
 
         .monitor-timeline {
+            min-height: 60px;
             max-height: 200px;
             overflow-y: auto;
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            overflow-x: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.15);
             border-radius: 8px;
-            background: rgba(0, 0, 0, 0.15);
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .monitor-timeline::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .monitor-timeline::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .monitor-timeline::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 3px;
         }
 
         .monitor-timeline-empty {
             padding: 24px;
             text-align: center;
-            color: rgba(255, 255, 255, 0.4);
+            color: rgba(255, 255, 255, 0.5);
             font-size: 13px;
+            font-style: italic;
         }
 
         .monitor-timeline-item {
@@ -4182,6 +4227,45 @@
             flex-shrink: 0;
         }
 
+        .timeline-dot.baseline {
+            background: #10b981;
+            box-shadow: 0 0 6px rgba(16, 185, 129, 0.4);
+        }
+
+        .monitor-timeline-item.baseline {
+            background: rgba(16, 185, 129, 0.08);
+            border-left-color: #10b981;
+        }
+
+        .baseline-info {
+            padding: 12px;
+            background: rgba(16, 185, 129, 0.08);
+            border-radius: 8px;
+            border: 1px solid rgba(16, 185, 129, 0.2);
+        }
+
+        .baseline-info-item {
+            display: flex;
+            gap: 8px;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .baseline-info-item:last-child {
+            border-bottom: none;
+        }
+
+        .baseline-label {
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 12px;
+            min-width: 100px;
+        }
+
+        .baseline-value {
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 12px;
+        }
+
         .timeline-content {
             flex: 1;
             min-width: 0;
@@ -4208,38 +4292,155 @@
             margin-bottom: 16px;
         }
 
+        /* Single screenshot (baseline) - full width */
+        .monitor-screenshots.single-screenshot {
+            grid-template-columns: 1fr;
+        }
+
         .monitor-screenshot-card {
             border: 1px solid rgba(255, 255, 255, 0.1);
             border-radius: 8px;
             overflow: hidden;
+            background: rgba(0, 0, 0, 0.15);
         }
 
         .screenshot-label {
-            padding: 8px 12px;
+            padding: 10px 14px;
             font-size: 11px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
-            color: rgba(255, 255, 255, 0.5);
-            background: rgba(0, 0, 0, 0.2);
+            color: rgba(255, 255, 255, 0.6);
+            background: rgba(0, 0, 0, 0.25);
             border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .screenshot-label .expand-hint {
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.4);
+            text-transform: none;
+            letter-spacing: normal;
         }
 
         .screenshot-container {
-            height: 150px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            min-height: 200px;
+            max-height: 350px;
+            display: block;
             background: rgba(0, 0, 0, 0.1);
+            padding: 12px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            cursor: zoom-in;
+        }
+
+        .screenshot-container::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .screenshot-container::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 3px;
+        }
+
+        .screenshot-container::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 3px;
+        }
+
+        .screenshot-container::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.3);
         }
 
         .screenshot-container img {
-            max-width: 100%;
-            max-height: 100%;
-            object-fit: contain;
+            width: 100%;
+            height: auto;
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
         }
 
         .screenshot-placeholder {
             color: rgba(255, 255, 255, 0.3);
+            font-size: 12px;
+            padding: 40px;
+            text-align: center;
+        }
+
+        /* Screenshot Lightbox */
+        .screenshot-lightbox {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.95);
+            z-index: 100000;
+            overflow-y: auto;
+            overflow-x: hidden;
+            cursor: zoom-out;
+            animation: fadeIn 0.2s ease;
+            padding: 20px;
+        }
+
+        .screenshot-lightbox img {
+            width: 95vw;
+            max-width: 1200px;
+            height: auto;
+            display: block;
+            margin: 0 auto;
+            border-radius: 8px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+        }
+
+        .screenshot-lightbox::-webkit-scrollbar {
+            width: 10px;
+        }
+
+        .screenshot-lightbox::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .screenshot-lightbox::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 5px;
+        }
+
+        .screenshot-lightbox::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .screenshot-lightbox-close {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.15);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            font-size: 28px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s ease;
+            z-index: 100001;
+        }
+
+        .screenshot-lightbox-close:hover {
+            background: rgba(255, 100, 100, 0.4);
+            border-color: rgba(255, 100, 100, 0.6);
+            transform: scale(1.1);
+        }
+
+        .screenshot-lightbox-hint {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(255, 255, 255, 0.5);
             font-size: 12px;
         }
 
@@ -4439,6 +4640,50 @@
         .metadata-info-item .value {
             color: rgba(255, 255, 255, 0.8);
             font-family: 'SF Mono', Monaco, monospace;
+        }
+
+        /* AI Watch Section for Web Monitors */
+        .ai-watch-section .metadata-field textarea {
+            min-height: 80px;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .ai-watch-presets {
+            margin-top: 16px;
+            padding: 12px;
+            background: rgba(0, 0, 0, 0.15);
+            border-radius: 8px;
+        }
+
+        .preset-btn {
+            padding: 6px 12px;
+            font-size: 11px;
+            background: rgba(99, 102, 241, 0.15);
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            border-radius: 4px;
+            color: rgba(255, 255, 255, 0.8);
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .preset-btn:hover {
+            background: rgba(99, 102, 241, 0.25);
+            border-color: rgba(99, 102, 241, 0.5);
+        }
+
+        .ai-watch-section select {
+            width: 100%;
+            padding: 10px 12px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 6px;
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 13px;
+        }
+
+        .ai-watch-section select option {
+            background: #1e2028;
         }
 
         /* AI Generation Card */
@@ -5138,7 +5383,7 @@
             <div class="metadata-tabs">
                 <button class="metadata-tab active" data-tab="details"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 6px;"><path d="M4 7h16M4 12h16M4 17h10"/></svg>Details</button>
                 <button class="metadata-tab" data-tab="monitor" id="monitorTab" style="display: none;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 6px;"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>Monitor</button>
-                <button class="metadata-tab" data-tab="ai" onclick="alert('TAB clicked - v2')">AI Generation TAB</button>
+                <button class="metadata-tab" data-tab="ai" id="aiTab" style="display: none;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 6px;"><path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z"/><circle cx="7.5" cy="14.5" r="1.5"/><circle cx="16.5" cy="14.5" r="1.5"/></svg>AI Watch</button>
                 <button class="metadata-tab" data-tab="transcript" id="transcriptTab" style="display: none;">Transcript</button>
                 <button class="metadata-tab" data-tab="system">System</button>
             </div>
@@ -5267,48 +5512,118 @@
                 </div>
 
                 <!-- AI Tab -->
-                <div class="metadata-tab-panel" id="tabAI">
-                    <div class="ai-generation-card">
-                        <h4><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 16px; height: 16px; display: inline-block; vertical-align: middle; margin-right: 6px;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> Generate Metadata with AI</h4>
-                        <p style="font-size: 12px; color: rgba(255,255,255,0.6); margin-bottom: 12px;">
-                            Use AI to automatically analyze this content and generate comprehensive metadata.
-                        </p>
-                        <textarea class="form-input" id="aiPrompt" rows="2" placeholder="Custom prompt (optional)..." style="margin-bottom: 12px; font-size: 12px;"></textarea>
-                        <div style="display: flex; align-items: center; gap: 12px;">
-                            <button class="ai-btn" id="generateMetadataBtn" style="background: red !important;" onclick="alert('Button clicked!'); console.log('[BUTTON] Generate clicked!'); if(typeof generateMetadataWithAI === 'function') { generateMetadataWithAI(); } else { alert('Function not defined!'); }">
-                                CLICK ME - Generate with AI
-                            </button>
-                            <span id="aiGenerationStatus" style="font-size: 12px; color: rgba(255,255,255,0.5);"></span>
+                <div class="metadata-tab-panel" id="tabAi">
+                    <!-- Web Monitor AI Watch Section (only for web-monitor items) -->
+                    <div class="ai-watch-section" id="aiWatchSection" style="display: none;">
+                        <div class="metadata-field-group">
+                            <div class="metadata-field-group-title">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 16px; height: 16px; display: inline-block; vertical-align: middle; margin-right: 6px;"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                                AI Watch Instructions
+                            </div>
+                            <p style="font-size: 12px; color: rgba(255,255,255,0.5); margin-bottom: 16px;">
+                                Tell the AI what specific things to look for when this website changes. The AI will use these instructions to analyze changes and provide relevant summaries.
+                            </p>
+                            
+                            <div class="metadata-field">
+                                <label>What to Watch For</label>
+                                <textarea id="aiWatchPrompt" rows="4" placeholder="Examples:
+- Alert me if prices change on any products
+- Look for new job postings in the engineering section
+- Watch for status changes or outage announcements
+- Track when new blog posts are published
+- Monitor for changes to the privacy policy"></textarea>
+                            </div>
+                            
+                            <div class="metadata-field">
+                                <label>Ignore These Changes</label>
+                                <textarea id="aiIgnorePrompt" rows="2" placeholder="Examples:
+- Ignore date/time updates in the footer
+- Skip changes to ad content or banners"></textarea>
+                            </div>
+                            
+                            <div class="ai-watch-presets">
+                                <label style="font-size: 11px; color: rgba(255,255,255,0.5); margin-bottom: 8px; display: block;">Quick Presets:</label>
+                                <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                                    <button class="preset-btn" onclick="setWatchPreset('price')">Price Changes</button>
+                                    <button class="preset-btn" onclick="setWatchPreset('jobs')">Job Postings</button>
+                                    <button class="preset-btn" onclick="setWatchPreset('status')">Status/Outages</button>
+                                    <button class="preset-btn" onclick="setWatchPreset('news')">News/Blog Posts</button>
+                                    <button class="preset-btn" onclick="setWatchPreset('stock')">Stock/Inventory</button>
+                                </div>
+                            </div>
+                            
+                            <div style="margin-top: 16px; display: flex; gap: 12px;">
+                                <button class="btn btn-primary" id="saveWatchInstructions" onclick="saveAIWatchInstructions()">
+                                    Save Instructions
+                                </button>
+                                <span id="watchSaveStatus" style="font-size: 12px; color: rgba(255,255,255,0.5); align-self: center;"></span>
+                            </div>
+                        </div>
+                        
+                        <div class="metadata-field-group" style="margin-top: 20px;">
+                            <div class="metadata-field-group-title">AI Summary Settings</div>
+                            
+                            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 13px; margin-bottom: 12px;">
+                                <input type="checkbox" id="aiAutoSummarize" style="width: 16px; height: 16px;">
+                                Auto-generate AI summary when changes are detected
+                            </label>
+                            
+                            <div class="metadata-field">
+                                <label>Summary Style</label>
+                                <select id="aiSummaryStyle">
+                                    <option value="brief">Brief (1-2 sentences)</option>
+                                    <option value="detailed">Detailed (paragraph)</option>
+                                    <option value="bullet">Bullet Points</option>
+                                    <option value="alert">Alert Style (urgent/not urgent)</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
+                    
+                    <!-- Generic AI Section (for non-monitor items) -->
+                    <div class="ai-generic-section" id="aiGenericSection">
+                        <div class="ai-generation-card">
+                            <h4><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 16px; height: 16px; display: inline-block; vertical-align: middle; margin-right: 6px;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> Generate Metadata with AI</h4>
+                            <p style="font-size: 12px; color: rgba(255,255,255,0.6); margin-bottom: 12px;">
+                                Use AI to automatically analyze this content and generate comprehensive metadata.
+                            </p>
+                            <textarea class="form-input" id="aiPrompt" rows="2" placeholder="Custom prompt (optional)..." style="margin-bottom: 12px; font-size: 12px;"></textarea>
+                            <div style="display: flex; align-items: center; gap: 12px;">
+                                <button class="ai-btn" id="generateMetadataBtn">
+                                    Generate with AI
+                                </button>
+                                <span id="aiGenerationStatus" style="font-size: 12px; color: rgba(255,255,255,0.5);"></span>
+                            </div>
+                        </div>
 
-                    <div class="metadata-field-group">
-                        <div class="metadata-field-group-title">AI Attribution</div>
-                        
-                        <div style="display: flex; gap: 16px; margin-bottom: 16px;">
-                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px;">
-                                <input type="checkbox" id="metaAiGenerated" style="width: 16px; height: 16px;">
-                                AI Generated
-                            </label>
-                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px;">
-                                <input type="checkbox" id="metaAiAssisted" style="width: 16px; height: 16px;">
-                                AI Assisted
-                            </label>
-                        </div>
-                        
-                        <div class="metadata-field">
-                            <label>AI Model</label>
-                            <input type="text" id="metaAiModel" placeholder="e.g., GPT-5.2, Claude Sonnet 4">
-                        </div>
-                        
-                        <div class="metadata-field">
-                            <label>AI Provider</label>
-                            <input type="text" id="metaAiProvider" placeholder="e.g., OpenAI, Anthropic">
-                        </div>
-                        
-                        <div class="metadata-field">
-                            <label>Original Prompt</label>
-                            <textarea id="metaAiPrompt" rows="3" placeholder="The prompt used to generate this content"></textarea>
+                        <div class="metadata-field-group">
+                            <div class="metadata-field-group-title">AI Attribution</div>
+                            
+                            <div style="display: flex; gap: 16px; margin-bottom: 16px;">
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px;">
+                                    <input type="checkbox" id="metaAiGenerated" style="width: 16px; height: 16px;">
+                                    AI Generated
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px;">
+                                    <input type="checkbox" id="metaAiAssisted" style="width: 16px; height: 16px;">
+                                    AI Assisted
+                                </label>
+                            </div>
+                            
+                            <div class="metadata-field">
+                                <label>AI Model</label>
+                                <input type="text" id="metaAiModel" placeholder="e.g., GPT-5.2, Claude Sonnet 4">
+                            </div>
+                            
+                            <div class="metadata-field">
+                                <label>AI Provider</label>
+                                <input type="text" id="metaAiProvider" placeholder="e.g., OpenAI, Anthropic">
+                            </div>
+                            
+                            <div class="metadata-field">
+                                <label>Original Prompt</label>
+                                <textarea id="metaAiPrompt" rows="3" placeholder="The prompt used to generate this content"></textarea>
+                            </div>
                         </div>
                     </div>
                 </div>

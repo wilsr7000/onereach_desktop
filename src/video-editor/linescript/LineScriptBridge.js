@@ -30,9 +30,6 @@ import { ProductionScriptUI } from './ProductionScriptUI.js';
 export function initLineScriptBridge(app) {
   console.log('[LineScriptBridge] Initializing Line Script modules...');
   
-  // #region agent log
-  console.log('[DEBUG-H1,H2] initLineScriptBridge - Creating appContext', {hasApp: !!app, appTranscriptSegments: app?.transcriptSegments?.length || 0, appTeleprompterWords: app?.teleprompterWords?.length || 0});
-  // #endregion
   
   // Create app context for modules
   const appContext = {
@@ -1021,9 +1018,6 @@ function hookLayoutSwitching(app, lineScriptPanel, adaptiveModeManager, spotting
       originalSwitchLayout(layout);
       
       if (layout === 'linescript') {
-        // #region agent log
-        console.log('[DEBUG-H3] Switching to linescript layout', {appTranscriptSegments: app?.transcriptSegments?.length || 0, appTeleprompterWords: app?.teleprompterWords?.length || 0});
-        // #endregion
         
         // Show Line Script panel
         lineScriptPanel.show();

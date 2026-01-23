@@ -792,9 +792,6 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
 
   // Generate sound effect from text prompt
   ipcMain.handle('video-editor:generate-sfx', async (event, options) => {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'VideoEditorIPC.js:generate-sfx',message:'SFX handler called',data:{hasService:!!videoEditor.elevenLabsService,prompt:options.prompt?.substring(0,30)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
     try {
       console.log('[VideoEditorIPC] Generating SFX:', options.prompt?.substring(0, 50));
       const audioPath = await videoEditor.elevenLabsService.generateSoundEffect(
@@ -802,14 +799,8 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
         { durationSeconds: options.durationSeconds, promptInfluence: options.promptInfluence },
         { projectId: options.projectId }
       );
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'VideoEditorIPC.js:generate-sfx-success',message:'SFX generated',data:{audioPath},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
       return { success: true, audioPath };
     } catch (error) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'VideoEditorIPC.js:generate-sfx-error',message:'SFX error',data:{error:error.message},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
       console.error('[VideoEditorIPC] Generate SFX error:', error);
       return { success: false, error: error.message };
     }
@@ -876,9 +867,6 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
 
   // Speech-to-Speech voice transformation
   ipcMain.handle('video-editor:speech-to-speech', async (event, options) => {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'VideoEditorIPC.js:speech-to-speech',message:'STS handler called',data:{hasService:!!videoEditor.elevenLabsService,audioPath:options.audioPath,voiceId:options.voiceId},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
     try {
       console.log('[VideoEditorIPC] Speech-to-Speech:', options.audioPath);
       const audioPath = await videoEditor.elevenLabsService.speechToSpeech(
@@ -887,14 +875,8 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
         { stability: options.stability, similarityBoost: options.similarityBoost },
         { projectId: options.projectId }
       );
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'VideoEditorIPC.js:speech-to-speech-success',message:'STS completed',data:{audioPath},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
       return { success: true, audioPath };
     } catch (error) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'VideoEditorIPC.js:speech-to-speech-error',message:'STS error',data:{error:error.message},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
       console.error('[VideoEditorIPC] Speech-to-Speech error:', error);
       return { success: false, error: error.message };
     }
@@ -902,23 +884,14 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
 
   // Audio isolation (remove background noise)
   ipcMain.handle('video-editor:isolate-audio', async (event, audioPath, options = {}) => {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'VideoEditorIPC.js:isolate-audio',message:'Isolate handler called',data:{hasService:!!videoEditor.elevenLabsService,audioPath},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
     try {
       console.log('[VideoEditorIPC] Isolating audio:', audioPath);
       const isolatedPath = await videoEditor.elevenLabsService.isolateAudio(
         audioPath,
         { projectId: options.projectId }
       );
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'VideoEditorIPC.js:isolate-audio-success',message:'Isolate completed',data:{isolatedPath},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
       return { success: true, audioPath: isolatedPath };
     } catch (error) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'VideoEditorIPC.js:isolate-audio-error',message:'Isolate error',data:{error:error.message},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
       console.error('[VideoEditorIPC] Isolate audio error:', error);
       return { success: false, error: error.message };
     }
@@ -970,19 +943,10 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
 
   // List all available voices (dynamic)
   ipcMain.handle('video-editor:list-voices', async () => {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'VideoEditorIPC.js:list-voices',message:'List voices called',data:{hasService:!!videoEditor.elevenLabsService,serviceType:typeof videoEditor.elevenLabsService},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
     try {
       const voices = await videoEditor.elevenLabsService.listVoices();
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'VideoEditorIPC.js:list-voices-success',message:'Voices fetched',data:{voiceCount:voices?.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       return { success: true, voices };
     } catch (error) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'VideoEditorIPC.js:list-voices-error',message:'List voices error',data:{error:error.message},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       console.error('[VideoEditorIPC] List voices error:', error);
       return { success: false, error: error.message };
     }
@@ -990,19 +954,10 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
 
   // Get user subscription info (quota/limits)
   ipcMain.handle('video-editor:get-subscription', async () => {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'VideoEditorIPC.js:get-subscription',message:'Subscription handler called',data:{hasService:!!videoEditor.elevenLabsService},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
     try {
       const subscription = await videoEditor.elevenLabsService.getUserSubscription();
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'VideoEditorIPC.js:get-subscription-success',message:'Subscription fetched',data:{tier:subscription?.tier,characterCount:subscription?.character_count},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       return { success: true, subscription };
     } catch (error) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'VideoEditorIPC.js:get-subscription-error',message:'Subscription error',data:{error:error.message},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       console.error('[VideoEditorIPC] Get subscription error:', error);
       return { success: false, error: error.message };
     }
@@ -1010,19 +965,10 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
 
   // Get user info
   ipcMain.handle('video-editor:get-user-info', async () => {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'VideoEditorIPC.js:get-user-info',message:'User info handler called',data:{hasService:!!videoEditor.elevenLabsService},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
     try {
       const user = await videoEditor.elevenLabsService.getUserInfo();
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'VideoEditorIPC.js:get-user-info-success',message:'User info fetched',data:{hasUser:!!user},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       return { success: true, user };
     } catch (error) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'VideoEditorIPC.js:get-user-info-error',message:'User info error',data:{error:error.message},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       console.error('[VideoEditorIPC] Get user info error:', error);
       return { success: false, error: error.message };
     }
@@ -1030,19 +976,10 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
 
   // Get usage statistics
   ipcMain.handle('video-editor:get-usage-stats', async (event, options = {}) => {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'VideoEditorIPC.js:get-usage-stats',message:'Usage stats handler called',data:{hasService:!!videoEditor.elevenLabsService},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
     try {
       const stats = await videoEditor.elevenLabsService.getUsageStats(options);
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'VideoEditorIPC.js:get-usage-stats-success',message:'Usage stats fetched',data:{hasStats:!!stats},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       return { success: true, stats };
     } catch (error) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'VideoEditorIPC.js:get-usage-stats-error',message:'Usage stats error',data:{error:error.message},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       console.error('[VideoEditorIPC] Get usage stats error:', error);
       return { success: false, error: error.message };
     }

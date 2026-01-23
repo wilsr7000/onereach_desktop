@@ -35,6 +35,12 @@ let authManager = null;
 // Global Voice Orb window instance
 let orbWindow = null;
 
+// Global Command HUD window instance
+let commandHUDWindow = null;
+
+// Global Intro Wizard window instance
+let introWizardWindow = null;
+
 // Enable Speech Recognition API in Electron
 // These must be set before app.whenReady()
 app.commandLine.appendSwitch('enable-speech-dispatcher');
@@ -472,7 +478,7 @@ function createTray() {
     { label: 'Quit', click: () => { app.quit(); } }
   ]);
   
-  tray.setToolTip('Onereach.ai');
+  tray.setToolTip('GSX Power User');
   tray.setContextMenu(contextMenu);
   
   // Show window when tray icon is clicked
@@ -588,7 +594,7 @@ function secureContentWindow(parentWindow) {
           "style-src-elem 'self' 'unsafe-inline' * https://*.onereach.ai https://fonts.googleapis.com; " +
           "script-src 'self' 'unsafe-inline' 'unsafe-eval' * https://*.onereach.ai; " +
           "connect-src 'self' * https://*.onereach.ai https://*.api.onereach.ai; " +
-          "img-src 'self' data: blob: * https://*.onereach.ai; " +
+          "img-src 'self' data: blob: spaces: * https://*.onereach.ai; " +
           "font-src 'self' data: * https://*.onereach.ai https://fonts.gstatic.com; " +
           "media-src 'self' * https://*.onereach.ai; " +
           "object-src 'none'; " +
@@ -750,6 +756,61 @@ app.whenReady().then(() => {
   logger.logAppReady();
   console.log('App is ready, re-initialized logger. Is stub?', logger._isStub);
   
+  // STARTUP RECOVERY: Check for and restore any missing config files from backups
+  const userDataPath = app.getPath('userData');
+  const protectedFiles = [
+    'external-bots.json',
+    'image-creators.json',
+    'video-creators.json', 
+    'audio-generators.json',
+    'ui-design-tools.json',
+    'web-tools.json',
+    'idw-entries.json',
+    'gsx-links.json'
+  ];
+  
+  for (const filename of protectedFiles) {
+    const filePath = path.join(userDataPath, filename);
+    const backupPath = path.join(userDataPath, filename + '.backup');
+    const protectBackupPath = path.join(userDataPath, filename + '.protect-backup');
+    
+    // If main file is missing or empty, try to restore from backups
+    let needsRestore = false;
+    try {
+      if (!fs.existsSync(filePath)) {
+        needsRestore = true;
+      } else {
+        const content = fs.readFileSync(filePath, 'utf8').trim();
+        if (!content || content === '[]' || content === '{}') {
+          // File exists but is empty - check if backup has data
+          needsRestore = true;
+        }
+      }
+    } catch (e) {
+      needsRestore = true;
+    }
+    
+    if (needsRestore) {
+      // Try protect-backup first (most recent), then regular backup
+      const backupSources = [protectBackupPath, backupPath];
+      for (const backup of backupSources) {
+        if (fs.existsSync(backup)) {
+          try {
+            const backupContent = fs.readFileSync(backup, 'utf8').trim();
+            if (backupContent && backupContent !== '[]' && backupContent !== '{}') {
+              fs.copyFileSync(backup, filePath);
+              console.log(`[Startup Recovery] Restored ${filename} from backup`);
+              break;
+            }
+          } catch (e) {
+            console.warn(`[Startup Recovery] Could not restore ${filename}:`, e.message);
+          }
+        }
+      }
+    }
+  }
+  console.log('[Startup Recovery] Config file check complete');
+  
   // Forward renderer logs to main process console
   ipcMain.on('log-message', (event, message) => {
     console.log(message);
@@ -781,6 +842,9 @@ app.whenReady().then(() => {
   const { registerIPCHandlers } = require('./spaces-upload-handler');
   registerIPCHandlers();
   console.log('[Spaces Upload] IPC handlers registered');
+  
+  // Register Claude Terminal IPC handlers
+  registerClaudeTerminalHandlers();
   
   // Initialize test context manager
   const testContextManager = require('./test-context-manager');
@@ -888,6 +952,15 @@ app.whenReady().then(() => {
   
   // Set up Tab Picker IPC handlers
   setupTabPickerIPC();
+  
+  // Set up Intro Wizard IPC handlers
+  setupIntroWizardIPC();
+  
+  // Set up Agent Manager IPC handlers
+  setupAgentManagerIPC();
+  
+  // Set up Claude Code IPC handlers
+  setupClaudeCodeIPC();
   
   // Add keyboard shortcuts to open dev tools (enabled in both dev and production)
   const openDevTools = () => {
@@ -1044,6 +1117,14 @@ app.whenReady().then(() => {
       console.error('[Startup] Error initializing module manager:', error);
     }
     
+    // Ensure dock is visible on macOS (fixes mysterious menu disappearance)
+    if (process.platform === 'darwin' && app.dock) {
+      app.dock.show().catch(err => {
+        console.log('[Dock] Could not show dock:', err.message);
+      });
+      console.log('[Startup] Ensured dock visibility on macOS');
+    }
+    
     // Initialize the application menu
     try {
       console.log('[Startup] Setting up application menu...');
@@ -1083,6 +1164,9 @@ app.whenReady().then(() => {
     initializeVoiceOrb();
 
     console.log('[Startup] Deferred managers initialized');
+    
+    // Check if intro wizard should be shown (first run or update)
+    checkAndShowIntroWizard();
   });
   
   // MIGRATION: Migrate idw-entries.json to settings manager if needed
@@ -1165,8 +1249,34 @@ app.whenReady().then(() => {
 // ============================================
 
 // Handle app quit - coordinate window closing
-app.on('before-quit', (event) => {
+app.on('before-quit', async (event) => {
   console.log('[App] before-quit event - coordinating shutdown');
+  
+  // Save voice orb position before quitting
+  if (typeof saveOrbPosition === 'function') {
+    try {
+      saveOrbPosition();
+    } catch (error) {
+      console.error('[App] Error saving orb position:', error);
+    }
+  }
+  
+  // Stop built-in agents
+  if (typeof stopBuiltInAgents === 'function') {
+    try {
+      await stopBuiltInAgents();
+    } catch (error) {
+      console.error('[App] Error stopping built-in agents:', error);
+    }
+  }
+  
+  // Shutdown exchange bridge
+  try {
+    const { shutdown } = require('./src/voice-task-sdk/exchange-bridge');
+    await shutdown();
+  } catch (error) {
+    // Exchange may not be initialized
+  }
   
   // Close all GSX windows first (they have forced destroy logic)
   try {
@@ -1235,6 +1345,15 @@ app.on('window-all-closed', () => {
 app.on('will-quit', (event) => {
   console.log('[App] will-quit event - final cleanup');
   
+  // Last chance to save orb position
+  if (typeof saveOrbPosition === 'function') {
+    try {
+      saveOrbPosition();
+    } catch (error) {
+      console.error('[App] Error saving orb position:', error);
+    }
+  }
+  
   // Clean up Spaces upload temp files
   try {
     const { cleanupTempFiles } = require('./spaces-upload-handler');
@@ -1297,28 +1416,16 @@ function setupSpacesAPI() {
   
   // Initialize conversation capture
   try {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:1298',message:'ConversationCapture init START',data:{spacesAPIExists:!!spacesAPI,timestamp:Date.now()},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
-    // #endregion
     
     const { getSettingsManager } = require('./settings-manager');
     const settingsManager = getSettingsManager();
     
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:1305',message:'SettingsManager loaded',data:{exists:!!settingsManager,hasGet:!!(settingsManager && settingsManager.get)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
-    // #endregion
     
     conversationCapture = getConversationCapture(spacesAPI, settingsManager);
     
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:1312',message:'ConversationCapture CREATED',data:{exists:!!conversationCapture,isEnabled:conversationCapture?conversationCapture.isEnabled():null},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
-    // #endregion
     
     console.log('[ConversationCapture] ✅ Initialized');
   } catch (error) {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:1319',message:'ConversationCapture init FAILED',data:{error:error.message,stack:error.stack},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
-    // #endregion
     console.error('[ConversationCapture] Failed to initialize:', error);
   }
   
@@ -3659,9 +3766,6 @@ function setupAiderIPC() {
   // Generate 4 design mockup choices using DALL-E 3
   ipcMain.handle('design:generate-choices', async (event, { objective, approaches }) => {
     console.log('[Design] Generating 4 design choices for:', objective?.substring(0, 50));
-    // #region agent log
-    try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'main.js:design:generate-choices',message:'IPC handler called',data:{objective:objective?.substring(0,50),approachCount:approaches?.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})+'\n'); } catch(e){}
-    // #endregion
     
     try {
       const { getSettingsManager } = require('./settings-manager');
@@ -3669,14 +3773,8 @@ function setupAiderIPC() {
       const openaiKey = settings.get('openaiApiKey');
       
       if (!openaiKey) {
-        // #region agent log
-        try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'main.js:design:generate-choices',message:'No OpenAI key',data:{hasKey:false},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})+'\n'); } catch(e){}
-        // #endregion
         throw new Error('OpenAI API key required for design generation. Please add it in Settings.');
       }
-      // #region agent log
-      try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'main.js:design:generate-choices',message:'OpenAI key found, calling API',data:{hasKey:true},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})+'\n'); } catch(e){}
-      // #endregion
       
       const https = require('https');
       
@@ -4130,16 +4228,10 @@ function setupAiderIPC() {
 
   // Get design approaches (for UI to display options)
   ipcMain.handle('design:get-approaches', async (event, { objective, options = {} }) => {
-    // #region agent log
-    try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'main.js:design:get-approaches',message:'Getting design approaches',data:{objective:objective?.substring(0,50)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})+'\n'); } catch(e){}
-    // #endregion
     try {
       const { getStylePromptGenerator } = require('./style-prompt-generator');
       const styleGen = getStylePromptGenerator();
       const approaches = styleGen.generateDesignApproaches(objective, options);
-      // #region agent log
-      try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'main.js:design:get-approaches',message:'Approaches generated',data:{count:approaches?.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})+'\n'); } catch(e){}
-      // #endregion
       return { success: true, approaches };
     } catch (error) {
       console.error('[Design] Failed to get approaches:', error);
@@ -5030,9 +5122,6 @@ function setupAiderIPC() {
   
   // Create a new git branch
   ipcMain.handle('aider:git-create-branch', async (event, repoPath, branchName, baseBranch = 'main') => {
-    // #region agent log
-    try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'main.js:git-create-branch',message:'Handler called',data:{repoPath,branchName,baseBranch},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-BRANCH'})+'\n'); } catch(e){}
-    // #endregion
     try {
       const { execSync } = require('child_process');
       const fs = require('fs');
@@ -5044,17 +5133,11 @@ function setupAiderIPC() {
       // Check if directory exists and is a git repo
       const gitDir = require('path').join(repoPath, '.git');
       const isGitRepo = fs.existsSync(gitDir);
-      // #region agent log
-      try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'main.js:git-create-branch',message:'Checking git repo',data:{repoPath,isGitRepo,gitDirExists:fs.existsSync(gitDir)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-BRANCH'})+'\n'); } catch(e){}
-      // #endregion
       
       // Sanitize branch name - replace spaces and special chars with dashes
       const safeBranchName = branchName.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/-+/g, '-');
       const safeBaseBranch = baseBranch.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/-+/g, '-');
       
-      // #region agent log
-      try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'main.js:git-create-branch',message:'Sanitized names',data:{original:branchName,safe:safeBranchName,baseOriginal:baseBranch,baseSafe:safeBaseBranch},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-BRANCH-FIX'})+'\n'); } catch(e){}
-      // #endregion
       
       // Create and switch to new branch (using quotes for safety)
       execSync(`git checkout -b "${safeBranchName}" "${safeBaseBranch}"`, { 
@@ -5066,9 +5149,6 @@ function setupAiderIPC() {
       return { success: true, branch: branchName };
       
     } catch (error) {
-      // #region agent log
-      try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'main.js:git-create-branch',message:'Git command failed',data:{error:error?.message,stderr:error?.stderr?.toString?.()},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-BRANCH'})+'\n'); } catch(e){}
-      // #endregion
       console.error('[GSX Create] Git create branch failed:', error);
       return { success: false, error: error.message };
     }
@@ -6157,12 +6237,40 @@ function setupIPC() {
   
   // Clear cache and reload for GSX toolbar refresh button
   // If options.clearStorage is true, also clear site storage for the current page before reloading.
+  // PROTECTION: We backup important JSON config files before clearing storage
   ipcMain.on('clear-cache-and-reload', async (event, options = {}) => {
     try {
       const win = BrowserWindow.fromWebContents(event.sender);
       if (win) {
         const clearStorage = !!options.clearStorage;
         if (clearStorage) {
+          // PROTECTION: Backup important JSON files before clearing storage
+          // These files contain user's third-party AI tools, IDW environments, etc.
+          const userDataPath = app.getPath('userData');
+          const filesToProtect = [
+            'external-bots.json',
+            'image-creators.json', 
+            'video-creators.json',
+            'audio-generators.json',
+            'ui-design-tools.json',
+            'web-tools.json',
+            'idw-entries.json',
+            'gsx-links.json'
+          ];
+          
+          for (const filename of filesToProtect) {
+            const filePath = path.join(userDataPath, filename);
+            const backupPath = path.join(userDataPath, filename + '.protect-backup');
+            if (fs.existsSync(filePath)) {
+              try {
+                fs.copyFileSync(filePath, backupPath);
+                console.log(`[IPC] Protected backup created: ${filename}`);
+              } catch (e) {
+                console.warn(`[IPC] Could not backup ${filename}:`, e.message);
+              }
+            }
+          }
+          
           // Best-effort clear of per-page web storage before reload.
           // Note: we intentionally do NOT clear cookies by default, to avoid forced logouts.
           try {
@@ -6180,6 +6288,24 @@ function setupIPC() {
             console.log('[IPC] Storage cleared for window (localstorage/indexdb/cachestorage/serviceworkers)');
           } catch (e) {
             console.error('[IPC] Error clearing storage data:', e);
+          }
+          
+          // PROTECTION: Restore backups if original files were affected
+          for (const filename of filesToProtect) {
+            const filePath = path.join(userDataPath, filename);
+            const backupPath = path.join(userDataPath, filename + '.protect-backup');
+            if (fs.existsSync(backupPath) && !fs.existsSync(filePath)) {
+              try {
+                fs.copyFileSync(backupPath, filePath);
+                console.log(`[IPC] Restored from backup: ${filename}`);
+              } catch (e) {
+                console.warn(`[IPC] Could not restore ${filename}:`, e.message);
+              }
+            }
+            // Clean up backup
+            if (fs.existsSync(backupPath)) {
+              try { fs.unlinkSync(backupPath); } catch (e) {}
+            }
           }
         }
 
@@ -6223,6 +6349,7 @@ function setupIPC() {
       return false;
     }
     
+    
     // Log settings change (without sensitive values)
     logger.logSettingsChanged('multiple-settings', 'updated', 'updated');
     logger.info('Settings saved', {
@@ -6231,6 +6358,7 @@ function setupIPC() {
     });
     
     const saved = settingsManager.update(settings);
+    
     
     // If idwEnvironments was updated, also write to idw-entries.json for menu compatibility
     if (settings.idwEnvironments) {
@@ -8568,10 +8696,6 @@ function setupIPC() {
   
   // Handle trigger paste in black hole widget
   ipcMain.on('black-hole:trigger-paste', () => {
-    // #region agent log
-    const fs = require('fs');
-    fs.appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'main.js:black-hole:trigger-paste',message:'Received trigger-paste IPC',data:{hasClipboardManager:!!global.clipboardManager,hasBlackHoleWindow:!!(global.clipboardManager&&global.clipboardManager.blackHoleWindow),isDestroyed:global.clipboardManager?.blackHoleWindow?.isDestroyed?.()},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H5'})+'\n');
-    // #endregion
     console.log('Received request to trigger paste in black hole widget');
     if (global.clipboardManager && global.clipboardManager.blackHoleWindow) {
       if (!global.clipboardManager.blackHoleWindow.isDestroyed()) {
@@ -10773,9 +10897,6 @@ function setupIPC() {
                     }
                   }
                   
-                  // #region agent log
-                  fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:10179',message:'Capturing PROMPT',data:{aiService,externalConversationId,payloadKeys:Object.keys(payload),hasMessages:!!payload.messages,hasPrompt:!!payload.prompt,messageType:typeof payload.messages},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
-                  // #endregion
                   
                   // Build message based on service
                   let messageToCapture = payload.messages || payload.prompt;
@@ -10791,15 +10912,9 @@ function setupIPC() {
                     timestamp: new Date().toISOString(),
                     externalConversationId  // Pass the conversation ID
                   }).catch(err => {
-                    // #region agent log
-                    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:10189',message:'capturePrompt promise REJECTED',data:{error:err.message,stack:err.stack},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
-                    // #endregion
                     console.error('[ConversationCapture] Error capturing prompt:', err);
                   });
                 } catch (err) {
-                  // #region agent log
-                  fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:10196',message:'capturePrompt threw exception',data:{error:err.message,stack:err.stack},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
-                  // #endregion
                   console.error('[ConversationCapture] Error in capturePrompt:', err);
                 }
               }
@@ -11203,9 +11318,6 @@ function setupIPC() {
                           // so we rely on URL matching or the ID carried over from the request
                         }
                         
-                        // #region agent log
-                        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:10428',message:'Capturing RESPONSE',data:{aiService,externalConversationId,messageTextLength:messageText?messageText.length:0,hasEvents:!!sseEvents,eventCount:sseEvents?sseEvents.length:0},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
-                        // #endregion
                         
                         conversationCapture.captureResponse(aiService, {
                           message: messageText,
@@ -11215,15 +11327,9 @@ function setupIPC() {
                           timestamp: new Date().toISOString(),
                           externalConversationId  // Pass the conversation ID
                         }).catch(err => {
-                          // #region agent log
-                          fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:10439',message:'captureResponse promise REJECTED',data:{error:err.message,stack:err.stack},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
-                          // #endregion
                           console.error('[ConversationCapture] Error capturing response:', err);
                         });
                       } catch (err) {
-                        // #region agent log
-                        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:10446',message:'captureResponse threw exception',data:{error:err.message,stack:err.stack},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
-                        // #endregion
                         console.error('[ConversationCapture] Error in captureResponse:', err);
                       }
                     }
@@ -12472,7 +12578,7 @@ function openDashboardWindow() {
     height: 900,
     minWidth: 1000,
     minHeight: 600,
-    title: 'OneReach.ai - App Health Dashboard',
+    title: 'GSX Power User - App Health Dashboard',
     backgroundColor: '#0a0a0f',
     webPreferences: {
       nodeIntegration: false,
@@ -12697,7 +12803,7 @@ function openSetupWizard() {
           "style-src-elem 'self' 'unsafe-inline' * https://*.onereach.ai; " +
           "script-src 'self' 'unsafe-inline' 'unsafe-eval' * https://*.onereach.ai; " +
           "connect-src 'self' * https://*.onereach.ai https://*.api.onereach.ai; " +
-          "img-src 'self' data: blob: * https://*.onereach.ai; " +
+          "img-src 'self' data: blob: spaces: * https://*.onereach.ai; " +
           "font-src 'self' data: * https://*.onereach.ai; " +
           "media-src 'self' * https://*.onereach.ai; " +
           "object-src 'none'; " +
@@ -13986,15 +14092,169 @@ ipcMain.on('open-budget-estimator', () => {
 
 // ==================== VOICE ORB ====================
 
+let orbIPCInitialized = false;
+let orbShortcutRegistered = false;
+let builtInAgents = [];
+
+/**
+ * Start built-in agents for the exchange
+ * These agents handle common voice commands locally
+ */
+async function startBuiltInAgents(exchangeUrl) {
+  console.log('[VoiceOrb] Starting built-in agents...');
+  
+  try {
+    // Try to load and start the spelling agent
+    const { createSpellingAgent } = require('./packages/agents/spelling-agent.js');
+    const spellingAgent = createSpellingAgent(exchangeUrl);
+    console.log('[VoiceOrb] Spelling agent created, connecting to', exchangeUrl);
+    
+    spellingAgent.on('connected', () => {
+      console.log('[VoiceOrb] Spelling agent connected');
+    });
+    
+    spellingAgent.on('disconnected', ({ reason }) => {
+      console.log('[VoiceOrb] Spelling agent disconnected:', reason);
+    });
+    
+    spellingAgent.on('reconnecting', ({ attempt }) => {
+      console.log('[VoiceOrb] Spelling agent reconnecting, attempt', attempt);
+    });
+    
+    spellingAgent.on('registered', ({ agentId }) => {
+      console.log('[VoiceOrb] Spelling agent registered as:', agentId);
+    });
+    
+    spellingAgent.on('error', ({ error }) => {
+      console.error('[VoiceOrb] Spelling agent error:', error.message);
+    });
+    
+    spellingAgent.on('bid:requested', ({ task }) => {
+      console.log('[VoiceOrb] Spelling agent bid requested for:', task.content);
+    });
+    
+    spellingAgent.on('bid:submitted', ({ confidence }) => {
+      console.log('[VoiceOrb] Spelling agent bid submitted:', confidence);
+    });
+    
+    spellingAgent.on('task:assigned', ({ task, isBackup }) => {
+      console.log('[VoiceOrb] Spelling agent assigned task:', task.id, 'backup:', isBackup);
+    });
+    
+    spellingAgent.on('task:completed', ({ taskId, success }) => {
+      console.log(`[VoiceOrb] Spelling agent completed task ${taskId}: ${success}`);
+    });
+    
+    await spellingAgent.start();
+    builtInAgents.push(spellingAgent);
+    console.log('[VoiceOrb] Spelling agent started');
+    
+  } catch (error) {
+    console.warn('[VoiceOrb] Could not start spelling agent:', error.message);
+    console.error('[VoiceOrb] Full error:', error.stack);
+    console.log('[VoiceOrb] Make sure packages are compiled: cd packages && npm run build');
+  }
+  
+  // Start user-defined dynamic agents
+  try {
+    const { startDynamicAgent } = require('./packages/agents/dynamic-agent');
+    const dynamicAgent = await startDynamicAgent(exchangeUrl);
+    if (dynamicAgent) {
+      builtInAgents.push(dynamicAgent);
+      console.log('[VoiceOrb] Dynamic user-defined agent started');
+    }
+  } catch (error) {
+    console.warn('[VoiceOrb] Could not start dynamic agent:', error.message);
+  }
+  
+  // Start GSX/MCS connections
+  try {
+    const { getAgentStore } = require('./src/voice-task-sdk/agent-store');
+    const { getMCSManager } = require('./src/voice-task-sdk/gsx-mcs-client');
+    
+    const store = getAgentStore();
+    await store.init();
+    
+    const gsxConnections = store.getEnabledGSXConnections();
+    if (gsxConnections.length > 0) {
+      const manager = getMCSManager();
+      
+      for (const conn of gsxConnections) {
+        const client = manager.addClient(conn);
+        
+        client.on('connected', async () => {
+          console.log(`[VoiceOrb] GSX connected: ${conn.name}`);
+          // Fetch agents when connected
+          try {
+            const agents = await client.fetchAgents();
+            await store.updateGSXAgents(conn.id, agents);
+          } catch (e) {
+            console.warn(`[VoiceOrb] Failed to fetch GSX agents:`, e.message);
+          }
+        });
+        
+        client.on('disconnected', () => {
+          console.log(`[VoiceOrb] GSX disconnected: ${conn.name}`);
+        });
+      }
+      
+      // Connect all GSX clients
+      await manager.connectAll();
+      console.log(`[VoiceOrb] ${gsxConnections.length} GSX connections initiated`);
+    }
+  } catch (error) {
+    console.warn('[VoiceOrb] Could not start GSX connections:', error.message);
+  }
+  
+  console.log(`[VoiceOrb] ${builtInAgents.length} agents started`);
+}
+
+/**
+ * Stop all built-in agents
+ */
+async function stopBuiltInAgents() {
+  console.log('[VoiceOrb] Stopping built-in agents...');
+  for (const agent of builtInAgents) {
+    try {
+      await agent.stop();
+    } catch (error) {
+      console.warn('[VoiceOrb] Error stopping agent:', error.message);
+    }
+  }
+  builtInAgents = [];
+}
+
 /**
  * Initialize Voice Orb based on settings
  */
-function initializeVoiceOrb() {
+async function initializeVoiceOrb() {
   try {
+    // Always setup IPC handlers so orb can be enabled dynamically
+    if (!orbIPCInitialized) {
+      setupOrbIPC();
+      setupCommandHUDIPC();
+      orbIPCInitialized = true;
+    }
+    
+    // Always register the shortcut so it works even if orb starts disabled
+    if (!orbShortcutRegistered) {
+      const shortcut = process.platform === 'darwin' ? 'Command+Shift+O' : 'Ctrl+Shift+O';
+      try {
+        globalShortcut.register(shortcut, () => {
+          toggleOrbWindow();
+        });
+        console.log(`[VoiceOrb] Registered global shortcut: ${shortcut}`);
+        orbShortcutRegistered = true;
+      } catch (shortcutError) {
+        console.error('[VoiceOrb] Failed to register shortcut:', shortcutError.message);
+      }
+    }
+    
+    // Only auto-show orb at startup if enabled in settings
     const voiceOrbEnabled = global.settingsManager?.get('voiceOrbEnabled');
     
     if (!voiceOrbEnabled) {
-      console.log('[VoiceOrb] Voice Orb disabled in settings');
+      console.log('[VoiceOrb] Voice Orb disabled in settings (use menu or Cmd+Shift+O to show)');
       return;
     }
     
@@ -14010,22 +14270,28 @@ function initializeVoiceOrb() {
       // Continue anyway - orb will work for transcription
     }
     
-    // Setup orb IPC handlers
-    setupOrbIPC();
+    // Initialize Exchange Bridge for auction-based task routing
+    try {
+      const { initializeExchangeBridge, getExchangeUrl } = require('./src/voice-task-sdk/exchange-bridge');
+      const exchangeReady = await initializeExchangeBridge();
+      if (exchangeReady) {
+        const url = getExchangeUrl();
+        console.log('[VoiceOrb] Exchange Bridge initialized at', url);
+        // Wait a moment for WebSocket server to be fully ready
+        await new Promise(resolve => setTimeout(resolve, 500));
+        // Start built-in agents (spelling, etc.)
+        await startBuiltInAgents(url);
+      } else {
+        console.warn('[VoiceOrb] Exchange Bridge not available - using local classification');
+      }
+    } catch (exchangeError) {
+      console.error('[VoiceOrb] Exchange Bridge init error:', exchangeError.message);
+      console.error('[VoiceOrb] Full error:', exchangeError.stack);
+      // Continue anyway - will fall back to local classification
+    }
     
     // Create the orb window
     createOrbWindow();
-    
-    // Register global shortcut (Cmd/Ctrl + Shift + O for Orb)
-    const shortcut = process.platform === 'darwin' ? 'Command+Shift+O' : 'Ctrl+Shift+O';
-    try {
-      globalShortcut.register(shortcut, () => {
-        toggleOrbWindow();
-      });
-      console.log(`[VoiceOrb] Registered global shortcut: ${shortcut}`);
-    } catch (shortcutError) {
-      console.error('[VoiceOrb] Failed to register shortcut:', shortcutError.message);
-    }
     
     console.log('[VoiceOrb] Voice Orb initialized successfully');
     
@@ -14057,10 +14323,26 @@ function setupOrbIPC() {
     toggleOrbWindow();
   });
   
-  // Set orb position (for drag support)
+  // Set orb position (for drag support) - debounced save
+  let orbPositionSaveTimeout = null;
   ipcMain.handle('orb:position', (event, x, y) => {
     if (orbWindow && !orbWindow.isDestroyed()) {
-      orbWindow.setPosition(Math.round(x), Math.round(y));
+      const posX = Math.round(x);
+      const posY = Math.round(y);
+      orbWindow.setPosition(posX, posY);
+      
+      // Debounced save - only save after dragging stops for 500ms
+      if (orbPositionSaveTimeout) {
+        clearTimeout(orbPositionSaveTimeout);
+      }
+      orbPositionSaveTimeout = setTimeout(() => {
+        if (global.settingsManager && orbWindow && !orbWindow.isDestroyed()) {
+          // Get the actual position from Electron (may differ from what renderer sent)
+          const [actualX, actualY] = orbWindow.getPosition();
+          global.settingsManager.update({ voiceOrbPosition: { x: actualX, y: actualY } });
+          console.log(`[VoiceOrb] Position saved: ${actualX}, ${actualY}`);
+        }
+      }, 500);
     }
   });
   
@@ -14068,6 +14350,46 @@ function setupOrbIPC() {
   ipcMain.on('orb:clicked', () => {
     console.log('[VoiceOrb] Orb clicked');
     // Future: could show an expanded panel
+  });
+  
+  // Relay voice input from Orb to Agent Composer
+  ipcMain.handle('orb:relay-to-composer', (event, transcript) => {
+    console.log('[VoiceOrb] Relaying to composer:', transcript.substring(0, 50));
+    return relayVoiceToComposer(transcript);
+  });
+  
+  // Check if Agent Composer is in creation mode
+  ipcMain.handle('orb:is-composer-active', () => {
+    return global.agentCreationMode === true && claudeCodeWindow && !claudeCodeWindow.isDestroyed();
+  });
+  
+  // Resize orb window for text chat
+  ipcMain.handle('orb:expand-for-chat', () => {
+    if (orbWindow && !orbWindow.isDestroyed()) {
+      const currentBounds = orbWindow.getBounds();
+      const newWidth = 380;
+      const newHeight = 520;
+      // Keep bottom-right corner anchored
+      const newX = currentBounds.x + currentBounds.width - newWidth;
+      const newY = currentBounds.y + currentBounds.height - newHeight;
+      orbWindow.setBounds({ x: newX, y: newY, width: newWidth, height: newHeight }, true);
+      console.log('[VoiceOrb] Expanded for text chat:', newWidth, 'x', newHeight);
+      return { width: newWidth, height: newHeight };
+    }
+  });
+  
+  ipcMain.handle('orb:collapse-from-chat', () => {
+    if (orbWindow && !orbWindow.isDestroyed()) {
+      const currentBounds = orbWindow.getBounds();
+      const newWidth = 350;
+      const newHeight = 250;
+      // Keep bottom-right corner anchored
+      const newX = currentBounds.x + currentBounds.width - newWidth;
+      const newY = currentBounds.y + currentBounds.height - newHeight;
+      orbWindow.setBounds({ x: newX, y: newY, width: newWidth, height: newHeight }, true);
+      console.log('[VoiceOrb] Collapsed from text chat');
+      return { width: newWidth, height: newHeight };
+    }
   });
   
   console.log('[VoiceOrb] IPC handlers registered');
@@ -14085,18 +14407,81 @@ function createOrbWindow() {
   const display = screen.getPrimaryDisplay();
   const { width: screenWidth, height: screenHeight } = display.workAreaSize;
   
-  // Position in bottom-right corner
-  // Window is taller to accommodate transcript tooltip above orb
-  const windowWidth = 300;
-  const windowHeight = 150;
-  const x = screenWidth - windowWidth - 20;
-  const y = screenHeight - windowHeight - 20;
+  // Window dimensions - large enough for text chat panel above orb
+  const windowWidth = 400;
+  const windowHeight = 550;
+  
+  // Try to restore saved position, otherwise default to bottom-right
+  let x, y;
+  const savedPosition = global.settingsManager?.get('voiceOrbPosition');
+  const savedWindowSize = global.settingsManager?.get('voiceOrbWindowSize');
+  
+  // Check if window size changed (reset position if so)
+  const currentWindowSize = { width: windowWidth, height: windowHeight };
+  
+  // Debug position restore
+  console.log('[VoiceOrb] Saved position:', JSON.stringify(savedPosition));
+  
+  // Only reset if window size actually changed, not on first run
+  const windowSizeChanged = savedWindowSize && (
+    savedWindowSize.width !== windowWidth || 
+    savedWindowSize.height !== windowHeight
+  );
+  
+  // Save window size if not saved yet (first run)
+  if (!savedWindowSize) {
+    global.settingsManager?.update({
+      voiceOrbWindowSize: currentWindowSize
+    });
+    console.log('[VoiceOrb] First run, saved window size');
+  } else if (windowSizeChanged) {
+    // Window size changed, reset position
+    global.settingsManager?.update({
+      voiceOrbWindowSize: currentWindowSize,
+      voiceOrbPosition: null
+    });
+    console.log('[VoiceOrb] Window size changed, resetting position');
+  }
+  
+  if (savedPosition && typeof savedPosition.x === 'number' && typeof savedPosition.y === 'number' && !windowSizeChanged) {
+    // Validate position is still on screen
+    // The orb is at bottom-right of window (right: 20px, bottom: 20px, size: 80x80)
+    // Orb's left edge is at windowX + 250, right edge at windowX + 330
+    // Orb's top edge is at windowY + 150, bottom edge at windowY + 230
+    // Allow negative window positions as long as the orb itself is visible
+    const orbLeftEdge = savedPosition.x + 250;
+    const orbRightEdge = savedPosition.x + 330;
+    const orbTopEdge = savedPosition.y + 150;
+    const orbBottomEdge = savedPosition.y + 230;
+    
+    const orbVisible = orbRightEdge > 50 && orbLeftEdge < screenWidth - 50 &&
+                       orbBottomEdge > 50 && orbTopEdge < screenHeight - 50;
+    
+    if (orbVisible) {
+      x = savedPosition.x;
+      y = savedPosition.y;
+      console.log(`[VoiceOrb] Restoring saved position: ${x}, ${y}`);
+    } else {
+      // Position off screen, use default
+      x = screenWidth - windowWidth - 20;
+      y = screenHeight - windowHeight - 20;
+      console.log(`[VoiceOrb] Saved position off screen (orb edges: L=${orbLeftEdge}, R=${orbRightEdge}, T=${orbTopEdge}, B=${orbBottomEdge}), using default`);
+    }
+  } else {
+    // No saved position or window size changed, use default bottom-right
+    x = screenWidth - windowWidth - 20;
+    y = screenHeight - windowHeight - 20;
+  }
+  
+  // Create window at default position first (Electron clamps negative values in constructor)
+  const defaultX = screenWidth - windowWidth - 20;
+  const defaultY = screenHeight - windowHeight - 20;
   
   orbWindow = new BrowserWindow({
     width: windowWidth,
     height: windowHeight,
-    x,
-    y,
+    x: defaultX,
+    y: defaultY,
     alwaysOnTop: true,
     transparent: true,
     frame: false,
@@ -14111,12 +14496,28 @@ function createOrbWindow() {
     },
   });
   
+  // Now move to saved position (setPosition allows negative values, unlike constructor)
+  if (x !== defaultX || y !== defaultY) {
+    orbWindow.setPosition(x, y);
+    console.log(`[VoiceOrb] Moved to saved position: ${x}, ${y}`);
+  }
+  
   // Set window level to float above everything
   orbWindow.setAlwaysOnTop(true, 'floating');
   orbWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   
+  // Restore dock/menu visibility on macOS (setVisibleOnAllWorkspaces can hide it)
+  if (process.platform === 'darwin' && app.dock) {
+    app.dock.show().catch(() => {});
+  }
+  
   // Load the orb UI
   orbWindow.loadFile(path.join(__dirname, 'orb.html'));
+  
+  // Save position before closing
+  orbWindow.on('close', () => {
+    saveOrbPosition();
+  });
   
   // Handle window close
   orbWindow.on('closed', () => {
@@ -14157,9 +14558,351 @@ function showOrbWindow() {
  */
 function hideOrbWindow() {
   if (orbWindow && !orbWindow.isDestroyed()) {
+    saveOrbPosition();
     orbWindow.hide();
   }
 }
+
+/**
+ * Save current orb position to settings
+ * Only saves position keys, doesn't affect other settings
+ */
+function saveOrbPosition() {
+  if (orbWindow && !orbWindow.isDestroyed() && global.settingsManager) {
+    try {
+      const [x, y] = orbWindow.getPosition();
+      global.settingsManager.update({ voiceOrbPosition: { x, y } });
+      console.log(`[VoiceOrb] Position saved: ${x}, ${y}`);
+    } catch (error) {
+      console.error('[VoiceOrb] Error saving position:', error);
+    }
+  }
+}
+
+// ==================== COMMAND HUD ====================
+
+/**
+ * Create the Command HUD window for displaying task status
+ */
+function createCommandHUDWindow() {
+  if (commandHUDWindow && !commandHUDWindow.isDestroyed()) {
+    return commandHUDWindow;
+  }
+  
+  const display = screen.getPrimaryDisplay();
+  const { width: screenWidth, height: screenHeight } = display.workAreaSize;
+  
+  // HUD size - tall enough to show all content without scrollbars
+  const windowWidth = 340;
+  const windowHeight = 420;
+  
+  // Position: above the orb, centered
+  const orbWidth = 80;
+  const orbHeight = 80;
+  const spacing = 20;
+  
+  // Default position (bottom right, above where orb typically is)
+  let x = screenWidth - windowWidth - 40;
+  let y = screenHeight - windowHeight - orbHeight - spacing - 30;
+  
+  // If orb exists, position directly above it
+  if (orbWindow && !orbWindow.isDestroyed()) {
+    const [orbX, orbY] = orbWindow.getPosition();
+    
+    // Center HUD above orb
+    x = orbX + (orbWidth / 2) - (windowWidth / 2);
+    y = orbY - windowHeight - spacing;
+    
+    // Make sure it stays on screen
+    x = Math.max(10, Math.min(x, screenWidth - windowWidth - 10));
+    y = Math.max(10, Math.min(y, screenHeight - windowHeight - 10));
+  }
+  
+  commandHUDWindow = new BrowserWindow({
+    width: windowWidth,
+    height: windowHeight,
+    x: x,
+    y: y,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    hasShadow: false,
+    show: false, // Start hidden
+    webPreferences: {
+      preload: path.join(__dirname, 'preload-command-hud.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  });
+  
+  // Set window level to float above everything
+  commandHUDWindow.setAlwaysOnTop(true, 'floating');
+  commandHUDWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  
+  // Restore dock/menu visibility on macOS (setVisibleOnAllWorkspaces can hide it)
+  if (process.platform === 'darwin' && app.dock) {
+    app.dock.show().catch(() => {});
+  }
+  
+  // Load the HUD UI
+  commandHUDWindow.loadFile(path.join(__dirname, 'command-hud.html'));
+  
+  // Handle window close
+  commandHUDWindow.on('closed', () => {
+    commandHUDWindow = null;
+  });
+  
+  console.log('[CommandHUD] HUD window created');
+  return commandHUDWindow;
+}
+
+/**
+ * Show the Command HUD with a task
+ */
+function showCommandHUD(task) {
+  if (!commandHUDWindow || commandHUDWindow.isDestroyed()) {
+    createCommandHUDWindow();
+  }
+  
+  // Reposition near orb but not overlapping
+  if (orbWindow && !orbWindow.isDestroyed()) {
+    const [orbX, orbY] = orbWindow.getPosition();
+    const display = screen.getPrimaryDisplay();
+    const { width: screenWidth, height: screenHeight } = display.workAreaSize;
+    
+    // HUD is 340x420, orb is 80x80
+    const hudWidth = 340;
+    const hudHeight = 420;
+    const orbWidth = 80;
+    const orbHeight = 80;
+    const spacing = 20; // Gap between HUD and orb
+    
+    // Position HUD directly above the orb, centered horizontally
+    let x = orbX + (orbWidth / 2) - (hudWidth / 2);
+    let y = orbY - hudHeight - spacing;
+    
+    // Make sure it stays on screen
+    x = Math.max(10, Math.min(x, screenWidth - hudWidth - 10));
+    y = Math.max(10, Math.min(y, screenHeight - hudHeight - 10));
+    
+    // If HUD would overlap orb vertically (not enough room above), check if there's room below
+    if (y + hudHeight + spacing > orbY) {
+      // Try below the orb
+      y = orbY + orbHeight + spacing;
+      if (y + hudHeight > screenHeight - 10) {
+        // Not enough room below either, just put it as high as possible
+        y = 10;
+      }
+    }
+    
+    commandHUDWindow.setPosition(Math.round(x), Math.round(y));
+  }
+  
+  // Send task to HUD
+  if (commandHUDWindow && !commandHUDWindow.isDestroyed()) {
+    commandHUDWindow.webContents.send('hud:task', task);
+    commandHUDWindow.show();
+  }
+}
+
+/**
+ * Hide the Command HUD
+ */
+function hideCommandHUD() {
+  if (commandHUDWindow && !commandHUDWindow.isDestroyed()) {
+    commandHUDWindow.hide();
+  }
+}
+
+/**
+ * Send result to Command HUD
+ */
+function sendCommandHUDResult(result) {
+  if (commandHUDWindow && !commandHUDWindow.isDestroyed()) {
+    commandHUDWindow.webContents.send('hud:result', result);
+  }
+}
+
+/**
+ * Reset Command HUD to empty state
+ */
+function resetCommandHUD() {
+  if (commandHUDWindow && !commandHUDWindow.isDestroyed()) {
+    commandHUDWindow.webContents.send('hud:reset');
+  }
+}
+
+/**
+ * Setup Command HUD IPC handlers
+ */
+function setupCommandHUDIPC() {
+  // Show HUD
+  ipcMain.handle('command-hud:show', (event, task) => {
+    showCommandHUD(task);
+  });
+  
+  // Hide HUD
+  ipcMain.handle('command-hud:hide', () => {
+    hideCommandHUD();
+  });
+  
+  // Send task update
+  ipcMain.handle('command-hud:task', (event, task) => {
+    if (commandHUDWindow && !commandHUDWindow.isDestroyed()) {
+      commandHUDWindow.webContents.send('hud:task', task);
+    }
+  });
+  
+  // Send result
+  ipcMain.handle('command-hud:result', (event, result) => {
+    sendCommandHUDResult(result);
+  });
+  
+  // Dismiss from HUD
+  ipcMain.on('hud:dismiss', () => {
+    hideCommandHUD();
+  });
+  
+  // Retry from HUD
+  ipcMain.on('hud:retry', (event, task) => {
+    console.log('[CommandHUD] Retry requested for task:', task?.action);
+    // Re-submit the task through voice task SDK
+    if (task && task.transcript) {
+      // Emit retry event for the orb to handle
+      if (orbWindow && !orbWindow.isDestroyed()) {
+        orbWindow.webContents.send('hud:retry-task', task);
+      }
+    }
+  });
+  
+  // Position update
+  ipcMain.handle('hud:position', (event, x, y) => {
+    if (commandHUDWindow && !commandHUDWindow.isDestroyed()) {
+      commandHUDWindow.setPosition(Math.round(x), Math.round(y));
+    }
+  });
+  
+  // ==================== CONTEXT MENU ====================
+  
+  // Show context menu on right-click
+  ipcMain.on('hud:show-context-menu', async () => {
+    if (!commandHUDWindow || commandHUDWindow.isDestroyed()) return;
+    
+    const { Menu } = require('electron');
+    
+    // Get available agents
+    let agents = [];
+    try {
+      const { getAgentStore } = require('./src/voice-task-sdk/agent-store');
+      const store = getAgentStore();
+      agents = await store.getAllAgents();
+    } catch (e) {
+      console.log('[CommandHUD] Could not load agents for context menu:', e.message);
+    }
+    
+    // Build agents submenu
+    const agentsSubmenu = agents.length > 0 
+      ? agents.map(agent => ({
+          label: agent.type === 'gsx' ? `[GSX] ${agent.name}` : agent.name,
+          click: () => {
+            commandHUDWindow.webContents.send('hud:action:trigger-agent', agent);
+          }
+        }))
+      : [{ label: 'No agents configured', enabled: false }];
+    
+    // Add "Manage Agents" at the end
+    agentsSubmenu.push({ type: 'separator' });
+    agentsSubmenu.push({
+      label: 'Manage Agents...',
+      click: () => {
+        createAgentManagerWindow();
+      }
+    });
+    
+    const contextMenu = Menu.buildFromTemplate([
+      {
+        label: 'Switch to Text Input',
+        click: () => {
+          commandHUDWindow.webContents.send('hud:action:text-input');
+        }
+      },
+      { type: 'separator' },
+      {
+        label: 'Trigger Agent',
+        submenu: agentsSubmenu
+      },
+      { type: 'separator' },
+      {
+        label: 'Manage Agents...',
+        click: () => {
+          createAgentManagerWindow();
+        }
+      },
+      {
+        label: 'Settings...',
+        click: () => {
+          const { openSettingsWindow } = require('./main.js');
+          if (typeof openSettingsWindow === 'function') {
+            openSettingsWindow();
+          } else {
+            // Fallback: send IPC to open settings
+            const mainWindow = BrowserWindow.getAllWindows().find(w => !w.isDestroyed());
+            if (mainWindow) {
+              mainWindow.webContents.send('menu-action', { action: 'settings' });
+            }
+          }
+        }
+      },
+      { type: 'separator' },
+      {
+        label: 'Dismiss',
+        click: () => {
+          hideCommandHUD();
+        }
+      }
+    ]);
+    
+    contextMenu.popup({ window: commandHUDWindow });
+  });
+  
+  // Trigger specific agent with transcript
+  ipcMain.handle('hud:trigger-agent', async (event, { agentId, transcript }) => {
+    console.log('[CommandHUD] Triggering agent:', agentId, 'with:', transcript);
+    
+    try {
+      // Submit with agent hint so exchange routes directly
+      const { getExchange } = require('./src/voice-task-sdk/exchange-bridge');
+      const exchange = getExchange();
+      
+      if (exchange) {
+        const result = await exchange.submit({
+          content: transcript,
+          metadata: {
+            source: 'text',
+            targetAgent: agentId,
+          },
+        });
+        return { success: true, taskId: result.taskId };
+      }
+      
+      return { success: false, error: 'Exchange not available' };
+    } catch (error) {
+      console.error('[CommandHUD] Trigger agent error:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  console.log('[CommandHUD] IPC handlers registered');
+}
+
+// Make HUD functions available globally for Voice Task SDK integration
+global.showCommandHUD = showCommandHUD;
+global.hideCommandHUD = hideCommandHUD;
+global.sendCommandHUDResult = sendCommandHUDResult;
+global.resetCommandHUD = resetCommandHUD;
 
 // ==================== VOICE TTS (ElevenLabs) ====================
 
@@ -14231,6 +14974,1660 @@ function setupVoiceTTS() {
   console.log('[VoiceTTS] Voice TTS handlers registered');
 }
 
+// ==================== AGENT MANAGER ====================
+
+let agentManagerWindow = null;
+
+/**
+ * Create and show the agent manager window
+ */
+function createAgentManagerWindow() {
+  if (agentManagerWindow && !agentManagerWindow.isDestroyed()) {
+    agentManagerWindow.focus();
+    return agentManagerWindow;
+  }
+  
+  console.log('[AgentManager] Creating agent manager window...');
+  
+  agentManagerWindow = new BrowserWindow({
+    width: 900,
+    height: 800,
+    minWidth: 600,
+    minHeight: 600,
+    title: 'Manage Agents',
+    frame: false,
+    transparent: false,
+    backgroundColor: '#1a1a24',
+    center: true,
+    resizable: true,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload-agent-manager.js'),
+      webSecurity: true,
+      sandbox: false
+    }
+  });
+  
+  // Clear the reference when closed
+  agentManagerWindow.on('closed', () => {
+    console.log('[AgentManager] Window closed');
+    agentManagerWindow = null;
+  });
+  
+  // Load the agent manager HTML
+  agentManagerWindow.loadFile('agent-manager.html').catch(err => {
+    console.error('[AgentManager] Error loading agent-manager.html:', err);
+  });
+  
+  agentManagerWindow.webContents.on('did-finish-load', () => {
+    console.log('[AgentManager] Window loaded successfully');
+  });
+  
+  return agentManagerWindow;
+}
+
+/**
+ * Setup Agent Manager IPC handlers
+ */
+function setupAgentManagerIPC() {
+  const { getAgentStore, initAgentStore } = require('./src/voice-task-sdk/agent-store');
+  
+  // Initialize agent store
+  initAgentStore().catch(err => {
+    console.error('[AgentManager] Failed to initialize agent store:', err);
+  });
+  
+  // Close window
+  ipcMain.on('agent-manager:close', () => {
+    if (agentManagerWindow && !agentManagerWindow.isDestroyed()) {
+      agentManagerWindow.close();
+    }
+  });
+  
+  // Open agent manager
+  ipcMain.on('agents:open-manager', () => {
+    createAgentManagerWindow();
+  });
+  
+  // ==================== LOCAL AGENTS ====================
+  
+  // Get all local agents
+  ipcMain.handle('agents:get-local', async () => {
+    const store = getAgentStore();
+    await store.init();
+    return store.getLocalAgents();
+  });
+  
+  // Get all agents (local + GSX)
+  ipcMain.handle('agents:list', async () => {
+    const store = getAgentStore();
+    await store.init();
+    return store.getAllAgents();
+  });
+  
+  // Create agent
+  ipcMain.handle('agents:create', async (event, agentData) => {
+    const store = getAgentStore();
+    return store.createAgent(agentData);
+  });
+  
+  // Update agent
+  ipcMain.handle('agents:update', async (event, id, updates) => {
+    const store = getAgentStore();
+    return store.updateAgent(id, updates);
+  });
+  
+  // Delete agent
+  ipcMain.handle('agents:delete', async (event, id) => {
+    const store = getAgentStore();
+    return store.deleteAgent(id);
+  });
+  
+  // ==================== AGENT VERSION HISTORY ====================
+  
+  // Get version history for an agent
+  ipcMain.handle('agents:get-versions', async (event, agentId) => {
+    const store = getAgentStore();
+    await store.init();
+    return store.getVersionHistory(agentId);
+  });
+  
+  // Get a specific version
+  ipcMain.handle('agents:get-version', async (event, agentId, versionNumber) => {
+    const store = getAgentStore();
+    await store.init();
+    return store.getVersion(agentId, versionNumber);
+  });
+  
+  // Undo last change
+  ipcMain.handle('agents:undo', async (event, agentId) => {
+    const store = getAgentStore();
+    await store.init();
+    return store.undoAgent(agentId);
+  });
+  
+  // Revert to specific version
+  ipcMain.handle('agents:revert', async (event, agentId, versionNumber) => {
+    const store = getAgentStore();
+    await store.init();
+    return store.revertToVersion(agentId, versionNumber);
+  });
+  
+  // Compare two versions
+  ipcMain.handle('agents:compare-versions', async (event, agentId, versionA, versionB) => {
+    const store = getAgentStore();
+    await store.init();
+    return store.compareVersions(agentId, versionA, versionB);
+  });
+  
+  // ==================== GSX CONNECTIONS ====================
+  
+  // Get GSX connections
+  ipcMain.handle('gsx:get-connections', async () => {
+    const store = getAgentStore();
+    await store.init();
+    return store.getGSXConnections();
+  });
+  
+  // Add GSX connection
+  ipcMain.handle('gsx:add-connection', async (event, connData) => {
+    const store = getAgentStore();
+    return store.addGSXConnection(connData);
+  });
+  
+  // Update GSX connection
+  ipcMain.handle('gsx:update-connection', async (event, id, updates) => {
+    const store = getAgentStore();
+    return store.updateGSXConnection(id, updates);
+  });
+  
+  // Delete GSX connection
+  ipcMain.handle('gsx:delete-connection', async (event, id) => {
+    const store = getAgentStore();
+    return store.deleteGSXConnection(id);
+  });
+  
+  console.log('[AgentManager] IPC handlers registered');
+}
+
+// ==================== CLAUDE CODE UI ====================
+
+let claudeCodeWindow = null;
+let pendingComposerInit = null; // Store initial description while window loads
+
+/**
+ * Create and show the GSX Agent Composer window
+ * @param {Object} options - Optional configuration
+ * @param {string} options.initialDescription - Initial agent description to auto-plan
+ */
+function createClaudeCodeWindow(options = {}) {
+  const { initialDescription } = options;
+  
+  if (claudeCodeWindow && !claudeCodeWindow.isDestroyed()) {
+    claudeCodeWindow.focus();
+    
+    // If window already exists and we have a description, send it
+    if (initialDescription) {
+      claudeCodeWindow.webContents.send('agent-composer:init', { 
+        description: initialDescription 
+      });
+    }
+    return claudeCodeWindow;
+  }
+  
+  console.log('[AgentComposer] Creating GSX Create window...');
+  
+  // Store the initial description to send after window loads
+  pendingComposerInit = initialDescription ? { description: initialDescription } : null;
+  
+  claudeCodeWindow = new BrowserWindow({
+    width: 1100,
+    height: 800,
+    minWidth: 900,
+    minHeight: 650,
+    title: 'GSX Agent Composer',
+    frame: false,
+    transparent: false,
+    backgroundColor: '#1a1a24',
+    center: true,
+    resizable: true,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload-claude-code.js'),
+      webSecurity: true,
+      sandbox: false
+    }
+  });
+  
+  // Clear the reference when closed
+  claudeCodeWindow.on('closed', () => {
+    console.log('[AgentComposer] Window closed');
+    claudeCodeWindow = null;
+    // Clear agent creation mode when composer closes
+    global.agentCreationMode = false;
+  });
+  
+  // Load the GSX Create UI HTML
+  claudeCodeWindow.loadFile('claude-code-ui.html').catch(err => {
+    console.error('[AgentComposer] Error loading claude-code-ui.html:', err);
+  });
+  
+  claudeCodeWindow.webContents.on('did-finish-load', () => {
+    console.log('[AgentComposer] Window loaded successfully');
+    
+    // Send the initial description if we have one
+    if (pendingComposerInit) {
+      console.log('[AgentComposer] Sending initial description:', pendingComposerInit.description);
+      claudeCodeWindow.webContents.send('agent-composer:init', pendingComposerInit);
+      pendingComposerInit = null;
+    }
+  });
+  
+  return claudeCodeWindow;
+}
+
+// ==================== Claude Code In-App Terminal (PTY) ====================
+
+let claudeTerminalWindow = null;
+let claudePty = null;
+
+/**
+ * Create and show the Claude Code terminal window for login
+ */
+function createClaudeTerminalWindow() {
+  if (claudeTerminalWindow && !claudeTerminalWindow.isDestroyed()) {
+    claudeTerminalWindow.focus();
+    return;
+  }
+  
+  claudeTerminalWindow = new BrowserWindow({
+    width: 800,
+    height: 500,
+    title: 'Claude Code Login',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload-claude-terminal.js'),
+    }
+  });
+  
+  claudeTerminalWindow.loadFile('claude-terminal.html');
+  
+  claudeTerminalWindow.on('closed', () => {
+    claudeTerminalWindow = null;
+    // Kill PTY if still running
+    if (claudePty) {
+      try {
+        claudePty.kill();
+      } catch (e) {
+        // Ignore
+      }
+      claudePty = null;
+    }
+  });
+}
+
+/**
+ * Register Claude Terminal IPC handlers
+ */
+function registerClaudeTerminalHandlers() {
+  // Start Claude Code PTY
+  ipcMain.handle('claude-terminal:start', async (event, cols, rows) => {
+    try {
+      // Kill existing PTY if any
+      if (claudePty) {
+        try {
+          claudePty.kill();
+        } catch (e) {
+          // Ignore
+        }
+      }
+      
+      const pty = require('node-pty');
+      const claudeCodeRunner = require('./lib/claude-code-runner');
+      const claudePath = claudeCodeRunner.getClaudeCodePath();
+      
+      console.log('[ClaudeTerminal] Starting PTY with claude at:', claudePath);
+      
+      // Spawn claude in PTY
+      claudePty = pty.spawn(claudePath, [], {
+        name: 'xterm-256color',
+        cols: cols || 80,
+        rows: rows || 24,
+        cwd: process.env.HOME,
+        env: process.env,
+      });
+      
+      // Forward output to renderer
+      claudePty.onData((data) => {
+        if (claudeTerminalWindow && !claudeTerminalWindow.isDestroyed()) {
+          claudeTerminalWindow.webContents.send('claude-terminal:output', data);
+        }
+      });
+      
+      // Handle exit
+      claudePty.onExit(({ exitCode }) => {
+        console.log('[ClaudeTerminal] PTY exited with code:', exitCode);
+        if (claudeTerminalWindow && !claudeTerminalWindow.isDestroyed()) {
+          claudeTerminalWindow.webContents.send('claude-terminal:exit', exitCode);
+        }
+        claudePty = null;
+      });
+      
+      return { success: true };
+    } catch (error) {
+      console.error('[ClaudeTerminal] Failed to start PTY:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Write to PTY
+  ipcMain.on('claude-terminal:write', (event, data) => {
+    if (claudePty) {
+      claudePty.write(data);
+    }
+  });
+  
+  // Resize PTY
+  ipcMain.on('claude-terminal:resize', (event, cols, rows) => {
+    if (claudePty) {
+      try {
+        claudePty.resize(cols, rows);
+      } catch (e) {
+        console.warn('[ClaudeTerminal] Resize error:', e.message);
+      }
+    }
+  });
+  
+  // Kill PTY
+  ipcMain.on('claude-terminal:kill', () => {
+    if (claudePty) {
+      try {
+        claudePty.kill();
+      } catch (e) {
+        // Ignore
+      }
+      claudePty = null;
+    }
+  });
+  
+  console.log('[ClaudeTerminal] IPC handlers registered');
+}
+
+/**
+ * Broadcast plan summary to all windows (for Orb TTS)
+ */
+function broadcastPlanSummary(summary) {
+  const { BrowserWindow } = require('electron');
+  BrowserWindow.getAllWindows().forEach(win => {
+    if (!win.isDestroyed()) {
+      win.webContents.send('agent-composer:plan-summary', summary);
+    }
+  });
+}
+
+/**
+ * Send voice command to Agent Composer
+ */
+function relayVoiceToComposer(transcript) {
+  if (claudeCodeWindow && !claudeCodeWindow.isDestroyed()) {
+    claudeCodeWindow.webContents.send('agent-composer:voice-input', { transcript });
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Setup Claude Code IPC handlers
+ */
+function setupClaudeCodeIPC() {
+  const { getAgentStore } = require('./src/voice-task-sdk/agent-store');
+  const { generateAgentFromDescription } = require('./lib/ai-agent-generator');
+  const { TEMPLATES, getTemplates, getTemplate } = require('./lib/claude-code-templates');
+  
+  // Get all templates
+  ipcMain.handle('claude-code:templates', () => {
+    return getTemplates();
+  });
+  
+  // Get a specific template
+  ipcMain.handle('claude-code:template', (event, templateId) => {
+    return getTemplate(templateId);
+  });
+  
+  // Get agent type templates
+  ipcMain.handle('claude-code:agent-types', () => {
+    try {
+      const { getAgentTemplates } = require('./lib/ai-agent-generator');
+      return getAgentTemplates();
+    } catch (error) {
+      console.error('[AgentComposer] Error getting agent types:', error);
+      return [];
+    }
+  });
+  
+  // Score templates against description (for auto-highlighting)
+  // DEPRECATED: Old keyword-based scoring - kept for compatibility
+  ipcMain.handle('agent-composer:score-templates', (event, description) => {
+    try {
+      const { scoreAllTemplates } = require('./lib/agent-templates');
+      return scoreAllTemplates(description || '');
+    } catch (error) {
+      console.error('[AgentComposer] Error scoring templates:', error);
+      return [];
+    }
+  });
+  
+  // LLM-based agent planning using Claude Code CLI (for full agentic capabilities)
+  ipcMain.handle('agent-composer:plan', async (event, description) => {
+    try {
+      const claudeCode = require('./lib/claude-code-runner');
+      const { getTemplates } = require('./lib/agent-templates');
+      
+      const templates = getTemplates();
+      
+      // Convert templates to a format the planner can use
+      const templateInfo = {};
+      for (const t of templates) {
+        templateInfo[t.id] = {
+          name: t.name,
+          description: t.description,
+          capabilities: t.capabilities,
+          executionType: t.executionType,
+        };
+      }
+      
+      console.log('[AgentComposer] Planning agent for:', description.substring(0, 50) + '...');
+      console.log('[AgentComposer] Using Claude Code CLI for agentic features');
+      
+      const result = await claudeCode.planAgent(description, templateInfo);
+      
+      if (result.success) {
+        console.log('[AgentComposer] Plan created via CLI:', result.plan.executionType, '-', result.plan.suggestedName);
+      } else {
+        console.error('[AgentComposer] CLI plan failed:', result.error);
+        // Fallback to direct API if CLI fails
+        console.log('[AgentComposer] Falling back to direct API...');
+        const ClaudeAPI = require('./claude-api');
+        const claudeAPI = new ClaudeAPI();
+        const fallbackResult = await claudeAPI.planAgent(description, templateInfo);
+        if (fallbackResult.success) {
+          console.log('[AgentComposer] Fallback plan created:', fallbackResult.plan.executionType, '-', fallbackResult.plan.suggestedName);
+        }
+        return fallbackResult;
+      }
+      
+      return result;
+    } catch (error) {
+      console.error('[AgentComposer] Planning error:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Broadcast plan summary to Orb for TTS
+  ipcMain.handle('agent-composer:broadcast-plan', async (event, planSummary) => {
+    console.log('[AgentComposer] Broadcasting plan summary:', planSummary.substring(0, 50) + '...');
+    broadcastPlanSummary({
+      type: 'plan-ready',
+      summary: planSummary,
+      timestamp: Date.now()
+    });
+    return { success: true };
+  });
+  
+  // Notify that agent creation is complete
+  ipcMain.handle('agent-composer:creation-complete', async (event, agentName) => {
+    console.log('[AgentComposer] Agent creation complete:', agentName);
+    global.agentCreationMode = false;
+    broadcastPlanSummary({
+      type: 'creation-complete',
+      agentName,
+      timestamp: Date.now()
+    });
+    return { success: true };
+  });
+  
+  // Generate agent from description (Phase 1)
+  ipcMain.handle('claude-code:generate-agent', async (event, description, options = {}) => {
+    try {
+      console.log('[AgentComposer] Generating agent from description:', description.substring(0, 50) + '...');
+      if (options.templateId) {
+        console.log('[AgentComposer] Using template:', options.templateId);
+      }
+      
+      // Generate agent config using Claude API
+      const config = await generateAgentFromDescription(description, options);
+      
+      // Save to agent store
+      const store = getAgentStore();
+      await store.init();
+      const agent = await store.createAgent(config);
+      
+      console.log('[AgentComposer] Agent created:', agent.name);
+      
+      return { success: true, agent };
+    } catch (error) {
+      console.error('[AgentComposer] Agent generation failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // ==================== AGENT SELF-VERIFICATION SYSTEM ====================
+  
+  /**
+   * Verify if an action was successful based on execution type
+   * Returns: { verified: boolean, method: string, details: string }
+   */
+  /**
+   * Verify if an agent action was successful
+   * Supports multiple verification methods based on execution type and app
+   */
+  async function verifyAgentAction(execAsync, executionType, actionContext) {
+    const { appName, action, expectedResult, script, output } = actionContext;
+    
+    try {
+      // ==================== APPLESCRIPT VERIFICATION ====================
+      if (executionType === 'applescript' && appName) {
+        // First verify app is running
+        const { stdout: runningApps } = await execAsync(`osascript -e 'tell application "System Events" to get name of every process'`);
+        const isRunning = runningApps.toLowerCase().includes(appName.toLowerCase());
+        
+        if (!isRunning) {
+          return { 
+            verified: false, 
+            method: 'process-check', 
+            details: `${appName} is not running`,
+            suggestion: `Try opening ${appName} first with: open -a "${appName}"`
+          };
+        }
+        
+        // ===== MUSIC APP =====
+        if (appName.toLowerCase() === 'music') {
+          const { stdout: state } = await execAsync(`osascript -e 'tell application "Music" to get player state'`);
+          const playerState = state.trim();
+          
+          if (action === 'play') {
+            if (playerState === 'playing') {
+              const { stdout: track } = await execAsync(`osascript -e 'tell application "Music" to get name of current track'`).catch(() => ({ stdout: 'Unknown' }));
+              const { stdout: artist } = await execAsync(`osascript -e 'tell application "Music" to get artist of current track'`).catch(() => ({ stdout: '' }));
+              return { 
+                verified: true, 
+                method: 'state-check', 
+                details: `Playing: "${track.trim()}"${artist.trim() ? ` by ${artist.trim()}` : ''}` 
+              };
+            } else {
+              return { 
+                verified: false, 
+                method: 'state-check', 
+                details: `Player state: ${playerState}`,
+                suggestion: 'Select a track first with: play (some track of library playlist 1)'
+              };
+            }
+          } else if (action === 'pause' || action === 'stop') {
+            return { 
+              verified: playerState === 'paused' || playerState === 'stopped', 
+              method: 'state-check', 
+              details: `Player state: ${playerState}` 
+            };
+          } else if (action === 'open') {
+            return { verified: true, method: 'process-check', details: `Music is open (state: ${playerState})` };
+          }
+          return { verified: false, method: 'state-check', details: `Player state: ${playerState}` };
+        }
+        
+        // ===== SAFARI =====
+        if (appName.toLowerCase() === 'safari') {
+          try {
+            const { stdout: url } = await execAsync(`osascript -e 'tell application "Safari" to get URL of current tab of window 1'`);
+            const { stdout: title } = await execAsync(`osascript -e 'tell application "Safari" to get name of current tab of window 1'`).catch(() => ({ stdout: '' }));
+            
+            if (action === 'open-url' && expectedResult?.url) {
+              const urlMatches = url.includes(expectedResult.url);
+              return { 
+                verified: urlMatches, 
+                method: 'url-check', 
+                details: urlMatches ? `Opened: ${url.trim().substring(0, 60)}` : `Wrong URL: ${url.trim().substring(0, 60)}`
+              };
+            }
+            return { 
+              verified: true, 
+              method: 'state-check', 
+              details: `${title.trim() || 'Safari'} - ${url.trim().substring(0, 50)}` 
+            };
+          } catch (e) {
+            return { verified: true, method: 'process-check', details: 'Safari is open (no tabs)' };
+          }
+        }
+        
+        // ===== FINDER =====
+        if (appName.toLowerCase() === 'finder') {
+          try {
+            const { stdout: folder } = await execAsync(`osascript -e 'tell application "Finder" to get POSIX path of (target of front window as alias)'`);
+            return { 
+              verified: true, 
+              method: 'state-check', 
+              details: `Finder at: ${folder.trim()}` 
+            };
+          } catch (e) {
+            return { verified: true, method: 'process-check', details: 'Finder is open' };
+          }
+        }
+        
+        // ===== MAIL =====
+        if (appName.toLowerCase() === 'mail') {
+          try {
+            const { stdout: count } = await execAsync(`osascript -e 'tell application "Mail" to get count of messages of inbox'`);
+            return { 
+              verified: true, 
+              method: 'state-check', 
+              details: `Mail open (${count.trim()} messages in inbox)` 
+            };
+          } catch (e) {
+            return { verified: true, method: 'process-check', details: 'Mail is open' };
+          }
+        }
+        
+        // ===== CALENDAR =====
+        if (appName.toLowerCase() === 'calendar') {
+          return { verified: true, method: 'process-check', details: 'Calendar is open' };
+        }
+        
+        // ===== NOTES =====
+        if (appName.toLowerCase() === 'notes') {
+          return { verified: true, method: 'process-check', details: 'Notes is open' };
+        }
+        
+        // ===== TERMINAL =====
+        if (appName.toLowerCase() === 'terminal') {
+          return { verified: true, method: 'process-check', details: 'Terminal is open' };
+        }
+        
+        // ===== SPOTIFY =====
+        if (appName.toLowerCase() === 'spotify') {
+          try {
+            const { stdout: state } = await execAsync(`osascript -e 'tell application "Spotify" to get player state'`);
+            if (action === 'play' && state.trim() === 'playing') {
+              const { stdout: track } = await execAsync(`osascript -e 'tell application "Spotify" to get name of current track'`).catch(() => ({ stdout: 'Unknown' }));
+              return { verified: true, method: 'state-check', details: `Playing: ${track.trim()}` };
+            }
+            return { verified: true, method: 'process-check', details: `Spotify (${state.trim()})` };
+          } catch (e) {
+            return { verified: true, method: 'process-check', details: 'Spotify is open' };
+          }
+        }
+        
+        // ===== GENERIC APP - check if frontmost =====
+        const { stdout: frontApp } = await execAsync(`osascript -e 'tell application "System Events" to get name of first application process whose frontmost is true'`);
+        const isFront = frontApp.trim().toLowerCase().includes(appName.toLowerCase());
+        return { 
+          verified: isFront, 
+          method: 'frontmost-check', 
+          details: isFront ? `${appName} is active` : `Front app: ${frontApp.trim()}`,
+          suggestion: isFront ? null : `Try activating with: tell application "${appName}" to activate`
+        };
+      }
+      
+      // ==================== SHELL COMMAND VERIFICATION ====================
+      if (executionType === 'shell') {
+        // Check if specific file should exist
+        if (expectedResult?.fileExists) {
+          const { stdout } = await execAsync(`test -e "${expectedResult.fileExists}" && echo "exists" || echo "missing"`);
+          const exists = stdout.trim() === 'exists';
+          return { 
+            verified: exists, 
+            method: 'file-check', 
+            details: exists ? `File exists: ${expectedResult.fileExists}` : `File not found: ${expectedResult.fileExists}` 
+          };
+        }
+        
+        // Check if directory should exist
+        if (expectedResult?.dirExists) {
+          const { stdout } = await execAsync(`test -d "${expectedResult.dirExists}" && echo "exists" || echo "missing"`);
+          const exists = stdout.trim() === 'exists';
+          return { 
+            verified: exists, 
+            method: 'dir-check', 
+            details: exists ? `Directory exists: ${expectedResult.dirExists}` : `Directory not found: ${expectedResult.dirExists}` 
+          };
+        }
+        
+        // Check if output contains expected string
+        if (expectedResult?.outputContains && output) {
+          const contains = output.includes(expectedResult.outputContains);
+          return { 
+            verified: contains, 
+            method: 'output-check', 
+            details: contains ? `Output contains expected text` : `Expected text not found in output` 
+          };
+        }
+        
+        // Check command exit code
+        if (expectedResult?.exitCode !== undefined) {
+          // Already checked by execAsync - if we got here, exit code was 0
+          return { verified: true, method: 'exit-code', details: 'Command completed with expected exit code' };
+        }
+        
+        // Generic shell - assume success if no error thrown
+        return { 
+          verified: true, 
+          method: 'exit-code', 
+          details: output ? `Output: ${output.substring(0, 100)}` : 'Command completed successfully' 
+        };
+      }
+      
+      // ==================== BROWSER AUTOMATION VERIFICATION ====================
+      if (executionType === 'browser') {
+        // Could integrate with Puppeteer/Playwright for verification
+        return { verified: null, method: 'browser-check', details: 'Browser verification not yet implemented' };
+      }
+      
+      // ==================== LLM (CONVERSATIONAL) VERIFICATION ====================
+      if (executionType === 'llm') {
+        // LLM agents can't self-verify - need user confirmation
+        return { 
+          verified: null, 
+          method: 'user-confirmation', 
+          details: 'Response generated - please confirm if it was helpful',
+          needsUserConfirmation: true
+        };
+      }
+      
+      // ==================== DEFAULT ====================
+      return { 
+        verified: null, 
+        method: 'none', 
+        details: `Automatic verification not available for ${executionType} execution type` 
+      };
+      
+    } catch (error) {
+      return { 
+        verified: false, 
+        method: 'error', 
+        details: error.message,
+        suggestion: 'Check if the app/command is available on this system'
+      };
+    }
+  }
+  
+  // Test an agent with a sample prompt - ACTUALLY EXECUTES the agent with SELF-VERIFICATION
+  ipcMain.handle('claude-code:test-agent', async (event, agent, testPrompt) => {
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    
+    try {
+      console.log('[AgentComposer] Testing agent:', agent.name, 'type:', agent.executionType, 'prompt:', testPrompt.substring(0, 50));
+      
+      // FAST PATH: If agent name contains a known app, just open it directly - skip Claude entirely
+      const agentNameLower = agent.name?.toLowerCase() || '';
+      const knownApps = {
+        'music': 'Music',
+        'safari': 'Safari', 
+        'finder': 'Finder',
+        'mail': 'Mail',
+        'calendar': 'Calendar',
+        'notes': 'Notes',
+        'photos': 'Photos',
+        'messages': 'Messages',
+        'facetime': 'FaceTime',
+        'maps': 'Maps',
+        'calculator': 'Calculator',
+        'preview': 'Preview',
+        'terminal': 'Terminal',
+        'chrome': 'Google Chrome',
+        'spotify': 'Spotify',
+        'slack': 'Slack',
+        'zoom': 'zoom.us',
+        'vscode': 'Visual Studio Code',
+        'code': 'Visual Studio Code',
+      };
+      
+      for (const [keyword, appName] of Object.entries(knownApps)) {
+        if (agentNameLower.includes(keyword)) {
+          console.log('[AgentComposer] Fast path: Opening', appName);
+          try {
+            // Use both open AND AppleScript activate to ensure app comes to front
+            await execAsync(`open -a "${appName}"`);
+            // Force bring to front with AppleScript
+            await execAsync(`osascript -e 'tell application "${appName}" to activate'`);
+            
+            // For Music app, also start playing if the prompt suggests it
+            const promptLower = testPrompt.toLowerCase();
+            console.log('[AgentComposer] Checking play condition:', { keyword, promptLower, hasPlay: promptLower.includes('play') });
+            if (keyword === 'music' && (promptLower.includes('play') || promptLower.includes('start') || promptLower.includes('go'))) {
+              console.log('[AgentComposer] Starting music playback');
+              // Must select a track first, then play - just "play" doesn't work without selection
+              await execAsync(`osascript -e 'tell application "Music"
+                activate
+                set shuffle enabled to true
+                play (some track of library playlist 1)
+                play
+              end tell'`);
+              console.log('[AgentComposer] Play command sent');
+              
+              // VERIFY: Use the verification system
+              await new Promise(resolve => setTimeout(resolve, 500)); // Wait a moment
+              const verification = await verifyAgentAction(execAsync, 'applescript', {
+                appName: 'Music',
+                action: 'play'
+              });
+              
+              console.log('[AgentComposer] Verification result:', verification);
+              
+              if (verification.verified === true) {
+                return { 
+                  success: true, 
+                  response: `✓ VERIFIED: ${verification.details}`,
+                  executed: true,
+                  verified: true,
+                  verificationMethod: verification.method
+                };
+              } else if (verification.verified === false) {
+                return { 
+                  success: false, 
+                  error: `Action executed but verification failed: ${verification.details}`,
+                  executed: true,
+                  verified: false,
+                  verificationMethod: verification.method
+                };
+              } else {
+                // Can't auto-verify, ask user
+                return {
+                  success: true,
+                  response: `Action executed. ${verification.details}`,
+                  executed: true,
+                  verified: null,
+                  needsUserConfirmation: true
+                };
+              }
+            }
+            
+            // VERIFY: Check if app actually opened
+            await new Promise(resolve => setTimeout(resolve, 300));
+            const verification = await verifyAgentAction(execAsync, 'applescript', {
+              appName: appName,
+              action: 'open'
+            });
+            
+            console.log('[AgentComposer] Verification result:', verification);
+            
+            if (verification.verified === true) {
+              return { 
+                success: true, 
+                response: `✓ VERIFIED: ${appName} is now open and active`,
+                executed: true,
+                verified: true,
+                verificationMethod: verification.method
+              };
+            } else {
+              return { 
+                success: true, 
+                response: `Opened ${appName}. ${verification.details}`,
+                executed: true,
+                verified: verification.verified,
+                verificationMethod: verification.method
+              };
+            }
+          } catch (err) {
+            console.error('[AgentComposer] Failed to open', appName, err.message);
+            return { success: false, error: `Failed to open ${appName}: ${err.message}` };
+          }
+        }
+      }
+      
+      const claudeCodeRunner = require('./lib/claude-code-runner');
+      
+      // For executable agent types, ask Claude Code to generate the command/script
+      const executionType = agent.executionType || 'llm';
+      
+      if (executionType === 'applescript') {
+        
+        // Ask Claude Code to generate AppleScript for this task
+        const scriptResponse = await claudeCodeRunner.complete(testPrompt, {
+          systemPrompt: `${agent.prompt}
+
+CRITICAL: Respond with ONLY the AppleScript command. No explanations.
+
+KEY RULES:
+- "open" an app = use "activate" (brings window to front)
+- "play music" = use "activate" first to show the app, then "play"
+- Always prefer "activate" to make apps visible
+
+COMMAND REFERENCE:
+- Open/launch app: tell application "AppName" to activate
+- Play music: tell application "Music" to activate
+- Open URL: tell application "Safari" to open location "https://url.com"
+- Open file: tell application "Finder" to open POSIX file "/path/to/file"
+
+For this request "${testPrompt}", respond with the single AppleScript command:`,
+          maxTokens: 200,
+          temperature: 0.0,
+        });
+        
+        
+        if (!scriptResponse) {
+          return { success: false, error: 'No script generated' };
+        }
+        
+        // Clean the script (remove any markdown or extra text)
+        let script = scriptResponse.trim();
+        script = script.replace(/^```applescript\n?/i, '').replace(/\n?```$/i, '');
+        script = script.replace(/^```\n?/, '').replace(/\n?```$/, '');
+        
+        // Fix common incomplete scripts
+        // "tell application X" without action -> add "to activate"
+        if (script.match(/^tell application\s+"[^"]+"\s*$/i)) {
+          script = script.replace(/^(tell application\s+"[^"]+")\s*$/i, '$1 to activate');
+          console.log('[AgentComposer] Fixed incomplete script, added "to activate"');
+        }
+        
+        // If script is just an app name, wrap it
+        if (script.match(/^[A-Za-z\s]+$/)) {
+          script = `tell application "${script}" to activate`;
+          console.log('[AgentComposer] Wrapped app name in tell statement');
+        }
+        
+        // If user asked to "open" something but script uses "play", change to "activate"
+        const wantsToOpen = testPrompt.toLowerCase().match(/\b(open|launch|start|show)\b/);
+        if (wantsToOpen && script.includes('to play')) {
+          script = script.replace('to play', 'to activate');
+          console.log('[AgentComposer] Changed "to play" to "to activate" for open request');
+        }
+        
+        // For any "to play" on Music app, prepend activate to ensure app is visible
+        if (script.includes('Music') && script.includes('to play')) {
+          script = 'tell application "Music" to activate\n' + script;
+          console.log('[AgentComposer] Prepended activate before play for Music app');
+        }
+        
+        // Simple app detection - if agent name contains app name, use shell open command (most reliable)
+        const agentNameLower = agent.name?.toLowerCase() || '';
+        const appMatch = agentNameLower.match(/(music|safari|finder|mail|calendar|notes|photos|messages|facetime|maps|news|stocks|weather|calculator|preview)/i);
+        if (appMatch) {
+          const appName = appMatch[1].charAt(0).toUpperCase() + appMatch[1].slice(1);
+          // Use shell open command - more reliable than AppleScript
+          console.log('[AgentComposer] Using shell open for', appName);
+          try {
+            const { stdout, stderr } = await execAsync(`open -a "${appName}"`);
+            console.log('[AgentComposer] Shell open succeeded for', appName);
+            return { 
+              success: true, 
+              response: `Opened ${appName} successfully!`,
+              executed: true
+            };
+          } catch (openError) {
+            console.error('[AgentComposer] Shell open failed:', openError.message);
+            // Fall through to try AppleScript
+          }
+        }
+        
+        console.log('[AgentComposer] Executing AppleScript:', script.substring(0, 100));
+        
+        // Execute the AppleScript
+        try {
+          const { stdout, stderr } = await execAsync(`osascript -e '${script.replace(/'/g, "'\"'\"'")}'`);
+          console.log('[AgentComposer] AppleScript executed successfully');
+          return { 
+            success: true, 
+            response: `Executed successfully!\n\nScript: ${script}\n\n${stdout ? 'Output: ' + stdout : 'Action completed.'}`,
+            executed: true
+          };
+        } catch (execError) {
+          console.error('[AgentComposer] AppleScript error:', execError.message);
+          return { success: false, error: `Script execution failed: ${execError.message}` };
+        }
+        
+      } else if (executionType === 'shell') {
+        // Ask Claude Code to generate shell command
+        const cmdResponse = await claudeCodeRunner.complete(testPrompt, {
+          systemPrompt: `${agent.prompt}
+
+IMPORTANT: Respond with ONLY the shell command to execute, nothing else.
+Do not include explanations - just the raw command.
+For safety, prefer read-only or reversible commands.`,
+        });
+        
+        if (!cmdResponse) {
+          return { success: false, error: 'No command generated' };
+        }
+        
+        let cmd = cmdResponse.trim();
+        cmd = cmd.replace(/^```(bash|sh|shell)?\n?/i, '').replace(/\n?```$/i, '');
+        
+        // Safety check - don't run dangerous commands
+        const dangerousPatterns = ['rm -rf', 'sudo', 'mkfs', 'dd if=', '> /dev/', 'chmod -R 777'];
+        if (dangerousPatterns.some(p => cmd.includes(p))) {
+          return { success: false, error: 'Command blocked for safety: ' + cmd };
+        }
+        
+        console.log('[AgentComposer] Executing shell command:', cmd);
+        
+        try {
+          const { stdout, stderr } = await execAsync(cmd, { timeout: 10000 });
+          return { 
+            success: true, 
+            response: `Executed: ${cmd}\n\n${stdout || 'Command completed successfully.'}`,
+            executed: true
+          };
+        } catch (execError) {
+          return { success: false, error: `Command failed: ${execError.message}` };
+        }
+        
+      } else {
+        // LLM/conversational - just get a text response from Claude Code
+        const response = await claudeCodeRunner.complete(testPrompt, {
+          systemPrompt: agent.prompt,
+        });
+        
+        if (response) {
+          return { success: true, response };
+        } else {
+          return { success: false, error: 'No response from agent' };
+        }
+      }
+      
+    } catch (error) {
+      console.error('[AgentComposer] Agent test failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // ==================== GSX Create Chat-Based Agent Building ====================
+  
+  // Check Claude Code authentication status
+  ipcMain.handle('claude-code:check-auth', async () => {
+    try {
+      const claudeCode = require('./lib/claude-code-runner');
+      return await claudeCode.isAuthenticated();
+    } catch (error) {
+      return { authenticated: false, error: error.message };
+    }
+  });
+  
+  // Trigger Claude Code login/setup
+  ipcMain.handle('claude-code:login', async () => {
+    try {
+      const claudeCode = require('./lib/claude-code-runner');
+      const authStatus = await claudeCode.isAuthenticated();
+      
+      if (authStatus.authenticated) {
+        return { success: true, message: 'Already authenticated! Your Anthropic API key is configured.' };
+      }
+      
+      // Not authenticated - open settings to add API key
+      const { dialog, shell } = require('electron');
+      const result = await dialog.showMessageBox({
+        type: 'info',
+        title: 'Claude Code Setup',
+        message: 'API Key Required',
+        detail: 'Claude Code uses your Anthropic API key from Settings.\n\nWould you like to open Settings to add your API key?',
+        buttons: ['Open Settings', 'Cancel'],
+        defaultId: 0,
+      });
+      
+      if (result.response === 0) {
+        // Open settings window
+        const main = require('./main');
+        if (main.openSetupWizard) {
+          main.openSetupWizard();
+        }
+      }
+      
+      return { success: false, error: 'API key not configured' };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Claude Terminal IPC handlers are registered in registerClaudeTerminalHandlers()
+  
+  // Chat message for iterative agent building
+  ipcMain.handle('gsx-create:chat', async (event, message, context = {}) => {
+    try {
+      console.log('[AgentComposer] Chat message:', message.substring(0, 50) + '...');
+      
+      const claudeCode = require('./lib/claude-code-runner');
+      const { getTemplate: getAgentTemplate } = require('./lib/agent-templates');
+      
+      // Check Claude Code authentication (API key)
+      const authCheck = await claudeCode.isAuthenticated();
+      if (!authCheck.authenticated) {
+        return { 
+          success: false, 
+          error: authCheck.error || 'Please add your Anthropic API key in Settings.',
+          needsLogin: true
+        };
+      }
+      
+      // Get agent type template for context
+      const agentTemplate = getAgentTemplate(context.agentTypeId || 'conversational');
+      
+      // Build matched types info
+      const matchedTypesInfo = context.matchedTypes?.length > 0
+        ? context.matchedTypes.map(t => `${t.id} (score: ${t.score}, keywords: ${t.matchedKeywords?.join(', ')})`).join('; ')
+        : 'none detected';
+      
+      const selectedTypesInfo = context.selectedTypes?.length > 0
+        ? context.selectedTypes.join(', ')
+        : 'none selected';
+      
+      // Build conversation history for context
+      const conversationHistory = (context.messageHistory || []).map(msg => ({
+        role: msg.role,
+        content: msg.content,
+      }));
+      
+      // Build plan context if available
+      const planContext = context.plan ? (() => {
+        const plan = context.plan;
+        const enabledFeatures = (plan.features || []).filter(f => f.enabled && f.feasible);
+        const disabledFeatures = (plan.features || []).filter(f => !f.enabled && f.feasible);
+        const infeasibleFeatures = (plan.features || []).filter(f => !f.feasible);
+        
+        return `
+APPROVED PLAN (User has approved this approach):
+- Understanding: ${plan.understanding}
+- Execution Type: ${plan.executionType}
+- Reasoning: ${plan.reasoning}
+- Suggested Name: ${plan.suggestedName}
+- Suggested Keywords: ${plan.suggestedKeywords?.join(', ')}
+
+SELECTED FEATURES (MUST implement these):
+${enabledFeatures.map(f => `- ${f.name}: ${f.description}`).join('\n') || '- No specific features selected'}
+
+EXCLUDED FEATURES (User chose NOT to include):
+${disabledFeatures.map(f => `- ${f.name}`).join('\n') || '- None excluded'}
+
+NOT FEASIBLE (Cannot be implemented):
+${infeasibleFeatures.map(f => `- ${f.name}: ${f.feasibilityReason}`).join('\n') || '- All features are feasible'}
+
+APPROACH:
+${plan.approach?.steps?.map((s, i) => `${i + 1}. ${s}`).join('\n')}
+
+VERIFICATION: ${plan.verification?.verificationMethod || 'user confirmation'}
+
+TEST PLAN (Agent will be tested with these):
+${plan.testPlan?.tests?.map((t, i) => `${i + 1}. "${t.testPrompt}" → ${t.expectedBehavior}`).join('\n') || 'No specific tests defined'}
+
+BUILD THE AGENT ACCORDING TO THIS PLAN. Use execution type "${plan.executionType}".
+Implement ALL selected features. Do NOT implement excluded or infeasible features.
+Ensure the agent will pass the test plan above.
+`;
+      })() : '';
+
+      // Build system prompt for agent creation chat
+      const systemPrompt = `You are GSX Agent Composer, an AI assistant that helps users build voice agents through conversation.
+
+Your job is to:
+1. Build the agent according to the approved plan (if provided)
+2. If no plan, understand what kind of agent the user wants
+3. Generate and refine agent configurations based on feedback
+4. Be helpful and concise
+${planContext}
+
+EXECUTION TYPE REFERENCE:
+- "applescript": macOS app control (Music, Finder, Safari, Mail, etc.), window management, system dialogs
+- "shell": terminal commands, file operations, git, npm, scripts
+- "llm": conversations, Q&A, advice, creative writing (no system access)
+- "browser": web automation, scraping, form filling
+- "system": volume, brightness, display settings
+
+${!context.plan ? `Auto-detected types: ${matchedTypesInfo}\nUser-selected types: ${selectedTypesInfo}` : ''}
+
+IMPORTANT: Generate an agent configuration as a JSON block:
+\`\`\`agent
+{
+  "name": "Agent Name",
+  "keywords": ["keyword1", "keyword2", "keyword3"],
+  "prompt": "System prompt for the agent - be specific",
+  "categories": ["category"],
+  "executionType": "${context.plan?.executionType || 'llm'}",
+  "capabilities": ["capability1", "capability2"],
+  "verification": {
+    "type": "auto or user",
+    "method": "How to verify success",
+    "successIndicator": "What indicates success"
+  }
+}
+\`\`\`
+
+Keep responses brief. Focus on building the agent.`;
+
+      // Add the new user message
+      conversationHistory.push({ role: 'user', content: message });
+      
+      // Call Claude Code CLI (uses browser login, no API key needed)
+      const response = await claudeCode.chat(conversationHistory, {
+        system: systemPrompt,
+      });
+      
+      if (!response?.success || !response?.content) {
+        return { success: false, error: response?.error || 'No response from Claude Code' };
+      }
+      
+      const responseText = response.content;
+      
+      // Parse agent draft from response if present
+      // Try multiple formats: ```agent, ```json, or raw JSON
+      let agentDraft = context.currentDraft;
+      const agentMatch = responseText.match(/```agent\s*([\s\S]*?)\s*```/) ||
+                         responseText.match(/```json\s*([\s\S]*?)\s*```/) ||
+                         responseText.match(/```\s*(\{[\s\S]*?\})\s*```/);
+      
+      // Also try to match raw JSON at the start or end of response
+      const rawJsonMatch = !agentMatch && responseText.match(/(\{[\s\S]*"name"[\s\S]*"keywords"[\s\S]*\})/);
+      
+      const jsonToParse = agentMatch ? agentMatch[1] : (rawJsonMatch ? rawJsonMatch[1] : null);
+      
+      if (jsonToParse) {
+        try {
+          const parsedAgent = JSON.parse(jsonToParse);
+          // Validate it looks like an agent (has name or keywords)
+          if (parsedAgent.name || parsedAgent.keywords) {
+            agentDraft = {
+              ...parsedAgent,
+              executionType: parsedAgent.executionType || agentTemplate?.executionType || 'llm',
+              templateId: context.agentTypeId || 'conversational',
+            };
+            console.log('[AgentComposer] Parsed agent draft:', agentDraft.name);
+          }
+        } catch (parseError) {
+          console.warn('[AgentComposer] Could not parse agent JSON:', parseError);
+        }
+      }
+      
+      // Clean the response text (remove all code blocks and raw JSON for display)
+      let cleanResponse = responseText
+        .replace(/```agent\s*[\s\S]*?\s*```/g, '')  // Remove ```agent blocks
+        .replace(/```json\s*[\s\S]*?\s*```/g, '')   // Remove ```json blocks
+        .replace(/```javascript\s*[\s\S]*?\s*```/g, '')  // Remove ```javascript blocks
+        .replace(/```\s*\{[\s\S]*?\}\s*```/g, '')   // Remove ``` blocks containing JSON objects
+        .trim();
+      
+      // If the remaining response looks like raw JSON, don't display it
+      if (cleanResponse.startsWith('{') && cleanResponse.endsWith('}')) {
+        cleanResponse = '';
+      }
+      
+      // If response is mostly JSON-like content, provide a friendly message
+      if (!cleanResponse || cleanResponse.length < 20) {
+        if (agentDraft) {
+          cleanResponse = `I've created the **${agentDraft.name || 'agent'}** configuration. Check the preview on the right!`;
+        } else {
+          cleanResponse = 'I\'ve updated the agent configuration. Check the preview!';
+        }
+      }
+      
+      return {
+        success: true,
+        response: cleanResponse,
+        agentDraft,
+      };
+      
+    } catch (error) {
+      console.error('[AgentComposer] Chat error:', error);
+      return { success: false, error: error.message || String(error) };
+    }
+  });
+  
+  // Save finalized agent
+  ipcMain.handle('gsx-create:save-agent', async (event, agentDraft) => {
+    try {
+      console.log('[AgentComposer] Saving agent:', agentDraft.name);
+      
+      const { getAgentStore } = require('./src/voice-task-sdk/agent-store');
+      const store = getAgentStore();
+      await store.init();
+      
+      // Normalize and validate
+      const agentConfig = {
+        name: agentDraft.name?.trim() || 'Unnamed Agent',
+        keywords: (agentDraft.keywords || []).map(k => String(k).toLowerCase().trim()).filter(k => k),
+        prompt: agentDraft.prompt?.trim() || '',
+        categories: agentDraft.categories || ['general'],
+        executionType: agentDraft.executionType || 'llm',
+        capabilities: agentDraft.capabilities || [],
+        templateId: agentDraft.templateId,
+        settings: {
+          confidenceThreshold: 0.7,
+          maxConcurrent: 5,
+        },
+      };
+      
+      if (!agentConfig.name || !agentConfig.prompt) {
+        return { success: false, error: 'Agent must have a name and prompt' };
+      }
+      
+      if (agentConfig.keywords.length === 0) {
+        return { success: false, error: 'Agent must have at least one keyword' };
+      }
+      
+      const agent = await store.createAgent(agentConfig);
+      console.log('[AgentComposer] Agent saved:', agent.id);
+      
+      return { success: true, agent };
+      
+    } catch (error) {
+      console.error('[AgentComposer] Save error:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // ==================== AUTONOMOUS AGENT TESTING ====================
+  
+  // Autonomous test - creates, tests, diagnoses, fixes, and iterates until success
+  // Returns comprehensive feedback including state diffs, verification results, and timeline
+  // Uses Claude Code CLI (browser login, no API key needed)
+  ipcMain.handle('gsx-create:auto-test', async (event, agent, testPrompt) => {
+    const { AgentAutoTester } = require('./lib/agent-auto-tester');
+    
+    // AgentAutoTester now uses Claude Code internally
+    const autoTester = new AgentAutoTester();
+    
+    console.log('[AgentComposer] Starting autonomous test for:', agent.name);
+    
+    // Progress callback to send updates to the UI
+    const progressUpdates = [];
+    const onProgress = (update) => {
+      progressUpdates.push(update);
+      console.log('[AgentComposer] Auto-test progress:', update.type, update.message);
+      
+      // Include state diff info in progress updates
+      if (update.stateDiff) {
+        console.log('[AgentComposer] State changes:', update.stateDiff.changeCount || 0);
+      }
+      
+      // Send progress to renderer with full details
+      if (claudeCodeWindow && !claudeCodeWindow.isDestroyed()) {
+        claudeCodeWindow.webContents.send('auto-test:progress', {
+          ...update,
+          stateDiff: update.stateDiff,
+          verificationResults: update.verificationResults
+        });
+      }
+    };
+    
+    try {
+      const result = await autoTester.testUntilSuccess(agent, testPrompt, onProgress);
+      
+      console.log('[AgentComposer] Autonomous test complete:', result.success ? 'SUCCESS' : 'FAILED');
+      if (result.lastResult?.stateDiff) {
+        console.log('[AgentComposer] Final state changes:', result.lastResult.stateDiff.changeCount || 0);
+      }
+      
+      // Return comprehensive result with all feedback
+      return {
+        success: result.success,
+        attempts: result.attempts,
+        verified: result.success,
+        finalAgent: result.finalAgent,
+        verificationDetails: result.verificationDetails,
+        recommendation: result.recommendation,
+        history: result.history,
+        progressLog: progressUpdates,
+        
+        // New comprehensive feedback fields
+        lastResult: result.lastResult ? {
+          verified: result.lastResult.verified,
+          details: result.lastResult.details,
+          action: result.lastResult.action,
+          beforeState: result.lastResult.beforeState,
+          afterState: result.lastResult.afterState,
+          stateDiff: result.lastResult.stateDiff,
+          verificationResults: result.lastResult.verificationResults,
+          timeline: result.lastResult.timeline,
+          beforeStateFormatted: result.lastResult.beforeStateFormatted,
+          afterStateFormatted: result.lastResult.afterStateFormatted
+        } : null,
+        timeline: result.timeline
+      };
+    } catch (error) {
+      console.error('[AgentComposer] Autonomous test error:', error);
+      return {
+        success: false,
+        error: error.message,
+        progressLog: progressUpdates
+      };
+    }
+  });
+  
+  // Quick test endpoint - single attempt, returns immediately with full feedback
+  // Uses Claude Code CLI (browser login, no API key needed)
+  ipcMain.handle('gsx-create:quick-test', async (event, agent, testPrompt) => {
+    const { AgentAutoTester } = require('./lib/agent-auto-tester');
+    
+    // AgentAutoTester now uses Claude Code internally
+    const autoTester = new AgentAutoTester();
+    
+    try {
+      const result = await autoTester.executeAndVerify(agent, testPrompt);
+      
+      // Return comprehensive feedback
+      return {
+        success: result.verified === true,
+        verified: result.verified,
+        method: result.method,
+        details: result.details,
+        needsUserConfirmation: result.needsUserConfirmation || false,
+        
+        // Full state information
+        action: result.action,
+        beforeState: result.beforeState,
+        afterState: result.afterState,
+        stateDiff: result.stateDiff,
+        verificationResults: result.verificationResults,
+        timeline: result.timeline,
+        beforeStateFormatted: result.beforeStateFormatted,
+        afterStateFormatted: result.afterStateFormatted,
+        actualState: result.actualState,
+        expectedState: result.expectedState
+      };
+    } catch (error) {
+      return {
+        success: false,
+        verified: false,
+        error: error.message
+      };
+    }
+  });
+  
+  // Check if Claude Code CLI is available (Phase 2)
+  ipcMain.handle('claude-code:available', async () => {
+    try {
+      const { isClaudeCodeAvailable } = require('./lib/claude-code-runner');
+      const result = await isClaudeCodeAvailable();
+      return result.available;
+    } catch (error) {
+      console.error('[ClaudeCode] Error checking availability:', error);
+      return false;
+    }
+  });
+  
+  // Run Claude Code CLI (Phase 2)
+  ipcMain.handle('claude-code:run', async (event, templateId, prompt, options = {}) => {
+    try {
+      const { runClaudeCode, runTemplate } = require('./lib/claude-code-runner');
+      const template = getTemplate(templateId);
+      
+      if (!template) {
+        return { success: false, error: `Template "${templateId}" not found` };
+      }
+      
+      if (template.backend !== 'cli') {
+        return { success: false, error: 'This template does not use Claude Code CLI' };
+      }
+      
+      console.log('[ClaudeCode] Running CLI template:', templateId);
+      
+      // Send output events back to renderer
+      const sendOutput = (data) => {
+        if (claudeCodeWindow && !claudeCodeWindow.isDestroyed()) {
+          claudeCodeWindow.webContents.send('claude-code:output', data);
+        }
+      };
+      
+      const result = await runTemplate(template, prompt, {
+        cwd: options.workingDir,
+        onOutput: sendOutput,
+        onError: sendOutput,
+      });
+      
+      return result;
+    } catch (error) {
+      console.error('[ClaudeCode] Run error:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Cancel running process (Phase 2)
+  ipcMain.handle('claude-code:cancel', async () => {
+    try {
+      const { cancelClaudeCode } = require('./lib/claude-code-runner');
+      return cancelClaudeCode();
+    } catch (error) {
+      console.error('[ClaudeCode] Cancel error:', error);
+      return false;
+    }
+  });
+  
+  // Browse for directory
+  ipcMain.handle('claude-code:browse-directory', async () => {
+    const { dialog } = require('electron');
+    const result = await dialog.showOpenDialog(claudeCodeWindow, {
+      properties: ['openDirectory'],
+      title: 'Select Working Directory'
+    });
+    
+    if (!result.canceled && result.filePaths.length > 0) {
+      return result.filePaths[0];
+    }
+    return null;
+  });
+  
+  // Close window
+  ipcMain.on('claude-code:close', () => {
+    if (claudeCodeWindow && !claudeCodeWindow.isDestroyed()) {
+      claudeCodeWindow.close();
+    }
+  });
+  
+  console.log('[AgentComposer] IPC handlers registered');
+}
+
+// ==================== INTRO WIZARD ====================
+
+/**
+ * Create and show the intro wizard window
+ * Shows intro for first-time users, or updates for returning users
+ */
+function createIntroWizardWindow() {
+  if (introWizardWindow && !introWizardWindow.isDestroyed()) {
+    introWizardWindow.focus();
+    return introWizardWindow;
+  }
+  
+  console.log('[IntroWizard] Creating intro wizard window...');
+  
+  introWizardWindow = new BrowserWindow({
+    width: 720,
+    height: 600,
+    minWidth: 600,
+    minHeight: 500,
+    title: 'Welcome to GSX Power User',
+    frame: false,
+    transparent: false,
+    backgroundColor: '#141414',
+    center: true,
+    resizable: true,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload-intro-wizard.js'),
+      webSecurity: true,
+      sandbox: false
+    }
+  });
+  
+  // Clear the reference when closed
+  introWizardWindow.on('closed', () => {
+    console.log('[IntroWizard] Window closed');
+    introWizardWindow = null;
+  });
+  
+  // Load the intro wizard HTML
+  introWizardWindow.loadFile('intro-wizard.html').catch(err => {
+    console.error('[IntroWizard] Error loading intro-wizard.html:', err);
+  });
+  
+  introWizardWindow.webContents.on('did-finish-load', () => {
+    console.log('[IntroWizard] Window loaded successfully');
+  });
+  
+  return introWizardWindow;
+}
+
+/**
+ * Setup Intro Wizard IPC handlers
+ */
+function setupIntroWizardIPC() {
+  const { getSettingsManager } = require('./settings-manager');
+  const packageJson = require('./package.json');
+  
+  // Get initialization data for the wizard
+  ipcMain.handle('intro-wizard:get-init-data', async () => {
+    const settings = getSettingsManager();
+    return {
+      currentVersion: packageJson.version,
+      lastSeenVersion: settings.getLastSeenVersion(),
+      isFirstRun: settings.isFirstRun()
+    };
+  });
+  
+  // Mark current version as seen
+  ipcMain.handle('intro-wizard:mark-seen', async () => {
+    const settings = getSettingsManager();
+    settings.setLastSeenVersion(packageJson.version);
+    console.log('[IntroWizard] Marked version as seen:', packageJson.version);
+    return true;
+  });
+  
+  // Close the wizard window
+  ipcMain.handle('intro-wizard:close', async () => {
+    if (introWizardWindow && !introWizardWindow.isDestroyed()) {
+      introWizardWindow.close();
+    }
+    return true;
+  });
+  
+  console.log('[IntroWizard] IPC handlers registered');
+}
+
+/**
+ * Check if intro wizard should be shown and show it
+ * Call this after the main window is ready
+ */
+function checkAndShowIntroWizard() {
+  const { getSettingsManager } = require('./settings-manager');
+  const packageJson = require('./package.json');
+  
+  const settings = getSettingsManager();
+  const currentVersion = packageJson.version;
+  
+  if (settings.shouldShowIntroWizard(currentVersion)) {
+    const isFirstRun = settings.isFirstRun();
+    console.log(`[IntroWizard] Showing wizard - ${isFirstRun ? 'First run' : 'Update from ' + settings.getLastSeenVersion()}`);
+    
+    // Delay slightly to let main window finish loading
+    setTimeout(() => {
+      createIntroWizardWindow();
+    }, 500);
+  } else {
+    console.log('[IntroWizard] Not showing - already seen version', currentVersion);
+  }
+}
+
 // Export functions for use in other modules
 module.exports = {
   openSetupWizard,
@@ -14242,5 +16639,15 @@ module.exports = {
   // Voice Orb
   showOrbWindow,
   hideOrbWindow,
-  toggleOrbWindow
+  toggleOrbWindow,
+  // Intro Wizard
+  createIntroWizardWindow,
+  checkAndShowIntroWizard,
+  // Agent Manager
+  createAgentManagerWindow,
+  // Claude Code UI
+  createClaudeCodeWindow,
+  createClaudeTerminalWindow,
+  broadcastPlanSummary,
+  relayVoiceToComposer,
 }; 

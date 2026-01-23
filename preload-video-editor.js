@@ -487,9 +487,6 @@ contextBridge.exposeInMainWorld('spaces', {
 contextBridge.exposeInMainWorld('clipboard', {
   getTranscription: (itemId) => ipcRenderer.invoke('clipboard:get-transcription', itemId),
   getMetadata: (itemId) => {
-    // #region agent log
-    console.log('[DEBUG-H5] clipboard.getMetadata called from preload with itemId:', itemId);
-    // #endregion
     return ipcRenderer.invoke('clipboard:get-metadata', itemId);
   },
   updateMetadata: (itemId, updates) => ipcRenderer.invoke('clipboard:update-metadata', itemId, updates),

@@ -53,9 +53,6 @@ class AIWindowOverlay {
 
 // Auto-initialize when loaded
 if (typeof window !== 'undefined' && window.location) {
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ai-window-overlay.js:456',message:'Overlay script executing',data:{url:window.location.href,readyState:document.readyState,hasAPI:!!window.api},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
-  // #endregion
   
   // Detect AI service from URL
   let aiService = 'Unknown';
@@ -73,9 +70,6 @@ if (typeof window !== 'undefined' && window.location) {
     aiService = 'Grok';
   }
   
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ai-window-overlay.js:477',message:'AI service detected',data:{aiService,url},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
-  // #endregion
   
   // For ChatGPT, intercept fetch to capture streaming responses
   if (aiService === 'ChatGPT') {
@@ -323,15 +317,9 @@ if (typeof window !== 'undefined' && window.location) {
   // Initialize overlay after page loads
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ai-window-overlay.js:485',message:'Creating overlay (DOMContentLoaded)',data:{aiService},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
-      // #endregion
       window.aiOverlay = new AIWindowOverlay(aiService);
     });
   } else {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ai-window-overlay.js:491',message:'Creating overlay (immediate)',data:{aiService},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
-    // #endregion
     window.aiOverlay = new AIWindowOverlay(aiService);
   }
 }

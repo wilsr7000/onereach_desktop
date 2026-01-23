@@ -16,6 +16,7 @@ export interface PromptBuilderConfig {
   includeExamples?: boolean
   includeParams?: boolean
   maxHistoryLength?: number
+  includeProviderContext?: boolean
 }
 
 export interface BuiltPrompt {
@@ -41,6 +42,8 @@ IMPORTANT RULES:
 
 const DEFAULT_SYSTEM_SUFFIX = `
 Respond ONLY with valid JSON in this exact format:
+
+For HIGH confidence (>= 0.7):
 {
   "action": "action_name",
   "params": { "param_name": "value" },
@@ -48,7 +51,21 @@ Respond ONLY with valid JSON in this exact format:
   "priority": 1, 2, or 3 (1=low, 2=normal, 3=high)
 }
 
-If no action matches, respond with:
+For LOW confidence (< 0.7) when the command is ambiguous or could match multiple actions:
+{
+  "action": "best_guess_action",
+  "params": { "param_name": "value" },
+  "confidence": 0.0 to 1.0,
+  "priority": 2,
+  "clarificationNeeded": true,
+  "clarificationQuestion": "A short question to ask the user for clarification",
+  "clarificationOptions": [
+    { "label": "Option 1 description", "action": "action1", "params": {} },
+    { "label": "Option 2 description", "action": "action2", "params": {} }
+  ]
+}
+
+If no action matches at all, respond with:
 {
   "action": "unknown",
   "params": {},
@@ -63,6 +80,7 @@ export function createPromptBuilder(initialConfig: PromptBuilderConfig = {}): Pr
     includeExamples: true,
     includeParams: true,
     maxHistoryLength: 10,
+    includeProviderContext: true,
     ...initialConfig,
   }
 
@@ -116,8 +134,20 @@ export function createPromptBuilder(initialConfig: PromptBuilderConfig = {}): Pr
       parts.push(`Current user: ${ctx.currentUser.id} (role: ${ctx.currentUser.role})`)
     }
 
-    if (ctx.metadata && Object.keys(ctx.metadata).length > 0) {
-      parts.push(`Additional context: ${JSON.stringify(ctx.metadata)}`)
+    // Include provider context if available
+    if (config.includeProviderContext && ctx.metadata?.providers) {
+      const providers = ctx.metadata.providers as Record<string, { summary?: string }>
+      for (const [providerId, data] of Object.entries(providers)) {
+        if (data.summary) {
+          parts.push(`- ${data.summary}`)
+        }
+      }
+    } else if (ctx.metadata && Object.keys(ctx.metadata).length > 0) {
+      // Fallback to raw metadata display
+      const metadataStr = JSON.stringify(ctx.metadata)
+      if (metadataStr.length < 500) {
+        parts.push(`Additional context: ${metadataStr}`)
+      }
     }
 
     if (parts.length === 0) {

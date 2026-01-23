@@ -113,9 +113,6 @@ export class MultiTrackAudioManager {
       this._originalVideoMuted = this.videoElement.muted;
       this.videoElement.muted = true;
       this._multiTrackActive = true;
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MultiTrackAudioManager.js:_enableMultiTrack',message:'Multi-track enabled - VIDEO MUTED',data:{originalMuted:this._originalVideoMuted,videoNowMuted:true,trackCount:this.trackAudio.size},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H3'})}).catch(()=>{});
-      // #endregion
       console.log('[MultiTrackAudio] Multi-track mode enabled, video native audio muted');
     }
   }
@@ -475,14 +472,8 @@ export class MultiTrackAudioManager {
    * Set mute state for a track
    */
   setTrackMute(trackId, muted) {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MultiTrackAudioManager.js:setTrackMute',message:'setTrackMute called',data:{trackId,muted,hasTrackData:this.trackAudio.has(trackId),videoMuted:this.videoElement?.muted,multiTrackActive:this._multiTrackActive},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H3'})}).catch(()=>{});
-    // #endregion
     const trackData = this.trackAudio.get(trackId);
     if (!trackData) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MultiTrackAudioManager.js:setTrackMute:noTrackData',message:'Track not found in manager',data:{trackId,availableTrackIds:[...this.trackAudio.keys()]},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
-      // #endregion
       return;
     }
 

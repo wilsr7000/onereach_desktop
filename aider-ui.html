@@ -7550,9 +7550,6 @@
             },
             
             onVoiceTranscript(text, isFinal) {
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:onVoiceTranscript',message:'transcript received',data:{text:text?.substring(0,50),isFinal,state:this.voiceMode.state,active:this.voiceMode.active},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A,B'})}).catch(()=>{});
-                // #endregion
                 if (!this.voiceMode.active) return;
                 
                 if (!isFinal) {
@@ -7566,9 +7563,6 @@
                         this.updateVoiceStatus('Listening...');
                     }
                 } else {
-                    // #region agent log
-                    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:onVoiceTranscript-final',message:'FINAL transcript - routing decision',data:{text:text?.substring(0,50),state:this.voiceMode.state,willCallPostPrompt:this.voiceMode.state==='ready'},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A,B'})}).catch(()=>{});
-                    // #endregion
                     this.voiceMode.sounds?.play('tick');
                     if (this.voiceMode.state === 'ready') {
                         this.handlePostPromptSpeech(text);
@@ -7579,9 +7573,6 @@
             },
             
             async processVoiceTranscript(transcript) {
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:processVoiceTranscript',message:'processVoiceTranscript CALLED',data:{transcript:transcript?.substring(0,50),prevState:this.voiceMode.state},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A,B'})}).catch(()=>{});
-                // #endregion
                 console.log('[Voice] Processing:', transcript);
                 this.voiceMode.originalTranscript = transcript;
                 this.voiceMode.state = 'thinking';
@@ -7606,9 +7597,6 @@
                     const preview = String(refined).substring(0, 80);
                     await this.speakResponse(`I'll ${preview}. Say go to confirm.`);
                     
-                    // #region agent log
-                    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:processVoiceTranscript-stateToReady',message:'STATE CHANGING TO READY - now listening for go command',data:{prevState:this.voiceMode.state},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'F'})}).catch(()=>{});
-                    // #endregion
                     this.voiceMode.state = 'ready';
                     this.voiceMode.sounds?.play('ready');
                     this.updateVoiceStatus('Say "go" to execute');
@@ -7623,9 +7611,6 @@
             },
             
             async handlePostPromptSpeech(speech) {
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:handlePostPromptSpeech',message:'handlePostPromptSpeech CALLED',data:{speech:speech?.substring(0,50),state:this.voiceMode.state},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B,E'})}).catch(()=>{});
-                // #endregion
                 if (this.voiceMode.autoSendTimer) {
                     clearTimeout(this.voiceMode.autoSendTimer);
                     this.voiceMode.autoSendTimer = null;
@@ -7633,16 +7618,8 @@
                 this.stopTTS();
                 
                 const cmd = String(speech).trim().toLowerCase();
-                // #region agent log
-                const isGoCmd = /^(go|send|yes|do it|execute|build|okay|ok)$/i.test(cmd);
-                const isCancelCmd = /^(cancel|stop|nevermind|clear)$/i.test(cmd);
-                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:handlePostPromptSpeech-cmdCheck',message:'Command check',data:{rawSpeech:speech,cmd:cmd,isGoCmd,isCancelCmd,cmdLength:cmd.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'G'})}).catch(()=>{});
-                // #endregion
                 
                 if (isGoCmd) {
-                    // #region agent log
-                    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:handlePostPromptSpeech-goMatched',message:'GO COMMAND MATCHED - executing',data:{cmd},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'G'})}).catch(()=>{});
-                    // #endregion
                     await this.speakResponse('Building...');
                     this.voiceMode.sounds?.play('sent');
                     this.sendPrompt();
@@ -7658,9 +7635,6 @@
                     return;
                 }
                 
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:handlePostPromptSpeech-noMatch',message:'No command matched - treating as correction',data:{cmd,cmdLength:cmd.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'G'})}).catch(()=>{});
-                // #endregion
                 // Treat as correction
                 await this.refineWithCorrection(speech);
             },
@@ -7729,16 +7703,10 @@
             },
             
             async speakResponse(text) {
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:speakResponse-entry',message:'speakResponse CALLED',data:{text:text?.substring(0,80),hasPrevAudio:!!this.voiceMode.ttsAudio,state:this.voiceMode.state},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
-                // #endregion
                 console.log('[Voice] Speaking:', text);
                 try {
                     if (window.voiceTTS) {
                         const audioPath = await window.voiceTTS.speak(text, 'Rachel');
-                        // #region agent log
-                        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:speakResponse-audioPath',message:'TTS audio path received',data:{audioPath,hasPath:!!audioPath},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
-                        // #endregion
                         if (audioPath) {
                             this.voiceMode.ttsAudio = new Audio(audioPath);
                             if (this.voiceMode.orb) {
@@ -7749,9 +7717,6 @@
                                 this.voiceMode.ttsAudio.onerror = reject;
                                 this.voiceMode.ttsAudio.play();
                             });
-                            // #region agent log
-                            fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:speakResponse-done',message:'TTS playback COMPLETED',data:{text:text?.substring(0,40)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
-                            // #endregion
                         }
                     }
                 } catch (err) {
@@ -8196,9 +8161,6 @@
                 // Ensure spaceItems is an array (defensive)
                 const items = Array.isArray(this.spaceItems) ? this.spaceItems : [];
                 console.log('[GSX Create] loadJourneyMapsForMain: spaceItems count =', items.length);
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:loadJourneyMapsForMain',message:'Journey map dropdown population',data:{itemCount:items.length,spaceItemsIsArray:Array.isArray(this.spaceItems),spaceItemsRaw:typeof this.spaceItems,firstThreeItems:items.slice(0,3).map(i=>({id:i.id,name:i.name,title:i.title,fileName:i.fileName,preview:i.preview,type:i.type,keys:Object.keys(i)}))},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H2-H4'})}).catch(()=>{});
-                // #endregion
                 
                 // Populate journey map dropdown from space items (assets in the space)
                 const mainSelect = document.getElementById('mainJourneyMapSelect');
@@ -8212,9 +8174,6 @@
                             option.textContent = displayText;
                             option.dataset.content = item.content || '';
                             mainSelect.appendChild(option);
-                            // #region agent log
-                            fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:loadJourneyMapsForMain:forEach',message:'Option display text computed',data:{displayText,itemId:item.id,name:item.name,title:item.title,fileName:item.fileName,preview:item.preview},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
-                            // #endregion
                         });
                         console.log('[GSX Create] Journey map dropdown populated with', items.length, 'items');
                     } else {
@@ -8237,9 +8196,6 @@
             // Called when journey map is selected - enables style guide dropdown
             onJourneyMapSelected(journeyMapId) {
                 console.log('[GSX Create] onJourneyMapSelected:', journeyMapId);
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:onJourneyMapSelected',message:'Style guide dropdown triggered',data:{journeyMapId,spaceItemsCount:this.spaceItems?.length,firstThreeItems:(this.spaceItems||[]).slice(0,3).map(i=>({id:i.id,name:i.name,title:i.title,fileName:i.fileName,preview:i.preview,type:i.type}))},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H5'})}).catch(()=>{});
-                // #endregion
                 
                 const styleSelect = document.getElementById('mainStyleGuideSelect');
                 if (!styleSelect) {
@@ -8601,15 +8557,9 @@ ${content}`;
                 event.preventDefault();
                 event.stopPropagation();
                 event.currentTarget.classList.remove('drag-over');
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:handleFileDrop',message:'File drop event received',data:{hasRepoPath:!!this.repoPath,repoPath:this.repoPath,hasFiles:!!(event.dataTransfer&&event.dataTransfer.files),fileCount:event.dataTransfer?.files?.length||0},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H6'})}).catch(()=>{});
-                // #endregion
                 
                 if (!this.repoPath) {
                     this.addMessage('error', 'Please select a space first');
-                    // #region agent log
-                    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:handleFileDrop:noRepoPath',message:'No repoPath - cannot upload',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H6'})}).catch(()=>{});
-                    // #endregion
                     return;
                 }
                 
@@ -8621,9 +8571,6 @@ ${content}`;
             
             // Upload files to the space
             async uploadFiles(files) {
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:uploadFiles',message:'uploadFiles called',data:{fileCount:files.length,repoPath:this.repoPath,currentSpaceId:this.currentSpaceId,fileNames:files.map(f=>f.name)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H6'})}).catch(()=>{});
-                // #endregion
                 if (!this.repoPath) return;
                 
                 this.addMessage('system', `Uploading ${files.length} file(s)...`);
@@ -8681,9 +8628,6 @@ ${content}`;
                     }
                 }
                 
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:uploadFiles:complete',message:'Upload process complete',data:{uploaded,failed,uploadedFilesCount:uploadedFiles.length,uploadedFileNames:uploadedFiles.map(f=>f.name)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H6'})}).catch(()=>{});
-                // #endregion
                 
                 // Refresh file list
                 await this.loadProjectFiles();
@@ -8885,9 +8829,6 @@ ${content}`;
                 
                 try {
                     const result = await window.aider.getSpaceItems(this.currentSpaceId);
-                    // #region agent log
-                    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:loadSpaceItems',message:'IPC result structure',data:{success:result.success,hasItems:!!result.items,itemsIsArray:Array.isArray(result.items),itemCount:result.items?.length,firstItemKeys:result.items?.[0] ? Object.keys(result.items[0]) : [],firstItem:result.items?.[0]},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H3'})}).catch(()=>{});
-                    // #endregion
                     if (result.success) {
                         this.spaceItems = result.items || [];
                     console.log('[GSX Create] Space items:', this.spaceItems);
@@ -11567,9 +11508,6 @@ If unsure, reply with the middle position.`;
                     console.log('[TaskQueue] Completed:', task.text.substring(0, 40), 'in', task.duration, 's');
                     
                 } catch (e) {
-                    // #region agent log
-                    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:executeQueueTask-error',message:'TASK EXECUTION ERROR',data:{taskText:task?.text?.substring(0,50),taskType:task?.type,errorMessage:e?.message,errorName:e?.name,errorStack:e?.stack?.substring(0,300)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'ERROR'})}).catch(()=>{});
-                    // #endregion
                     console.error('[TaskQueue] Task failed:', e);
                     task.status = 'completed';  // Mark as complete anyway to continue
                     task.completedAt = Date.now();
@@ -11584,9 +11522,6 @@ If unsure, reply with the middle position.`;
             
             // Execute task based on its type
             async executeTaskByType(task) {
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:executeTaskByType',message:'Executing task by type',data:{taskType:task?.type,taskText:task?.text?.substring(0,50)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'TASKTYPE'})}).catch(()=>{});
-                // #endregion
                 
                 switch (task.type) {
                     case this.TASK_TYPES.EVALUATE:
@@ -12053,17 +11988,11 @@ If unsure, reply with the middle position.`;
             
             // Add user feedback as a task
             addUserFeedbackTask(feedbackText) {
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:addUserFeedbackTask',message:'Adding user feedback task',data:{feedbackText:feedbackText?.substring(0,50),taskType:this.TASK_TYPES?.USER,queueLengthBefore:this.taskQueue?.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'FEEDBACK'})}).catch(()=>{});
-                // #endregion
                 
                 const task = this.addTask(this.TASK_TYPES.USER, 
                     feedbackText, 
                     { source: 'user_feedback' });
                 
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:addUserFeedbackTask-result',message:'Task added result',data:{taskCreated:!!task,taskId:task?.id,queueLengthAfter:this.taskQueue?.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'FEEDBACK'})}).catch(()=>{});
-                // #endregion
                 
                 return task;
             },
@@ -18168,26 +18097,17 @@ Increase your budget or reduce the buffer to continue.`);
                 // Get or prompt for objective
                 let objective = this.cycleState.objective;
                 
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:startCycle-initial',message:'startCycle objective check',data:{hasExistingObjective:!!objective,objectiveType:typeof objective},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B,C'})}).catch(()=>{});
-                // #endregion
                 
                 if (!objective) {
                     // Try to extract from journey map
                     objective = await this.getObjectiveFromContext();
                     
-                    // #region agent log
-                    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:startCycle-fromContext',message:'getObjectiveFromContext returned',data:{objective:objective,objectiveType:typeof objective},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
-                    // #endregion
                 }
                 
                 if (!objective) {
                     // Prompt user for objective
                     objective = await this.promptForObjective();
                     
-                    // #region agent log
-                    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:startCycle-fromPrompt',message:'promptForObjective returned',data:{objective:objective,objectiveType:typeof objective},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
-                    // #endregion
                 }
                 
                 if (!objective) {
@@ -18207,24 +18127,15 @@ Increase your budget or reduce the buffer to continue.`);
             
             // Get objective from journey map or other context
             async getObjectiveFromContext() {
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:getObjectiveFromContext',message:'getObjectiveFromContext CALLED',data:{hasConstitutionalJourneyMap:!!this.constitutionalMemory?.journeyMap,hasEvaluatedJourneyMap:!!this.evaluatedJourneyMap?.content},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A,B,E'})}).catch(()=>{});
-                // #endregion
                 
                 // Try journey map first
                 const journeyMap = this.constitutionalMemory?.journeyMap || 
                                    this.evaluatedJourneyMap?.content;
                 
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:getObjectiveFromContext-journeyMap',message:'journeyMap value',data:{hasJourneyMap:!!journeyMap,journeyMapType:typeof journeyMap,journeyMapPreview:typeof journeyMap==='string'?journeyMap.substring(0,100):'not-string'},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'E'})}).catch(()=>{});
-                // #endregion
                 
                 if (journeyMap) {
                     const objective = await this.extractObjectiveFromJourneyMap(journeyMap);
                     
-                    // #region agent log
-                    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:getObjectiveFromContext-extracted',message:'extractObjectiveFromJourneyMap returned',data:{objective:objective,objectiveType:typeof objective,isString:typeof objective==='string'},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-                    // #endregion
                     
                     if (objective && typeof objective === 'string' && !objective.toLowerCase().includes('template')) {
                         return objective;
@@ -20050,9 +19961,6 @@ Based on the objective and feedback, the recommended approach is:
             async generateTaskBreakdown() {
                 const objective = this.cycleState.objective;
                 
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:generateTaskBreakdown',message:'generateTaskBreakdown CALLED',data:{objective:objective,objectiveType:typeof objective,isString:typeof objective==='string'},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'D'})}).catch(()=>{});
-                // #endregion
                 
                 const tasks = [];
                 
@@ -22053,9 +21961,6 @@ Categories: UX, Visual, Functionality, Accessibility, Performance`;
             
             // Extract objective from Journey Map
             async extractObjectiveFromJourneyMap(journeyMapContent) {
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:extractObjectiveFromJourneyMap',message:'extractObjectiveFromJourneyMap CALLED',data:{hasParam:!!journeyMapContent,paramType:typeof journeyMapContent,hasEvaluatedJourneyMap:!!this.evaluatedJourneyMap},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A,E'})}).catch(()=>{});
-                // #endregion
                 
                 // Use passed content or fall back to evaluatedJourneyMap
                 const content = journeyMapContent || this.evaluatedJourneyMap?.content;
@@ -22071,9 +21976,6 @@ Respond with ONLY the objective, no other text.`;
 
                     const objective = await this.callEvaluationAPI(systemPrompt, userPrompt);
                     
-                    // #region agent log
-                    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'aider-ui.html:extractObjectiveFromJourneyMap-result',message:'callEvaluationAPI returned',data:{objective:objective,objectiveType:typeof objective,isString:typeof objective==='string'},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-                    // #endregion
                     
                     return typeof objective === 'string' ? objective.trim() : null;
                 } catch (error) {

@@ -553,13 +553,57 @@ Respond with valid JSON only, no markdown formatting.`;
     if (!apiKey) {
       const { getSettingsManager } = require('./settings-manager');
       const settingsManager = getSettingsManager();
-      apiKey = settingsManager.get('llmApiKey') || 
-               settingsManager.get('anthropicApiKey') ||
-               settingsManager.get('llmConfig.anthropic.apiKey');
+      
+      // Try to find an Anthropic key - prioritize dedicated anthropicApiKey
+      const anthropicApiKey = settingsManager.get('anthropicApiKey');
+      const nestedKey = settingsManager.get('llmConfig.anthropic.apiKey');
+      const llmApiKey = settingsManager.get('llmApiKey');
+      const provider = settingsManager.get('llmProvider');
+      
+      // Helper to extract valid Anthropic key from a string (handles copy-paste errors)
+      const extractAnthropicKey = (str) => {
+        if (!str) return null;
+        // Look for sk-ant- pattern anywhere in the string
+        const match = str.match(/sk-ant-[A-Za-z0-9_-]+/);
+        return match ? match[0] : null;
+      };
+      
+      // Priority: dedicated anthropic key > nested config > llmApiKey (only if it's an Anthropic key)
+      const cleanAnthropicKey = extractAnthropicKey(anthropicApiKey);
+      const cleanNestedKey = extractAnthropicKey(nestedKey);
+      const cleanLlmKey = extractAnthropicKey(llmApiKey);
+      
+      if (cleanAnthropicKey) {
+        apiKey = cleanAnthropicKey;
+      } else if (cleanNestedKey) {
+        apiKey = cleanNestedKey;
+      } else if (cleanLlmKey) {
+        apiKey = cleanLlmKey;
+      } else if (llmApiKey && provider === 'anthropic') {
+        // User has llmApiKey set with anthropic provider, but key doesn't look like Anthropic format
+        // Still try it in case they have a valid key with different format
+        apiKey = llmApiKey;
+      }
+      
+      console.log('[ClaudeAPI] Key lookup:', {
+        hasAnthropicApiKey: !!anthropicApiKey,
+        cleanedAnthropicKey: !!cleanAnthropicKey,
+        hasNestedKey: !!nestedKey,
+        hasLlmApiKey: !!llmApiKey,
+        provider,
+        selectedKeyPrefix: apiKey?.substring(0, 12)
+      });
     }
     
     if (!apiKey) {
-      throw new Error('API key is required for chat');
+      throw new Error('Anthropic API key not found. Please add your Anthropic API key (starts with sk-ant-) in Settings > API Keys.');
+    }
+    
+    // Validate key format and give helpful error
+    if (!apiKey.startsWith('sk-ant-')) {
+      const keyType = apiKey.startsWith('sk-proj-') ? 'OpenAI' : 
+                      apiKey.startsWith('sk-') ? 'OpenAI' : 'unknown';
+      throw new Error(`Invalid API key format for Claude. You provided a ${keyType} key (${apiKey.substring(0, 10)}...), but Claude requires an Anthropic API key that starts with "sk-ant-". Please add your Anthropic key in Settings.`);
     }
 
     const {
@@ -814,6 +858,308 @@ Respond with valid JSON only, no markdown formatting.`;
         operation: 'analyze'
       });
       throw error;
+    }
+  }
+
+  // ==================== AGENT PLANNING ====================
+
+  /**
+   * Plan an agent - analyze what the user wants and determine the best approach
+   * @param {string} description - User's description of what they want
+   * @param {Object} availableTemplates - Available execution types and their capabilities
+   * @returns {Promise<Object>} Planning result with recommended approach
+   */
+  async planAgent(description, availableTemplates = {}) {
+    const templateInfo = Object.entries(availableTemplates).map(([id, t]) => 
+      `- ${id}: ${t.name} - ${t.description} (capabilities: ${t.capabilities?.join(', ')})`
+    ).join('\n');
+
+    const prompt = `Analyze this user request and plan the best approach for building a voice-activated agent:
+
+USER REQUEST: "${description}"
+
+AVAILABLE EXECUTION TYPES:
+${templateInfo || `
+- shell: Terminal commands, file operations, system tasks
+- applescript: macOS app control, UI automation, system features
+- nodejs: JavaScript code, API calls, data processing
+- llm: Conversational AI, Q&A, text generation (no system access)
+- browser: Web automation, scraping, form filling
+`}
+
+Analyze the request and identify ALL possible features this agent could have. For each feature, determine if it's feasible.
+
+Respond in JSON format:
+{
+  "understanding": "What the user is trying to accomplish in one sentence",
+  "executionType": "The best execution type for this task",
+  "reasoning": "Why this execution type is best (2-3 sentences)",
+  "features": [
+    {
+      "id": "feature_id",
+      "name": "Feature Name",
+      "description": "What this feature does",
+      "enabled": true,
+      "feasible": true,
+      "feasibilityReason": "Why it can or can't be done",
+      "priority": "core|recommended|optional",
+      "requiresPermission": false
+    }
+  ],
+  "approach": {
+    "steps": ["Step 1", "Step 2", ...],
+    "requirements": ["What's needed - apps, permissions, etc"],
+    "challenges": ["Potential issues to handle"]
+  },
+  "suggestedName": "Short agent name (2-4 words)",
+  "suggestedKeywords": ["keyword1", "keyword2", ...],
+  "verification": {
+    "canAutoVerify": true/false,
+    "verificationMethod": "How to check if it worked",
+    "expectedOutcome": "What success looks like"
+  },
+  "testPlan": {
+    "tests": [
+      {
+        "id": "test_id",
+        "name": "Test Name",
+        "description": "What this test verifies",
+        "testPrompt": "The voice command to test with",
+        "expectedBehavior": "What should happen",
+        "verificationMethod": "auto-app-state | auto-file-check | auto-process-check | manual",
+        "verificationDetails": {
+          "appName": "App name if checking app state",
+          "checkType": "running | frontmost | player-state | file-exists",
+          "expectedValue": "The expected result"
+        },
+        "priority": "critical | important | nice-to-have"
+      }
+    ],
+    "setupSteps": ["Any setup needed before testing"],
+    "cleanupSteps": ["Cleanup after testing"]
+  },
+  "confidence": 0.0-1.0
+}
+
+TEST PLAN GUIDELINES:
+- Include 2-5 tests covering core functionality
+- "critical" tests must pass for agent to be considered working
+- "important" tests should pass but aren't blockers
+- "nice-to-have" tests are optional
+- Use "auto-*" verification methods when possible (auto-app-state for apps, auto-file-check for files)
+- Use "manual" only when automatic verification isn't possible
+
+FEATURE GUIDELINES:
+- "core" features are essential to the agent's purpose (always enabled by default)
+- "recommended" features enhance the agent (enabled by default)
+- "optional" features are nice-to-have (disabled by default)
+- Set feasible=false for features that cannot be implemented (e.g., require APIs we don't have, need hardware we can't access)
+- Include 4-8 features total, covering the main functionality and potential enhancements`;
+
+    try {
+      const response = await this.complete(prompt, {
+        maxTokens: 8000,  // Large buffer for complex plans with many features and test cases
+        temperature: 0.2
+      });
+      
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        try {
+          const plan = JSON.parse(jsonMatch[0]);
+          return {
+            success: true,
+            plan,
+            raw: response
+          };
+        } catch (parseError) {
+          console.error('[ClaudeAPI] Plan JSON parse error:', parseError.message);
+          console.error('[ClaudeAPI] Attempted to parse:', jsonMatch[0].substring(0, 500) + '...');
+          
+          // Try to salvage a partial plan
+          return {
+            success: false,
+            error: `JSON parse error: ${parseError.message}. The response may have been truncated.`,
+            raw: response,
+            partialJson: jsonMatch[0].substring(0, 1000)
+          };
+        }
+      }
+      
+      return {
+        success: false,
+        error: 'Could not parse planning response',
+        raw: response
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  // ==================== AGENT DIAGNOSTIC METHODS ====================
+
+  /**
+   * Diagnose why an agent action failed
+   * @param {Object} agent - The agent configuration
+   * @param {string} testPrompt - What was being tested
+   * @param {Object} result - The verification result
+   * @returns {Promise<Object>} Diagnosis with rootCause, category, and suggestedFix
+   */
+  async diagnoseAgentFailure(agent, testPrompt, result) {
+    const prompt = `Analyze this agent test failure and identify the root cause:
+
+AGENT:
+- Name: ${agent.name}
+- Type: ${agent.executionType}
+- Prompt: ${agent.prompt?.substring(0, 500)}
+
+TEST INPUT: ${testPrompt}
+
+FAILURE RESULT:
+- Verification Method: ${result.method}
+- Details: ${result.details}
+${result.script ? `- Script Used: ${result.script}` : ''}
+${result.error ? '- Execution Error: true' : ''}
+
+Analyze the failure and respond in this JSON format:
+{
+  "summary": "One-line description of what went wrong",
+  "rootCause": "Technical explanation of why it failed",
+  "category": "one of: command-syntax | missing-prerequisite | wrong-approach | permission-denied | app-state-issue | timing-issue | other",
+  "confidence": 0.0-1.0,
+  "suggestedFix": "Specific change to make"
+}`;
+
+    try {
+      const response = await this.complete(prompt, {
+        maxTokens: 500,
+        temperature: 0.1
+      });
+      
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0]);
+      }
+      
+      return {
+        summary: 'Diagnosis parsing failed',
+        rootCause: response,
+        category: 'other',
+        confidence: 0.3,
+        suggestedFix: 'Manual review required'
+      };
+    } catch (error) {
+      return {
+        summary: 'Diagnosis error',
+        rootCause: error.message,
+        category: 'other',
+        confidence: 0,
+        suggestedFix: 'Unable to diagnose - check logs manually'
+      };
+    }
+  }
+
+  /**
+   * Generate a fix for a failed agent based on diagnosis
+   * @param {Object} agent - The agent configuration
+   * @param {string} testPrompt - What was being tested
+   * @param {Object} diagnosis - The failure diagnosis
+   * @returns {Promise<Object>} Fix with canFix, description, and changes
+   */
+  async generateAgentFix(agent, testPrompt, diagnosis) {
+    const prompt = `Generate a fix for this agent failure:
+
+AGENT:
+${JSON.stringify(agent, null, 2)}
+
+DIAGNOSIS:
+${JSON.stringify(diagnosis, null, 2)}
+
+TEST PROMPT: ${testPrompt}
+
+Based on the diagnosis, generate a specific fix. Respond in JSON format:
+{
+  "canFix": true or false,
+  "reason": "Why the fix will work (or why it can't be fixed)",
+  "description": "Human-readable description of the fix",
+  "fixType": "script-change | prompt-change | approach-change | add-prerequisite",
+  "changes": {
+    "newScript": "The corrected script/command if applicable (or null)",
+    "newPrompt": "Updated agent prompt if needed (or null)",
+    "preCommands": ["Commands to run before the main action"],
+    "postCommands": ["Commands to run after for verification"],
+    "executionType": "Changed execution type if needed (or null)"
+  }
+}`;
+
+    try {
+      const response = await this.complete(prompt, {
+        maxTokens: 800,
+        temperature: 0.1
+      });
+      
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0]);
+      }
+      
+      return {
+        canFix: false,
+        reason: 'Could not generate structured fix',
+        description: response
+      };
+    } catch (error) {
+      return {
+        canFix: false,
+        reason: error.message,
+        description: 'Fix generation failed'
+      };
+    }
+  }
+
+  /**
+   * Generate an optimized script for an agent action
+   * @param {Object} agent - The agent configuration
+   * @param {string} testPrompt - What to do
+   * @param {string} scriptType - 'applescript' or 'shell'
+   * @param {Array} previousAttempts - History of failed attempts
+   * @returns {Promise<string>} The generated script
+   */
+  async generateOptimizedScript(agent, testPrompt, scriptType, previousAttempts = []) {
+    const failureContext = previousAttempts.length > 0
+      ? `\n\nPREVIOUS FAILURES (avoid these mistakes):\n${previousAttempts.map((a, i) => 
+          `${i + 1}. ${a.script || 'N/A'} -> Failed: ${a.details}`
+        ).join('\n')}`
+      : '';
+
+    const typeInstructions = scriptType === 'applescript'
+      ? `Generate AppleScript code. Use proper "tell application" syntax. For Music app, remember to select a track before playing.`
+      : `Generate a shell command. Use safe commands, no sudo or rm -rf.`;
+
+    const prompt = `${typeInstructions}
+
+AGENT: ${agent.name}
+TASK: ${testPrompt}
+${failureContext}
+
+Generate ONLY the ${scriptType} code, no explanations or markdown:`;
+
+    try {
+      const response = await this.complete(prompt, {
+        maxTokens: 300,
+        temperature: 0.1
+      });
+      
+      // Clean up response
+      let script = response.trim();
+      script = script.replace(/^```(applescript|bash|sh|shell)?\n?/i, '');
+      script = script.replace(/\n?```$/i, '');
+      
+      return script;
+    } catch (error) {
+      throw new Error(`Script generation failed: ${error.message}`);
     }
   }
 }

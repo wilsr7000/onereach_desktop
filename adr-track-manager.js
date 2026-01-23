@@ -22,9 +22,6 @@
   
   class ADRTrackManager {
     constructor(appContext) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'adr-track-manager.js:ADRTrackManager:constructor',message:'ADRTrackManager constructor called',data:{hasAppContext:!!appContext},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
-      // #endregion
       this.app = appContext;
 
       // Track type constants
@@ -106,9 +103,6 @@
      * @returns {object|null} The new duplicated track or null if failed
      */
     duplicateTrack(trackId, options = {}) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'adr-track-manager.js:duplicateTrack:entry',message:'duplicateTrack called',data:{trackId,options,hasCurrentProject:!!this.app.currentProject,audioTracksCount:this.app.audioTracks?.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H2'})}).catch(()=>{});
-      // #endregion
       const sourceTrack = this.findTrack(trackId);
       if (!sourceTrack) {
         console.error('[ADRTrackManager] Cannot duplicate: track not found', trackId);
@@ -165,9 +159,6 @@
 
       // Add to tracks array
       this.app.audioTracks.push(newTrack);
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'adr-track-manager.js:duplicateTrack:afterPush',message:'Track pushed to audioTracks',data:{newTrackId,audioTracksCount:this.app.audioTracks?.length,trackIds:this.app.audioTracks?.map(t=>t.id)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
-      // #endregion
 
       // Render the new track in UI
       if (this.app.renderAudioTrack) {
@@ -202,9 +193,6 @@
         });
       }
       
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'adr-track-manager.js:duplicateTrack:beforeReturn',message:'About to return - checking if saveProject will be called',data:{newTrackId,hasSaveProject:typeof this.app.saveProject === 'function',hasCurrentProject:!!this.app.currentProject},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H5'})}).catch(()=>{});
-      // #endregion
       
       return newTrack;
     }
@@ -701,9 +689,6 @@
      * @param {string} voiceName - Name for the custom voice
      */
     async createCustomVoice(trackId, voiceName) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'adr-track-manager.js:createCustomVoice:entry',message:'ADRTrackManager createCustomVoice called',data:{trackId,voiceName},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
-      // #endregion
       const track = this.findTrack(trackId);
       if (!track) {
         throw new Error('Track not found');
@@ -715,9 +700,6 @@
       const transcript = this.app.transcriptSegments || [];
       const video = document.getElementById('videoPlayer');
       const totalDuration = video?.duration || this.app.videoInfo?.duration || 60;
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'adr-track-manager.js:createCustomVoice:context',message:'Voice creation context',data:{trackId,trackName:track.name,trackType:track.type,transcriptLength:transcript.length,totalDuration,hasVideoPath:!!this.app.videoPath},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
-      // #endregion
 
       // Calculate available audio duration
       let availableDuration = totalDuration;
@@ -857,9 +839,6 @@
     _selectOptimalVoiceSegments(transcript, track, options = {}) {
       const { targetDuration = 180, maxDuration = 300, preferSpeaker = null } = options;
       const totalDuration = this.app.videoInfo?.duration || 60;
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'adr-track-manager.js:_selectOptimalVoiceSegments:entry',message:'Selecting optimal voice segments',data:{transcriptLength:transcript?.length||0,trackId:track?.id,targetDuration,maxDuration,preferSpeaker,totalDuration},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
-      // #endregion
 
       // No transcript - return single segment capped at maxDuration
       if (!transcript || transcript.length === 0) {
@@ -2101,9 +2080,6 @@
 
   class TrackContextMenu {
     constructor(appContext, adrManager) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'adr-track-manager.js:TrackContextMenu:constructor:start',message:'TrackContextMenu constructor called',data:{hasAppContext:!!appContext,hasAdrManager:!!adrManager},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
-      // #endregion
       this.app = appContext;
       this.adrManager = adrManager;
       this.menuElement = null;
@@ -2113,9 +2089,6 @@
       this._setupEventListeners();
       this._attachToExistingTracks();
 
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'adr-track-manager.js:TrackContextMenu:constructor:end',message:'TrackContextMenu constructor completed',data:{menuElementCreated:!!this.menuElement},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
-      // #endregion
       console.log('[TrackContextMenu] Initialized');
     }
 
@@ -2276,9 +2249,6 @@
      * Build menu items based on track type
      */
     _buildMenuItems(track) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'adr-track-manager.js:_buildMenuItems:start',message:'Building menu items',data:{trackId:track?.id,trackType:track?.type},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
-      // #endregion
       const items = [];
       const isOriginal = track.type === 'original';
       const displayInfo = this.adrManager.getTrackDisplayInfo(track);
@@ -2365,9 +2335,6 @@
         label: 'Create Custom Voice from Track',
         action: 'create-voice'
       });
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'adr-track-manager.js:_buildMenuItems',message:'Built menu items with Create Custom Voice',data:{trackId:track.id,trackName:track.name,trackType:track.type,itemCount:items.length,hasCreateVoice:items.some(i=>i.action==='create-voice')},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
-      // #endregion
 
       // Language/Voice transformation section
       items.push({ type: 'divider' });
@@ -2568,9 +2535,6 @@
      * Create custom voice from track audio
      */
     async _createCustomVoice(trackId) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'adr-track-manager.js:_createCustomVoice:entry',message:'TrackContextMenu _createCustomVoice called',data:{trackId},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
-      // #endregion
       const track = this.adrManager.findTrack(trackId);
       if (!track) return;
 
@@ -2581,21 +2545,12 @@
         '(This will clone the voice from this track\'s audio)',
         defaultName
       );
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'adr-track-manager.js:_createCustomVoice:afterPrompt',message:'User responded to voice name prompt',data:{trackId,defaultName,voiceName:voiceName||'(cancelled)'},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
-      // #endregion
       if (!voiceName || !voiceName.trim()) return;
 
       try {
         // Call the ADR manager method
         await this.adrManager.createCustomVoice(trackId, voiceName.trim());
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'adr-track-manager.js:_createCustomVoice:success',message:'Voice creation completed successfully',data:{trackId,voiceName},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
-        // #endregion
       } catch (error) {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'adr-track-manager.js:_createCustomVoice:error',message:'Voice creation failed',data:{trackId,voiceName,error:error.message},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H5'})}).catch(()=>{});
-        // #endregion
         console.error('[TrackContextMenu] Create voice error:', error);
         this.app.showToast && this.app.showToast('error', 'Voice creation failed: ' + error.message);
       }

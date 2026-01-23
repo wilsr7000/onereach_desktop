@@ -1,5 +1,14 @@
-const { dialog: electronDialog, BrowserWindow } = require('electron');
+const { BrowserWindow } = require('electron');
 const path = require('path');
+
+// Lazy-load dialog to avoid issues when required before app is ready
+let electronDialog = null;
+function getElectronDialog() {
+  if (!electronDialog) {
+    electronDialog = require('electron').dialog;
+  }
+  return electronDialog;
+}
 
 /**
  * Wrapped Dialog Module
@@ -10,19 +19,12 @@ const path = require('path');
 
 class WrappedDialog {
   constructor() {
-    // Preserve all original methods except showOpenDialog
-    Object.keys(electronDialog).forEach(key => {
-      if (key !== 'showOpenDialog' && typeof electronDialog[key] === 'function') {
-        this[key] = electronDialog[key].bind(electronDialog);
-      }
-    });
-    
-    // Copy non-function properties
-    Object.keys(electronDialog).forEach(key => {
-      if (typeof electronDialog[key] !== 'function') {
-        this[key] = electronDialog[key];
-      }
-    });
+    // Methods are proxied on-demand, no initialization needed
+  }
+  
+  // Proxy any method calls to the real dialog
+  _getDialog() {
+    return getElectronDialog();
   }
 
   /**
@@ -35,6 +37,8 @@ class WrappedDialog {
    * @returns {Promise<{canceled: boolean, filePaths: string[], bookmarks?: string[]}>}
    */
   async showOpenDialog(windowOrOptions, maybeOptions) {
+    const dialog = this._getDialog();
+    
     // Parse arguments (Electron supports both signatures)
     let browserWindow, options;
     if (maybeOptions) {
@@ -55,11 +59,11 @@ class WrappedDialog {
     if (!spacesEnabled) {
       // Feature disabled - use original Electron dialog
       console.log('[Wrapped Dialog] Spaces integration disabled, using native dialog');
-      return await electronDialog.showOpenDialog(browserWindow, options);
+      return await dialog.showOpenDialog(browserWindow, options);
     }
 
     // Show our custom dialog with instructions
-    const choice = await electronDialog.showMessageBox(browserWindow, {
+    const choice = await dialog.showMessageBox(browserWindow, {
       type: 'question',
       buttons: ['Choose from Computer', 'Choose from Spaces', 'Cancel'],
       defaultId: 0,
@@ -73,7 +77,7 @@ class WrappedDialog {
     if (choice.response === 0) {
       // Choose from Computer - use original Electron dialog
       console.log('[Wrapped Dialog] User chose: Computer');
-      return await electronDialog.showOpenDialog(browserWindow, options);
+      return await dialog.showOpenDialog(browserWindow, options);
       
     } else if (choice.response === 1) {
       // Choose from Spaces
@@ -103,19 +107,19 @@ class WrappedDialog {
    * Original methods pass through directly
    */
   async showSaveDialog(windowOrOptions, maybeOptions) {
-    return await electronDialog.showSaveDialog(windowOrOptions, maybeOptions);
+    return await this._getDialog().showSaveDialog(windowOrOptions, maybeOptions);
   }
   
   async showMessageBox(windowOrOptions, maybeOptions) {
-    return await electronDialog.showMessageBox(windowOrOptions, maybeOptions);
+    return await this._getDialog().showMessageBox(windowOrOptions, maybeOptions);
   }
   
-  async showErrorBox(title, content) {
-    return electronDialog.showErrorBox(title, content);
+  showErrorBox(title, content) {
+    return this._getDialog().showErrorBox(title, content);
   }
   
   async showCertificateTrustDialog(windowOrOptions, maybeOptions) {
-    return await electronDialog.showCertificateTrustDialog(windowOrOptions, maybeOptions);
+    return await this._getDialog().showCertificateTrustDialog(windowOrOptions, maybeOptions);
   }
 }
 

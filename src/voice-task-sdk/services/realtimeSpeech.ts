@@ -265,8 +265,6 @@ export class RealtimeSpeechService {
 
         case 'input_audio_buffer.speech_started':
           console.log('[RealtimeSpeech] Speech detected')
-          // #region agent log
-          // #endregion
           
           // BARGE-IN: If TTS is playing and user starts speaking, interrupt it
           if (this.ttsPlaying && this.onBargeIn) {
@@ -281,8 +279,6 @@ export class RealtimeSpeechService {
 
         case 'input_audio_buffer.speech_stopped':
           console.log('[RealtimeSpeech] Speech ended')
-          // #region agent log
-          // #endregion
           this.config.onEvent({ type: 'speech_stopped' })
           // Note: Don't manually commit - OpenAI's server-side VAD automatically 
           // commits the buffer when speech stops (with turn_detection enabled)
@@ -307,8 +303,6 @@ export class RealtimeSpeechService {
         case 'conversation.item.input_audio_transcription.completed':
           if (data.transcript) {
             console.log('[RealtimeSpeech] Transcription complete:', data.transcript)
-            // #region agent log
-            // #endregion
             this.config.onEvent({ 
               type: 'transcript_final', 
               transcript: data.transcript 

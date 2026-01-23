@@ -701,6 +701,7 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
   const isMac = process.platform === 'darwin';
   const startTime = Date.now();
   
+  
   // PERFORMANCE: Use cached menu data instead of reading files every time
   const cachedData = menuCache.loadAll();
   
@@ -2233,12 +2234,91 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
           }
         },
         {
+          label: 'Manage Agents...',
+          click: () => {
+            try {
+              const main = require('./main');
+              if (main.createAgentManagerWindow) {
+                main.createAgentManagerWindow();
+              }
+            } catch (error) {
+              console.error('[Menu] Agent Manager error:', error);
+            }
+          }
+        },
+        {
+          label: 'Create Agent with AI...',
+          accelerator: 'CmdOrCtrl+Shift+G',
+          click: () => {
+            try {
+              const main = require('./main');
+              if (main.createClaudeCodeWindow) {
+                main.createClaudeCodeWindow();
+              }
+            } catch (error) {
+              console.error('[Menu] Claude Code error:', error);
+            }
+          }
+        },
+        {
+          label: 'Claude Code Status...',
+          click: async () => {
+            try {
+              const { dialog } = require('electron');
+              const claudeCode = require('./lib/claude-code-runner');
+              
+              const authStatus = await claudeCode.isAuthenticated();
+              
+              if (authStatus.authenticated) {
+                dialog.showMessageBox({
+                  type: 'info',
+                  title: 'Claude Code',
+                  message: 'Authenticated',
+                  detail: 'Claude Code is ready to use with your Anthropic API key.',
+                  buttons: ['OK']
+                });
+              } else {
+                const result = await dialog.showMessageBox({
+                  type: 'warning',
+                  title: 'Claude Code',
+                  message: 'Not Configured',
+                  detail: authStatus.error || 'Please add your Anthropic API key in Settings.',
+                  buttons: ['Open Settings', 'Cancel'],
+                  defaultId: 0,
+                });
+                
+                if (result.response === 0) {
+                  const main = require('./main');
+                  if (main.openSetupWizard) {
+                    main.openSetupWizard();
+                  }
+                }
+              }
+            } catch (error) {
+              console.error('[Menu] Claude Code status error:', error);
+            }
+          }
+        },
+        {
+          label: 'Claude Code Login...',
+          click: () => {
+            try {
+              const main = require('./main');
+              if (main.createClaudeTerminalWindow) {
+                main.createClaudeTerminalWindow();
+              } else {
+                console.error('[Menu] createClaudeTerminalWindow not found in main');
+              }
+            } catch (error) {
+              console.error('[Menu] Claude Terminal error:', error);
+            }
+          }
+        },
+        { type: 'separator' },
+        {
           label: 'GSX Create',
           accelerator: 'CommandOrControl+Shift+A',
           click: () => {
-            // #region agent log
-            console.log('[GSX-DEBUG] H0: GSX Create menu item clicked - opening window');
-            // #endregion
             // Get screen dimensions for larger window
             const { screen } = require('electron');
             const primaryDisplay = screen.getPrimaryDisplay();
@@ -2255,14 +2335,6 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
               }
             });
             
-            // #region agent log
-            aiderWindow.webContents.on('did-finish-load', () => {
-              console.log('[GSX-DEBUG] H0: GSX Create window finished loading');
-            });
-            aiderWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
-              console.log('[GSX-DEBUG] H0: GSX Create window FAILED to load:', errorCode, errorDescription);
-            });
-            // #endregion
             aiderWindow.loadFile('aider-ui.html');
           }
         },
@@ -2360,7 +2432,7 @@ Right-click anywhere: Paste to Black Hole`;
             dialog.showMessageBox(focusedWindow, {
               type: 'info',
               title: 'Keyboard Shortcuts',
-              message: 'OneReach.ai Keyboard Shortcuts',
+              message: 'GSX Power User Keyboard Shortcuts',
               detail: shortcutsMessage,
               buttons: ['OK']
             });
@@ -2663,7 +2735,7 @@ END OF AUTOMATED REPORT
               
               if (result.response === 0) {
                 // Open GitHub issues page with pre-filled title
-                const issueTitle = `Bug Report ${reportId} - Onereach.ai v${systemInfo.app_version}`;
+                const issueTitle = `Bug Report ${reportId} - GSX Power User v${systemInfo.app_version}`;
                 const encodedTitle = encodeURIComponent(issueTitle);
                 const encodedBody = encodeURIComponent(emailBody);
                 
@@ -2682,7 +2754,7 @@ END OF AUTOMATED REPORT
                 
               } else if (result.response === 1) {
                 // Open email client with everything pre-filled
-                const subject = `Bug Report ${reportId} - Onereach.ai v${systemInfo.app_version}`;
+                const subject = `Bug Report ${reportId} - GSX Power User v${systemInfo.app_version}`;
                 const encodedSubject = encodeURIComponent(subject);
                 const encodedBody = encodeURIComponent(emailBody);
                 
@@ -3183,8 +3255,8 @@ END OF AUTOMATED REPORT
           click: () => {
             console.log('[Share] Share via Email clicked');
             const { shell } = require('electron');
-            const subject = encodeURIComponent('Check out Onereach.ai Desktop');
-            const body = encodeURIComponent('I\'m using Onereach.ai Desktop - a powerful app for AI productivity. Download it here: https://github.com/wilsr7000/onereach_desktop/releases/latest');
+            const subject = encodeURIComponent('Check out GSX Power User');
+            const body = encodeURIComponent('I\'m using GSX Power User - a powerful app for AI productivity. Download it here: https://github.com/wilsr7000/onereach_desktop/releases/latest');
             shell.openExternal(`mailto:?subject=${subject}&body=${body}`);
           }
         },

@@ -278,13 +278,7 @@ export class ElevenLabsService {
    * @returns {Promise<Array>} Array of voice objects
    */
   async listVoices() {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ElevenLabsService.js:listVoices',message:'listVoices called',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
     const apiKey = this.getApiKey();
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ElevenLabsService.js:listVoices-apiKey',message:'API key check',data:{hasKey:!!apiKey,keyLength:apiKey?.length||0},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
     if (!apiKey) {
       throw new Error('ElevenLabs API key not found');
     }

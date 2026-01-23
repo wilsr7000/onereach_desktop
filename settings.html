@@ -209,6 +209,134 @@
             margin: 30px 0;
         }
         
+        /* API Keys Card Grid */
+        .api-keys-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 16px;
+            margin-top: 16px;
+        }
+        
+        .api-key-card {
+            background: #252525;
+            border: 1px solid #3e3e3e;
+            border-radius: 8px;
+            padding: 16px;
+            transition: border-color 0.2s;
+        }
+        
+        .api-key-card:hover {
+            border-color: #4e4e4e;
+        }
+        
+        .api-key-card.configured {
+            border-color: rgba(0, 200, 83, 0.3);
+        }
+        
+        .api-key-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+        
+        .api-key-card-title {
+            font-size: 14px;
+            font-weight: 500;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .api-key-card-badge {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+        
+        .badge-required {
+            background: rgba(139, 92, 246, 0.2);
+            color: #a78bfa;
+        }
+        
+        .badge-optional {
+            background: rgba(100, 100, 100, 0.3);
+            color: #888;
+        }
+        
+        .badge-configured {
+            background: rgba(0, 200, 83, 0.15);
+            color: #00c853;
+        }
+        
+        .api-key-card-desc {
+            font-size: 11px;
+            color: #888;
+            margin-bottom: 12px;
+            line-height: 1.4;
+        }
+        
+        .api-key-card-input {
+            position: relative;
+        }
+        
+        .api-key-card-input input {
+            width: 100%;
+            padding: 8px 36px 8px 10px;
+            font-size: 13px;
+        }
+        
+        .api-key-card-input .toggle-visibility {
+            position: absolute;
+            right: 4px;
+            top: 50%;
+            transform: translateY(-50%);
+            padding: 4px;
+            font-size: 14px;
+        }
+        
+        .api-key-card-link {
+            display: block;
+            margin-top: 8px;
+            font-size: 11px;
+            color: #8b5cf6;
+            text-decoration: none;
+        }
+        
+        .api-key-card-link:hover {
+            text-decoration: underline;
+        }
+        
+        .section-subtitle {
+            font-size: 13px;
+            color: #888;
+            margin-bottom: 16px;
+            font-weight: normal;
+        }
+        
+        .api-section-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+        
+        .api-section-header h3 {
+            font-size: 14px;
+            font-weight: 500;
+            color: #b0b0b0;
+            margin: 0;
+        }
+        
+        .api-section-line {
+            flex: 1;
+            height: 1px;
+            background: #3e3e3e;
+        }
+        
         /* Dark scrollbar styling */
         ::-webkit-scrollbar {
             width: 12px;
@@ -248,11 +376,152 @@
     <div class="container">
         <div id="statusMessage" class="status-message"></div>
         
+        <!-- API Keys Section -->
+        <div class="section">
+            <h2 class="section-title">API Keys</h2>
+            <p class="section-subtitle">All keys are encrypted and stored securely using your system's keychain</p>
+            
+            <!-- Core AI Keys -->
+            <div class="api-section-header">
+                <h3>Core AI Services</h3>
+                <div class="api-section-line"></div>
+            </div>
+            
+            <div class="api-keys-grid">
+                <!-- OpenAI -->
+                <div class="api-key-card" id="openaiCard">
+                    <div class="api-key-card-header">
+                        <span class="api-key-card-title">
+                            OpenAI
+                            <span class="api-key-card-badge badge-required">Required</span>
+                        </span>
+                        <span id="openaiKeyStatus" class="api-key-status"></span>
+                    </div>
+                    <div class="api-key-card-desc">Voice Orb, Image Editing, Whisper Transcription, GPT Models</div>
+                    <div class="api-key-card-input">
+                        <input type="password" id="openaiApiKey" placeholder="sk-proj-...">
+                        <button class="toggle-visibility" onclick="toggleOpenAIKeyVisibility()">Show</button>
+                    </div>
+                    <a href="https://platform.openai.com/api-keys" target="_blank" class="api-key-card-link">Get API Key</a>
+                </div>
+                
+                <!-- Anthropic -->
+                <div class="api-key-card" id="anthropicCard">
+                    <div class="api-key-card-header">
+                        <span class="api-key-card-title">
+                            Anthropic (Claude)
+                            <span class="api-key-card-badge badge-required">Required</span>
+                        </span>
+                        <span id="anthropicKeyStatus" class="api-key-status"></span>
+                    </div>
+                    <div class="api-key-card-desc">Agent Composer, AI Analysis, Claude Models</div>
+                    <div class="api-key-card-input">
+                        <input type="password" id="anthropicApiKey" placeholder="sk-ant-...">
+                        <button class="toggle-visibility" onclick="toggleAnthropicKeyVisibility()">Show</button>
+                    </div>
+                    <a href="https://console.anthropic.com/settings/keys" target="_blank" class="api-key-card-link">Get API Key</a>
+                </div>
+            </div>
+            
+            <!-- Speech & Voice Keys -->
+            <div class="api-section-header" style="margin-top: 24px;">
+                <h3>Speech & Voice</h3>
+                <div class="api-section-line"></div>
+            </div>
+            
+            <div class="api-keys-grid">
+                <!-- AssemblyAI -->
+                <div class="api-key-card" id="assemblyaiCard">
+                    <div class="api-key-card-header">
+                        <span class="api-key-card-title">
+                            AssemblyAI
+                            <span class="api-key-card-badge badge-optional">Optional</span>
+                        </span>
+                        <span id="assemblyaiKeyStatus" class="api-key-status"></span>
+                    </div>
+                    <div class="api-key-card-desc">Speaker Recognition, Advanced Transcription</div>
+                    <div class="api-key-card-input">
+                        <input type="password" id="assemblyaiApiKey" placeholder="Enter API key">
+                        <button class="toggle-visibility" onclick="toggleAssemblyAIKeyVisibility()">Show</button>
+                    </div>
+                    <a href="https://www.assemblyai.com/app" target="_blank" class="api-key-card-link">Get API Key</a>
+                </div>
+                
+                <!-- ElevenLabs -->
+                <div class="api-key-card" id="elevenLabsCard">
+                    <div class="api-key-card-header">
+                        <span class="api-key-card-title">
+                            ElevenLabs
+                            <span class="api-key-card-badge badge-optional">Optional</span>
+                        </span>
+                        <span id="elevenLabsKeyStatus" class="api-key-status"></span>
+                    </div>
+                    <div class="api-key-card-desc">AI Voice Generation, Audio Replacement</div>
+                    <div class="api-key-card-input">
+                        <input type="password" id="elevenLabsApiKey" placeholder="Enter API key">
+                        <button class="toggle-visibility" onclick="toggleElevenLabsKeyVisibility()">Show</button>
+                    </div>
+                    <a href="https://elevenlabs.io/app/settings/api-keys" target="_blank" class="api-key-card-link">Get API Key</a>
+                </div>
+            </div>
+            
+            <!-- Video Platform Keys -->
+            <div class="api-section-header" style="margin-top: 24px;">
+                <h3>Video Platforms</h3>
+                <div class="api-section-line"></div>
+            </div>
+            
+            <div class="api-keys-grid">
+                <!-- YouTube -->
+                <div class="api-key-card" id="youtubeCard">
+                    <div class="api-key-card-header">
+                        <span class="api-key-card-title">
+                            YouTube
+                            <span class="api-key-card-badge badge-optional">Optional</span>
+                        </span>
+                        <span id="youtubeConnectionStatus" class="api-key-status"></span>
+                    </div>
+                    <div class="api-key-card-desc">Direct uploads to YouTube</div>
+                    <div class="api-key-card-input" style="margin-bottom: 8px;">
+                        <input type="text" id="youtubeClientId" placeholder="Client ID">
+                    </div>
+                    <div class="api-key-card-input">
+                        <input type="password" id="youtubeClientSecret" placeholder="Client Secret">
+                        <button class="toggle-visibility" onclick="toggleYouTubeSecretVisibility()">Show</button>
+                    </div>
+                    <button id="youtubeConnectBtn" onclick="connectYouTube()" style="margin-top: 10px; width: 100%; background: #3e3e3e; color: #e0e0e0; border: none; padding: 8px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                        Connect YouTube
+                    </button>
+                    <a href="https://console.cloud.google.com/apis/credentials" target="_blank" class="api-key-card-link">Setup OAuth</a>
+                </div>
+                
+                <!-- Vimeo -->
+                <div class="api-key-card" id="vimeoCard">
+                    <div class="api-key-card-header">
+                        <span class="api-key-card-title">
+                            Vimeo
+                            <span class="api-key-card-badge badge-optional">Optional</span>
+                        </span>
+                    </div>
+                    <div class="api-key-card-desc">Direct uploads to Vimeo</div>
+                    <div class="api-key-card-input" style="margin-bottom: 8px;">
+                        <input type="text" id="vimeoClientId" placeholder="Client ID">
+                    </div>
+                    <div class="api-key-card-input">
+                        <input type="password" id="vimeoClientSecret" placeholder="Client Secret">
+                        <button class="toggle-visibility" onclick="toggleVimeoSecretVisibility()">Show</button>
+                    </div>
+                    <a href="https://developer.vimeo.com/apps" target="_blank" class="api-key-card-link">Setup OAuth</a>
+                </div>
+            </div>
+        </div>
+        
+        <!-- LLM Configuration Section -->
         <div class="section">
             <h2 class="section-title">LLM Configuration</h2>
             
             <div class="form-group">
-                <label for="llmProvider">LLM Provider</label>
+                <label for="llmProvider">Default Provider</label>
                 <select id="llmProvider">
                     <option value="openai">OpenAI</option>
                     <option value="anthropic">Anthropic (Claude)</option>
@@ -263,11 +532,11 @@
             </div>
             
             <div class="form-group">
-                <label for="llmModel">Model</label>
+                <label for="llmModel">Default Model</label>
                 <select id="llmModel">
-                    <option value="gpt-5.1">GPT-5.1</option>
-                    <option value="gpt-4o">GPT-4o</option>
-                    <option value="gpt-4o-mini">GPT-4o Mini</option>
+                    <option value="gpt-5.2">GPT-5.2 Thinking</option>
+                    <option value="gpt-5.2-pro">GPT-5.2 Pro</option>
+                    <option value="gpt-5.2-chat-latest">GPT-5.2 Instant</option>
                     <option value="claude-opus-4-5-20251101">Claude Opus 4.5</option>
                     <option value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5</option>
                     <option value="gemini-pro">Gemini Pro</option>
@@ -280,24 +549,24 @@
             
             <div class="form-group api-key-group">
                 <label for="llmApiKey">
-                    API Key
+                    Provider API Key (Legacy)
                     <span id="apiKeyStatus" class="api-key-status"></span>
-                    <a href="#" class="test-connection" onclick="testConnection()">Test Connection</a>
+                    <a href="#" class="test-connection" onclick="testConnection()">Test</a>
                 </label>
                 <div style="position: relative;">
-                    <input type="password" id="llmApiKey" placeholder="Enter your API key">
-                    <button class="toggle-visibility" onclick="toggleApiKeyVisibility()">👁</button>
+                    <input type="password" id="llmApiKey" placeholder="Use dedicated keys above instead">
+                    <button class="toggle-visibility" onclick="toggleApiKeyVisibility()">Show</button>
                 </div>
-                <div class="info-text">Your API key is encrypted and stored securely using your system's keychain</div>
+                <div class="info-text">For backwards compatibility. Prefer using the dedicated OpenAI/Anthropic keys above.</div>
             </div>
             
             <div class="form-group" id="claude4ThinkingGroup" style="display: none;">
-                <label for="claude4ThinkingMode">Claude 4 Opus Thinking Mode</label>
+                <label for="claude4ThinkingMode">Claude Thinking Mode</label>
                 <select id="claude4ThinkingMode">
                     <option value="disabled">Disabled (Fast Response)</option>
                     <option value="enabled">Enabled (Extended Thinking)</option>
                 </select>
-                <div class="info-text">Enable extended thinking for complex reasoning and multi-step planning</div>
+                <div class="info-text">Enable extended thinking for complex reasoning</div>
             </div>
             
             <div class="form-group" id="claude4ThinkingLevelGroup" style="display: none;">
@@ -308,120 +577,6 @@
                     <option value="think-hard">Think Hard (~10k tokens)</option>
                     <option value="ultrathink">Ultra Think (~32k tokens)</option>
                 </select>
-                <div class="info-text">Higher thinking levels provide deeper analysis but increase cost and latency</div>
-            </div>
-            
-            <div class="divider"></div>
-            
-            <h3 style="font-size: 16px; margin-bottom: 16px;">AI Image Editing (OpenAI DALL-E)</h3>
-            
-            <div class="form-group api-key-group">
-                <label for="openaiApiKey">
-                    OpenAI API Key
-                    <span id="openaiKeyStatus" class="api-key-status"></span>
-                </label>
-                <div style="position: relative;">
-                    <input type="password" id="openaiApiKey" placeholder="sk-... (required for AI image editing)">
-                    <button class="toggle-visibility" onclick="toggleOpenAIKeyVisibility()">👁</button>
-                </div>
-                <div class="info-text">Required for AI image editing and Whisper transcription. Get your key at <a href="https://platform.openai.com/api-keys" style="color: #8b5cf6;">platform.openai.com</a></div>
-            </div>
-            
-            <div class="divider"></div>
-            
-            <h3 style="font-size: 16px; margin-bottom: 16px;">Speaker Recognition (AssemblyAI)</h3>
-            
-            <div class="form-group api-key-group">
-                <label for="assemblyaiApiKey">
-                    AssemblyAI API Key
-                    <span id="assemblyaiKeyStatus" class="api-key-status"></span>
-                </label>
-                <div style="position: relative;">
-                    <input type="password" id="assemblyaiApiKey" placeholder="(required for speaker recognition)">
-                    <button class="toggle-visibility" onclick="toggleAssemblyAIKeyVisibility()">👁</button>
-                </div>
-                <div class="info-text">Required for speaker recognition in videos. Get your key at <a href="https://www.assemblyai.com/app" style="color: #8b5cf6;">assemblyai.com</a></div>
-            </div>
-            
-            <div class="divider"></div>
-            
-            <h3 style="font-size: 16px; margin-bottom: 16px;">AI Voice Generation (ElevenLabs)</h3>
-            
-            <div class="form-group api-key-group">
-                <label for="elevenLabsApiKey">
-                    ElevenLabs API Key
-                    <span id="elevenLabsKeyStatus" class="api-key-status"></span>
-                </label>
-                <div style="position: relative;">
-                    <input type="password" id="elevenLabsApiKey" placeholder="(required for AI voice generation)">
-                    <button class="toggle-visibility" onclick="toggleElevenLabsKeyVisibility()">👁</button>
-                </div>
-                <div class="info-text">Required for AI voice generation and audio replacement in video editor. Get your key at <a href="https://elevenlabs.io/app/settings/api-keys" style="color: #8b5cf6;">elevenlabs.io</a></div>
-            </div>
-            
-            <div class="divider"></div>
-            
-            <h3 style="font-size: 16px; margin-bottom: 16px;">Video Release - YouTube Integration</h3>
-            
-            <div class="form-group api-key-group">
-                <label for="youtubeClientId">
-                    YouTube Client ID
-                    <span id="youtubeClientIdStatus" class="api-key-status"></span>
-                </label>
-                <div style="position: relative;">
-                    <input type="text" id="youtubeClientId" placeholder="(OAuth 2.0 Client ID from Google Cloud Console)">
-                </div>
-            </div>
-            
-            <div class="form-group api-key-group">
-                <label for="youtubeClientSecret">
-                    YouTube Client Secret
-                    <span id="youtubeClientSecretStatus" class="api-key-status"></span>
-                </label>
-                <div style="position: relative;">
-                    <input type="password" id="youtubeClientSecret" placeholder="(OAuth 2.0 Client Secret)">
-                    <button class="toggle-visibility" onclick="toggleYouTubeSecretVisibility()">👁</button>
-                </div>
-            </div>
-            
-            <div class="form-group" style="display: flex; align-items: center; gap: 12px;">
-                <button class="btn" id="youtubeConnectBtn" onclick="connectYouTube()" style="background: #ff0000; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer;">
-                    ▶️ Connect YouTube Account
-                </button>
-                <span id="youtubeConnectionStatus" style="font-size: 13px; color: #b0b0b0;"></span>
-            </div>
-            
-            <div class="info-text">
-                To enable direct YouTube uploads: 
-                1. Go to <a href="https://console.cloud.google.com/apis/credentials" style="color: #8b5cf6;">Google Cloud Console</a>
-                2. Create OAuth 2.0 credentials
-                3. Add <code style="background: #1e1e1e; padding: 2px 6px; border-radius: 4px;">http://localhost:8089/oauth/callback</code> as redirect URI
-                4. Enable YouTube Data API v3
-            </div>
-            
-            <div class="divider"></div>
-            
-            <h3 style="font-size: 16px; margin-bottom: 16px;">Video Release - Vimeo Integration</h3>
-            
-            <div class="form-group api-key-group">
-                <label for="vimeoClientId">
-                    Vimeo Client ID
-                    <span id="vimeoClientIdStatus" class="api-key-status"></span>
-                </label>
-                <div style="position: relative;">
-                    <input type="text" id="vimeoClientId" placeholder="(OAuth Client ID from Vimeo Developer)">
-                </div>
-            </div>
-            
-            <div class="form-group api-key-group">
-                <label for="vimeoClientSecret">
-                    Vimeo Client Secret
-                    <span id="vimeoClientSecretStatus" class="api-key-status"></span>
-                </label>
-                <div style="position: relative;">
-                    <input type="password" id="vimeoClientSecret" placeholder="(OAuth Client Secret)">
-                    <button class="toggle-visibility" onclick="toggleVimeoSecretVisibility()">👁</button>
-                </div>
             </div>
             
             <div class="form-group" style="display: flex; align-items: center; gap: 12px;">
@@ -682,6 +837,89 @@
             </div>
         </div>
         
+        <!-- Voice Context Providers Section -->
+        <div class="section">
+            <h2 class="section-title">Voice Context Providers</h2>
+            <div class="info-text" style="margin-bottom: 20px;">
+                Context providers enrich voice commands with additional information like time, location, and custom facts. This helps the AI understand your requests better.
+            </div>
+            
+            <div id="contextProvidersContainer">
+                <!-- Time/Date Provider -->
+                <div class="form-group provider-group" data-provider-id="temporal">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="providerTemporal" checked>
+                        <label for="providerTemporal" style="margin-bottom: 0;">Time & Date</label>
+                    </div>
+                    <div class="info-text">Provides current time, date, day of week, and part of day (morning/afternoon/evening)</div>
+                </div>
+                
+                <!-- Active App Provider -->
+                <div class="form-group provider-group" data-provider-id="active-app">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="providerActiveApp" checked>
+                        <label for="providerActiveApp" style="margin-bottom: 0;">Active Application</label>
+                    </div>
+                    <div class="info-text">Detects the currently focused application and document you're working on</div>
+                </div>
+                
+                <!-- Custom Facts Provider -->
+                <div class="form-group provider-group" data-provider-id="custom-facts">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="providerCustomFacts" checked>
+                        <label for="providerCustomFacts" style="margin-bottom: 0;">Custom Facts</label>
+                    </div>
+                    <div class="info-text">User-defined facts and preferences for personalized context</div>
+                    
+                    <div id="customFactsEditor" style="margin-top: 15px; padding-left: 24px;">
+                        <div id="factsList" style="margin-bottom: 10px;"></div>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <input type="text" id="newFactKey" placeholder="Key (e.g., project_name)" style="flex: 1;">
+                            <input type="text" id="newFactValue" placeholder="Value" style="flex: 2;">
+                            <button class="btn-secondary" onclick="addCustomFact()" style="min-width: 60px;">Add</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Calendar Provider -->
+                <div class="form-group provider-group" data-provider-id="calendar">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="providerCalendar">
+                        <label for="providerCalendar" style="margin-bottom: 0;">Calendar (requires configuration)</label>
+                    </div>
+                    <div class="info-text">Shows current and upcoming meetings from your calendar</div>
+                    <div id="calendarSettings" style="display: none; margin-top: 15px; padding-left: 24px;">
+                        <label for="calendarSource" style="font-size: 12px;">Calendar Source</label>
+                        <select id="calendarSource" style="margin-bottom: 10px;">
+                            <option value="system">System Calendar (macOS)</option>
+                            <option value="google">Google Calendar</option>
+                            <option value="ical">iCal URL</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <!-- Location Provider -->
+                <div class="form-group provider-group" data-provider-id="location">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="providerLocation">
+                        <label for="providerLocation" style="margin-bottom: 0;">Location (requires permission)</label>
+                    </div>
+                    <div class="info-text">Provides city, region, and timezone. Uses IP geolocation by default.</div>
+                </div>
+            </div>
+            
+            <!-- Conversation History -->
+            <div class="form-group" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #3e3e3e;">
+                <label style="color: #fff; font-size: 16px; margin-bottom: 15px;">Conversation History</label>
+                <div class="info-text" style="margin-bottom: 10px;">
+                    Conversation history helps the AI understand context from previous voice commands.
+                </div>
+                <button class="btn-secondary" onclick="clearConversationHistory()" style="background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.3); color: #fca5a5;">
+                    Clear Conversation History
+                </button>
+            </div>
+        </div>
+        
         <div class="button-group">
             <button class="btn-secondary" onclick="window.close()">Cancel</button>
             <button class="btn-primary" onclick="saveSettings()">Save Settings</button>
@@ -692,6 +930,7 @@
         let settings = {};
         let apiKeyVisible = false;
         let openaiKeyVisible = false;
+        let anthropicKeyVisible = false;
         let assemblyaiKeyVisible = false;
         let elevenLabsKeyVisible = false;
         let gsxTokenVisible = false;
@@ -709,9 +948,10 @@
                 
                 // Populate form fields
                 document.getElementById('llmProvider').value = settings.llmProvider || 'openai';
-                document.getElementById('llmModel').value = settings.llmModel || 'gpt-4';
+                document.getElementById('llmModel').value = settings.llmModel || 'gpt-5.2';
                 document.getElementById('llmApiKey').value = settings.llmApiKey || '';
                 document.getElementById('openaiApiKey').value = settings.openaiApiKey || '';
+                document.getElementById('anthropicApiKey').value = settings.anthropicApiKey || '';
                 document.getElementById('assemblyaiApiKey').value = settings.assemblyaiApiKey || '';
                 document.getElementById('theme').value = settings.theme || 'dark';
                 document.getElementById('autoSave').checked = settings.autoSave !== false;
@@ -793,6 +1033,12 @@
                     document.getElementById('openaiKeyStatus').className = 'api-key-status status-valid';
                 }
                 
+                // Check if Anthropic API key exists
+                if (settings.anthropicApiKey) {
+                    document.getElementById('anthropicKeyStatus').textContent = '(Key saved)';
+                    document.getElementById('anthropicKeyStatus').className = 'api-key-status status-valid';
+                }
+                
                 // Check if AssemblyAI API key exists
                 if (settings.assemblyaiApiKey) {
                     document.getElementById('assemblyaiKeyStatus').textContent = '(Key saved)';
@@ -833,6 +1079,16 @@
                 document.getElementById('claudePreferHeadless').checked = settings.claudePreferHeadless !== false; // Default true
                 document.getElementById('claudeHeadlessTimeout').value = settings.claudeHeadlessTimeout || '60000';
                 document.getElementById('claudeApiFallback').checked = settings.claudeApiFallback !== false; // Default true
+                
+                // Update card status indicators
+                updateApiKeyCardStatus();
+                
+                // Add input listeners for real-time card updates
+                ['openaiApiKey', 'anthropicApiKey', 'assemblyaiApiKey', 'elevenLabsApiKey', 
+                 'youtubeClientId', 'youtubeClientSecret', 'vimeoClientId', 'vimeoClientSecret'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.addEventListener('input', updateApiKeyCardStatus);
+                });
             } catch (error) {
                 console.error('Error loading settings:', error);
                 showStatus('Error loading settings', 'error');
@@ -858,6 +1114,7 @@
                 llmModel: document.getElementById('llmModel').value,
                 llmApiKey: document.getElementById('llmApiKey').value,
                 openaiApiKey: document.getElementById('openaiApiKey').value,
+                anthropicApiKey: document.getElementById('anthropicApiKey').value,
                 assemblyaiApiKey: document.getElementById('assemblyaiApiKey').value,
                 elevenLabsApiKey: document.getElementById('elevenLabsApiKey').value,
                 youtubeClientId: document.getElementById('youtubeClientId').value,
@@ -957,11 +1214,11 @@
             
             if (apiKeyVisible) {
                 input.type = 'password';
-                button.textContent = '👁';
+                button.textContent = 'Show';
                 apiKeyVisible = false;
             } else {
                 input.type = 'text';
-                button.textContent = '🙈';
+                button.textContent = 'Hide';
                 apiKeyVisible = true;
             }
         }
@@ -972,12 +1229,27 @@
             
             if (openaiKeyVisible) {
                 input.type = 'password';
-                button.textContent = '👁';
+                button.textContent = 'Show';
                 openaiKeyVisible = false;
             } else {
                 input.type = 'text';
-                button.textContent = '🙈';
+                button.textContent = 'Hide';
                 openaiKeyVisible = true;
+            }
+        }
+        
+        function toggleAnthropicKeyVisibility() {
+            const input = document.getElementById('anthropicApiKey');
+            const button = input.parentElement.querySelector('.toggle-visibility');
+            
+            if (anthropicKeyVisible) {
+                input.type = 'password';
+                button.textContent = 'Show';
+                anthropicKeyVisible = false;
+            } else {
+                input.type = 'text';
+                button.textContent = 'Hide';
+                anthropicKeyVisible = true;
             }
         }
         
@@ -987,11 +1259,11 @@
             
             if (assemblyaiKeyVisible) {
                 input.type = 'password';
-                button.textContent = '👁';
+                button.textContent = 'Show';
                 assemblyaiKeyVisible = false;
             } else {
                 input.type = 'text';
-                button.textContent = '🙈';
+                button.textContent = 'Hide';
                 assemblyaiKeyVisible = true;
             }
         }
@@ -1002,11 +1274,11 @@
             
             if (elevenLabsKeyVisible) {
                 input.type = 'password';
-                button.textContent = '👁';
+                button.textContent = 'Show';
                 elevenLabsKeyVisible = false;
             } else {
                 input.type = 'text';
-                button.textContent = '🙈';
+                button.textContent = 'Hide';
                 elevenLabsKeyVisible = true;
             }
         }
@@ -1017,11 +1289,11 @@
             
             if (youtubeSecretVisible) {
                 input.type = 'password';
-                button.textContent = '👁';
+                button.textContent = 'Show';
                 youtubeSecretVisible = false;
             } else {
                 input.type = 'text';
-                button.textContent = '🙈';
+                button.textContent = 'Hide';
                 youtubeSecretVisible = true;
             }
         }
@@ -1032,12 +1304,74 @@
             
             if (vimeoSecretVisible) {
                 input.type = 'password';
-                button.textContent = '👁';
+                button.textContent = 'Show';
                 vimeoSecretVisible = false;
             } else {
                 input.type = 'text';
-                button.textContent = '🙈';
+                button.textContent = 'Hide';
                 vimeoSecretVisible = true;
+            }
+        }
+        
+        // Update card styling based on configured state
+        function updateApiKeyCardStatus() {
+            const keys = [
+                { id: 'openaiApiKey', card: 'openaiCard', status: 'openaiKeyStatus' },
+                { id: 'anthropicApiKey', card: 'anthropicCard', status: 'anthropicKeyStatus' },
+                { id: 'assemblyaiApiKey', card: 'assemblyaiCard', status: 'assemblyaiKeyStatus' },
+                { id: 'elevenLabsApiKey', card: 'elevenLabsCard', status: 'elevenLabsKeyStatus' }
+            ];
+            
+            keys.forEach(({ id, card, status }) => {
+                const input = document.getElementById(id);
+                const cardEl = document.getElementById(card);
+                const statusEl = document.getElementById(status);
+                
+                if (input && cardEl) {
+                    if (input.value && input.value.trim()) {
+                        cardEl.classList.add('configured');
+                        if (statusEl) {
+                            statusEl.textContent = 'Configured';
+                            statusEl.className = 'api-key-status status-valid';
+                        }
+                        // Update badge
+                        const badge = cardEl.querySelector('.api-key-card-badge');
+                        if (badge) {
+                            badge.textContent = 'Configured';
+                            badge.className = 'api-key-card-badge badge-configured';
+                        }
+                    } else {
+                        cardEl.classList.remove('configured');
+                        if (statusEl) {
+                            statusEl.textContent = '';
+                            statusEl.className = 'api-key-status';
+                        }
+                    }
+                }
+            });
+            
+            // Check YouTube
+            const ytClientId = document.getElementById('youtubeClientId');
+            const ytSecret = document.getElementById('youtubeClientSecret');
+            const ytCard = document.getElementById('youtubeCard');
+            if (ytClientId && ytSecret && ytCard) {
+                if (ytClientId.value && ytSecret.value) {
+                    ytCard.classList.add('configured');
+                } else {
+                    ytCard.classList.remove('configured');
+                }
+            }
+            
+            // Check Vimeo
+            const vimeoClientId = document.getElementById('vimeoClientId');
+            const vimeoSecret = document.getElementById('vimeoClientSecret');
+            const vimeoCard = document.getElementById('vimeoCard');
+            if (vimeoClientId && vimeoSecret && vimeoCard) {
+                if (vimeoClientId.value && vimeoSecret.value) {
+                    vimeoCard.classList.add('configured');
+                } else {
+                    vimeoCard.classList.remove('configured');
+                }
             }
         }
         
@@ -1155,9 +1489,9 @@
             switch (provider) {
                 case 'openai':
                     options = [
-                        { value: 'gpt-5.1', text: 'GPT-5.1' },
-                        { value: 'gpt-4o', text: 'GPT-4o' },
-                        { value: 'gpt-4o-mini', text: 'GPT-4o Mini' }
+                        { value: 'gpt-5.2', text: 'GPT-5.2 Thinking' },
+                        { value: 'gpt-5.2-pro', text: 'GPT-5.2 Pro' },
+                        { value: 'gpt-5.2-chat-latest', text: 'GPT-5.2 Instant' }
                     ];
                     break;
                 case 'anthropic':
@@ -1471,6 +1805,167 @@
                 showStatus('GSX token cleared', 'success');
             }
         }
+        
+        // ==================== CONTEXT PROVIDERS ====================
+        
+        let customFacts = [];
+        
+        // Initialize context provider settings
+        async function initContextProviders() {
+            try {
+                // Load provider states from settings
+                const providerSettings = settings.contextProviders || {};
+                
+                document.getElementById('providerTemporal').checked = providerSettings.temporal !== false;
+                document.getElementById('providerActiveApp').checked = providerSettings.activeApp !== false;
+                document.getElementById('providerCustomFacts').checked = providerSettings.customFacts !== false;
+                document.getElementById('providerCalendar').checked = providerSettings.calendar === true;
+                document.getElementById('providerLocation').checked = providerSettings.location === true;
+                
+                // Load custom facts
+                if (window.api && window.api.getCustomFacts) {
+                    customFacts = await window.api.getCustomFacts() || [];
+                } else {
+                    customFacts = settings.customFacts || [];
+                }
+                renderCustomFacts();
+                
+                // Set up calendar settings visibility
+                const calendarCheckbox = document.getElementById('providerCalendar');
+                const calendarSettings = document.getElementById('calendarSettings');
+                calendarCheckbox.addEventListener('change', () => {
+                    calendarSettings.style.display = calendarCheckbox.checked ? 'block' : 'none';
+                });
+                
+                // Add change handlers for providers
+                document.querySelectorAll('.provider-group input[type="checkbox"]').forEach(checkbox => {
+                    checkbox.addEventListener('change', saveProviderSettings);
+                });
+                
+            } catch (e) {
+                console.warn('Could not load context provider settings:', e);
+            }
+        }
+        
+        // Save provider settings
+        async function saveProviderSettings() {
+            const providerSettings = {
+                temporal: document.getElementById('providerTemporal').checked,
+                activeApp: document.getElementById('providerActiveApp').checked,
+                customFacts: document.getElementById('providerCustomFacts').checked,
+                calendar: document.getElementById('providerCalendar').checked,
+                location: document.getElementById('providerLocation').checked,
+                calendarSource: document.getElementById('calendarSource').value,
+            };
+            
+            settings.contextProviders = providerSettings;
+        }
+        
+        // Render custom facts list
+        function renderCustomFacts() {
+            const container = document.getElementById('factsList');
+            
+            if (customFacts.length === 0) {
+                container.innerHTML = '<div style="color: #666; font-size: 12px; margin-bottom: 10px;">No custom facts defined. Add facts below.</div>';
+                return;
+            }
+            
+            container.innerHTML = customFacts.map((fact, index) => `
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px; padding: 8px; background: #1e1e1e; border-radius: 6px;">
+                    <span style="flex: 1; font-size: 13px;"><strong style="color: #8888ff;">${escapeHtml(fact.key)}:</strong> ${escapeHtml(fact.value)}</span>
+                    <button onclick="removeCustomFact(${index})" style="background: none; border: none; color: #888; cursor: pointer; padding: 4px;">×</button>
+                </div>
+            `).join('');
+        }
+        
+        // Add a custom fact
+        async function addCustomFact() {
+            const keyInput = document.getElementById('newFactKey');
+            const valueInput = document.getElementById('newFactValue');
+            
+            const key = keyInput.value.trim();
+            const value = valueInput.value.trim();
+            
+            if (!key || !value) {
+                showStatus('Please enter both key and value', 'error');
+                return;
+            }
+            
+            // Check for duplicate key
+            const existing = customFacts.findIndex(f => f.key === key);
+            if (existing >= 0) {
+                customFacts[existing].value = value;
+            } else {
+                customFacts.push({ key, value });
+            }
+            
+            // Save to API if available
+            if (window.api && window.api.addCustomFact) {
+                try {
+                    await window.api.addCustomFact(key, value);
+                } catch (e) {
+                    console.warn('Could not save fact via API:', e);
+                }
+            }
+            
+            // Also save to settings
+            settings.customFacts = customFacts;
+            
+            keyInput.value = '';
+            valueInput.value = '';
+            renderCustomFacts();
+            showStatus('Custom fact added', 'success');
+        }
+        
+        // Remove a custom fact
+        async function removeCustomFact(index) {
+            const fact = customFacts[index];
+            if (!fact) return;
+            
+            customFacts.splice(index, 1);
+            
+            // Remove via API if available
+            if (window.api && window.api.removeCustomFact) {
+                try {
+                    await window.api.removeCustomFact(fact.key);
+                } catch (e) {
+                    console.warn('Could not remove fact via API:', e);
+                }
+            }
+            
+            settings.customFacts = customFacts;
+            renderCustomFacts();
+        }
+        
+        // Clear conversation history
+        async function clearConversationHistory() {
+            if (!confirm('Are you sure you want to clear your voice conversation history?')) {
+                return;
+            }
+            
+            try {
+                if (window.api && window.api.clearConversationHistory) {
+                    await window.api.clearConversationHistory();
+                }
+                showStatus('Conversation history cleared', 'success');
+            } catch (e) {
+                showStatus('Failed to clear history: ' + e.message, 'error');
+            }
+        }
+        
+        // Escape HTML helper
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Call initContextProviders after loadSettings
+        const originalLoadSettings = loadSettings;
+        loadSettings = async function() {
+            await originalLoadSettings.call(this);
+            await initContextProviders();
+        };
     </script>
 </body>
 </html> 

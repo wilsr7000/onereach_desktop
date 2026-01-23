@@ -973,9 +973,6 @@ class ClipboardStorageV2 {
   // Add new item (transactional - files + DB in single operation)
   addItem(item) {
     const itemId = item.id || this.generateId();
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-storage-v2.js:addItem:entry',message:'addItem called',data:{itemId,hasExistingId:!!item.id,type:item.type,spaceId:item.spaceId,indexItemCountBefore:this.index.items.length,dbReady:this.dbReady},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
-    // #endregion
     const itemDir = path.join(this.itemsDir, itemId);
     
     // Determine content path

@@ -9,7 +9,7 @@
  * - Confidence thresholds
  */
 
-import type { Action, AppContext, ClassifiedTask, TaskPriority } from '../core/types'
+import type { Action, AppContext, ClassifiedTask, TaskPriority, ClarificationOption } from '../core/types'
 import type { PromptBuilder } from './promptBuilder'
 
 export interface AIClassifierConfig {
@@ -27,6 +27,10 @@ export interface AIClassifierResponse {
   params: Record<string, unknown>
   confidence: number
   priority: TaskPriority
+  // Disambiguation support
+  clarificationNeeded?: boolean
+  clarificationQuestion?: string
+  clarificationOptions?: ClarificationOption[]
 }
 
 export interface AIClassifier {
@@ -138,6 +142,33 @@ export function createAIClassifier(
         priority: [1, 2, 3].includes(parsed.priority) ? parsed.priority : 2,
       }
 
+      // Parse disambiguation fields if present
+      if (parsed.clarificationNeeded === true) {
+        response.clarificationNeeded = true
+        response.clarificationQuestion = typeof parsed.clarificationQuestion === 'string' 
+          ? parsed.clarificationQuestion 
+          : 'Could you clarify what you meant?'
+        
+        // Parse clarification options
+        if (Array.isArray(parsed.clarificationOptions)) {
+          response.clarificationOptions = parsed.clarificationOptions
+            .filter((opt: unknown) => 
+              typeof opt === 'object' && opt !== null && 
+              typeof (opt as Record<string, unknown>).label === 'string' &&
+              typeof (opt as Record<string, unknown>).action === 'string'
+            )
+            .map((opt: Record<string, unknown>) => ({
+              label: opt.label as string,
+              action: opt.action as string,
+              params: typeof opt.params === 'object' && opt.params !== null 
+                ? opt.params as Record<string, unknown> 
+                : {},
+              confidence: typeof opt.confidence === 'number' ? opt.confidence : undefined,
+            }))
+            .slice(0, 5) // Max 5 options
+        }
+      }
+
       // Check if action is valid (or "unknown")
       if (response.action !== 'unknown' && !validActions.includes(response.action)) {
         // Try to find closest match
@@ -149,6 +180,19 @@ export function createAIClassifier(
           response.action = 'unknown'
           response.confidence = 0
         }
+      }
+
+      // Validate clarification option actions too
+      if (response.clarificationOptions) {
+        response.clarificationOptions = response.clarificationOptions.filter(opt => {
+          if (validActions.includes(opt.action)) return true
+          const match = validActions.find(a => a.toLowerCase() === opt.action.toLowerCase())
+          if (match) {
+            opt.action = match
+            return true
+          }
+          return false
+        })
       }
 
       return response
@@ -203,12 +247,6 @@ export function createAIClassifier(
         return null
       }
 
-      // Check confidence threshold
-      if (parsed.action === 'unknown' || parsed.confidence < (config.confidenceThreshold ?? 0.3)) {
-        stats.successfulRequests++
-        return null
-      }
-
       stats.successfulRequests++
       
       // Update latency stats
@@ -216,11 +254,31 @@ export function createAIClassifier(
       totalLatency += latency
       stats.averageLatencyMs = totalLatency / stats.successfulRequests
 
+      // If clarification is needed, return with disambiguation info
+      if (parsed.clarificationNeeded && parsed.clarificationOptions?.length) {
+        return {
+          action: parsed.action,
+          content: transcript,
+          params: parsed.params,
+          priority: parsed.priority,
+          confidence: parsed.confidence,
+          clarificationNeeded: true,
+          clarificationQuestion: parsed.clarificationQuestion,
+          clarificationOptions: parsed.clarificationOptions,
+        }
+      }
+
+      // Check confidence threshold - return null only if truly unknown
+      if (parsed.action === 'unknown' || parsed.confidence < (config.confidenceThreshold ?? 0.3)) {
+        return null
+      }
+
       return {
         action: parsed.action,
         content: transcript,
         params: parsed.params,
         priority: parsed.priority,
+        confidence: parsed.confidence,
       }
     } catch (error) {
       stats.failedRequests++

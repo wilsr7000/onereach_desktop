@@ -471,9 +471,6 @@ class SpacesAPIServer {
         const data = JSON.parse(body);
         const { spaceId, content, type, title, sourceUrl, tags, metadata } = data;
 
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'spaces-api-server.js:handleSendToSpace:entry',message:'Request received',data:{spaceId,type,hasTags:!!tags,tagsValue:tags,hasMetadataTags:!!metadata?.tags,metadataTagsValue:metadata?.tags},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-        // #endregion
 
         if (!spaceId || !content) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -491,9 +488,6 @@ class SpacesAPIServer {
         // Extract tags from either root level or metadata.tags
         const itemTags = tags || metadata?.tags || [];
 
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'spaces-api-server.js:handleSendToSpace:tagsExtracted',message:'Tags extracted',data:{itemTags,tagsLength:itemTags.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-        // #endregion
 
         // Route through clipboardManager for proper sync
         if (global.clipboardManager) {
@@ -512,9 +506,6 @@ class SpacesAPIServer {
             timestamp: Date.now()
           };
 
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'spaces-api-server.js:handleSendToSpace:itemCreated',message:'Item object created before addToHistory',data:{itemTags:item.tags,itemType:item.type,itemSpaceId:item.spaceId},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
-          // #endregion
 
           // Use addToHistory for proper in-memory sync and space metadata updates
           await global.clipboardManager.addToHistory(item);
@@ -522,9 +513,6 @@ class SpacesAPIServer {
           // Get the newly added item's ID
           const addedItem = global.clipboardManager.history?.[0];
           
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'spaces-api-server.js:handleSendToSpace:afterAdd',message:'After addToHistory',data:{addedItemId:addedItem?.id,addedItemSpaceId:addedItem?.spaceId,historyLength:global.clipboardManager.history?.length,storageItemCount:global.clipboardManager.storage?.index?.items?.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-ADD'})}).catch(()=>{});
-          // #endregion
           
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ success: true, itemId: addedItem?.id || 'unknown' }));

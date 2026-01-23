@@ -1435,9 +1435,6 @@ Respond with JSON only:
    * Helper: Get image data for item
    */
   async getImageData(item) {
-    // #region agent log
-    try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'metadata-generator.js:getImageData',message:'getImageData called',data:{itemId:item.id,hasThumbnail:!!item.thumbnail,thumbnailLength:item.thumbnail?.length,thumbnailPrefix:item.thumbnail?.substring(0,50),hasContent:!!item.content,contentPrefix:item.content?.substring(0,50),hasFilePath:!!item.filePath,filePath:item.filePath,fileType:item.fileType},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-META'})+'\n'); } catch(e){}
-    // #endregion
     
     if (item.thumbnail && !item.thumbnail.includes('svg+xml')) {
       return item.thumbnail;
@@ -1467,18 +1464,12 @@ Respond with JSON only:
         item.id,
         item.fileName
       );
-      // #region agent log
-      try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'metadata-generator.js:getImageData:storedPath',message:'Checking stored file path',data:{storedPath,exists:require('fs').existsSync(storedPath)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-META'})+'\n'); } catch(e){}
-      // #endregion
       
       if (require('fs').existsSync(storedPath)) {
         try {
           const buffer = require('fs').readFileSync(storedPath);
           // Detect actual image type from magic bytes, not filename
           const mimeType = this.detectImageMimeType(buffer);
-          // #region agent log
-          try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'metadata-generator.js:getImageData:detected',message:'Detected image type',data:{storedPath,mimeType,bufferLength:buffer.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-META'})+'\n'); } catch(e){}
-          // #endregion
           return `data:${mimeType};base64,${buffer.toString('base64')}`;
         } catch (e) {
           console.error('[MetadataGen] Error reading stored image file:', e);
@@ -1486,9 +1477,6 @@ Respond with JSON only:
       }
     }
     
-    // #region agent log
-    try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'metadata-generator.js:getImageData:failed',message:'Could not get image data',data:{itemId:item.id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-META'})+'\n'); } catch(e){}
-    // #endregion
     
     return null;
   }

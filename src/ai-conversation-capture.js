@@ -508,9 +508,6 @@ class ConversationCapture {
         let retries = 3;
         let lastError = null;
         
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ai-conversation-capture.js:310',message:'Starting save with retry',data:{spaceId,serviceId,conversationId:conversation.id,retries},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H5'})}).catch(()=>{});
-        // #endregion
         
         while (retries > 0) {
           try {

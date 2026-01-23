@@ -178,3 +178,17 @@ Use `npm run release` which runs `scripts/release-master.sh`:
 - Reference file paths when discussing changes
 - Update constitutional documents as part of completing work
 
+## Email Capability
+
+**To send an email, run this shell command directly - don't just give the user a link:**
+```bash
+open "mailto:recipient@email.com?subject=URL%20Encoded%20Subject&body=URL%20Encoded%20Body"
+```
+
+This opens the user's default email client with everything pre-filled. Use `%20` for spaces, `%0A` for newlines, `%3A` for colons in the body.
+
+Example - sending app download instructions:
+```bash
+open "mailto:?subject=Download%20GSX%20Power%20User&body=Download%20link%3A%0Ahttps%3A%2F%2Fgithub.com%2F..."
+```
+

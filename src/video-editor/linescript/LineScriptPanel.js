@@ -112,9 +112,6 @@ export class LineScriptPanel {
     this.container = document.getElementById('lineScriptPanel') || 
                      document.getElementById('storyBeatsEditorContainer');
     
-    // #region agent log
-    console.log('[DEBUG-H4] init() called', {foundContainer: !!this.container, containerId: this.container?.id});
-    // #endregion
     
     if (!this.container) {
       console.warn('[LineScriptPanel] Container not found');
@@ -201,17 +198,11 @@ export class LineScriptPanel {
    * Load transcript data
    */
   loadTranscriptData() {
-    // #region agent log
-    console.log('[DEBUG-H1] loadTranscriptData ENTRY', {hasAppApp: !!this.app?.app, appContextKeys: this.app ? Object.keys(this.app) : null});
-    // #endregion
     
     // Get transcript from app context - check both the appContext and the main app object
     // The main app (this.app.app) has the live data, appContext may have stale snapshot
     const mainApp = this.app.app || this.app;
     
-    // #region agent log
-    console.log('[DEBUG-H2] Checking transcript sources', {mainAppTeleprompterWords: mainApp.teleprompterWords?.length || 0, mainAppTranscriptSegments: mainApp.transcriptSegments?.length || 0, appContextTeleprompterWords: this.app.teleprompterWords?.length || 0, appContextTranscriptSegments: this.app.transcriptSegments?.length || 0});
-    // #endregion
     
     // Priority 1: Live teleprompter words from main app
     if (mainApp.teleprompterWords?.length > 0) {
@@ -237,9 +228,6 @@ export class LineScriptPanel {
       console.log('[LineScriptPanel] No transcript data available');
     }
     
-    // #region agent log
-    console.log('[DEBUG-H2] loadTranscriptData EXIT', {wordsCount: this.words?.length || 0, speakersCount: this.speakers?.length || 0});
-    // #endregion
     
     // Get speakers from main app or appContext
     this.speakers = mainApp.speakers || this.app.speakers || [];
@@ -623,9 +611,6 @@ export class LineScriptPanel {
    * Show the panel
    */
   show() {
-    // #region agent log
-    console.log('[DEBUG-H3,H4] show() called', {hasContainer: !!this.container, containerId: this.container?.id});
-    // #endregion
     
     this.visible = true;
     if (this.container) {
@@ -661,9 +646,6 @@ export class LineScriptPanel {
    * Render the panel
    */
   render() {
-    // #region agent log
-    console.log('[DEBUG-H5] render() called', {hasContainer: !!this.container, wordsCount: this.words?.length || 0, viewMode: this.viewMode, visible: this.visible});
-    // #endregion
     
     if (!this.container) return;
     

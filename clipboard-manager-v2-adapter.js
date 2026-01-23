@@ -313,9 +313,6 @@ class ClipboardManagerV2 {
     
     // Load all items (without content for performance)
     const items = this.storage.getAllItems();
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-manager-v2-adapter.js:loadFromStorage',message:'Loading from storage',data:{itemsFromStorage:items?.length,currentHistoryLength:this.history?.length,firstFiveIds:items?.slice(0,5).map(i=>i.id)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
-    // #endregion
     
     // Convert to old format for compatibility
     this.history = items.map(item => {
@@ -381,9 +378,6 @@ class ClipboardManagerV2 {
   async addToHistory(item) {
     // Ensure history is loaded before adding
     this.ensureHistoryLoaded();
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-manager-v2-adapter.js:addToHistory:entry',message:'addToHistory called',data:{type:item?.type,spaceId:item?.spaceId,historyLengthBefore:this.history?.length,storageItemCount:this.storage?.index?.items?.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
-    // #endregion
     
     const logger = getLogger();
     
@@ -581,9 +575,6 @@ class ClipboardManagerV2 {
     };
     
     this.history.unshift(historyItem);
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-manager-v2-adapter.js:addToHistory:afterUnshift',message:'After adding to history',data:{addedId:historyItem.id,historyLengthAfter:this.history?.length,storageItemCount:this.storage?.index?.items?.length,historyFirstId:this.history[0]?.id,storageFirstId:this.storage?.index?.items?.[0]?.id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
-    // #endregion
     
     // Maintain max history size
     if (this.history.length > this.maxHistorySize) {
@@ -662,9 +653,6 @@ class ClipboardManagerV2 {
    * This runs asynchronously so it doesn't block clipboard capture
    */
   async maybeAutoGenerateMetadata(itemId, itemType, isScreenshot, fileType = null) {
-    // #region agent log
-    try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'clipboard-manager-v2-adapter.js:maybeAutoGenerateMetadata:entry',message:'maybeAutoGenerateMetadata called',data:{itemId,itemType,isScreenshot,fileType},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-META'})+'\n'); } catch(e){}
-    // #endregion
     try {
       const { getSettingsManager } = require('./settings-manager');
       const settingsManager = getSettingsManager();
@@ -680,9 +668,6 @@ class ClipboardManagerV2 {
       // Check if this is an image file (type=file but fileType=image-file)
       const isImageFile = itemType === 'file' && fileType === 'image-file';
       
-      // #region agent log
-      try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'clipboard-manager-v2-adapter.js:maybeAutoGenerateMetadata:settings',message:'Settings check',data:{itemId,itemType,fileType,isImageFile,autoAIMetadata,autoAIMetadataTypes,hasApiKey:!!apiKey,autoGenerateScreenshotMetadata},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-META'})+'\n'); } catch(e){}
-      // #endregion
       
       console.log(`[Auto AI] Settings check for item ${itemId}:`, {
         itemType,
@@ -697,9 +682,6 @@ class ClipboardManagerV2 {
       
       if (!apiKey) {
         console.log('[Auto AI] No API key configured, skipping metadata generation');
-        // #region agent log
-        try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'clipboard-manager-v2-adapter.js:maybeAutoGenerateMetadata:noApiKey',message:'No API key - skipping',data:{itemId},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-META'})+'\n'); } catch(e){}
-        // #endregion
         return; // No API key configured
       }
       
@@ -734,30 +716,18 @@ class ClipboardManagerV2 {
       
       if (!shouldGenerate) {
         console.log(`[Auto AI] Skipping metadata generation for ${itemType} (not in enabled types: ${autoAIMetadataTypes.join(', ')})`);
-        // #region agent log
-        try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'clipboard-manager-v2-adapter.js:maybeAutoGenerateMetadata:skip',message:'Skipping - not in enabled types',data:{itemId,itemType,fileType,autoAIMetadataTypes},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-META'})+'\n'); } catch(e){}
-        // #endregion
         return;
       }
       
       console.log(`[Auto AI] Generating metadata for ${itemType} item: ${itemId}`);
-      // #region agent log
-      try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'clipboard-manager-v2-adapter.js:maybeAutoGenerateMetadata:generate',message:'Will generate metadata',data:{itemId,itemType,fileType},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-META'})+'\n'); } catch(e){}
-      // #endregion
       
       // Generate metadata using NEW specialized system
       const MetadataGenerator = require('./metadata-generator');
       const metadataGen = new MetadataGenerator(this);
       
-      // #region agent log
-      try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'clipboard-manager-v2-adapter.js:maybeAutoGenerateMetadata:beforeGenerate',message:'About to call generateMetadataForItem',data:{itemId},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-META'})+'\n'); } catch(e){}
-      // #endregion
       
       const result = await metadataGen.generateMetadataForItem(itemId, apiKey);
       
-      // #region agent log
-      try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'clipboard-manager-v2-adapter.js:maybeAutoGenerateMetadata:afterGenerate',message:'generateMetadataForItem returned',data:{itemId,success:result?.success,error:result?.error,hasMetadata:!!result?.metadata},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-META'})+'\n'); } catch(e){}
-      // #endregion
       
       if (result.success) {
         console.log(`[Auto AI] Successfully generated specialized metadata for ${itemType}: ${itemId}`);
@@ -776,14 +746,8 @@ class ClipboardManagerV2 {
         }
       } else {
         console.error(`[Auto AI] Failed to generate metadata for item ${itemId}:`, result.error);
-        // #region agent log
-        try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'clipboard-manager-v2-adapter.js:maybeAutoGenerateMetadata:failed',message:'Metadata generation failed',data:{itemId,error:result?.error},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-META'})+'\n'); } catch(e){}
-        // #endregion
       }
     } catch (error) {
-      // #region agent log
-      try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'clipboard-manager-v2-adapter.js:maybeAutoGenerateMetadata:exception',message:'Exception in metadata generation',data:{error:error.message,stack:error.stack?.substring(0,500)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-META'})+'\n'); } catch(e){}
-      // #endregion
       const logger = getLogger();
       logger.error('Clipboard auto AI metadata generation failed', {
         error: error.message,
@@ -796,9 +760,6 @@ class ClipboardManagerV2 {
   getHistory() {
     // Ensure history is loaded (lazy loading)
     this.ensureHistoryLoaded();
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-manager-v2-adapter.js:getHistory',message:'getHistory called',data:{historyLength:this.history?.length,storageItemCount:this.storage?.index?.items?.length,historyFirstFiveIds:this.history?.slice(0,5).map(i=>i.id),storageFirstFiveIds:this.storage?.index?.items?.slice(0,5).map(i=>i.id)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
-    // #endregion
     
     // Load content and metadata on demand for items that need it
     return this.history.map(item => {
@@ -1104,11 +1065,6 @@ class ClipboardManagerV2 {
   }
   
   createSpace(space) {
-    // #region agent log
-    console.log('[GSX-DEBUG] H7: createSpace method called');
-    console.log('[GSX-DEBUG] H7: this.storage exists:', !!this.storage);
-    console.log('[GSX-DEBUG] H7: space param:', JSON.stringify(space));
-    // #endregion
     
     // Add lastUsed timestamp when creating a space
     const spaceWithTimestamp = {
@@ -1117,15 +1073,9 @@ class ClipboardManagerV2 {
       createdAt: Date.now()
     };
     
-    // #region agent log
-    console.log('[GSX-DEBUG] H8: About to call this.storage.createSpace');
-    // #endregion
     
     const newSpace = this.storage.createSpace(spaceWithTimestamp);
     
-    // #region agent log
-    console.log('[GSX-DEBUG] H8: storage.createSpace returned:', JSON.stringify(newSpace));
-    // #endregion
     
     // Reload spaces from storage to stay in sync
     this.spaces = [...(this.storage.index.spaces || [])];
@@ -2287,9 +2237,6 @@ Respond ONLY with valid JSON, no other text.`;
   // If broken, check TEST-BLACKHOLE.md for troubleshooting
   // Must use app.getAppPath() for preload, NOT __dirname
   createBlackHoleWindow(position, startExpanded = false, clipboardData = null) {
-    // #region agent log
-    try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'clipboard-manager-v2-adapter.js:createBlackHoleWindow',message:'createBlackHoleWindow called',data:{hasPosition:!!position,startExpanded,hasClipboardData:!!clipboardData,windowExists:!!(this.blackHoleWindow&&!this.blackHoleWindow.isDestroyed())},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H7'})+'\n'); } catch(e){}
-    // #endregion
     if (this.blackHoleWindow && !this.blackHoleWindow.isDestroyed()) {
       this.blackHoleWindow.focus();
       // If we have new clipboard data, send it
@@ -2669,9 +2616,6 @@ Respond ONLY with valid JSON, no other text.`;
   
   // IPC Setup - Complete set of handlers for compatibility
   setupIPC() {
-    // #region agent log
-    console.log('[DEBUG-H2] setupIPC called:', { hasIpcMain: !!ipcMain, alreadyRegistered: !!ClipboardManagerV2._ipcRegistered });
-    // #endregion
     if (!ipcMain) {
       console.log('IPC not available in non-Electron environment');
       return;
@@ -2680,15 +2624,9 @@ Respond ONLY with valid JSON, no other text.`;
     // Prevent duplicate IPC registration (memory leak prevention)
     if (ClipboardManagerV2._ipcRegistered) {
       console.warn('[ClipboardManager] IPC handlers already registered - skipping to prevent memory leak');
-      // #region agent log
-      console.log('[DEBUG-H2] setupIPC SKIPPED - _ipcRegistered flag was already true');
-      // #endregion
       return;
     }
     ClipboardManagerV2._ipcRegistered = true;
-    // #region agent log
-    console.log('[DEBUG-H2] setupIPC proceeding - flag set to true, will register handlers');
-    // #endregion
     
     // Helper to safely register IPC handlers - skips if handler already exists
     // This prevents "Attempted to register a second handler" errors when handlers
@@ -2933,19 +2871,10 @@ Respond ONLY with valid JSON, no other text.`;
     });
     
     safeHandle('clipboard:create-space', (event, space) => {
-      // #region agent log
-      console.log('[GSX-DEBUG] clipboard:create-space called with:', JSON.stringify(space));
-      // #endregion
       try {
         const result = this.createSpace(space);
-        // #region agent log
-        console.log('[GSX-DEBUG] clipboard:create-space success:', JSON.stringify(result));
-        // #endregion
         return result;
       } catch (error) {
-        // #region agent log
-        console.error('[GSX-DEBUG] clipboard:create-space error:', error.message, error.stack);
-        // #endregion
         throw error;
       }
     });
@@ -3211,13 +3140,7 @@ Respond ONLY with valid JSON, no other text.`;
       }
     });
     
-    // #region agent log
-    console.log('[DEBUG-H3] About to register clipboard:get-metadata handler');
-    // #endregion
     safeHandle('clipboard:get-metadata', (event, itemId) => {
-      // #region agent log
-      console.log('[DEBUG-H4] clipboard:get-metadata handler INVOKED with itemId:', itemId);
-      // #endregion
       try {
         const item = this.storage.loadItem(itemId);
         if (!item) return { success: false, error: 'Item not found' };
@@ -5618,13 +5541,52 @@ ${chunks[i]}`;
         // Run the check
         const result = await this.websiteMonitor.checkWebsite(monitorId);
         
+        // Get current timeline
+        const currentTimeline = item.timeline || [];
+        const now = new Date().toISOString();
+        
+        // If timeline is empty, create a baseline entry
+        if (currentTimeline.length === 0 && result && result.snapshot) {
+          console.log('[WebMonitor] Creating baseline entry for existing monitor...');
+          
+          const baselineEntry = {
+            id: `baseline-${Date.now()}`,
+            timestamp: now,
+            type: 'baseline',
+            summary: 'Initial baseline captured',
+            screenshotPath: result.snapshot.screenshot || null,
+            textLength: result.snapshot.textContent?.length || 0
+          };
+          
+          // Update item with baseline
+          item.timeline = [baselineEntry];
+          item.lastChecked = now;
+          
+          // Update in history array
+          const historyIndex = this.history.findIndex(h => h.id === itemId);
+          if (historyIndex >= 0) {
+            this.history[historyIndex].timeline = [baselineEntry];
+            this.history[historyIndex].lastChecked = now;
+          }
+          
+          // Update in storage
+          await this.updateItemMetadata(itemId, { 
+            timeline: [baselineEntry],
+            lastChecked: now 
+          });
+          
+          // Notify UI to refresh
+          this.notifyHistoryUpdate();
+          
+          return { success: true, changed: false, baseline: true };
+        }
+        
         // Update item if changed
         if (result && result.changed) {
           await this.handleWebsiteChange(result);
         }
         
         // Update last checked time on the item
-        const now = new Date().toISOString();
         item.lastChecked = now;
         
         // Update in history array
@@ -6583,9 +6545,6 @@ ${chunks[i]}`;
         const mimeType = data.mimeType || this.getMimeTypeFromExtension(ext);
         thumbnail = `data:${mimeType};base64,${data.fileData}`;
         console.log('[V2] Generated image thumbnail, mimeType:', mimeType, 'dataLength:', data.fileData.length);
-        // #region agent log
-        try { fs.appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'clipboard-manager-v2-adapter.js:add-file:imageThumbnail',message:'Generated image thumbnail',data:{fileName:data.fileName,mimeType,thumbnailLength:thumbnail.length,fileType},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H6'})+'\n'); } catch(e){}
-        // #endregion
       }
       
       const itemId = this.generateId();
@@ -9233,12 +9192,54 @@ ${chunks[i]}`;
     BrowserWindow.getAllWindows().forEach(window => {
       window.webContents.send('show-notification', {
         title: 'Website Monitor Created',
-        body: `Now monitoring ${monitor.name}. Checks every 30 minutes.`,
+        body: `Now monitoring ${monitor.name}. Capturing initial baseline...`,
         type: 'success'
       });
     });
     
     console.log('[WebMonitors] Monitor created successfully:', monitorItem.id);
+    
+    // Perform initial check to capture baseline
+    try {
+      console.log('[WebMonitors] Capturing initial baseline...');
+      const initialResult = await this.websiteMonitor.checkWebsite(monitor.id);
+      
+      if (initialResult && initialResult.snapshot) {
+        // Create baseline entry for timeline
+        const baselineEntry = {
+          id: `baseline-${Date.now()}`,
+          timestamp: new Date().toISOString(),
+          type: 'baseline',
+          summary: 'Initial baseline captured',
+          screenshotPath: initialResult.snapshot.screenshot || null,
+          textLength: initialResult.snapshot.textContent?.length || 0
+        };
+        
+        // Update the monitor item with baseline
+        const historyItem = this.history.find(h => h.id === monitorItem.id || h.id === indexEntry.id);
+        if (historyItem) {
+          historyItem.timeline = [baselineEntry];
+          historyItem.lastChecked = new Date().toISOString();
+          historyItem.changeCount = 0;
+          
+          // Also update in storage
+          await this.updateItemMetadata(historyItem.id, {
+            timeline: [baselineEntry],
+            lastChecked: historyItem.lastChecked,
+            changeCount: 0
+          });
+        }
+        
+        console.log('[WebMonitors] Initial baseline captured successfully');
+        
+        // Notify UI of update
+        this.notifyHistoryUpdate();
+      }
+    } catch (baselineError) {
+      console.error('[WebMonitors] Failed to capture initial baseline:', baselineError.message);
+      // Not critical - monitor will work, just no baseline in timeline
+    }
+    
     return monitorItem;
   }
   

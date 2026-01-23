@@ -234,7 +234,7 @@ function createMainWindow(app) {
           "style-src-elem 'self' 'unsafe-inline' * https://*.onereach.ai https://fonts.googleapis.com; " +
           "script-src 'self' 'unsafe-inline' 'unsafe-eval' * https://*.onereach.ai https://unpkg.com https://cdn.jsdelivr.net; " +
           "connect-src 'self' * https://*.onereach.ai https://*.api.onereach.ai ws://localhost:3322 wss://*; " +
-          "img-src 'self' data: blob: * https://*.onereach.ai; " +
+          "img-src 'self' data: blob: spaces: * https://*.onereach.ai; " +
           "font-src 'self' data: * https://*.onereach.ai https://fonts.gstatic.com; " +
           "media-src 'self' blob: mediastream: * https://*.onereach.ai https://*.chatgpt.com https://*.openai.com; " +
           "worker-src 'self' blob:; " +
@@ -741,7 +741,7 @@ function createSecureContentWindow(parentWindow) {
           "style-src-elem 'self' 'unsafe-inline' * https://*.onereach.ai https://fonts.googleapis.com; " +
           "script-src 'self' 'unsafe-inline' 'unsafe-eval' * https://*.onereach.ai https://unpkg.com https://cdn.jsdelivr.net; " +
           "connect-src 'self' * https://*.onereach.ai https://*.api.onereach.ai ws://localhost:3322; " +
-          "img-src 'self' data: blob: * https://*.onereach.ai; " +
+          "img-src 'self' data: blob: spaces: * https://*.onereach.ai; " +
           "font-src 'self' data: * https://*.onereach.ai https://fonts.gstatic.com; " +
           "media-src 'self' blob: * https://*.onereach.ai; " +
           "worker-src 'self' blob:; " +
@@ -1077,7 +1077,7 @@ function createSetupWizardWindow(options = {}) {
           "style-src-elem 'self' 'unsafe-inline' * https://*.onereach.ai; " +
           "script-src 'self' 'unsafe-inline' 'unsafe-eval' * https://*.onereach.ai https://unpkg.com https://cdn.jsdelivr.net; " +
           "connect-src 'self' * https://*.onereach.ai https://*.api.onereach.ai ws://localhost:3322; " +
-          "img-src 'self' data: blob: * https://*.onereach.ai; " +
+          "img-src 'self' data: blob: spaces: * https://*.onereach.ai; " +
           "font-src 'self' data: * https://*.onereach.ai; " +
           "media-src 'self' * https://*.onereach.ai; " +
           "object-src 'none'; " +
@@ -1118,7 +1118,7 @@ function createTestWindow() {
           "style-src-elem 'self' 'unsafe-inline' * https://*.onereach.ai https://fonts.googleapis.com; " +
           "script-src 'self' 'unsafe-inline' 'unsafe-eval' * https://*.onereach.ai https://unpkg.com https://cdn.jsdelivr.net; " +
           "connect-src 'self' * https://*.onereach.ai https://*.api.onereach.ai ws://localhost:3322; " +
-          "img-src 'self' data: blob: * https://*.onereach.ai; " +
+          "img-src 'self' data: blob: spaces: * https://*.onereach.ai; " +
           "font-src 'self' data: * https://*.onereach.ai https://fonts.gstatic.com; " +
           "media-src 'self' * https://*.onereach.ai; " +
           "object-src 'none'; " +
@@ -1212,7 +1212,7 @@ function openGSXWindow(url, title, idwEnvironment) {
           "style-src-elem 'self' 'unsafe-inline' * https://*.onereach.ai https://fonts.googleapis.com; " +
           "script-src 'self' 'unsafe-inline' 'unsafe-eval' * https://*.onereach.ai https://unpkg.com https://cdn.jsdelivr.net; " +
           "connect-src 'self' * https://*.onereach.ai https://*.api.onereach.ai ws://localhost:3322; " +
-          "img-src 'self' data: blob: * https://*.onereach.ai; " +
+          "img-src 'self' data: blob: spaces: * https://*.onereach.ai; " +
           "font-src 'self' data: * https://*.onereach.ai https://fonts.gstatic.com; " +
           "media-src 'self' blob: * https://*.onereach.ai; " +
           "worker-src 'self' blob:; " +
@@ -1549,10 +1549,6 @@ function handleDownloadWithSpaceOption(item, windowName = 'Main Window') {
     } else if (result.response === 1) {
       // Save to Space
       console.log(`[DOWNLOAD] User chose to save to Space`);
-      // #region agent log
-      const fs = require('fs');
-      try { fs.appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'browserWindow.js:saveToSpace',message:'User chose Save to Space',data:{fileName},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})+'\n'); } catch(e){}
-      // #endregion
       
       const tempPath = app.getPath('temp');
       const tempFilePath = path.join(tempPath, fileName);
@@ -1607,9 +1603,6 @@ function handleDownloadWithSpaceOption(item, windowName = 'Main Window') {
                     }
                     
                     // Send the file data
-                    // #region agent log
-                    try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'browserWindow.js:sendExternalFileDrop',message:'Sending external-file-drop',data:{fileName,fileSize:fileData.length,mimeType:item.getMimeType()||'application/octet-stream'},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})+'\n'); } catch(e){}
-                    // #endregion
                     clipboardManager.blackHoleWindow.webContents.send('external-file-drop', {
                       fileName: fileName,
                       fileData: base64Data,
@@ -1692,9 +1685,6 @@ function handleDownloadWithSpaceOption(item, windowName = 'Main Window') {
                           }
                           
                           // Send the file data
-                          // #region agent log
-                          try { require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log', JSON.stringify({location:'browserWindow.js:sendExternalFileDrop2',message:'Sending external-file-drop (new window)',data:{fileName,fileSize:fileData.length,mimeType:item.getMimeType()||'application/octet-stream'},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})+'\n'); } catch(e){}
-                          // #endregion
                           clipboardManager.blackHoleWindow.webContents.send('external-file-drop', {
                             fileName: fileName,
                             fileData: base64Data,

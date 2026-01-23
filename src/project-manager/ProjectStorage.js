@@ -324,14 +324,6 @@ class ProjectStorage {
       if (fs.existsSync(versionPath)) {
         const data = fs.readFileSync(versionPath, 'utf8');
         const version = JSON.parse(data);
-        // #region agent log
-        const http = require('http');
-        const logData = JSON.stringify({location:'ProjectStorage.js:getVersion',message:'Loading version from disk',data:{versionId,transcriptInFile:version?.transcriptSegments?.length||0,markersInFile:version?.markers?.length||0,path:versionPath},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4-backend'});
-        const req = http.request({hostname:'127.0.0.1',port:7242,path:'/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',method:'POST',headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(logData)}},()=>{});
-        req.on('error',()=>{});
-        req.write(logData);
-        req.end();
-        // #endregion
         return version;
       }
     } catch (error) {
@@ -369,14 +361,6 @@ class ProjectStorage {
       throw new Error(`Version not found: ${versionId}`);
     }
     
-    // #region agent log
-    const http = require('http');
-    const logData = JSON.stringify({location:'ProjectStorage.js:updateVersion',message:'Saving version to disk',data:{versionId,transcriptInUpdates:updates?.transcriptSegments?.length||0,markersInUpdates:updates?.markers?.length||0},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3-backend'});
-    const req = http.request({hostname:'127.0.0.1',port:7242,path:'/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',method:'POST',headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(logData)}},()=>{});
-    req.on('error',()=>{});
-    req.write(logData);
-    req.end();
-    // #endregion
     
     // Apply updates (except id, projectId, and createdAt)
     const { id, projectId, createdAt, ...allowedUpdates } = updates;
@@ -388,13 +372,6 @@ class ProjectStorage {
     const versionPath = this.getVersionPath(versionId);
     fs.writeFileSync(versionPath, JSON.stringify(version, null, 2));
     
-    // #region agent log
-    const logData2 = JSON.stringify({location:'ProjectStorage.js:updateVersion:saved',message:'Version file written',data:{versionId,path:versionPath,transcriptInVersion:version?.transcriptSegments?.length||0},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3-backend'});
-    const req2 = http.request({hostname:'127.0.0.1',port:7242,path:'/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',method:'POST',headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(logData2)}},()=>{});
-    req2.on('error',()=>{});
-    req2.write(logData2);
-    req2.end();
-    // #endregion
     
     console.log('[ProjectStorage] Updated version:', versionId);
     return version;

@@ -1,0 +1,1387 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Command HUD</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        html, body {
+            width: 100%;
+            height: 100%;
+            background: transparent;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        
+        .hud-container {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            right: 10px;
+            width: auto;
+            background: linear-gradient(165deg, rgba(28, 28, 38, 0.95) 0%, rgba(18, 18, 26, 0.98) 100%);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            box-shadow: 
+                0 8px 32px rgba(0, 0, 0, 0.4),
+                inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            color: #e0e0e0;
+            overflow: visible;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: opacity 0.3s ease, transform 0.3s ease;
+        }
+        
+        .hud-container.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        
+        .hud-container.hiding {
+            opacity: 0;
+            transform: translateY(-10px);
+        }
+        
+        /* Header */
+        .hud-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.03);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        
+        .hud-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 600;
+            font-size: 13px;
+            color: #fff;
+        }
+        
+        .queue-indicator {
+            display: none;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 8px;
+            background: rgba(139, 92, 246, 0.15);
+            border-radius: 10px;
+            font-size: 10px;
+            color: #c4b5fd;
+        }
+        
+        .queue-indicator.visible {
+            display: flex;
+        }
+        
+        .queue-count {
+            font-weight: 600;
+        }
+        
+        .hud-status-badge {
+            padding: 3px 8px;
+            border-radius: 10px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .hud-status-badge.pending {
+            background: rgba(234, 179, 8, 0.2);
+            color: #eab308;
+        }
+        
+        .hud-status-badge.running {
+            background: rgba(59, 130, 246, 0.2);
+            color: #3b82f6;
+            animation: pulse-badge 1.5s ease-in-out infinite;
+        }
+        
+        .hud-status-badge.completed {
+            background: rgba(34, 197, 94, 0.2);
+            color: #22c55e;
+        }
+        
+        .hud-status-badge.failed {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+        }
+        
+        @keyframes pulse-badge {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+        
+        /* Content */
+        .hud-content {
+            padding: 16px;
+        }
+        
+        /* Action Display */
+        .action-display {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        
+        .action-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            flex-shrink: 0;
+            background: rgba(139, 92, 246, 0.15);
+            border: 1px solid rgba(139, 92, 246, 0.25);
+        }
+        
+        .action-icon.pending {
+            background: rgba(234, 179, 8, 0.15);
+            border-color: rgba(234, 179, 8, 0.25);
+        }
+        
+        .action-icon.running {
+            background: rgba(59, 130, 246, 0.15);
+            border-color: rgba(59, 130, 246, 0.25);
+            animation: icon-pulse 1.5s ease-in-out infinite;
+        }
+        
+        .action-icon.completed {
+            background: rgba(34, 197, 94, 0.15);
+            border-color: rgba(34, 197, 94, 0.25);
+        }
+        
+        .action-icon.failed {
+            background: rgba(239, 68, 68, 0.15);
+            border-color: rgba(239, 68, 68, 0.25);
+        }
+        
+        @keyframes icon-pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+        
+        .action-details {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .action-name {
+            font-size: 16px;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 4px;
+            text-transform: capitalize;
+        }
+        
+        .action-transcript {
+            font-size: 12px;
+            color: #a0a0a0;
+            line-height: 1.4;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        
+        /* Parameters */
+        .params-section {
+            margin-bottom: 16px;
+        }
+        
+        .params-title {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: #808080;
+            margin-bottom: 8px;
+            letter-spacing: 0.5px;
+        }
+        
+        .params-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+        
+        .param-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 10px;
+            background: rgba(100, 100, 255, 0.1);
+            border-radius: 8px;
+            font-size: 11px;
+        }
+        
+        .param-key {
+            color: #8888ff;
+        }
+        
+        .param-value {
+            color: #e0e0e0;
+        }
+        
+        /* Progress */
+        .progress-section {
+            margin-bottom: 16px;
+        }
+        
+        .progress-bar {
+            height: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+            border-radius: 2px;
+            transition: width 0.3s ease;
+        }
+        
+        .progress-fill.indeterminate {
+            width: 30%;
+            animation: progress-slide 1.5s ease-in-out infinite;
+        }
+        
+        @keyframes progress-slide {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(400%); }
+        }
+        
+        /* Result */
+        .result-section {
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 10px;
+            margin-bottom: 12px;
+        }
+        
+        .result-section.success {
+            background: rgba(34, 197, 94, 0.1);
+            border: 1px solid rgba(34, 197, 94, 0.2);
+        }
+        
+        .result-section.error {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+        }
+        
+        .result-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: #22c55e;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .result-section.error .result-title {
+            color: #ef4444;
+        }
+        
+        .result-section.fading {
+            opacity: 0;
+            transition: opacity 0.5s ease;
+        }
+        
+        .result-message {
+            font-size: 12px;
+            color: #b0b0b0;
+            line-height: 1.4;
+        }
+        
+        /* Confidence */
+        .confidence-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 11px;
+            color: #808080;
+            padding-top: 8px;
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        
+        .confidence-value {
+            font-weight: 600;
+            color: #a0a0a0;
+        }
+        
+        .confidence-value.high { color: #22c55e; }
+        .confidence-value.medium { color: #eab308; }
+        .confidence-value.low { color: #ef4444; }
+        
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            padding: 32px 16px;
+            color: #808080;
+        }
+        
+        .empty-icon {
+            font-size: 48px;
+            margin-bottom: 12px;
+            opacity: 0.6;
+        }
+        
+        .empty-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #a0a0a0;
+            margin-bottom: 4px;
+        }
+        
+        .empty-text {
+            font-size: 12px;
+            color: #666;
+        }
+        
+        /* Actions */
+        .hud-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+        }
+        
+        .hud-btn {
+            flex: 1;
+            padding: 10px 16px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            color: #ccc;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .hud-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+        
+        .hud-btn.primary {
+            background: rgba(139, 92, 246, 0.2);
+            border-color: rgba(139, 92, 246, 0.3);
+            color: #c4b5fd;
+        }
+        
+        .hud-btn.primary:hover {
+            background: rgba(139, 92, 246, 0.3);
+            border-color: rgba(139, 92, 246, 0.4);
+        }
+        
+        .hud-btn.danger {
+            background: rgba(239, 68, 68, 0.15);
+            border-color: rgba(239, 68, 68, 0.3);
+            color: #fca5a5;
+        }
+        
+        .hud-btn.danger:hover {
+            background: rgba(239, 68, 68, 0.25);
+        }
+        
+        /* Loading spinner */
+        .spinner {
+            width: 24px;
+            height: 24px;
+            border: 2px solid rgba(59, 130, 246, 0.2);
+            border-top-color: #3b82f6;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        /* Text Input Mode */
+        .text-input-section {
+            display: none;
+            padding: 12px;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        
+        .text-input-section.visible {
+            display: block;
+        }
+        
+        .text-input-wrapper {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .text-input {
+            flex: 1;
+            padding: 10px 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            color: #e0e0e0;
+            font-size: 13px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        
+        .text-input:focus {
+            border-color: rgba(139, 92, 246, 0.5);
+        }
+        
+        .text-input::placeholder {
+            color: #666;
+        }
+        
+        .text-input-send {
+            padding: 10px 16px;
+            background: rgba(139, 92, 246, 0.2);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 8px;
+            color: #c4b5fd;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .text-input-send:hover {
+            background: rgba(139, 92, 246, 0.3);
+            border-color: rgba(139, 92, 246, 0.4);
+        }
+        
+        .text-input-close {
+            padding: 10px;
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            color: #888;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .text-input-close:hover {
+            background: rgba(255, 255, 255, 0.05);
+            color: #ccc;
+        }
+        
+        /* Right-click hint */
+        .context-hint {
+            position: absolute;
+            bottom: 8px;
+            right: 12px;
+            font-size: 10px;
+            color: #555;
+            pointer-events: none;
+        }
+        
+        /* Disambiguation Mode */
+        .disambiguation-section {
+            display: none;
+            padding: 16px;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        
+        .disambiguation-section.visible {
+            display: block;
+        }
+        
+        .disambiguation-question {
+            font-size: 14px;
+            font-weight: 500;
+            color: #fff;
+            margin-bottom: 12px;
+            line-height: 1.4;
+        }
+        
+        .disambiguation-options {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        .disambiguation-option {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 14px;
+            background: rgba(139, 92, 246, 0.08);
+            border: 1px solid rgba(139, 92, 246, 0.2);
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .disambiguation-option:hover {
+            background: rgba(139, 92, 246, 0.15);
+            border-color: rgba(139, 92, 246, 0.35);
+            transform: translateX(4px);
+        }
+        
+        .disambiguation-option:active {
+            transform: translateX(2px);
+            background: rgba(139, 92, 246, 0.2);
+        }
+        
+        .disambiguation-option.selected {
+            background: rgba(139, 92, 246, 0.25);
+            border-color: rgba(139, 92, 246, 0.5);
+        }
+        
+        .option-number {
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(139, 92, 246, 0.2);
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            color: #c4b5fd;
+            flex-shrink: 0;
+        }
+        
+        .option-content {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .option-label {
+            font-size: 13px;
+            font-weight: 500;
+            color: #e0e0e0;
+            margin-bottom: 2px;
+        }
+        
+        .option-action {
+            font-size: 11px;
+            color: #888;
+        }
+        
+        .disambiguation-hint {
+            margin-top: 12px;
+            font-size: 11px;
+            color: #666;
+            text-align: center;
+        }
+        
+        .disambiguation-hint kbd {
+            display: inline-block;
+            padding: 2px 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            font-family: inherit;
+            font-size: 10px;
+        }
+        
+        /* Listening indicator for voice response */
+        .listening-indicator {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-top: 12px;
+            padding: 8px 12px;
+            background: rgba(234, 179, 8, 0.1);
+            border: 1px solid rgba(234, 179, 8, 0.2);
+            border-radius: 8px;
+            font-size: 12px;
+            color: #eab308;
+        }
+        
+        .listening-indicator.visible {
+            display: flex;
+        }
+        
+        .listening-dot {
+            width: 8px;
+            height: 8px;
+            background: #eab308;
+            border-radius: 50%;
+            animation: listening-pulse 1.5s ease-in-out infinite;
+        }
+        
+        @keyframes listening-pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.8); }
+        }
+    </style>
+</head>
+<body>
+    <div class="hud-container" id="hudContainer">
+        <div class="hud-header">
+            <div class="hud-title">
+                <span id="hudIcon">&bull;</span>
+                <span>Voice Command</span>
+                <span class="queue-indicator" id="queueIndicator">
+                    <span class="queue-count" id="queueCount">0</span>
+                    <span>in queue</span>
+                </span>
+            </div>
+            <span class="hud-status-badge pending" id="statusBadge">Pending</span>
+        </div>
+        <div class="hud-content" id="hudContent">
+            <div class="empty-state" id="emptyState">
+                <div class="empty-icon">&mdash;</div>
+                <div class="empty-title">Listening...</div>
+                <div class="empty-text">Speak a command to get started</div>
+            </div>
+            
+            <div id="taskDisplay" style="display: none;">
+                <div class="action-display">
+                    <div class="action-icon" id="actionIcon">
+                        <span id="actionEmoji">&bull;</span>
+                    </div>
+                    <div class="action-details">
+                        <div class="action-name" id="actionName">Processing...</div>
+                        <div class="action-transcript" id="actionTranscript"></div>
+                    </div>
+                </div>
+                
+                <div class="params-section" id="paramsSection" style="display: none;">
+                    <div class="params-title">Parameters</div>
+                    <div class="params-list" id="paramsList"></div>
+                </div>
+                
+                <div class="progress-section" id="progressSection">
+                    <div class="progress-bar">
+                        <div class="progress-fill indeterminate" id="progressFill"></div>
+                    </div>
+                </div>
+                
+                <div class="result-section" id="resultSection" style="display: none;">
+                    <div class="result-title" id="resultTitle">
+                        <span id="resultIcon">+</span>
+                        <span id="resultLabel">Completed</span>
+                    </div>
+                    <div class="result-message" id="resultMessage"></div>
+                </div>
+                
+                <div class="confidence-row" id="confidenceRow">
+                    <span>Confidence</span>
+                    <span class="confidence-value high" id="confidenceValue">95%</span>
+                </div>
+                
+                <div class="hud-actions" id="hudActions" style="display: none;">
+                    <button class="hud-btn" id="btnDismiss">Dismiss</button>
+                    <button class="hud-btn primary" id="btnRetry" style="display: none;">Retry</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Disambiguation Section -->
+        <div class="disambiguation-section" id="disambiguationSection">
+            <div class="disambiguation-question" id="disambiguationQuestion">
+                What did you mean?
+            </div>
+            <div class="disambiguation-options" id="disambiguationOptions">
+                <!-- Options will be populated dynamically -->
+            </div>
+            <div class="listening-indicator" id="listeningIndicator">
+                <span class="listening-dot"></span>
+                <span>Listening for your response...</span>
+            </div>
+            <div class="disambiguation-hint">
+                Press <kbd>1</kbd>-<kbd>5</kbd> to select, or speak your choice
+            </div>
+        </div>
+        
+        <!-- Text Input Section -->
+        <div class="text-input-section" id="textInputSection">
+            <div class="text-input-wrapper">
+                <input type="text" class="text-input" id="textInput" placeholder="Type your command..." />
+                <button class="text-input-send" id="textInputSend">Send</button>
+                <button class="text-input-close" id="textInputClose">×</button>
+            </div>
+        </div>
+        
+        <!-- Right-click hint -->
+        <div class="context-hint">Right-click for options</div>
+    </div>
+
+    <script>
+        // State
+        let currentTask = null;
+        let autoHideTimer = null;
+        let queueStatsTimer = null;
+        let errorFadeTimer = null;
+        const AUTO_HIDE_DELAY = 8000; // Hide after 8 seconds on success
+        const ERROR_FADE_DELAY = 15000; // Fade errors after 15 seconds
+        
+        // Queue indicator elements
+        const queueIndicator = document.getElementById('queueIndicator');
+        const queueCount = document.getElementById('queueCount');
+        
+        // Update queue stats display
+        async function updateQueueStats() {
+            if (!window.hudAPI || !window.hudAPI.getQueueStats) return;
+            
+            try {
+                const stats = await window.hudAPI.getQueueStats('voice-commands');
+                if (stats) {
+                    const total = stats.pending + stats.running;
+                    if (total > 0) {
+                        queueCount.textContent = total;
+                        queueIndicator.classList.add('visible');
+                    } else {
+                        queueIndicator.classList.remove('visible');
+                    }
+                }
+            } catch (e) {
+                // Ignore errors
+            }
+        }
+        
+        // Start periodic queue stats updates
+        function startQueueStatsUpdates() {
+            updateQueueStats();
+            queueStatsTimer = setInterval(updateQueueStats, 1000);
+        }
+        
+        function stopQueueStatsUpdates() {
+            if (queueStatsTimer) {
+                clearInterval(queueStatsTimer);
+                queueStatsTimer = null;
+            }
+        }
+        
+        // Action icons mapping (using simple characters instead of emojis)
+        const ACTION_ICONS = {
+            search: 'S',
+            create: '+',
+            open: 'O',
+            send: '>',
+            save: '*',
+            delete: 'X',
+            edit: 'E',
+            play: '>',
+            stop: '[]',
+            navigate: 'N',
+            copy: 'C',
+            paste: 'P',
+            undo: '<',
+            redo: '>',
+            help: '?',
+            settings: '*',
+            default: '>'
+        };
+        
+        // DOM Elements
+        const hudContainer = document.getElementById('hudContainer');
+        const emptyState = document.getElementById('emptyState');
+        const taskDisplay = document.getElementById('taskDisplay');
+        const statusBadge = document.getElementById('statusBadge');
+        const actionIcon = document.getElementById('actionIcon');
+        const actionEmoji = document.getElementById('actionEmoji');
+        const actionName = document.getElementById('actionName');
+        const actionTranscript = document.getElementById('actionTranscript');
+        const paramsSection = document.getElementById('paramsSection');
+        const paramsList = document.getElementById('paramsList');
+        const progressSection = document.getElementById('progressSection');
+        const progressFill = document.getElementById('progressFill');
+        const resultSection = document.getElementById('resultSection');
+        const resultTitle = document.getElementById('resultTitle');
+        const resultIcon = document.getElementById('resultIcon');
+        const resultLabel = document.getElementById('resultLabel');
+        const resultMessage = document.getElementById('resultMessage');
+        const confidenceRow = document.getElementById('confidenceRow');
+        const confidenceValue = document.getElementById('confidenceValue');
+        const hudActions = document.getElementById('hudActions');
+        const btnDismiss = document.getElementById('btnDismiss');
+        const btnRetry = document.getElementById('btnRetry');
+        
+        // Show HUD
+        function show() {
+            hudContainer.classList.remove('hiding');
+            hudContainer.classList.add('visible');
+            clearAutoHide();
+            startQueueStatsUpdates();
+        }
+        
+        // Hide HUD
+        function hide() {
+            hudContainer.classList.add('hiding');
+            hudContainer.classList.remove('visible');
+            clearAutoHide();
+            clearErrorFade();
+            stopQueueStatsUpdates();
+        }
+        
+        // Clear auto-hide timer
+        function clearAutoHide() {
+            if (autoHideTimer) {
+                clearTimeout(autoHideTimer);
+                autoHideTimer = null;
+            }
+        }
+        
+        // Clear error fade timer
+        function clearErrorFade() {
+            if (errorFadeTimer) {
+                clearTimeout(errorFadeTimer);
+                errorFadeTimer = null;
+            }
+        }
+        
+        // Schedule auto-hide
+        function scheduleAutoHide(delay = AUTO_HIDE_DELAY) {
+            clearAutoHide();
+            autoHideTimer = setTimeout(() => {
+                hide();
+            }, delay);
+        }
+        
+        // Schedule error fade (longer than success)
+        function scheduleErrorFade() {
+            clearErrorFade();
+            errorFadeTimer = setTimeout(() => {
+                hide();
+            }, ERROR_FADE_DELAY);
+        }
+        
+        // Clear previous result state (called when new task starts)
+        function clearPreviousResult() {
+            // If there was an error showing, fade it out
+            if (resultSection.style.display !== 'none' && 
+                resultSection.classList.contains('error')) {
+                resultSection.classList.add('fading');
+                // Quick fade then hide
+                setTimeout(() => {
+                    resultSection.style.display = 'none';
+                    resultSection.className = 'result-section';
+                }, 300);
+            } else {
+                resultSection.style.display = 'none';
+                resultSection.className = 'result-section';
+            }
+            hudActions.style.display = 'none';
+            clearAutoHide();
+            clearErrorFade();
+        }
+        
+        // Update status badge
+        function updateStatus(status) {
+            statusBadge.className = 'hud-status-badge ' + status;
+            actionIcon.className = 'action-icon ' + status;
+            
+            const labels = {
+                pending: 'Pending',
+                running: 'Running',
+                completed: 'Done',
+                failed: 'Failed'
+            };
+            statusBadge.textContent = labels[status] || status;
+        }
+        
+        // Get icon for action
+        function getActionIcon(action) {
+            if (!action) return ACTION_ICONS.default;
+            const key = action.toLowerCase().replace(/_/g, '');
+            return ACTION_ICONS[key] || ACTION_ICONS.default;
+        }
+        
+        // Display task
+        function displayTask(task) {
+            currentTask = task;
+            
+            // Clear any previous result/error state
+            clearPreviousResult();
+            
+            // Show task display, hide empty state
+            emptyState.style.display = 'none';
+            taskDisplay.style.display = 'block';
+            
+            // Update action info
+            const action = task.action || 'Processing';
+            actionEmoji.textContent = getActionIcon(action);
+            actionName.textContent = action.replace(/_/g, ' ');
+            actionTranscript.textContent = task.transcript || task.content || '';
+            
+            // Update status
+            updateStatus(task.status || 'pending');
+            
+            // Show parameters if any
+            if (task.params && Object.keys(task.params).length > 0) {
+                paramsSection.style.display = 'block';
+                paramsList.innerHTML = Object.entries(task.params)
+                    .filter(([key, value]) => value !== undefined && value !== null)
+                    .map(([key, value]) => `
+                        <span class="param-tag">
+                            <span class="param-key">${key}:</span>
+                            <span class="param-value">${String(value).substring(0, 30)}</span>
+                        </span>
+                    `).join('');
+            } else {
+                paramsSection.style.display = 'none';
+            }
+            
+            // Show confidence if available
+            if (task.confidence !== undefined) {
+                confidenceRow.style.display = 'flex';
+                const conf = Math.round(task.confidence * 100);
+                confidenceValue.textContent = conf + '%';
+                confidenceValue.className = 'confidence-value ' + 
+                    (conf >= 80 ? 'high' : conf >= 50 ? 'medium' : 'low');
+            } else {
+                confidenceRow.style.display = 'none';
+            }
+            
+            // Show/hide progress based on status
+            if (task.status === 'running' || task.status === 'pending') {
+                progressSection.style.display = 'block';
+                resultSection.style.display = 'none';
+                hudActions.style.display = 'none';
+            } else {
+                progressSection.style.display = 'none';
+            }
+            
+            show();
+        }
+        
+        // Display result
+        function displayResult(result) {
+            const isSuccess = result.success !== false && !result.error;
+            
+            updateStatus(isSuccess ? 'completed' : 'failed');
+            
+            // Hide progress, show result
+            progressSection.style.display = 'none';
+            resultSection.style.display = 'block';
+            resultSection.className = 'result-section ' + (isSuccess ? 'success' : 'error');
+            
+            resultIcon.textContent = isSuccess ? '+' : 'x';
+            resultLabel.textContent = isSuccess ? 'Completed' : 'Failed';
+            resultMessage.textContent = result.message || result.error || 
+                (isSuccess ? 'Action completed successfully' : 'An error occurred');
+            
+            // Show actions
+            hudActions.style.display = 'flex';
+            btnRetry.style.display = isSuccess ? 'none' : 'block';
+            
+            // Auto-hide on success, fade error after longer delay
+            if (isSuccess) {
+                scheduleAutoHide();
+            } else {
+                // Errors fade after a longer delay so user can see them
+                scheduleErrorFade();
+            }
+        }
+        
+        // Reset to empty state
+        function reset() {
+            currentTask = null;
+            emptyState.style.display = 'block';
+            taskDisplay.style.display = 'none';
+            updateStatus('pending');
+            progressFill.className = 'progress-fill indeterminate';
+            clearAutoHide();
+            clearErrorFade();
+            clearPreviousResult();
+        }
+        
+        // Button handlers
+        btnDismiss.addEventListener('click', () => {
+            hide();
+            if (window.hudAPI) {
+                window.hudAPI.dismiss();
+            }
+        });
+        
+        btnRetry.addEventListener('click', () => {
+            if (currentTask && window.hudAPI) {
+                window.hudAPI.retry(currentTask);
+            }
+        });
+        
+        // Listen for HUD events from main process
+        if (window.hudAPI) {
+            window.hudAPI.onShow(() => {
+                show();
+            });
+            
+            window.hudAPI.onHide(() => {
+                hide();
+            });
+            
+            window.hudAPI.onTask((task) => {
+                displayTask(task);
+            });
+            
+            window.hudAPI.onResult((result) => {
+                displayResult(result);
+            });
+            
+            window.hudAPI.onReset(() => {
+                reset();
+            });
+            
+            // Listen for SDK task lifecycle events (automatic queue updates)
+            window.hudAPI.onTaskLifecycle((event) => {
+                console.log('[CommandHUD] Task lifecycle event:', event.type, event);
+                
+                switch (event.type) {
+                    case 'queued':
+                        // New task - clear any old errors and show new task
+                        clearPreviousResult();
+                        if (event.task) {
+                            displayTask({
+                                ...event.task,
+                                transcript: event.task.content,
+                                status: 'pending',
+                            });
+                            show();
+                        }
+                        break;
+                        
+                    case 'started':
+                        // Update to running state
+                        if (event.task) {
+                            displayTask({
+                                ...event.task,
+                                transcript: event.task.content,
+                                status: 'running',
+                            });
+                        }
+                        break;
+                        
+                    case 'completed':
+                        // Show success result
+                        if (event.task) {
+                            currentTask = { ...currentTask, ...event.task };
+                        }
+                        displayResult({
+                            success: true,
+                            message: event.result?.data?.message || 'Task completed successfully',
+                        });
+                        break;
+                        
+                    case 'failed':
+                        // Show error result
+                        if (event.task) {
+                            currentTask = { ...currentTask, ...event.task };
+                        }
+                        displayResult({
+                            success: false,
+                            error: event.error || 'Task failed',
+                            message: event.error || 'An error occurred',
+                        });
+                        break;
+                        
+                    case 'retry':
+                        // Show retry status
+                        if (event.task) {
+                            displayTask({
+                                ...event.task,
+                                transcript: event.task.content,
+                                status: 'pending',
+                            });
+                        }
+                        break;
+                        
+                    case 'cancelled':
+                        displayResult({
+                            success: false,
+                            message: 'Task cancelled',
+                        });
+                        break;
+                        
+                    case 'deadletter':
+                        displayResult({
+                            success: false,
+                            error: event.reason || 'Task moved to dead letter queue',
+                            message: event.reason || 'Task could not be processed',
+                        });
+                        break;
+                        
+                    case 'progress':
+                        // Update status display
+                        if (event.task) {
+                            updateStatus(event.status || 'running');
+                        }
+                        break;
+                }
+            });
+        }
+        
+        console.log('[CommandHUD] HUD initialized with SDK lifecycle events');
+        
+        // ==================== TEXT INPUT MODE ====================
+        
+        const textInputSection = document.getElementById('textInputSection');
+        const textInput = document.getElementById('textInput');
+        const textInputSend = document.getElementById('textInputSend');
+        const textInputClose = document.getElementById('textInputClose');
+        
+        function showTextInput() {
+            textInputSection.classList.add('visible');
+            textInput.focus();
+            textInput.value = '';
+        }
+        
+        function hideTextInput() {
+            textInputSection.classList.remove('visible');
+            textInput.value = '';
+        }
+        
+        function sendTextCommand() {
+            const command = textInput.value.trim();
+            if (!command) return;
+            
+            console.log('[CommandHUD] Sending text command:', command);
+            
+            // Submit via API
+            if (window.hudAPI && window.hudAPI.submitTextCommand) {
+                window.hudAPI.submitTextCommand(command);
+            }
+            
+            // Clear and hide
+            textInput.value = '';
+            hideTextInput();
+        }
+        
+        // Text input event handlers
+        textInputSend.addEventListener('click', sendTextCommand);
+        textInputClose.addEventListener('click', hideTextInput);
+        textInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                sendTextCommand();
+            } else if (e.key === 'Escape') {
+                hideTextInput();
+            }
+        });
+        
+        // ==================== CONTEXT MENU ====================
+        
+        // Prevent default context menu
+        document.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            
+            // Request context menu from main process
+            if (window.hudAPI && window.hudAPI.showContextMenu) {
+                window.hudAPI.showContextMenu();
+            }
+        });
+        
+        // Listen for context menu actions from main process
+        if (window.hudAPI) {
+            // Text input toggle
+            if (window.hudAPI.onShowTextInput) {
+                window.hudAPI.onShowTextInput(() => {
+                    showTextInput();
+                });
+            }
+            
+            // Trigger specific agent
+            if (window.hudAPI.onTriggerAgent) {
+                window.hudAPI.onTriggerAgent((agent) => {
+                    console.log('[CommandHUD] Triggering agent:', agent);
+                    // If there's current transcript, send it to the specific agent
+                    const transcript = currentTask?.transcript || currentTask?.content || '';
+                    if (transcript && window.hudAPI.triggerAgentWithTranscript) {
+                        window.hudAPI.triggerAgentWithTranscript(agent.id, transcript);
+                    }
+                });
+            }
+        }
+        
+        console.log('[CommandHUD] Context menu and text input initialized');
+        
+        // ==================== DISAMBIGUATION MODE ====================
+        
+        const disambiguationSection = document.getElementById('disambiguationSection');
+        const disambiguationQuestion = document.getElementById('disambiguationQuestion');
+        const disambiguationOptions = document.getElementById('disambiguationOptions');
+        const listeningIndicator = document.getElementById('listeningIndicator');
+        
+        let currentDisambiguationState = null;
+        let isListeningForDisambiguation = false;
+        
+        /**
+         * Show disambiguation options
+         * @param {Object} state - Disambiguation state from disambiguator
+         */
+        function showDisambiguation(state) {
+            currentDisambiguationState = state;
+            
+            // Hide other sections
+            taskDisplay.style.display = 'none';
+            emptyState.style.display = 'none';
+            progressSection.style.display = 'none';
+            resultSection.style.display = 'none';
+            
+            // Update question
+            disambiguationQuestion.textContent = state.question || 'What did you mean?';
+            
+            // Build options HTML
+            const optionsHtml = state.options.map((opt, index) => `
+                <div class="disambiguation-option" data-index="${index}" tabindex="0">
+                    <span class="option-number">${index + 1}</span>
+                    <div class="option-content">
+                        <div class="option-label">${escapeHtml(opt.label)}</div>
+                        <div class="option-action">${escapeHtml(opt.action.replace(/_/g, ' '))}</div>
+                    </div>
+                </div>
+            `).join('');
+            
+            disambiguationOptions.innerHTML = optionsHtml;
+            
+            // Add click handlers to options
+            disambiguationOptions.querySelectorAll('.disambiguation-option').forEach(el => {
+                el.addEventListener('click', () => {
+                    const index = parseInt(el.dataset.index, 10);
+                    selectDisambiguationOption(index);
+                });
+            });
+            
+            // Show section
+            disambiguationSection.classList.add('visible');
+            
+            // Update status
+            updateStatus('pending');
+            statusBadge.textContent = 'Clarify';
+            
+            // Show listening indicator if voice is active
+            if (isListeningForDisambiguation) {
+                listeningIndicator.classList.add('visible');
+            }
+            
+            show();
+            
+            console.log('[CommandHUD] Showing disambiguation:', state);
+        }
+        
+        /**
+         * Hide disambiguation mode
+         */
+        function hideDisambiguation() {
+            disambiguationSection.classList.remove('visible');
+            listeningIndicator.classList.remove('visible');
+            currentDisambiguationState = null;
+            isListeningForDisambiguation = false;
+        }
+        
+        /**
+         * Select a disambiguation option
+         * @param {number} index - Option index (0-based)
+         */
+        function selectDisambiguationOption(index) {
+            if (!currentDisambiguationState) return;
+            
+            const options = disambiguationOptions.querySelectorAll('.disambiguation-option');
+            if (index < 0 || index >= options.length) return;
+            
+            // Visual feedback
+            options.forEach(el => el.classList.remove('selected'));
+            options[index].classList.add('selected');
+            
+            console.log('[CommandHUD] Selected option:', index, currentDisambiguationState.options[index]);
+            
+            // Notify main process
+            if (window.hudAPI && window.hudAPI.selectDisambiguationOption) {
+                window.hudAPI.selectDisambiguationOption(currentDisambiguationState.id, index);
+            }
+            
+            // Hide disambiguation after short delay
+            setTimeout(() => {
+                hideDisambiguation();
+            }, 300);
+        }
+        
+        /**
+         * Handle voice response to disambiguation
+         * @param {string} voiceResponse - User's spoken response
+         */
+        function handleDisambiguationVoiceResponse(voiceResponse) {
+            if (!currentDisambiguationState) return;
+            
+            console.log('[CommandHUD] Voice disambiguation response:', voiceResponse);
+            
+            // Notify main process
+            if (window.hudAPI && window.hudAPI.resolveDisambiguationWithVoice) {
+                window.hudAPI.resolveDisambiguationWithVoice(currentDisambiguationState.id, voiceResponse);
+            }
+            
+            hideDisambiguation();
+        }
+        
+        /**
+         * Escape HTML to prevent XSS
+         */
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Keyboard shortcuts for disambiguation
+        document.addEventListener('keydown', (e) => {
+            if (!currentDisambiguationState) return;
+            
+            // Number keys 1-5
+            const num = parseInt(e.key, 10);
+            if (num >= 1 && num <= 5 && num <= currentDisambiguationState.options.length) {
+                e.preventDefault();
+                selectDisambiguationOption(num - 1);
+            }
+            
+            // Escape to cancel
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                hideDisambiguation();
+                if (window.hudAPI && window.hudAPI.cancelDisambiguation) {
+                    window.hudAPI.cancelDisambiguation(currentDisambiguationState.id);
+                }
+            }
+        });
+        
+        // Listen for disambiguation events from main process
+        if (window.hudAPI) {
+            // Show disambiguation
+            if (window.hudAPI.onDisambiguation) {
+                window.hudAPI.onDisambiguation((state) => {
+                    showDisambiguation(state);
+                });
+            }
+            
+            // Set listening state
+            if (window.hudAPI.onDisambiguationListening) {
+                window.hudAPI.onDisambiguationListening((listening) => {
+                    isListeningForDisambiguation = listening;
+                    if (listening && currentDisambiguationState) {
+                        listeningIndicator.classList.add('visible');
+                    } else {
+                        listeningIndicator.classList.remove('visible');
+                    }
+                });
+            }
+            
+            // Voice response received
+            if (window.hudAPI.onDisambiguationVoiceResponse) {
+                window.hudAPI.onDisambiguationVoiceResponse((response) => {
+                    handleDisambiguationVoiceResponse(response);
+                });
+            }
+        }
+        
+        console.log('[CommandHUD] Disambiguation mode initialized');
+    </script>
+</body>
+</html>

@@ -62,9 +62,6 @@ class BlackHoleWidget {
     
     async init() {
         console.log('[BlackHole] Initializing...');
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:init',message:'BlackHole widget init called',data:{hasWindowApi:!!window.api,hasClipboard:!!window.clipboard},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H7'})}).catch(()=>{});
-        // #endregion
         
         // Check URL params
         try {
@@ -129,16 +126,10 @@ class BlackHoleWidget {
     
     async loadSpaces() {
         console.log('[BlackHole] Loading spaces...');
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:loadSpaces',message:'Loading spaces',data:{hasClipboard:!!window.clipboard,hasGetSpaces:!!(window.clipboard&&window.clipboard.getSpaces)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H7'})}).catch(()=>{});
-        // #endregion
         try {
             if (window.clipboard && window.clipboard.getSpaces) {
                 this.spaces = await window.clipboard.getSpaces();
                 console.log('[BlackHole] Loaded', this.spaces.length, 'spaces');
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:loadSpaces:success',message:'Spaces loaded',data:{spaceCount:this.spaces.length,spaceNames:this.spaces.slice(0,5).map(s=>s.name)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H7'})}).catch(()=>{});
-                // #endregion
             } else {
                 console.warn('[BlackHole] window.clipboard.getSpaces not available');
                 this.spaces = [];
@@ -291,9 +282,6 @@ class BlackHoleWidget {
             
             // Clipboard data from paste trigger
             window.api.receive('paste-clipboard-data', async (data) => {
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:paste-clipboard-data',message:'Received paste-clipboard-data in widget',data:{hasData:!!data,hasText:data?.hasText,textPreview:data?.text?.substring(0,50)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H5'})}).catch(()=>{});
-                // #endregion
                 console.log('[BlackHole] Received paste-clipboard-data');
                 this.sendIPC('black-hole:debug', { event: 'RECEIVED_PASTE_DATA', hasData: !!data });
                 
@@ -339,16 +327,10 @@ class BlackHoleWidget {
                 this.originalPosition = pos;
             });
             
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:setupIPCHandlers',message:'Registering external-file-drop handler',data:{hasWindowApi:!!window.api,hasReceive:!!(window.api&&window.api.receive)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
-            // #endregion
             
             // Handler for external file drop from downloads (H1 - was MISSING)
             // Note: receive() strips the event, so we just get data directly
             window.api.receive('external-file-drop', async (data) => {
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:external-file-drop',message:'Received external-file-drop event',data:{hasData:!!data,fileName:data?.fileName,fileSize:data?.fileSize,mimeType:data?.mimeType},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
-                // #endregion
                 console.log('[BlackHole] Received external-file-drop:', data);
                 this.sendIPC('black-hole:debug', { event: 'EXTERNAL_FILE_DROP', fileName: data?.fileName });
                 
@@ -365,9 +347,6 @@ class BlackHoleWidget {
                         preview: data.fileName,
                         previewType: 'Downloaded File'
                     };
-                    // #region agent log
-                    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:external-file-drop:pendingSet',message:'pendingItem set from external-file-drop',data:{pendingItemType:this.pendingItem.type,fileName:data.fileName},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
-                    // #endregion
                     this.showModal();
                 }
             });
@@ -375,9 +354,6 @@ class BlackHoleWidget {
             // Handler for prepare-for-download (H2 - was MISSING)
             // Note: receive() strips the event, so we just get data directly
             window.api.receive('prepare-for-download', async (data) => {
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:prepare-for-download',message:'Received prepare-for-download event',data:{fileName:data?.fileName},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
-                // #endregion
                 console.log('[BlackHole] Preparing for download:', data?.fileName);
                 this.sendIPC('black-hole:debug', { event: 'PREPARE_FOR_DOWNLOAD', fileName: data?.fileName });
                 // Ensure spaces are loaded
@@ -389,9 +365,6 @@ class BlackHoleWidget {
             // Handler for check-widget-ready (H3 - was MISSING)
             // Note: receive() strips the event, so we get no arguments
             window.api.receive('check-widget-ready', async () => {
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:check-widget-ready',message:'Received check-widget-ready event',data:{isReady:this.isReady,spacesCount:this.spaces.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
-                // #endregion
                 console.log('[BlackHole] Check-widget-ready, isReady:', this.isReady);
                 if (this.isReady) {
                     this.sendIPC('black-hole:widget-ready');
@@ -519,17 +492,11 @@ class BlackHoleWidget {
     
     handleDrop(e) {
         console.log('[BlackHole] Handling drop');
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:handleDrop',message:'Drop event received',data:{hasDataTransfer:!!e.dataTransfer,hasFiles:!!(e.dataTransfer&&e.dataTransfer.files),fileCount:e.dataTransfer?.files?.length||0},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})}).catch(()=>{});
-        // #endregion
         
         const files = e.dataTransfer && e.dataTransfer.files;
         if (files && files.length > 0) {
             const file = files[0];
             console.log('[BlackHole] Dropped file:', file.name);
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:handleDrop:file',message:'Processing dropped file',data:{fileName:file.name,fileSize:file.size,fileType:file.type},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})}).catch(()=>{});
-            // #endregion
             
             const reader = new FileReader();
             reader.onload = (evt) => {
@@ -573,9 +540,6 @@ class BlackHoleWidget {
     
     showModal() {
         console.log('[BlackHole] showModal called');
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:showModal',message:'showModal called',data:{isClosing:this.isClosing,hasModal:!!this.modal,spacesCount:this.spaces.length,hasPendingItem:!!this.pendingItem},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H5'})}).catch(()=>{});
-        // #endregion
         
         // Don't show if we're in the process of closing
         if (this.isClosing) {
@@ -1015,9 +979,6 @@ class BlackHoleWidget {
     
     async handleConfirm() {
         console.log('[BlackHole] ========== HANDLE CONFIRM START ==========');
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:handleConfirm',message:'handleConfirm called',data:{selectedSpaceId:this.selectedSpaceId,hasPendingItem:!!this.pendingItem,pendingItemType:this.pendingItem?.type,hasClipboardAPI:!!window.clipboard,spacesCount:this.spaces.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H5'})}).catch(()=>{});
-        // #endregion
         
         // Send debug info to main process so it shows in terminal
         this.sendIPC('black-hole:debug', {
@@ -1130,9 +1091,6 @@ class BlackHoleWidget {
                     
             case 'file':
                     console.log('[BlackHole] Calling window.clipboard.addFile...');
-                    // #region agent log
-                    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:handleConfirm:addFile',message:'Calling addFile',data:{fileName:item.data?.fileName,fileSize:item.data?.fileSize,spaceId:item.data?.spaceId,hasFileData:!!item.data?.fileData},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H5'})}).catch(()=>{});
-                    // #endregion
                 result = await window.clipboard.addFile(item.data);
                     console.log('[BlackHole] addFile returned:', JSON.stringify(result));
                 break;
@@ -1143,9 +1101,6 @@ class BlackHoleWidget {
             }
             
             console.log('[BlackHole] Final result:', JSON.stringify(result));
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:handleConfirm:result',message:'Save result received',data:{success:result?.success,error:result?.error,resultKeys:result?Object.keys(result):[]},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H5'})}).catch(()=>{});
-            // #endregion
             
             if (result && result.success) {
                 console.log('[BlackHole] SUCCESS! ItemId:', result.itemId, 'Closing modal...');
@@ -1157,9 +1112,6 @@ class BlackHoleWidget {
                 this.animateAndClose(true);
         } else {
                 console.error('[BlackHole] FAILED! Result:', result);
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'black-hole.js:handleConfirm:failed',message:'Save failed',data:{error:result?.error,result:JSON.stringify(result).substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H5'})}).catch(()=>{});
-                // #endregion
                 
                 // Show user-friendly error with error code for debugging
                 const errorMessage = result?.error || 'Save failed';

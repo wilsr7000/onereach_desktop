@@ -1,0 +1,19 @@
+{
+  "name": "@onereach/task-packages",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "task-exchange",
+    "task-agent"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "build:exchange": "npm run build -w task-exchange",
+    "build:agent": "npm run build -w task-agent",
+    "test": "npm run test:unit && npm run test:integration",
+    "test:unit": "npx tsx task-exchange/src/test/exchange.test.ts",
+    "test:integration": "npx tsx test-integration.ts",
+    "test:spelling": "npx tsx test-spelling-agent.ts",
+    "test:all": "npm run test && npm run test:spelling"
+  }
+}

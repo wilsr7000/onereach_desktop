@@ -123,6 +123,18 @@ export interface ClassifiedTask {
   content: string
   params: Record<string, unknown>
   priority: TaskPriority
+  confidence?: number
+  // Disambiguation support
+  clarificationNeeded?: boolean
+  clarificationQuestion?: string
+  clarificationOptions?: ClarificationOption[]
+}
+
+export interface ClarificationOption {
+  label: string
+  action: string
+  params?: Record<string, unknown>
+  confidence?: number
 }
 
 // ============================================================================

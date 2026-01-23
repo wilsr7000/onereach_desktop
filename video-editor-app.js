@@ -8948,9 +8948,6 @@
 
         // ==================== PRELOADER ====================
         // Check for missing assets and prompt user to generate them
-//#region agent log
-fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'video-editor-app.js:8702',message:'onVideoLoaded - before preloader',data:{hasTranscriptSegments:!!this.transcriptSegments,transcriptSegmentsCount:this.transcriptSegments?.length||0,transcriptSource:this.transcriptSource,spaceItemId:this.spaceItemId,loadingFromProject:this._loadingFromProject},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B,C,E'})}).catch(()=>{});
-//#endregion
         if (window.VideoEditorPreloader && this.videoPath) {
           try {
             const preloadResult = await window.VideoEditorPreloader.checkAndPrompt(
@@ -14262,9 +14259,6 @@ fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{metho
       },
 
       toggleAudioMute() {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'video-editor-app.js:toggleAudioMute',message:'toggleAudioMute called (old handler)',data:{audioMutedBefore:this.audioMuted,videoMutedBefore:document.getElementById('videoPlayer')?.muted},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-OLD'})}).catch(()=>{});
-        // #endregion
         const video = document.getElementById('videoPlayer');
         const btn = document.getElementById('audioMuteBtn');
 
@@ -14394,9 +14388,6 @@ fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{metho
        * Creates Guide track (synced to video) and starts Master track extraction
        */
       async initializeAudioTracks(videoPath, videoDuration) {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'video-editor-app.js:initializeAudioTracks',message:'initializeAudioTracks called',data:{videoPath:videoPath?.substring(0,50),videoDuration},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-INIT'})}).catch(()=>{});
-        // #endregion
         console.log('[AudioTracks] Initializing for:', videoPath);
         
         // Reset tracks to just Guide
@@ -14572,10 +14563,6 @@ fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{metho
        * Toggle Guide track mute (controls video.muted)
        */
       toggleGuideTrackMute() {
-        // #region agent log
-        const video = document.getElementById('videoPlayer');
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'video-editor-app.js:toggleGuideTrackMute:entry',message:'toggleGuideTrackMute called',data:{videoMutedBefore:video?.muted,multiTrackActive:this.multiTrackAudio?._multiTrackActive},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2-H3'})}).catch(()=>{});
-        // #endregion
         const guide = this.getGuideTrack();
         if (!guide) return;
         
@@ -14584,9 +14571,6 @@ fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{metho
         // Guide track controls video's embedded audio
         // BUT: In multi-track mode, video is already muted - this has no effect
         if (video) {
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'video-editor-app.js:toggleGuideTrackMute:setVideoMuted',message:'Setting video.muted',data:{guideMuted:guide.muted,videoMutedBefore:video.muted,multiTrackActive:this.multiTrackAudio?._multiTrackActive},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H3'})}).catch(()=>{});
-          // #endregion
           video.muted = guide.muted;
         }
         
@@ -14922,9 +14906,6 @@ fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{metho
       },
 
       renderAudioTrack(track) {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'video-editor-app.js:renderAudioTrack',message:'renderAudioTrack called',data:{trackId:track?.id,trackType:track?.type,trackName:track?.name},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-RENDER'})}).catch(()=>{});
-        // #endregion
         const container = document.getElementById('audioTracksContainer');
         const addTrackRow = document.getElementById('addTrackRow');
 
@@ -15080,25 +15061,16 @@ fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{metho
       },
 
       toggleTrackMute(trackId) {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'video-editor-app.js:toggleTrackMute:entry',message:'toggleTrackMute called',data:{trackId,allTracks:this.audioTracks?.map(t=>({id:t.id,type:t.type,muted:t.muted}))},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H5'})}).catch(()=>{});
-        // #endregion
         const track = this.audioTracks.find(t => t.id === trackId);
         if (!track) return;
         
         // Handle Guide track specially - controls video's embedded audio
         if (track.type === 'guide') {
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'video-editor-app.js:toggleTrackMute:guide',message:'Redirecting to toggleGuideTrackMute',data:{trackId},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
-          // #endregion
           this.toggleGuideTrackMute();
           return;
         }
         
         track.muted = !track.muted;
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'video-editor-app.js:toggleTrackMute:afterMute',message:'Track muted state changed',data:{trackId,type:track.type,muted:track.muted,videoMuted:document.getElementById('videoPlayer')?.muted,multiTrackActive:this.multiTrackAudio?._multiTrackActive},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H3'})}).catch(()=>{});
-        // #endregion
         console.log('[AudioTracks] Track mute toggled:', trackId, track.type, '->', track.muted);
         
         // Update button UI
@@ -17212,9 +17184,6 @@ fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{metho
           this.transcriptSegments = versionData.transcriptSegments;
           // Also restore the transcript source to prevent preloader from prompting regeneration
           this.transcriptSource = versionData.transcriptSource || 'elevenlabs-scribe';
-//#region agent log
-fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'video-editor-app.js:16963',message:'applyVersionState - transcript restored',data:{segmentsCount:this.transcriptSegments.length,transcriptSource:this.transcriptSource,originalSource:versionData.transcriptSource,hasOriginalSource:!!versionData.transcriptSource},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A,C,D,E'})}).catch(()=>{});
-//#endregion
           console.log('[ProjectManager] Loaded', this.transcriptSegments.length, 'transcript segments from version (source:', this.transcriptSource + ')');
           
           // Show and initialize teleprompter with restored transcript
@@ -18297,13 +18266,7 @@ fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{metho
           
           // IMPORTANT: Apply version state BEFORE loading video to avoid race condition
           // where video's loadedmetadata event fires before transcriptSegments is set
-//#region agent log
-fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'video-editor-app.js:18026',message:'loadProject - before applyVersionState',data:{versionId:result.version.id,hasTranscriptSegmentsInVersion:!!(result.version.transcriptSegments&&result.version.transcriptSegments.length>0),transcriptSourceInVersion:result.version.transcriptSource},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C,E'})}).catch(()=>{});
-//#endregion
           this.applyVersionState(result.version);
-//#region agent log
-fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'video-editor-app.js:18028',message:'loadProject - after applyVersionState',data:{hasTranscriptSegments:!!this.transcriptSegments,transcriptSegmentsCount:this.transcriptSegments?.length||0,transcriptSource:this.transcriptSource},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C,E'})}).catch(()=>{});
-//#endregion
           
           if (result.primaryAsset?.path) {
             console.log('[loadProject] Loading video from path:', result.primaryAsset.path);

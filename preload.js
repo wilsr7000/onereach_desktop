@@ -343,6 +343,17 @@ contextBridge.exposeInMainWorld(
     saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
     testLLMConnection: (config) => ipcRenderer.invoke('settings:test-llm', config),
     
+    // Context Provider API
+    getCustomFacts: () => ipcRenderer.invoke('voice-task-sdk:get-facts'),
+    addCustomFact: (key, value, category) => ipcRenderer.invoke('voice-task-sdk:add-fact', key, value, category),
+    removeCustomFact: (key) => ipcRenderer.invoke('voice-task-sdk:remove-fact', key),
+    listContextProviders: () => ipcRenderer.invoke('voice-task-sdk:list-providers'),
+    enableContextProvider: (providerId) => ipcRenderer.invoke('voice-task-sdk:enable-provider', providerId),
+    disableContextProvider: (providerId) => ipcRenderer.invoke('voice-task-sdk:disable-provider', providerId),
+    configureContextProvider: (providerId, settings) => ipcRenderer.invoke('voice-task-sdk:configure-provider', providerId, settings),
+    getCurrentContext: () => ipcRenderer.invoke('voice-task-sdk:get-context'),
+    clearConversationHistory: () => ipcRenderer.invoke('voice-task-sdk:clear-history'),
+    
     // Video Release - YouTube/Vimeo Authentication
     authenticateYouTube: () => ipcRenderer.invoke('release:authenticate-youtube'),
     authenticateVimeo: () => ipcRenderer.invoke('release:authenticate-vimeo'),
@@ -729,11 +740,6 @@ contextBridge.exposeInMainWorld('realtimeSpeech', {
   // Events: transcript_delta (partial), transcript (final), speech_started, speech_stopped, error
   onEvent: (callback) => {
     const handler = (event, data) => {
-      // #region agent log
-      if (data.type === 'transcript' || data.type === 'transcript_delta') {
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'preload.js:onEvent',message:'speech event received from main',data:{type:data.type,text:data.text?.substring(0,50),isFinal:data.isFinal},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A,D'})}).catch(()=>{});
-      }
-      // #endregion
       callback(data);
     };
     ipcRenderer.on('realtime-speech:event', handler);

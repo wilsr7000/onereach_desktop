@@ -45,9 +45,6 @@ function getAssetPath(filename) {
 
 // Initialize
 async function init() {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:init:start',message:'Init function called',data:{timestamp:Date.now()},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
-    // #endregion
     
     const loadingOverlay = document.getElementById('loadingOverlay');
     const errorDisplay = document.getElementById('errorDisplay');
@@ -88,18 +85,9 @@ async function init() {
         setupPreviewEventListeners();
         setView('list');
         
-        // #region agent log
-        const criticalElements = ['closeBtn','minimizeBtn','maximizeBtn','selectAllBtn','deselectAllBtn','bulkMoveBtn','bulkDeleteBtn','searchInput','spacesList','addSpaceBtn','historyList','contextMenu','iconPicker','modalSave','modalCancel','metadataSave','metadataCancel','generateMetadataBtn'];
-        const missingElements = criticalElements.filter(id => !document.getElementById(id));
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:init:elementCheck',message:'Checking critical elements at startup',data:{totalChecked:criticalElements.length,missingCount:missingElements.length,missingElements:missingElements},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})}).catch(()=>{});
-        // #endregion
         
         document.getElementById('searchInput').focus();
         
-        // #region agent log
-        const chatbotBtn = document.querySelector('.filter-btn[data-filter="chatbot-conversation"]');
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:init:afterSetup',message:'Checking for chatbot button in DOM',data:{chatbotBtnExists:!!chatbotBtn,chatbotBtnVisible:chatbotBtn?(window.getComputedStyle(chatbotBtn).display!=='none'):false,allFilterCount:document.querySelectorAll('.filter-btn').length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
-        // #endregion
         
         // PERFORMANCE: Parallelize independent API calls
         console.log('Loading data in parallel...');
@@ -2554,9 +2542,6 @@ function initGenerativeSearch() {
     const searchBtn = document.getElementById('generativeSearchBtn');
     const panelContainer = document.getElementById('generativeSearchPanelContainer');
     
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:initGenerativeSearch',message:'Checking GenerativeSearch dependencies',data:{searchBtnExists:!!searchBtn,panelContainerExists:!!panelContainer,GenerativeSearchPanelDefined:typeof GenerativeSearchPanel !== 'undefined'},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H5'})}).catch(()=>{});
-    // #endregion
     
     if (!searchBtn || !panelContainer) {
         console.log('[GenerativeSearch] UI elements not found');
@@ -2659,9 +2644,6 @@ function initGenerativeSearch() {
 
 // Render generative search results with scores
 function renderGenerativeSearchResults(results) {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:renderGenerativeSearchResults',message:'Looking for historyList element',data:{resultsLength:results?.length,historyListExists:!!document.getElementById('historyList')},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
-    // #endregion
     // FIX: Changed from 'historyContainer' to 'historyList' - the correct element ID
     const container = document.getElementById('historyList');
     if (!container) return;
@@ -2689,11 +2671,6 @@ function renderGenerativeSearchResults(results) {
         const score = item._search?.compositeScore || 0;
         const scores = item._search?.scores || {};
         
-        // #region agent log
-        if (idx === 0) {
-            fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:renderGenerativeSearchResults:scoreBadge',message:'First item score data',data:{compositeScore:score,scores:scores,_searchKeys:Object.keys(item._search||{}),itemPreview:item.preview?.substring(0,50)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-TOOLTIP'})}).catch(()=>{});
-        }
-        // #endregion
         
         // Build tooltip explaining the relevance
         // Prioritize the LLM's reason explanation if available
@@ -2724,30 +2701,16 @@ function renderGenerativeSearchResults(results) {
         const tooltipData = encodeURIComponent(tooltip);
         
         const badgeHtml = `<span class="gs-score-badge" data-tooltip="${tooltipData}" style="background: linear-gradient(135deg, rgba(147, 51, 234, 0.3), rgba(79, 70, 229, 0.3)); padding: 2px 8px; border-radius: 4px; font-size: 10px; color: rgba(200, 180, 255, 0.9); margin-left: 8px; cursor: help; position: relative;">${Math.round(score)}%</span>`;
-        // #region agent log
-        if (idx === 0) {
-            fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:badgeHtml',message:'Generated badge HTML',data:{badgeHtmlPreview:badgeHtml.substring(0,150),hasDataTooltip:badgeHtml.includes('data-tooltip'),tooltipDataPreview:tooltipData.substring(0,50)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
-        }
-        // #endregion
         return {
             ...item,
             _scoreBadge: badgeHtml
         };
     });
     
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:beforeRenderHistory',message:'About to render items with badges',data:{itemCount:itemsWithScoreBadges.length,firstItemHasBadge:!!itemsWithScoreBadges[0]?._scoreBadge},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
-    // #endregion
     
     // Use existing render function
     renderHistory(itemsWithScoreBadges, { showScoreBadges: true });
     
-    // #region agent log
-    setTimeout(() => {
-        const badgesInDOM = document.querySelectorAll('.gs-score-badge');
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:afterRenderHistory',message:'Checking badges in DOM after render',data:{badgeCount:badgesInDOM.length,firstBadgeHtml:badgesInDOM[0]?.outerHTML?.substring(0,100)||'none'},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2,H4'})}).catch(()=>{});
-    }, 500);
-    // #endregion
 }
 
 // Clear generative search results
@@ -4227,9 +4190,6 @@ async function showMetadataModal(itemId) {
         
         // Extract Audio button - show for video files
         const extractAudioBtn = document.getElementById('extractAudioBtn');
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:showMetadataModal:extractAudioBtn',message:'Checking extractAudioBtn element',data:{extractAudioBtnExists:!!extractAudioBtn,itemId:item?.id,fileCategory:item?.fileCategory,fileType:item?.fileType},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
-        // #endregion
         const isVideo = item?.fileCategory === 'video' || item?.fileType?.startsWith('video/');
         if (isVideo && extractAudioBtn) {
             // Check if audio already extracted
@@ -4431,6 +4391,40 @@ async function showMetadataModal(itemId) {
     });
     const isWebMonitor = item.type === 'web-monitor';
     const monitorTab = document.getElementById('monitorTab');
+    const aiTab = document.getElementById('aiTab');
+    
+    // Show/hide AI tab based on item type
+    console.log('[MetadataModal] AI Tab setup:', { aiTab: !!aiTab, isWebMonitor });
+    if (aiTab) {
+        aiTab.style.display = isWebMonitor ? 'inline-flex' : 'none';
+        console.log('[MetadataModal] AI tab display set to:', aiTab.style.display);
+    }
+    
+    // Show/hide AI Watch section vs generic AI section
+    const aiWatchSection = document.getElementById('aiWatchSection');
+    const aiGenericSection = document.getElementById('aiGenericSection');
+    console.log('[MetadataModal] AI sections:', { aiWatchSection: !!aiWatchSection, aiGenericSection: !!aiGenericSection });
+    if (aiWatchSection) {
+        aiWatchSection.style.display = isWebMonitor ? 'block' : 'none';
+    }
+    if (aiGenericSection) {
+        aiGenericSection.style.display = isWebMonitor ? 'none' : 'block';
+    }
+    
+    // Populate AI Watch fields for web monitors
+    if (isWebMonitor) {
+        const watchPrompt = document.getElementById('aiWatchPrompt');
+        const ignorePrompt = document.getElementById('aiIgnorePrompt');
+        const autoSummarize = document.getElementById('aiAutoSummarize');
+        const summaryStyle = document.getElementById('aiSummaryStyle');
+        
+        const aiSettings = item.settings?.aiWatch || metadata.settings?.aiWatch || {};
+        
+        if (watchPrompt) watchPrompt.value = aiSettings.watchFor || '';
+        if (ignorePrompt) ignorePrompt.value = aiSettings.ignore || '';
+        if (autoSummarize) autoSummarize.checked = aiSettings.autoSummarize !== false;
+        if (summaryStyle) summaryStyle.value = aiSettings.summaryStyle || 'brief';
+    }
     
     if (monitorTab) {
         monitorTab.style.display = isWebMonitor ? 'inline-flex' : 'none';
@@ -4505,6 +4499,10 @@ async function showMetadataModal(itemId) {
         const timelineContainer = document.getElementById('monitorTimeline');
         const timeline = item.timeline || metadata.timeline || [];
         
+        console.log('[Monitor Tab] Timeline container found:', !!timelineContainer);
+        console.log('[Monitor Tab] Timeline data:', timeline);
+        console.log('[Monitor Tab] Timeline length:', timeline.length);
+        
         if (timelineContainer) {
             if (timeline.length === 0) {
                 timelineContainer.innerHTML = `
@@ -4513,15 +4511,20 @@ async function showMetadataModal(itemId) {
                     </div>
                 `;
             } else {
-                timelineContainer.innerHTML = timeline.map((change, index) => `
-                    <div class="monitor-timeline-item" data-index="${index}">
-                        <div class="timeline-dot"></div>
+                timelineContainer.innerHTML = timeline.map((change, index) => {
+                    const isBaseline = change.type === 'baseline';
+                    const dotClass = isBaseline ? 'timeline-dot baseline' : 'timeline-dot';
+                    const summary = change.summary || (isBaseline ? 'Initial baseline captured' : 'Content changed');
+                    return `
+                    <div class="monitor-timeline-item ${isBaseline ? 'baseline' : ''}" data-index="${index}">
+                        <div class="${dotClass}"></div>
                         <div class="timeline-content">
                             <div class="timeline-time">${new Date(change.timestamp).toLocaleString()}</div>
-                            <div class="timeline-summary">${escapeHtml(change.summary || 'Content changed')}</div>
+                            <div class="timeline-summary">${isBaseline ? '📸 ' : ''}${escapeHtml(summary)}</div>
                         </div>
                     </div>
-                `).join('');
+                `;
+                }).join('');
                 
                 // Add click handlers to timeline items
                 timelineContainer.querySelectorAll('.monitor-timeline-item').forEach(el => {
@@ -4701,6 +4704,150 @@ function hideMetadataModal() {
     document.getElementById('metadataModal').style.display = 'none';
 }
 
+// AI Watch preset instructions
+const AI_WATCH_PRESETS = {
+    price: {
+        watchFor: "Monitor for any price changes on products or services. Alert me if:\n- Prices increase or decrease\n- New sales or discounts appear\n- Products go on clearance\n- Shipping costs change",
+        ignore: "Ignore minor formatting changes to price displays"
+    },
+    jobs: {
+        watchFor: "Watch for job posting changes:\n- New job listings added\n- Positions removed or filled\n- Changes to job requirements or descriptions\n- Salary/compensation updates",
+        ignore: "Ignore changes to application counts or posting dates"
+    },
+    status: {
+        watchFor: "Monitor for status and availability changes:\n- Service outages or incidents\n- Maintenance announcements\n- Status changes (operational/degraded/down)\n- Recovery notifications",
+        ignore: "Ignore timestamp updates if status hasn't changed"
+    },
+    news: {
+        watchFor: "Track new content:\n- New blog posts or articles\n- Press releases\n- News updates\n- Featured content changes",
+        ignore: "Ignore sidebar widgets, comment counts, or social share numbers"
+    },
+    stock: {
+        watchFor: "Monitor inventory and availability:\n- Out of stock notifications\n- Back in stock alerts\n- Low stock warnings\n- Pre-order availability changes",
+        ignore: "Ignore exact quantity numbers if item is still in stock"
+    }
+};
+
+// Set AI watch preset
+function setWatchPreset(presetName) {
+    const preset = AI_WATCH_PRESETS[presetName];
+    if (!preset) return;
+    
+    const watchPrompt = document.getElementById('aiWatchPrompt');
+    const ignorePrompt = document.getElementById('aiIgnorePrompt');
+    
+    if (watchPrompt) watchPrompt.value = preset.watchFor;
+    if (ignorePrompt) ignorePrompt.value = preset.ignore || '';
+    
+    // Show feedback
+    const statusEl = document.getElementById('watchSaveStatus');
+    if (statusEl) {
+        statusEl.textContent = `${presetName.charAt(0).toUpperCase() + presetName.slice(1)} preset loaded`;
+        statusEl.style.color = 'rgba(99, 102, 241, 0.8)';
+        setTimeout(() => { statusEl.textContent = ''; }, 2000);
+    }
+}
+
+// Save AI watch instructions
+async function saveAIWatchInstructions() {
+    const modal = document.getElementById('metadataModal');
+    const itemId = modal?.dataset?.itemId;
+    if (!itemId) return;
+    
+    const watchPrompt = document.getElementById('aiWatchPrompt')?.value || '';
+    const ignorePrompt = document.getElementById('aiIgnorePrompt')?.value || '';
+    const autoSummarize = document.getElementById('aiAutoSummarize')?.checked ?? true;
+    const summaryStyle = document.getElementById('aiSummaryStyle')?.value || 'brief';
+    
+    const statusEl = document.getElementById('watchSaveStatus');
+    if (statusEl) {
+        statusEl.textContent = 'Saving...';
+        statusEl.style.color = 'rgba(255, 255, 255, 0.5)';
+    }
+    
+    try {
+        // Get current item to preserve other settings
+        const item = history.find(h => h.id === itemId);
+        const currentSettings = item?.settings || {};
+        
+        // Update AI watch settings
+        const updatedSettings = {
+            ...currentSettings,
+            aiWatch: {
+                watchFor: watchPrompt,
+                ignore: ignorePrompt,
+                autoSummarize: autoSummarize,
+                summaryStyle: summaryStyle
+            }
+        };
+        
+        // Save via IPC
+        const result = await window.clipboard.updateMetadata(itemId, { settings: updatedSettings });
+        
+        if (result.success) {
+            // Update local history
+            if (item) {
+                item.settings = updatedSettings;
+            }
+            
+            if (statusEl) {
+                statusEl.textContent = 'Saved!';
+                statusEl.style.color = 'rgba(16, 185, 129, 0.8)';
+                setTimeout(() => { statusEl.textContent = ''; }, 2000);
+            }
+        } else {
+            throw new Error(result.error || 'Save failed');
+        }
+    } catch (error) {
+        console.error('[AI Watch] Save error:', error);
+        if (statusEl) {
+            statusEl.textContent = 'Error saving';
+            statusEl.style.color = 'rgba(239, 68, 68, 0.8)';
+        }
+    }
+}
+
+// Close screenshot lightbox
+function closeScreenshotLightbox() {
+    const lightbox = document.querySelector('.screenshot-lightbox');
+    if (lightbox) {
+        lightbox.remove();
+    }
+}
+
+// Open screenshot in lightbox for full-size viewing
+function openScreenshotLightbox(imgSrc) {
+    // Remove any existing lightbox first
+    closeScreenshotLightbox();
+    
+    // Create lightbox
+    const lightbox = document.createElement('div');
+    lightbox.className = 'screenshot-lightbox';
+    lightbox.onclick = function(e) {
+        // Close if clicking the background (not the image)
+        if (e.target === lightbox) {
+            closeScreenshotLightbox();
+        }
+    };
+    
+    lightbox.innerHTML = `
+        <img src="${imgSrc}" alt="Screenshot">
+        <button class="screenshot-lightbox-close" onclick="closeScreenshotLightbox()" title="Close (Escape)">×</button>
+        <div class="screenshot-lightbox-hint">Click background, X button, or press Escape to close</div>
+    `;
+    
+    // Close on Escape key
+    const handleEscape = (e) => {
+        if (e.key === 'Escape') {
+            closeScreenshotLightbox();
+            document.removeEventListener('keydown', handleEscape);
+        }
+    };
+    document.addEventListener('keydown', handleEscape);
+    
+    document.body.appendChild(lightbox);
+}
+
 // Show details for a selected monitor change
 function showMonitorChangeDetail(change, index, timeline) {
     const detailContainer = document.getElementById('monitorChangeDetail');
@@ -4708,31 +4855,118 @@ function showMonitorChangeDetail(change, index, timeline) {
     
     detailContainer.style.display = 'block';
     
+    const isBaseline = change.type === 'baseline';
+    
     // Screenshots
     const screenshotBefore = document.getElementById('screenshotBefore');
     const screenshotAfter = document.getElementById('screenshotAfter');
     
-    if (screenshotBefore) {
-        if (change.screenshotBeforePath) {
-            screenshotBefore.innerHTML = `<img src="file://${change.screenshotBeforePath}" alt="Before">`;
-        } else {
-            screenshotBefore.innerHTML = '<div class="screenshot-placeholder">No screenshot</div>';
+    // Get screenshot cards to update labels
+    const beforeCard = screenshotBefore?.closest('.monitor-screenshot-card');
+    const afterCard = screenshotAfter?.closest('.monitor-screenshot-card');
+    
+    // Get the screenshots container and apply single-screenshot class for baseline
+    const screenshotsContainer = document.querySelector('.monitor-screenshots');
+    
+    if (isBaseline) {
+        // For baseline, show single full-width screenshot
+        if (screenshotsContainer) {
+            screenshotsContainer.classList.add('single-screenshot');
+        }
+        if (beforeCard) {
+            const label = beforeCard.querySelector('.screenshot-label');
+            if (label) label.innerHTML = 'Baseline Capture <span class="expand-hint">Click to expand</span>';
+        }
+        if (afterCard) {
+            afterCard.style.display = 'none';
+        }
+        
+        if (screenshotBefore) {
+            if (change.screenshotPath) {
+                // Handle both file paths and data URLs
+                const imgSrc = change.screenshotPath.startsWith('data:') 
+                    ? change.screenshotPath 
+                    : `file://${change.screenshotPath}`;
+                screenshotBefore.innerHTML = `<img src="${imgSrc}" alt="Baseline screenshot" onclick="openScreenshotLightbox(this.src)">`;
+            } else {
+                screenshotBefore.innerHTML = '<div class="screenshot-placeholder">Baseline screenshot not available</div>';
+            }
+        }
+    } else {
+        // For changes, show before/after
+        if (beforeCard) {
+            const label = beforeCard.querySelector('.screenshot-label');
+            if (label) label.textContent = 'Before';
+        }
+        if (afterCard) {
+            afterCard.style.display = '';
+        }
+        
+        // Show both before/after for changes
+        if (screenshotsContainer) {
+            screenshotsContainer.classList.remove('single-screenshot');
+        }
+        if (beforeCard) {
+            const label = beforeCard.querySelector('.screenshot-label');
+            if (label) label.innerHTML = 'Before <span class="expand-hint">Click to expand</span>';
+        }
+        if (afterCard) {
+            afterCard.style.display = '';
+            const label = afterCard.querySelector('.screenshot-label');
+            if (label) label.innerHTML = 'After <span class="expand-hint">Click to expand</span>';
+        }
+        
+        if (screenshotBefore) {
+            const beforePath = change.screenshotBeforePath || change.beforeScreenshotPath;
+            if (beforePath) {
+                const imgSrc = beforePath.startsWith('data:') ? beforePath : `file://${beforePath}`;
+                screenshotBefore.innerHTML = `<img src="${imgSrc}" alt="Before" onclick="openScreenshotLightbox(this.src)">`;
+            } else {
+                screenshotBefore.innerHTML = '<div class="screenshot-placeholder">No screenshot</div>';
+            }
+        }
+        
+        if (screenshotAfter) {
+            const afterPath = change.screenshotAfterPath || change.afterScreenshotPath;
+            if (afterPath) {
+                const imgSrc = afterPath.startsWith('data:') ? afterPath : `file://${afterPath}`;
+                screenshotAfter.innerHTML = `<img src="${imgSrc}" alt="After" onclick="openScreenshotLightbox(this.src)">`;
+            } else {
+                screenshotAfter.innerHTML = '<div class="screenshot-placeholder">No screenshot</div>';
+            }
         }
     }
     
-    if (screenshotAfter) {
-        if (change.screenshotAfterPath) {
-            screenshotAfter.innerHTML = `<img src="file://${change.screenshotAfterPath}" alt="After">`;
-        } else {
-            screenshotAfter.innerHTML = '<div class="screenshot-placeholder">No screenshot</div>';
-        }
-    }
-    
-    // Text diff
+    // Text diff section
+    const diffSection = document.querySelector('.monitor-diff-section');
     const diffContainer = document.getElementById('monitorDiff');
     const diffStats = document.getElementById('diffStats');
     
-    if (diffContainer && change.diff) {
+    if (isBaseline) {
+        // For baseline, show summary info instead of diff
+        if (diffSection) diffSection.style.display = 'block';
+        if (diffContainer) {
+            const textLength = change.textLength || 0;
+            diffContainer.innerHTML = `
+                <div class="baseline-info">
+                    <div class="baseline-info-item">
+                        <span class="baseline-label">Status:</span>
+                        <span class="baseline-value">Initial baseline captured</span>
+                    </div>
+                    <div class="baseline-info-item">
+                        <span class="baseline-label">Page content:</span>
+                        <span class="baseline-value">${textLength > 0 ? `${textLength.toLocaleString()} characters` : 'Captured'}</span>
+                    </div>
+                    <div class="baseline-info-item">
+                        <span class="baseline-label">Next check:</span>
+                        <span class="baseline-value">Changes from this baseline will appear here</span>
+                    </div>
+                </div>
+            `;
+        }
+        if (diffStats) diffStats.innerHTML = 'Baseline';
+    } else if (diffContainer && change.diff) {
+        if (diffSection) diffSection.style.display = 'block';
         const diff = change.diff;
         let addedCount = 0;
         let removedCount = 0;
@@ -4771,6 +5005,7 @@ function showMonitorChangeDetail(change, index, timeline) {
             diffStats.innerHTML = `<span class="added">+${addedCount}</span> / <span class="removed">-${removedCount}</span>`;
         }
     } else if (diffContainer) {
+        if (diffSection) diffSection.style.display = 'block';
         diffContainer.innerHTML = '<div class="diff-placeholder">No text differences recorded</div>';
         if (diffStats) diffStats.innerHTML = '';
     }
@@ -4780,9 +5015,12 @@ function showMonitorChangeDetail(change, index, timeline) {
     const aiDescContent = document.getElementById('aiDescContent');
     
     if (aiDescContainer && aiDescContent) {
-        if (change.aiDescription) {
+        if (isBaseline) {
+            // No AI description for baseline
+            aiDescContainer.style.display = 'none';
+        } else if (change.aiDescription || change.aiSummary) {
             aiDescContainer.style.display = 'block';
-            aiDescContent.textContent = change.aiDescription;
+            aiDescContent.textContent = change.aiDescription || change.aiSummary;
         } else {
             aiDescContainer.style.display = 'none';
         }
@@ -4791,6 +5029,8 @@ function showMonitorChangeDetail(change, index, timeline) {
 
 // Switch metadata modal tab
 function switchMetadataTab(tabName) {
+    console.log('[MetadataModal] Switching to tab:', tabName);
+    
     // Update tab buttons
     document.querySelectorAll('.metadata-tab').forEach(tab => {
         tab.classList.toggle('active', tab.dataset.tab === tabName);
@@ -4801,7 +5041,9 @@ function switchMetadataTab(tabName) {
         panel.classList.remove('active');
     });
     
-    const targetPanel = document.getElementById('tab' + tabName.charAt(0).toUpperCase() + tabName.slice(1));
+    const panelId = 'tab' + tabName.charAt(0).toUpperCase() + tabName.slice(1);
+    const targetPanel = document.getElementById(panelId);
+    console.log('[MetadataModal] Looking for panel:', panelId, 'Found:', !!targetPanel);
     if (targetPanel) {
         targetPanel.classList.add('active');
     }
@@ -5198,9 +5440,6 @@ function setupEventListeners() {
     
     // Filter buttons
     const filterButtons = document.querySelectorAll('.filter-btn');
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:init:filterButtons',message:'Filter buttons found',data:{count:filterButtons.length,filters:Array.from(filterButtons).map(b=>b.dataset.filter)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
-    // #endregion
     
     document.querySelectorAll('.filter-btn').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -5252,9 +5491,6 @@ function setupEventListeners() {
         
         // Select space
         const spaceId = spaceItem.dataset.spaceId;
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:spaceClick:before',message:'Space clicked - before loadHistory',data:{spaceId:spaceId,previousSpace:currentSpace,historyLength:history?.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
-        // #endregion
         currentSpace = spaceId === 'null' ? null : spaceId;
         await window.clipboard.setCurrentSpace(currentSpace);
         
@@ -5264,9 +5500,6 @@ function setupEventListeners() {
         spaceItem.classList.add('active');
 
         await loadHistory();
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:spaceClick:afterLoadHistory',message:'After loadHistory',data:{currentSpace:currentSpace,historyLength:history?.length,historyItemSpaces:history?.slice(0,5).map(h=>({id:h.id,spaceId:h.spaceId}))},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
-        // #endregion
         updateTagDropdown(); // Refresh available tags for this space
         updateSidebarTags(); // Refresh sidebar tags for this space
         filterItems();
@@ -5290,9 +5523,6 @@ function setupEventListeners() {
         // Look for a badge CHILD element inside this history item
         const badge = historyItem.querySelector('.gs-score-badge');
         
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:badge-check',message:'Badge lookup (child strategy)',data:{historyItemFound:!!historyItem,badgeFound:!!badge,hasDataTooltip:badge?.dataset?.tooltip?.substring(0,50)||'none',itemId:historyItem?.dataset?.id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-FIX'})}).catch(()=>{});
-        // #endregion
         
         if (badge && badge.dataset.tooltip && tooltipTarget !== historyItem) {
             // Remove existing tooltip
@@ -5311,9 +5541,6 @@ function setupEventListeners() {
             scoreTooltip.style.left = `${rect.left}px`;
             scoreTooltip.style.top = `${rect.bottom + 8}px`;
             
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:tooltip-created',message:'Tooltip created and positioned',data:{tooltipText:scoreTooltip.textContent?.substring(0,50),left:scoreTooltip.style.left,top:scoreTooltip.style.top},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-FIX'})}).catch(()=>{});
-            // #endregion
             
             // Adjust if off-screen
             const tooltipRect = scoreTooltip.getBoundingClientRect();
@@ -5899,11 +6126,19 @@ async function showPreviewModal(itemId) {
         fileType: historyItem.fileType, 
         fileCategory: historyItem.fileCategory,
         source: historyItem.metadata?.source,
+        type: historyItem.type,
         isVideo 
     });
     
     if (isVideo) {
         showVideoPreviewModal(itemId);
+        return;
+    }
+    
+    // Use metadata modal for web-monitor items (shows Monitor tab with diffs)
+    if (historyItem.type === 'web-monitor') {
+        console.log('[Preview] Redirecting web-monitor item to metadata modal');
+        showMetadataModal(itemId);
         return;
     }
     
@@ -7720,18 +7955,6 @@ async function saveEditedImage() {
 
 // Setup preview modal event listeners
 function setupPreviewEventListeners() {
-    // #region agent log
-    const elementsCheck = {
-        previewModeBtn: !!document.getElementById('previewModeBtn'),
-        previewCopyBtn: !!document.getElementById('previewCopyBtn'),
-        previewClose: !!document.getElementById('previewClose'),
-        previewCloseX: !!document.getElementById('previewCloseX'),
-        previewEditCancel: !!document.getElementById('previewEditCancel'),
-        previewEditSave: !!document.getElementById('previewEditSave'),
-        previewEditTextarea: !!document.getElementById('previewEditTextarea')
-    };
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'clipboard-viewer.js:setupPreviewEventListeners',message:'Checking preview modal elements',data:elementsCheck,timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})}).catch(()=>{});
-    // #endregion
     
     // Mode toggle button
     document.getElementById('previewModeBtn').addEventListener('click', togglePreviewEditMode);

@@ -436,9 +436,6 @@ class AppManagerAgent {
     }
     
     const scanStart = Date.now();
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app-manager-agent.js:403',message:'Scan starting',data:{processedEventsCount:this.processedEventIds.size,fingerprintsCount:this.eventFingerprints.size,contextHistoryLen:this.contextHistory.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3-H4'})}).catch(()=>{});
-    // #endregion
     console.log('[Agent] Starting scan...');
     
     // Broadcast HUD: scan starting
@@ -472,9 +469,6 @@ class AppManagerAgent {
       }
       
       console.log(`[Agent] Found ${errors.length} errors to analyze`);
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app-manager-agent.js:432',message:'Errors found for analysis',data:{errorsCount:errors.length,samples:errors.slice(0,3).map(e=>({id:e.id,msg:e.message?.substring(0,60),source:e.source}))},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H2'})}).catch(()=>{});
-      // #endregion
       
       // Broadcast HUD: errors found
       this._broadcastHUD({
@@ -925,9 +919,6 @@ Summary:`;
    */
   _isDuplicateEvent(fingerprint, eventTime) {
     const existingTime = this.eventFingerprints.get(fingerprint);
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app-manager-agent.js:672',message:'Duplicate check',data:{fingerprint:fingerprint?.substring(0,80),hasExisting:!!existingTime,timeDiff:existingTime?(eventTime-existingTime):null,dedupeWindow:CONFIG.eventDedupeWindowMs},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
-    // #endregion
     if (!existingTime) return false;
     
     return (eventTime - existingTime) < CONFIG.eventDedupeWindowMs;
@@ -1209,9 +1200,6 @@ Summary:`;
       );
       
       if (existingItem && existingItem.diagnosis) {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app-manager-agent.js:947',message:'Using cached diagnosis',data:{normalizedMsg:normalizedMsg.substring(0,60),cachedStrategy:existingItem.diagnosis.strategy,occurrences:existingItem.occurrences},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-ARCH'})}).catch(()=>{});
-        // #endregion
         console.log(`[Agent] Using cached diagnosis for: ${normalizedMsg.substring(0, 50)}...`);
         return {
           ...diagnosis,
@@ -1249,9 +1237,6 @@ Summary:`;
    * Check for quick-fix patterns without LLM
    */
   _checkQuickFix(errorGroup) {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app-manager-agent.js:969',message:'Quick-fix check',data:{source:errorGroup.source,msg:errorGroup.message?.substring(0,100)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})}).catch(()=>{});
-    // #endregion
     const message = (errorGroup.message || '').toLowerCase();
     const source = (errorGroup.source || '').toLowerCase();
     
@@ -1346,9 +1331,6 @@ Summary:`;
    * Uses Claude Opus 4.5 with sliding window context
    */
   async _llmDiagnose(errorGroup) {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app-manager-agent.js:1036',message:'LLM diagnose called',data:{source:errorGroup.source,msg:errorGroup.message?.substring(0,100),count:errorGroup.count,errorsLen:errorGroup.errors?.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H2'})}).catch(()=>{});
-    // #endregion
     try {
       const { getSettingsManager } = require('./settings-manager');
       const settingsManager = getSettingsManager();

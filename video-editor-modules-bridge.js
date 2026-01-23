@@ -716,9 +716,6 @@ if (!app) {
      * @param {Array} savedTracks - Optional array of tracks from saved project
      */
     app.restoreAudioTracks = function(savedTracks) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'video-editor-modules-bridge.js:restoreAudioTracks:entry',message:'restoreAudioTracks called',data:{savedTracksCount:savedTracks?.length,savedTrackIds:savedTracks?.map(t=>t.id),currentAudioTracksCount:app.audioTracks?.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})}).catch(()=>{});
-      // #endregion
       const container = document.getElementById('audioTracksContainer');
       const defaultA1 = { id: 'A1', type: 'original', name: 'Original', muted: false, solo: false, volume: 1.0, clips: [] };
       
@@ -854,8 +851,6 @@ if (!app) {
     const originalLoadProjectData = app.loadProjectData;
     if (typeof originalLoadProjectData === 'function') {
       app.loadProjectData = function(projectData) {
-        // #region agent log
-        // #endregion
         // Call original
         const result = originalLoadProjectData.call(app, projectData);
         
@@ -863,8 +858,6 @@ if (!app) {
         setTimeout(() => {
           // Pass saved tracks from project data - check both "tracks" and "audioTracks" keys
           const savedTracks = projectData?.audioTracks || projectData?.tracks || app.currentProject?.audioTracks || app.currentProject?.tracks;
-          // #region agent log
-          // #endregion
           app.restoreAudioTracks(savedTracks);
         }, 100);
         
@@ -875,13 +868,8 @@ if (!app) {
     
     // Also try to hook into restoreProject if it exists
     const originalRestoreProject = app.restoreProject;
-    // #region agent log - DISABLED: referenced originalSaveProject before declaration
-    //
-    // #endregion
     if (typeof originalRestoreProject === 'function') {
       app.restoreProject = function(projectData, ...args) {
-        // #region agent log
-        // #endregion
         const result = originalRestoreProject.call(app, projectData, ...args);
         
         // Restore audio tracks after a short delay
@@ -931,8 +919,6 @@ if (!app) {
     const originalSaveProject = app.saveProject;
     if (typeof originalSaveProject === 'function') {
       app.saveProject = function(...args) {
-        // #region agent log
-        // #endregion
         // Ensure audioTracks are serializable before save
         // Note: video-editor-app.js uses both "tracks" and looks for "audioTracks" in different places
         if (app.currentProject) {
@@ -940,8 +926,6 @@ if (!app) {
           app.currentProject.audioTracks = serializedTracks;
           app.currentProject.tracks = serializedTracks; // Also set "tracks" for compatibility with loadProject
           app.currentProject.nextTrackId = app.nextTrackId || 2;
-          // #region agent log
-          // #endregion
         }
         
         return originalSaveProject.apply(app, args);
@@ -999,14 +983,8 @@ if (!app) {
 
         // Fetch metadata and restore persisted project state (if present)
         try {
-          // #region agent log
-          console.log('[DEBUG-H1] loadVideoFromSpace: About to call clipboard.getMetadata for itemId:', itemId);
-          // #endregion
           if (window.clipboard && typeof window.clipboard.getMetadata === 'function') {
             const metaResult = await window.clipboard.getMetadata(itemId);
-            // #region agent log
-            console.log('[DEBUG-H4] loadVideoFromSpace: clipboard.getMetadata returned:', { success: metaResult?.success, hasMetadata: !!metaResult?.metadata });
-            // #endregion
             const metadata = metaResult?.metadata;
             const savedState = metadata?.videoEditorProjectState;
             if (savedState) {
@@ -1018,9 +996,6 @@ if (!app) {
           }
         } catch (e) {
           console.warn('[VideoEditorModulesBridge] Failed to restore project state on loadVideoFromSpace:', e);
-          // #region agent log
-          console.error('[DEBUG-H1,H2,H3,H4] loadVideoFromSpace: clipboard.getMetadata FAILED:', e.message);
-          // #endregion
         }
 
         return result;

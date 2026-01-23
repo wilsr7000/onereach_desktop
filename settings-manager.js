@@ -49,7 +49,28 @@ class SettingsManager {
     try {
       // Try to load encrypted settings first
       if (fs.existsSync(this.encryptedSettingsPath)) {
-        const encryptedData = JSON.parse(fs.readFileSync(this.encryptedSettingsPath, 'utf8'));
+        let encryptedData;
+        try {
+          encryptedData = JSON.parse(fs.readFileSync(this.encryptedSettingsPath, 'utf8'));
+        } catch (parseError) {
+          console.error('[Settings] Settings file corrupted, trying backup...');
+          // Try to restore from backup
+          const backupPath = this.encryptedSettingsPath + '.backup';
+          if (fs.existsSync(backupPath)) {
+            try {
+              encryptedData = JSON.parse(fs.readFileSync(backupPath, 'utf8'));
+              // Restore the backup
+              fs.copyFileSync(backupPath, this.encryptedSettingsPath);
+              console.log('[Settings] Restored settings from backup');
+            } catch (backupError) {
+              console.error('[Settings] Backup also corrupted:', backupError.message);
+              return {};
+            }
+          } else {
+            console.error('[Settings] No backup available');
+            return {};
+          }
+        }
         const settings = {};
         
         // Decrypt sensitive fields
@@ -195,8 +216,30 @@ class SettingsManager {
         }
       }
       
-      // Save encrypted settings
-      fs.writeFileSync(this.encryptedSettingsPath, JSON.stringify(dataToSave, null, 2));
+      // Create backup before saving (in case of corruption)
+      const backupPath = this.encryptedSettingsPath + '.backup';
+      if (fs.existsSync(this.encryptedSettingsPath)) {
+        try {
+          fs.copyFileSync(this.encryptedSettingsPath, backupPath);
+        } catch (backupError) {
+          console.warn('[Settings] Could not create backup:', backupError.message);
+        }
+      }
+      
+      // Use atomic write: write to temp file, then rename
+      const tempPath = this.encryptedSettingsPath + '.tmp';
+      const jsonData = JSON.stringify(dataToSave, null, 2);
+      fs.writeFileSync(tempPath, jsonData);
+      
+      // Verify the temp file is valid JSON before renaming
+      try {
+        JSON.parse(fs.readFileSync(tempPath, 'utf8'));
+        fs.renameSync(tempPath, this.encryptedSettingsPath);
+      } catch (verifyError) {
+        console.error('[Settings] Verification failed, keeping original file:', verifyError.message);
+        fs.unlinkSync(tempPath);
+        return false;
+      }
       
       // Remove old plain settings file if it exists
       if (fs.existsSync(this.settingsPath)) {
@@ -234,6 +277,7 @@ class SettingsManager {
       gsxSyncInterval: 'daily',
       gsxSyncPaths: null,
       openaiApiKey: '',
+      anthropicApiKey: '',
       elevenLabsApiKey: '',
       // Budget settings
       budgetEnabled: true,
@@ -396,6 +440,52 @@ class SettingsManager {
   
   setSpacesUploadEnabled(enabled) {
     return this.set('spacesUploadIntegration', enabled);
+  }
+  
+  // Intro wizard / version tracking methods
+  getLastSeenVersion() {
+    return this.get('lastSeenVersion') || null;
+  }
+  
+  setLastSeenVersion(version) {
+    return this.set('lastSeenVersion', version);
+  }
+  
+  isFirstRun() {
+    return !this.getLastSeenVersion();
+  }
+  
+  /**
+   * Check if intro wizard should be shown
+   * @param {string} currentVersion - Current app version from package.json
+   * @returns {boolean} True if wizard should be shown
+   */
+  shouldShowIntroWizard(currentVersion) {
+    const lastSeen = this.getLastSeenVersion();
+    
+    // First run - show intro
+    if (!lastSeen) {
+      return true;
+    }
+    
+    // Compare versions - show updates if current version is newer
+    return this.compareVersions(currentVersion, lastSeen) > 0;
+  }
+  
+  /**
+   * Compare semantic versions
+   * @returns 1 if a > b, -1 if a < b, 0 if equal
+   */
+  compareVersions(a, b) {
+    const partsA = a.split('.').map(Number);
+    const partsB = b.split('.').map(Number);
+    for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
+      const numA = partsA[i] || 0;
+      const numB = partsB[i] || 0;
+      if (numA > numB) return 1;
+      if (numA < numB) return -1;
+    }
+    return 0;
   }
 }
 
