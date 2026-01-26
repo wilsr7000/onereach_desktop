@@ -8575,6 +8575,17 @@ function setupIPC() {
     openSetupWizard();
   });
   
+  // Handler for closing wizard windows
+  ipcMain.on('close-wizard', () => {
+    console.log('Received request to close wizard');
+    const windows = BrowserWindow.getAllWindows();
+    windows.forEach(win => {
+      if (win.getTitle().includes('Welcome') || win.getTitle().includes('Wizard')) {
+        win.close();
+      }
+    });
+  });
+  
   // Direct handler for opening the settings window
   ipcMain.on('open-settings', () => {
     console.log('Received direct request to open settings window');
@@ -13295,6 +13306,31 @@ function openBudgetEstimator() {
 
 // Make budget estimator globally accessible
 global.openBudgetEstimatorGlobal = openBudgetEstimator;
+
+// Function to open the new onboarding wizard (from Josh)
+function openOnboardingWizard() {
+  console.log('Opening onboarding wizard window...');
+  
+  const wizardWindow = new BrowserWindow({
+    width: 700,
+    height: 800,
+    center: true,
+    resizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js')
+    }
+  });
+  
+  wizardWindow.loadFile('onboarding-wizard.html');
+  
+  wizardWindow.on('closed', () => {
+    console.log('Onboarding wizard closed');
+  });
+}
 
 // Function to open the setup wizard modal
 function openSetupWizard() {
