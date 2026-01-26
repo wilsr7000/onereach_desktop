@@ -64,6 +64,9 @@ class ClipboardStorageV2 {
     // Load or create index (legacy JSON - kept for migration/backup)
     this.index = this.loadIndex();
     
+    // Create default GSX Agent context files (after index is loaded)
+    this.ensureGSXAgentDefaultFiles();
+    
     // Initialize DuckDB asynchronously
     this._initDuckDB();
     
@@ -80,6 +83,7 @@ class ClipboardStorageV2 {
     // PERFORMANCE: Debounce save operations (for legacy JSON backup)
     this._saveTimeout = null;
     this._pendingIndex = null;
+    this._saveInProgress = false; // Track if async save is running
   }
   
   // ========== DUCKDB INITIALIZATION ==========
@@ -195,6 +199,12 @@ class ClipboardStorageV2 {
     await this._dbRun(`
       INSERT OR IGNORE INTO spaces (id, name, icon, color) 
       VALUES ('unclassified', 'Unclassified', '◯', '#64c8ff')
+    `);
+    
+    // Ensure GSX Agent context space exists (system space for agent context data)
+    await this._dbRun(`
+      INSERT OR IGNORE INTO spaces (id, name, icon, color) 
+      VALUES ('gsx-agent', 'GSX Agent', '●', '#8b5cf6')
     `);
     
     console.log('[Storage] DuckDB schema created');
@@ -589,14 +599,17 @@ class ClipboardStorageV2 {
     };
   }
   
-  // Flush any pending async saves (call before app quit)
+  // Flush any pending async saves (call before app quit or reload)
   flushPendingSaves() {
     if (this._saveTimeout) {
       clearTimeout(this._saveTimeout);
       this._saveTimeout = null;
     }
-    if (this._pendingIndex) {
-      this.saveIndexSync(this._pendingIndex);
+    // If there's a pending index OR an async save is in progress,
+    // save the current in-memory index synchronously to ensure consistency
+    if (this._pendingIndex || this._saveInProgress) {
+      // Always save the current this.index which has the latest state
+      this.saveIndexSync(this.index);
       this._pendingIndex = null;
     }
   }
@@ -704,8 +717,204 @@ class ClipboardStorageV2 {
     this.ensureSpaceMetadata('unclassified', {
       name: 'Unclassified',
       icon: '◯',
-      color: '#64c8ff'
+      color: '#64c8ff',
+      isSystem: true
     });
+    
+    // Ensure "gsx-agent" space has a directory and metadata file (system space for agent context)
+    this.ensureSpaceMetadata('gsx-agent', {
+      name: 'GSX Agent',
+      icon: '●',
+      color: '#8b5cf6',
+      isSystem: true
+    });
+    // Note: GSX Agent default files are created after index is loaded (in constructor)
+  }
+  
+  /**
+   * Ensure GSX Agent space has default context files
+   * Creates main.md and agent-profile.md as proper indexed items
+   */
+  ensureGSXAgentDefaultFiles() {
+    // Use fixed IDs so we can check if they exist
+    const mainId = 'gsx-agent-main-context';
+    const profileId = 'gsx-agent-profile';
+    
+    // Check if items already exist in index
+    const mainExists = this.index?.items?.find(i => i.id === mainId);
+    const profileExists = this.index?.items?.find(i => i.id === profileId);
+    
+    // Create main.md as indexed item
+    if (!mainExists) {
+      try {
+        const mainContent = this.generateMainMdContent();
+        this.addItem({
+          id: mainId,
+          type: 'text',
+          content: mainContent,
+          spaceId: 'gsx-agent',
+          pinned: true,
+          metadata: {
+            name: 'main.md',
+            description: 'User and system context for AI agents',
+            isProtected: true,
+            category: 'context'
+          }
+        });
+        console.log('[Storage] Created main.md item for GSX Agent space');
+      } catch (e) {
+        console.error('[Storage] Error creating main.md item:', e.message);
+      }
+    }
+    
+    // Create agent-profile.md as indexed item
+    if (!profileExists) {
+      try {
+        const profileContent = this.generateAgentProfileContent();
+        this.addItem({
+          id: profileId,
+          type: 'text',
+          content: profileContent,
+          spaceId: 'gsx-agent',
+          pinned: true,
+          metadata: {
+            name: 'agent-profile.md',
+            description: 'Customize how your AI assistant behaves',
+            isProtected: true,
+            category: 'profile'
+          }
+        });
+        console.log('[Storage] Created agent-profile.md item for GSX Agent space');
+      } catch (e) {
+        console.error('[Storage] Error creating agent-profile.md item:', e.message);
+      }
+    }
+  }
+  
+  /**
+   * Generate main.md content with real system data
+   */
+  generateMainMdContent() {
+    const os = require('os');
+    
+    // Get user info
+    const userInfo = os.userInfo();
+    const homeDir = userInfo.homedir;
+    const username = userInfo.username;
+    
+    // Get system info
+    const platform = os.platform();
+    const release = os.release();
+    const arch = os.arch();
+    const hostname = os.hostname();
+    
+    // Get timezone
+    let timezone = 'Unknown';
+    try {
+      timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    } catch (e) {}
+    
+    // Get timezone offset
+    const offset = new Date().getTimezoneOffset();
+    const offsetHours = Math.abs(Math.floor(offset / 60));
+    const offsetMins = Math.abs(offset % 60);
+    const offsetSign = offset <= 0 ? '+' : '-';
+    const offsetStr = `${offsetSign}${String(offsetHours).padStart(2, '0')}:${String(offsetMins).padStart(2, '0')}`;
+    
+    // Get locale
+    let language = 'en-US';
+    let region = 'US';
+    try {
+      const locale = process.env.LANG || process.env.LC_ALL || 'en_US.UTF-8';
+      const parts = locale.split('.')[0].split('_');
+      language = parts.join('-');
+      region = parts[1] || 'US';
+    } catch (e) {}
+    
+    // Get installed apps (macOS)
+    let apps = [];
+    if (platform === 'darwin') {
+      try {
+        const appsDir = '/Applications';
+        if (fs.existsSync(appsDir)) {
+          apps = fs.readdirSync(appsDir)
+            .filter(f => f.endsWith('.app'))
+            .map(f => f.replace('.app', ''))
+            .sort()
+            .slice(0, 50); // Limit to 50 apps
+        }
+      } catch (e) {}
+    }
+    
+    // Map platform to friendly name
+    const osName = platform === 'darwin' ? 'macOS' : platform === 'win32' ? 'Windows' : 'Linux';
+    
+    let content = `# GSX Agent Context
+
+## User
+name: ${userInfo.username}
+username: ${username}
+home: ${homeDir}
+
+## System
+os: ${osName}
+version: ${release}
+arch: ${arch}
+hostname: ${hostname}
+
+## Timezone
+timezone: ${timezone}
+offset: ${offsetStr}
+
+## Locale
+language: ${language}
+region: ${region}
+
+## Location
+city: 
+state: 
+country: 
+
+## Preferences
+units: imperial
+temperature: fahrenheit
+
+## Installed Apps
+`;
+    
+    // Add apps
+    for (const app of apps) {
+      content += `- ${app}\n`;
+    }
+    
+    return content;
+  }
+  
+  /**
+   * Generate agent-profile.md with default settings
+   */
+  generateAgentProfileContent() {
+    return `# Agent Profile
+
+## Identity
+name: Atlas
+role: Personal Assistant
+
+## Personality
+tone: friendly
+humor: light
+formality: casual
+
+## Communication
+greeting: Hey there!
+signoff: Let me know if you need anything else.
+verbosity: brief
+use_emoji: false
+
+## Preferences
+confirm_actions: true
+proactive_suggestions: true
+`;
   }
   
   // Ensure a space has a directory and metadata file
@@ -842,7 +1051,15 @@ class ClipboardStorageV2 {
           id: 'unclassified',
           name: 'Unclassified',
           icon: '◯',
-          color: '#64c8ff'
+          color: '#64c8ff',
+          isSystem: true
+        },
+        {
+          id: 'gsx-agent',
+          name: 'GSX Agent',
+          icon: '●',
+          color: '#8b5cf6',
+          isSystem: true
         }
       ],
       preferences: {
@@ -903,6 +1120,10 @@ class ClipboardStorageV2 {
   async _performAsyncSave() {
     if (!this._pendingIndex) return;
     
+    // Mark save in progress BEFORE clearing _pendingIndex
+    // This prevents race conditions with flushPendingSaves/reloadIndex
+    this._saveInProgress = true;
+    
     const index = this._pendingIndex;
     this._pendingIndex = null;
     this._saveTimeout = null;
@@ -936,6 +1157,9 @@ class ClipboardStorageV2 {
       } catch (e) {
         // Ignore cleanup errors
       }
+    } finally {
+      // Always clear the in-progress flag
+      this._saveInProgress = false;
     }
   }
   
@@ -1360,6 +1584,13 @@ class ClipboardStorageV2 {
   
   // Delete item (transactional)
   deleteItem(itemId) {
+    // Protect system context files
+    const protectedIds = ['gsx-agent-main-context', 'gsx-agent-profile'];
+    if (protectedIds.includes(itemId)) {
+      console.warn('[Storage] Cannot delete protected system item:', itemId);
+      throw new Error('Cannot delete protected system file');
+    }
+    
     // Find in index first
     const itemIndex = this.index.items.findIndex(item => item.id === itemId);
     if (itemIndex === -1) {
@@ -2017,6 +2248,10 @@ class ClipboardStorageV2 {
   deleteSpace(spaceId) {
     if (spaceId === 'unclassified') {
       throw new Error('Cannot delete unclassified space');
+    }
+    
+    if (spaceId === 'gsx-agent') {
+      throw new Error('Cannot delete GSX Agent space');
     }
     
     // Check if this is a system space

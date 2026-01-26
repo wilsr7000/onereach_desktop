@@ -547,19 +547,6 @@
                 </select>
             </div>
             
-            <div class="form-group api-key-group">
-                <label for="llmApiKey">
-                    Provider API Key (Legacy)
-                    <span id="apiKeyStatus" class="api-key-status"></span>
-                    <a href="#" class="test-connection" onclick="testConnection()">Test</a>
-                </label>
-                <div style="position: relative;">
-                    <input type="password" id="llmApiKey" placeholder="Use dedicated keys above instead">
-                    <button class="toggle-visibility" onclick="toggleApiKeyVisibility()">Show</button>
-                </div>
-                <div class="info-text">For backwards compatibility. Prefer using the dedicated OpenAI/Anthropic keys above.</div>
-            </div>
-            
             <div class="form-group" id="claude4ThinkingGroup" style="display: none;">
                 <label for="claude4ThinkingMode">Claude Thinking Mode</label>
                 <select id="claude4ThinkingMode">
@@ -928,7 +915,6 @@
     
     <script>
         let settings = {};
-        let apiKeyVisible = false;
         let openaiKeyVisible = false;
         let anthropicKeyVisible = false;
         let assemblyaiKeyVisible = false;
@@ -949,7 +935,6 @@
                 // Populate form fields
                 document.getElementById('llmProvider').value = settings.llmProvider || 'openai';
                 document.getElementById('llmModel').value = settings.llmModel || 'gpt-5.2';
-                document.getElementById('llmApiKey').value = settings.llmApiKey || '';
                 document.getElementById('openaiApiKey').value = settings.openaiApiKey || '';
                 document.getElementById('anthropicApiKey').value = settings.anthropicApiKey || '';
                 document.getElementById('assemblyaiApiKey').value = settings.assemblyaiApiKey || '';
@@ -1019,12 +1004,6 @@
                     if (settings.claude4ThinkingMode === 'enabled') {
                         document.getElementById('claude4ThinkingLevelGroup').style.display = 'block';
                     }
-                }
-                
-                // Check if API key exists
-                if (settings.llmApiKey) {
-                    document.getElementById('apiKeyStatus').textContent = '(Key saved)';
-                    document.getElementById('apiKeyStatus').className = 'api-key-status status-valid';
                 }
                 
                 // Check if OpenAI API key exists
@@ -1112,7 +1091,6 @@
             const newSettings = {
                 llmProvider: document.getElementById('llmProvider').value,
                 llmModel: document.getElementById('llmModel').value,
-                llmApiKey: document.getElementById('llmApiKey').value,
                 openaiApiKey: document.getElementById('openaiApiKey').value,
                 anthropicApiKey: document.getElementById('anthropicApiKey').value,
                 assemblyaiApiKey: document.getElementById('assemblyaiApiKey').value,
@@ -1206,21 +1184,6 @@
                 element.className += ' status-invalid';
             }
             element.style.display = 'block';
-        }
-        
-        function toggleApiKeyVisibility() {
-            const input = document.getElementById('llmApiKey');
-            const button = input.parentElement.querySelector('.toggle-visibility');
-            
-            if (apiKeyVisible) {
-                input.type = 'password';
-                button.textContent = 'Show';
-                apiKeyVisible = false;
-            } else {
-                input.type = 'text';
-                button.textContent = 'Hide';
-                apiKeyVisible = true;
-            }
         }
         
         function toggleOpenAIKeyVisibility() {
@@ -1529,13 +1492,23 @@
             });
         }
         
-        async function testConnection() {
-            const provider = document.getElementById('llmProvider').value;
-            const apiKey = document.getElementById('llmApiKey').value;
+        async function testConnection(providerOverride) {
+            const provider = providerOverride || document.getElementById('llmProvider').value;
             const model = document.getElementById('llmModel').value;
             
+            // Get the appropriate API key based on provider
+            let apiKey;
+            let statusEl;
+            if (provider === 'openai') {
+                apiKey = document.getElementById('openaiApiKey').value;
+                statusEl = document.getElementById('openaiKeyStatus');
+            } else if (provider === 'anthropic') {
+                apiKey = document.getElementById('anthropicApiKey').value;
+                statusEl = document.getElementById('anthropicKeyStatus');
+            }
+            
             if (!apiKey) {
-                showStatus('Please enter an API key first', 'error');
+                showStatus(`Please enter an API key for ${provider} first`, 'error');
                 return;
             }
             
@@ -1545,12 +1518,16 @@
                 const result = await window.api.testLLMConnection({ provider, apiKey, model });
                 if (result.success) {
                     showStatus('Connection successful!', 'success');
-                    document.getElementById('apiKeyStatus').textContent = '(Valid)';
-                    document.getElementById('apiKeyStatus').className = 'api-key-status status-valid';
+                    if (statusEl) {
+                        statusEl.textContent = '(Valid)';
+                        statusEl.className = 'api-key-status status-valid';
+                    }
                 } else {
                     showStatus(`Connection failed: ${result.error}`, 'error');
-                    document.getElementById('apiKeyStatus').textContent = '(Invalid)';
-                    document.getElementById('apiKeyStatus').className = 'api-key-status status-invalid';
+                    if (statusEl) {
+                        statusEl.textContent = '(Invalid)';
+                        statusEl.className = 'api-key-status status-invalid';
+                    }
                 }
             } catch (error) {
                 showStatus(`Error testing connection: ${error.message}`, 'error');

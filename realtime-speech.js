@@ -3,10 +3,13 @@
  * 
  * Uses WebSocket connection to OpenAI's Realtime API for low-latency
  * real-time transcription as you speak.
+ * 
+ * Includes speech queue to prevent overlapping audio responses.
  */
 
 const WebSocket = require('ws');
 const { ipcMain } = require('electron');
+const { getSpeechQueue, PRIORITY } = require('./src/voice-task-sdk/audio/speechQueue');
 
 class RealtimeSpeech {
   constructor() {
@@ -18,6 +21,11 @@ class RealtimeSpeech {
     this.audioBuffer = [];
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 3;
+    
+    // Speech queue for preventing overlapping audio
+    this.speechQueue = getSpeechQueue();
+    this.speechQueue.setSpeakFunction((text) => this._doSpeak(text));
+    this.speechQueue.setCancelFunction(() => this._doCancel());
     
     // Language consistency tracking
     this.languageHistory = [];  // Last 3 detected languages
@@ -233,22 +241,45 @@ class RealtimeSpeech {
           this.isConnected = true;
           this.reconnectAttempts = 0;
           
-          // Configure the session for transcription with English preference
+          // Configure the session with FUNCTION CALLING
+          // This ensures the AI never responds directly - it always calls our function
+          // which gives us full control over what gets said (Concierge pattern)
           this.sendEvent({
             type: 'session.update',
             session: {
               modalities: ['text', 'audio'],
-              instructions: 'Always respond in English unless the user has consistently spoken in another language for multiple turns. Default to English. Do not switch languages based on a single input that might be misheard.',
+              instructions: 'You are a voice assistant router. For EVERY user input, you MUST call the handle_user_request function. Never respond directly - always use the function. After receiving the function result, speak it exactly as provided.',
               input_audio_format: 'pcm16',
               input_audio_transcription: {
                 model: 'whisper-1'
               },
               turn_detection: {
                 type: 'server_vad',
-                threshold: 0.6,           // Slightly higher threshold to avoid background noise triggering
-                prefix_padding_ms: 500,   // More padding before speech starts
-                silence_duration_ms: 1200 // Wait 1.2 seconds of silence before ending turn
-              }
+                threshold: 0.6,
+                prefix_padding_ms: 500,
+                silence_duration_ms: 1200
+              },
+              // FUNCTION CALLING: Route all input through our handler
+              tools: [{
+                type: 'function',
+                name: 'handle_user_request',
+                description: 'Process any user request, question, or command. This function MUST be called for every user input.',
+                parameters: {
+                  type: 'object',
+                  properties: {
+                    transcript: {
+                      type: 'string',
+                      description: 'The exact text of what the user said'
+                    },
+                    intent: {
+                      type: 'string',
+                      description: 'The detected intent: question, command, statement, or unclear'
+                    }
+                  },
+                  required: ['transcript']
+                }
+              }],
+              tool_choice: 'required'  // Force function call on every input
             }
           });
           
@@ -324,16 +355,18 @@ class RealtimeSpeech {
 
       case 'input_audio_buffer.speech_started':
         console.log('[RealtimeSpeech] Speech started');
-        // AUTO-CANCEL: When user starts speaking, cancel any in-progress AI response
-        if (this.hasActiveResponse) {
+        // AUTO-CANCEL: When user starts speaking, cancel any in-progress AI response AND queue
+        if (this.hasActiveResponse || this.speechQueue.isSpeaking) {
           console.log('[RealtimeSpeech] Auto-cancelling response due to user speech');
-          this.cancelResponse();
+          this.cancelResponse(true);  // true = also cancel queue
+          this.broadcast({ type: 'clear_audio_buffer' });
         }
         this.broadcast({ type: 'speech_started' });
         break;
 
       case 'input_audio_buffer.speech_stopped':
         console.log('[RealtimeSpeech] Speech stopped');
+        // With function calling, AI will call our function instead of responding directly
         this.broadcast({ type: 'speech_stopped' });
         break;
 
@@ -367,6 +400,19 @@ class RealtimeSpeech {
         break;
 
       case 'error':
+        // FIX: Handle "no active response" error gracefully - this is benign
+        // It means the response already finished before we tried to cancel
+        if (event.error?.code === 'response_cancel_not_active') {
+          console.log('[RealtimeSpeech] Cancel failed (no active response) - treating as success');
+          this.hasActiveResponse = false;
+          // Resolve any pending cancel wait
+          if (this._cancelResolver) {
+            this._cancelResolver();
+            this._cancelResolver = null;
+          }
+          break; // Don't broadcast this as an error
+        }
+        
         console.error('[RealtimeSpeech] API Error:', event.error);
         this.broadcast({ type: 'error', error: event.error });
         break;
@@ -385,6 +431,9 @@ class RealtimeSpeech {
       case 'response.audio.done':
         console.log('[RealtimeSpeech] Audio output complete');
         this.broadcast({ type: 'audio_done', responseId: event.response_id });
+        
+        // Mark speech as complete in the queue
+        this.speechQueue.markComplete();
         break;
 
       case 'response.audio_transcript.delta':
@@ -418,6 +467,35 @@ class RealtimeSpeech {
       case 'response.done':
         this.hasActiveResponse = false;
         this.activeResponseId = null;
+        break;
+      
+      // FUNCTION CALLING: Handle our handle_user_request function
+      case 'response.function_call_arguments.done':
+        console.log('[RealtimeSpeech] Function call complete:', event.name);
+        
+        if (event.name === 'handle_user_request') {
+          try {
+            const args = JSON.parse(event.arguments);
+            const transcript = args.transcript;
+            
+            console.log('[RealtimeSpeech] Processing user request:', transcript);
+            
+            // Broadcast the transcript for processing
+            // The exchange-bridge will handle it and call back with the result
+            this.pendingFunctionCallId = event.call_id;
+            this.pendingFunctionItemId = event.item_id;
+            
+            // Broadcast to trigger our agent processing
+            this.broadcast({ 
+              type: 'function_call_transcript', 
+              transcript: transcript,
+              callId: event.call_id,
+              itemId: event.item_id
+            });
+          } catch (err) {
+            console.error('[RealtimeSpeech] Error parsing function arguments:', err);
+          }
+        }
         break;
 
       default:
@@ -477,44 +555,60 @@ class RealtimeSpeech {
   }
 
   /**
-   * Speak text using OpenAI Realtime TTS
-   * Sends a message and triggers audio response
+   * Speak text using OpenAI Realtime TTS (queued)
+   * Uses speech queue to prevent overlapping audio
    * @param {string} text - Text to speak
+   * @param {Object} options - { priority }
    * @returns {Promise<boolean>}
    */
-  async speak(text) {
+  async speak(text, options = {}) {
+    // Use speech queue to prevent overlapping
+    return this.speechQueue.enqueue(text, {
+      priority: options.priority ?? PRIORITY.NORMAL,
+      metadata: options.metadata
+    });
+  }
+  
+  /**
+   * Internal: Actually speak text (called by speech queue)
+   * @private
+   */
+  async _doSpeak(text) {
     if (!this.isConnected) {
-      console.log('[RealtimeSpeech] speak: Not connected, connecting first...');
+      console.log('[RealtimeSpeech] _doSpeak: Not connected, connecting first...');
       try {
         await this.connect();
       } catch (err) {
-        console.error('[RealtimeSpeech] speak: Failed to connect:', err);
+        console.error('[RealtimeSpeech] _doSpeak: Failed to connect:', err);
         return false;
       }
     }
     
     // If there's an active response, cancel it and wait for confirmation
     if (this.hasActiveResponse) {
-      console.log('[RealtimeSpeech] speak: Active response in progress, cancelling first...');
+      console.log('[RealtimeSpeech] _doSpeak: Active response in progress, cancelling first...');
+      
+      // Broadcast to clear audio buffer IMMEDIATELY before cancel completes
+      this.broadcast({ type: 'clear_audio_buffer' });
+      
       await this.cancelResponseAndWait();
     }
     
     console.log('[RealtimeSpeech] Speaking:', text);
     
-    // Create a conversation item with the text to speak
+    // Create an assistant message (not user) to avoid triggering function calls
     const itemId = `speak_${Date.now()}`;
     this.sendEvent({
       type: 'conversation.item.create',
       item: {
         id: itemId,
         type: 'message',
-        role: 'user',
-        content: [{ type: 'input_text', text: `Say exactly this: "${text}"` }]
+        role: 'assistant',
+        content: [{ type: 'text', text: text }]
       }
     });
     
-    // Trigger the response (this will generate audio)
-    // Use the tracked response language for consistency
+    // Use response.create to generate audio for this text
     const langInstruction = this.currentResponseLanguage === 'en' 
       ? 'Respond in English.'
       : `Respond in ${this.getLanguageName(this.currentResponseLanguage)}.`;
@@ -523,7 +617,63 @@ class RealtimeSpeech {
       type: 'response.create',
       response: {
         modalities: ['audio', 'text'],
-        instructions: `${langInstruction} Respond by saying exactly: "${text}". Do not add anything else.`
+        instructions: `${langInstruction} Say exactly: "${text}". Nothing else.`
+      }
+    });
+    
+    return true;
+  }
+  
+  /**
+   * Internal: Cancel current speech (called by speech queue)
+   * @private
+   */
+  async _doCancel() {
+    await this.cancelResponseAndWait();
+  }
+  
+  /**
+   * Respond to a function call with our agent's result
+   * This is the key to the Concierge pattern - we provide the answer, AI speaks it
+   * @param {string} callId - The function call ID
+   * @param {string} result - The result text to speak
+   */
+  respondToFunctionCall(callId, result) {
+    if (!this.isConnected) {
+      console.error('[RealtimeSpeech] Cannot respond to function call - not connected');
+      return false;
+    }
+    
+    console.log('[RealtimeSpeech] Responding to function call:', callId, 'with:', result);
+    
+    // ALWAYS create the function call output first (required by OpenAI)
+    this.sendEvent({
+      type: 'conversation.item.create',
+      item: {
+        type: 'function_call_output',
+        call_id: callId,
+        output: JSON.stringify({ response: result })
+      }
+    });
+    
+    // If already speaking or something in queue, queue this response
+    // This prevents "conversation_already_has_active_response" errors
+    if (this.speechQueue.isSpeaking || this.speechQueue.queue.length > 0 || this.hasActiveResponse) {
+      console.log('[RealtimeSpeech] Queue active or response in progress, queueing function response');
+      this.speechQueue.enqueue(result, { 
+        priority: PRIORITY.HIGH,
+        metadata: { callId, type: 'function_response' }
+      });
+      return true;
+    }
+    
+    // Otherwise, directly create the response (more immediate)
+    this.sendEvent({
+      type: 'response.create',
+      response: {
+        modalities: ['audio', 'text'],
+        instructions: `Speak exactly this response to the user: "${result}". Do not add anything else.`,
+        tool_choice: 'none'
       }
     });
     
@@ -567,12 +717,17 @@ class RealtimeSpeech {
   /**
    * Cancel any in-progress response from OpenAI
    * Used when we want to handle a command locally without AI responding
+   * @param {boolean} cancelQueue - Also cancel all pending speech in queue
    */
-  cancelResponse() {
+  cancelResponse(cancelQueue = false) {
+    if (cancelQueue) {
+      // Cancel all pending speech as well
+      this.speechQueue.cancelAll();
+    }
+    
     if (!this.isConnected) {
       return false;
     }
-    
     
     console.log('[RealtimeSpeech] Cancelling any in-progress response');
     this.hasActiveResponse = false;
@@ -733,8 +888,29 @@ class RealtimeSpeech {
     });
 
     // Cancel any in-progress response (used when handling commands locally)
-    ipcMain.handle('realtime-speech:cancel-response', async () => {
-      return { success: this.cancelResponse() };
+    ipcMain.handle('realtime-speech:cancel-response', async (event, cancelQueue = false) => {
+      return { success: this.cancelResponse(cancelQueue) };
+    });
+    
+    // Cancel all pending speech in queue
+    ipcMain.handle('realtime-speech:cancel-all', async () => {
+      await this.speechQueue.cancelAll();
+      return { success: true };
+    });
+    
+    // Get speech queue status
+    ipcMain.handle('realtime-speech:queue-status', async () => {
+      return this.speechQueue.getStatus();
+    });
+    
+    // Respond to a function call with our agent's result
+    ipcMain.handle('realtime-speech:respond-to-function', async (event, callId, result) => {
+      try {
+        const success = this.respondToFunctionCall(callId, result);
+        return { success };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
     });
 
     console.log('[RealtimeSpeech] IPC handlers registered');
@@ -751,7 +927,7 @@ function getRealtimeSpeech() {
   return instance;
 }
 
-module.exports = { RealtimeSpeech, getRealtimeSpeech };
+module.exports = { RealtimeSpeech, getRealtimeSpeech, PRIORITY };
 
 
 

@@ -198,12 +198,13 @@ contextBridge.exposeInMainWorld('orbAPI', {
   
   /**
    * Expand window for text chat
+   * @param {string} anchor - Which corner to anchor: 'bottom-right', 'bottom-left', 'top-right', 'top-left'
    * @returns {Promise<void>}
    */
-  expandForChat: () => ipcRenderer.invoke('orb:expand-for-chat'),
+  expandForChat: (anchor = 'bottom-right') => ipcRenderer.invoke('orb:expand-for-chat', anchor),
   
   /**
-   * Collapse window when text chat closes
+   * Collapse window when text chat closes (restores to original position)
    * @returns {Promise<void>}
    */
   collapseFromChat: () => ipcRenderer.invoke('orb:collapse-from-chat'),
@@ -223,6 +224,14 @@ contextBridge.exposeInMainWorld('orbAPI', {
    * @returns {Promise<{success: boolean, error?: string}>}
    */
   speak: (text) => ipcRenderer.invoke('realtime-speech:speak', text),
+  
+  /**
+   * Respond to a function call with our agent's result
+   * @param {string} callId - The function call ID
+   * @param {string} result - The result text for AI to speak
+   * @returns {Promise<{success: boolean, error?: string}>}
+   */
+  respondToFunction: (callId, result) => ipcRenderer.invoke('realtime-speech:respond-to-function', callId, result),
   
   /**
    * Speak text using ElevenLabs TTS (fallback)
@@ -341,7 +350,24 @@ contextBridge.exposeInMainWorld('orbAPI', {
    * Check if Agent Composer is in creation mode
    * @returns {Promise<boolean>}
    */
-  isComposerActive: () => ipcRenderer.invoke('orb:is-composer-active')
+  isComposerActive: () => ipcRenderer.invoke('orb:is-composer-active'),
+  
+  // ==========================================================================
+  // WEB SEARCH (from webview-search-service.js via main process)
+  // ==========================================================================
+  
+  /**
+   * Perform a web search using the hidden webview
+   * @param {string} query - Search query
+   * @returns {Promise<{success: boolean, results: Array<{title, url, snippet}>, error?: string}>}
+   */
+  webSearch: (query) => ipcRenderer.invoke('search:web-query', query),
+  
+  /**
+   * Clear the search cache
+   * @returns {Promise<{success: boolean}>}
+   */
+  clearSearchCache: () => ipcRenderer.invoke('search:clear-cache')
 });
 
 console.log('[Orb Preload] Voice Orb preload script loaded with Agent Composer integration');

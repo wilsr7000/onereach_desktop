@@ -18,6 +18,7 @@
     "package:win:arm64": "npx electron-builder build --win arm64 --publish never",
     "package:win:x64": "npx electron-builder build --win x64 --publish never",
     "package:universal": "npx electron-builder build --mac universal --win arm64,x64 --publish never",
+    "package:mac:universal": "npx electron-builder build --mac --universal --publish never",
     "publish": "npx electron-builder build --mac --win --publish always",
     "publish:mac": "npx electron-builder build --mac --publish always",
     "publish:win": "npx electron-builder build --win --publish always",

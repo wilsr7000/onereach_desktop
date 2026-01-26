@@ -175,6 +175,10 @@ class SpacesAPI {
       if (spaceId === 'unclassified') {
         throw new Error('Cannot delete the Unclassified space');
       }
+      
+      if (spaceId === 'gsx-agent') {
+        throw new Error('Cannot delete the GSX Agent space');
+      }
 
       const success = this.storage.deleteSpace(spaceId);
       
@@ -1886,6 +1890,16 @@ class SpacesAPI {
        */
       delete: async (spaceId, filePath) => {
         try {
+          // Protect default context files in GSX Agent space
+          if (spaceId === 'gsx-agent') {
+            const protectedFiles = ['main.md', 'agent-profile.md'];
+            const fileName = filePath.split('/').pop();
+            if (protectedFiles.includes(fileName)) {
+              console.warn('[SpacesAPI] Cannot delete protected file:', fileName);
+              throw new Error(`Cannot delete ${fileName} - this is a required system file`);
+            }
+          }
+          
           const fullPath = path.join(this.storage.spacesDir, spaceId, filePath);
           
           if (fs.existsSync(fullPath)) {

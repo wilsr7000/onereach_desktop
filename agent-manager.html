@@ -347,6 +347,122 @@
             color: #888;
         }
         
+        /* Store Card */
+        .store-card {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 12px;
+            display: flex;
+            gap: 16px;
+            transition: all 0.2s;
+        }
+        
+        .store-card:hover {
+            border-color: rgba(255, 255, 255, 0.15);
+            background: rgba(255, 255, 255, 0.05);
+        }
+        
+        .store-card.enabled {
+            border-color: rgba(139, 92, 246, 0.3);
+        }
+        
+        .store-card-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            background: rgba(139, 92, 246, 0.15);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            flex-shrink: 0;
+        }
+        
+        .store-card-icon.time { background: rgba(59, 130, 246, 0.15); }
+        .store-card-icon.media { background: rgba(236, 72, 153, 0.15); }
+        .store-card-icon.search { background: rgba(34, 197, 94, 0.15); }
+        .store-card-icon.help { background: rgba(251, 191, 36, 0.15); }
+        .store-card-icon.spelling { background: rgba(99, 102, 241, 0.15); }
+        .store-card-icon.weather { background: rgba(6, 182, 212, 0.15); }
+        
+        .store-card-content {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .store-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 6px;
+        }
+        
+        .store-card-name {
+            font-weight: 600;
+            font-size: 14px;
+            color: #fff;
+        }
+        
+        .store-card-badge {
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .store-card-badge.builtin {
+            background: rgba(139, 92, 246, 0.2);
+            color: #c4b5fd;
+        }
+        
+        .store-card-badge.custom {
+            background: rgba(34, 197, 94, 0.2);
+            color: #86efac;
+        }
+        
+        .store-card-description {
+            font-size: 13px;
+            color: #999;
+            line-height: 1.4;
+            margin-bottom: 8px;
+        }
+        
+        .store-card-capabilities {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 8px;
+        }
+        
+        .capability-tag {
+            padding: 3px 8px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 6px;
+            font-size: 11px;
+            color: #888;
+        }
+        
+        .store-card-examples {
+            font-size: 11px;
+            color: #666;
+            font-style: italic;
+        }
+        
+        .store-card-examples strong {
+            color: #888;
+            font-style: normal;
+        }
+        
+        .store-card-actions {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: 8px;
+        }
+        
         /* Empty State */
         .empty-state {
             text-align: center;
@@ -493,13 +609,28 @@
         </div>
         
         <div class="tabs">
-            <button class="tab active" data-tab="local">Local Agents</button>
+            <button class="tab active" data-tab="store">Agent Store</button>
+            <button class="tab" data-tab="local">My Agents</button>
             <button class="tab" data-tab="gsx">GSX Connections</button>
         </div>
         
         <div class="content">
+            <!-- Agent Store Tab -->
+            <div class="tab-content active" id="tab-store">
+                <div class="toolbar">
+                    <span class="toolbar-title">Available Agents</span>
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <input type="text" class="form-input" id="storeSearch" placeholder="Search agents..." style="width: 200px; padding: 6px 12px;">
+                        <button class="btn primary" id="createCustomAgentBtn">+ Create Custom Agent</button>
+                    </div>
+                </div>
+                <div class="agent-list" id="storeList">
+                    <!-- Built-in agents will be rendered here -->
+                </div>
+            </div>
+            
             <!-- Local Agents Tab -->
-            <div class="tab-content active" id="tab-local">
+            <div class="tab-content" id="tab-local">
                 <div class="toolbar">
                     <span class="toolbar-title">Your Custom Agents</span>
                     <button class="btn primary" id="addAgentBtn">+ New Agent</button>
@@ -588,9 +719,81 @@
     </div>
 
     <script>
+        // Built-in agents catalog
+        const BUILTIN_AGENTS = [
+            {
+                id: 'time-agent',
+                name: 'Time Agent',
+                icon: '&#128336;',
+                iconClass: 'time',
+                description: 'Answers time and date questions from your system clock. Always accurate, never hallucinates.',
+                capabilities: ['Current time', 'Current date', 'Day of week', 'Month', 'Year'],
+                examples: ['"What time is it?"', '"What day is today?"', '"What is the date?"'],
+                category: 'system',
+                builtin: true
+            },
+            {
+                id: 'media-agent',
+                name: 'Media Agent',
+                icon: '&#127925;',
+                iconClass: 'media',
+                description: 'Controls music playback on your Mac using Apple Music or Spotify. Play, pause, skip tracks, and adjust volume.',
+                capabilities: ['Play music', 'Pause/Resume', 'Skip track', 'Previous track', 'Volume control', 'Mute/Unmute'],
+                examples: ['"Play some jazz"', '"Pause the music"', '"Skip this song"', '"Turn up the volume"'],
+                category: 'media',
+                builtin: true
+            },
+            {
+                id: 'search-agent',
+                name: 'Search Agent',
+                icon: '&#128269;',
+                iconClass: 'search',
+                description: 'Searches the web to answer questions about weather, facts, people, places, current events, and definitions.',
+                capabilities: ['Weather lookup', 'Fact checking', 'Definitions', 'People lookup', 'Current events'],
+                examples: ['"What\'s the weather?"', '"Who invented the telephone?"', '"Define quantum computing"'],
+                category: 'information',
+                builtin: true
+            },
+            {
+                id: 'help-agent',
+                name: 'Help Agent',
+                icon: '&#10067;',
+                iconClass: 'help',
+                description: 'Explains what the Orb can do and lists available commands. Your guide to voice capabilities.',
+                capabilities: ['List commands', 'Explain capabilities', 'Usage guidance'],
+                examples: ['"What can you do?"', '"Help me"', '"List your commands"'],
+                category: 'system',
+                builtin: true
+            },
+            {
+                id: 'spelling-agent',
+                name: 'Spelling Agent',
+                icon: '&#128221;',
+                iconClass: 'spelling',
+                description: 'Helps spell words correctly. Great for tricky words or when you need to spell something out loud.',
+                capabilities: ['Spell words', 'Word definitions', 'Phonetic spelling'],
+                examples: ['"How do you spell necessary?"', '"Spell onomatopoeia"'],
+                category: 'language',
+                builtin: true
+            },
+            {
+                id: 'weather-agent',
+                name: 'Weather Agent',
+                icon: '&#9925;',
+                iconClass: 'weather',
+                description: 'Dedicated weather forecasts with detailed conditions. Requires a weather API key for real-time data.',
+                capabilities: ['Current weather', 'Temperature', 'Forecast', 'Humidity', 'Conditions'],
+                examples: ['"Weather in Denver"', '"Is it going to rain?"', '"How cold is it?"'],
+                category: 'information',
+                builtin: true,
+                requiresApiKey: true
+            }
+        ];
+        
         // State
         let agents = [];
         let gsxConnections = [];
+        let enabledBuiltinAgents = {};
         let editingAgentId = null;
         let editingGSXId = null;
         
@@ -598,10 +801,13 @@
         const closeBtn = document.getElementById('closeBtn');
         const tabs = document.querySelectorAll('.tab');
         const tabContents = document.querySelectorAll('.tab-content');
+        const storeList = document.getElementById('storeList');
+        const storeSearch = document.getElementById('storeSearch');
         const agentList = document.getElementById('agentList');
         const gsxList = document.getElementById('gsxList');
         const addAgentBtn = document.getElementById('addAgentBtn');
         const addGSXBtn = document.getElementById('addGSXBtn');
+        const createCustomAgentBtn = document.getElementById('createCustomAgentBtn');
         
         // Agent Modal
         const agentModal = document.getElementById('agentModal');
@@ -638,6 +844,83 @@
                 document.getElementById('tab-' + tabId).classList.add('active');
             });
         });
+        
+        // ==================== AGENT STORE ====================
+        
+        function renderStore(filter = '') {
+            const filterLower = filter.toLowerCase();
+            const filteredAgents = BUILTIN_AGENTS.filter(agent => {
+                if (!filter) return true;
+                return agent.name.toLowerCase().includes(filterLower) ||
+                       agent.description.toLowerCase().includes(filterLower) ||
+                       agent.capabilities.some(c => c.toLowerCase().includes(filterLower));
+            });
+            
+            if (filteredAgents.length === 0) {
+                storeList.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">&mdash;</div>
+                        <div class="empty-state-title">No matching agents</div>
+                        <div class="empty-state-text">Try a different search term</div>
+                    </div>
+                `;
+                return;
+            }
+            
+            storeList.innerHTML = filteredAgents.map(agent => {
+                const isEnabled = enabledBuiltinAgents[agent.id] !== false; // Default to enabled
+                return `
+                    <div class="store-card ${isEnabled ? 'enabled' : ''}">
+                        <div class="store-card-icon ${agent.iconClass}">${agent.icon}</div>
+                        <div class="store-card-content">
+                            <div class="store-card-header">
+                                <span class="store-card-name">${escapeHtml(agent.name)}</span>
+                                <span class="store-card-badge builtin">Built-in</span>
+                            </div>
+                            <div class="store-card-description">${escapeHtml(agent.description)}</div>
+                            <div class="store-card-capabilities">
+                                ${agent.capabilities.map(c => `<span class="capability-tag">${escapeHtml(c)}</span>`).join('')}
+                            </div>
+                            <div class="store-card-examples">
+                                <strong>Try:</strong> ${agent.examples.join(' ')}
+                            </div>
+                        </div>
+                        <div class="store-card-actions">
+                            <label class="toggle-switch">
+                                <input type="checkbox" ${isEnabled ? 'checked' : ''} 
+                                       onchange="toggleBuiltinAgent('${agent.id}', this.checked)" />
+                                <span class="toggle-slider"></span>
+                            </label>
+                            ${agent.requiresApiKey ? '<span style="font-size: 10px; color: #f59e0b;">Needs API key</span>' : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        async function toggleBuiltinAgent(agentId, enabled) {
+            enabledBuiltinAgents[agentId] = enabled;
+            
+            try {
+                await window.agentManagerAPI.setBuiltinAgentEnabled(agentId, enabled);
+                renderStore(storeSearch.value);
+            } catch (error) {
+                console.error('Error toggling agent:', error);
+                // Revert the state
+                enabledBuiltinAgents[agentId] = !enabled;
+                renderStore(storeSearch.value);
+            }
+        }
+        
+        async function loadBuiltinAgentStates() {
+            try {
+                enabledBuiltinAgents = await window.agentManagerAPI.getBuiltinAgentStates() || {};
+            } catch (error) {
+                console.error('Error loading agent states:', error);
+                enabledBuiltinAgents = {};
+            }
+            renderStore();
+        }
         
         // ==================== LOCAL AGENTS ====================
         
@@ -889,8 +1172,25 @@
         
         // ==================== EVENT LISTENERS ====================
         
+        // Store search
+        storeSearch.addEventListener('input', (e) => {
+            renderStore(e.target.value);
+        });
+        
         addAgentBtn.addEventListener('click', () => showAgentModal());
         addGSXBtn.addEventListener('click', () => showGSXModal());
+        
+        // Create custom agent from store tab - switch to My Agents tab and open modal
+        createCustomAgentBtn.addEventListener('click', () => {
+            // Switch to My Agents tab
+            tabs.forEach(t => t.classList.remove('active'));
+            tabContents.forEach(tc => tc.classList.remove('active'));
+            document.querySelector('[data-tab="local"]').classList.add('active');
+            document.getElementById('tab-local').classList.add('active');
+            
+            // Open the agent modal
+            showAgentModal();
+        });
         
         agentModalClose.addEventListener('click', hideAgentModal);
         agentModalCancel.addEventListener('click', hideAgentModal);
@@ -911,6 +1211,7 @@
         // ==================== INITIALIZATION ====================
         
         async function init() {
+            await loadBuiltinAgentStates();
             await loadAgents();
             await loadGSXConnections();
         }
@@ -919,6 +1220,8 @@
             init();
         } else {
             console.error('[AgentManager] API not available');
+            // Still render store with defaults
+            renderStore();
         }
         
         console.log('[AgentManager] Initialized');

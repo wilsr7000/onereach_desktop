@@ -1288,8 +1288,130 @@ function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = 
         }
     });
     
-
+    // ========================================
+    // Drag and Drop Forwarding for Webviews
+    // Electron webviews don't natively forward drag/drop events to content
+    // This implementation forwards files and URLs to the webview content
+    // ========================================
     
+    // Prevent default drag behavior and show copy cursor
+    webview.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = 'copy';
+    });
+    
+    webview.addEventListener('dragenter', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+    });
+    
+    webview.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+    });
+    
+    // Handle file and URL drops - forward to webview content
+    webview.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        console.log(`Drop event on webview ${tabId}`, e.dataTransfer);
+        
+        // Get drop coordinates relative to the webview
+        const rect = webview.getBoundingClientRect();
+        const clientX = e.clientX - rect.left;
+        const clientY = e.clientY - rect.top;
+        
+        // Handle file drops
+        const files = Array.from(e.dataTransfer.files);
+        if (files.length > 0) {
+            console.log(`Forwarding ${files.length} file(s) to webview content`);
+            
+            // Convert files to transferable format (can't send File objects directly)
+            const fileData = files.map((file) => ({
+                name: file.name,
+                type: file.type || 'application/octet-stream',
+                size: file.size,
+                path: file.path,  // Electron provides the full file path
+                lastModified: file.lastModified
+            }));
+            
+            // Forward file data to webview content via postMessage
+            try {
+                await webview.executeJavaScript(`
+                    (function() {
+                        const fileData = ${JSON.stringify(fileData)};
+                        const dropX = ${clientX};
+                        const dropY = ${clientY};
+                        
+                        // Dispatch custom event for apps that listen for it
+                        const customEvent = new CustomEvent('electron-file-drop', {
+                            detail: { files: fileData, clientX: dropX, clientY: dropY },
+                            bubbles: true,
+                            cancelable: true
+                        });
+                        
+                        // Find element at drop point and dispatch event
+                        const targetElement = document.elementFromPoint(dropX, dropY) || document.body;
+                        targetElement.dispatchEvent(customEvent);
+                        
+                        // Also post message for apps using message listeners
+                        window.postMessage({
+                            type: 'electron-file-drop',
+                            files: fileData,
+                            clientX: dropX,
+                            clientY: dropY
+                        }, '*');
+                        
+                        console.log('[Electron] File drop forwarded:', fileData.map(f => f.name));
+                    })();
+                `);
+            } catch (err) {
+                console.error(`Error forwarding file drop to webview ${tabId}:`, err);
+            }
+        }
+        
+        // Handle URL drops (links dragged from other apps/browsers)
+        const urlData = e.dataTransfer.getData('text/uri-list') || 
+                        e.dataTransfer.getData('text/plain') || '';
+        
+        if (urlData && (urlData.startsWith('http://') || urlData.startsWith('https://'))) {
+            console.log(`Forwarding URL drop to webview content: ${urlData}`);
+            
+            try {
+                await webview.executeJavaScript(`
+                    (function() {
+                        const url = ${JSON.stringify(urlData)};
+                        const dropX = ${clientX};
+                        const dropY = ${clientY};
+                        
+                        // Dispatch custom event for URL drops
+                        const customEvent = new CustomEvent('electron-url-drop', {
+                            detail: { url: url, clientX: dropX, clientY: dropY },
+                            bubbles: true,
+                            cancelable: true
+                        });
+                        
+                        const targetElement = document.elementFromPoint(dropX, dropY) || document.body;
+                        targetElement.dispatchEvent(customEvent);
+                        
+                        // Also post message
+                        window.postMessage({
+                            type: 'electron-url-drop',
+                            url: url,
+                            clientX: dropX,
+                            clientY: dropY
+                        }, '*');
+                        
+                        console.log('[Electron] URL drop forwarded:', url);
+                    })();
+                `);
+            } catch (err) {
+                console.error(`Error forwarding URL drop to webview ${tabId}:`, err);
+            }
+        }
+    });
 
     
     // Add the elements to the DOM

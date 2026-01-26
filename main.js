@@ -43,8 +43,10 @@ let introWizardWindow = null;
 
 // Enable Speech Recognition API in Electron
 // These must be set before app.whenReady()
-app.commandLine.appendSwitch('enable-speech-dispatcher');
-app.commandLine.appendSwitch('enable-experimental-web-platform-features');
+if (app && app.commandLine) {
+  app.commandLine.appendSwitch('enable-speech-dispatcher');
+  app.commandLine.appendSwitch('enable-experimental-web-platform-features');
+}
 
 // Global Aider Bridge instance (main/shared)
 let aiderBridge = null;
@@ -832,6 +834,45 @@ app.whenReady().then(() => {
       console.error('[debug:log] failed to write', err?.message || err);
     }
   });
+
+  // ========================================
+  // Webview Native Drag Handler
+  // Enables outbound drag from webview content to desktop/external apps
+  // ========================================
+  ipcMain.on('webview-start-native-drag', (event, { filePath, iconPath }) => {
+    try {
+      const fs = require('fs');
+      const { nativeImage } = require('electron');
+      
+      // Validate file exists
+      if (!filePath || !fs.existsSync(filePath)) {
+        console.error('[Webview Drag] File not found:', filePath);
+        return;
+      }
+      
+      // Create icon for drag operation
+      let icon;
+      if (iconPath && fs.existsSync(iconPath)) {
+        icon = nativeImage.createFromPath(iconPath);
+      } else {
+        // Use a default drag icon
+        const defaultIconPath = path.join(__dirname, 'assets', 'drag-icon.png');
+        if (fs.existsSync(defaultIconPath)) {
+          icon = nativeImage.createFromPath(defaultIconPath);
+        }
+      }
+      
+      console.log('[Webview Drag] Starting native drag for:', filePath);
+      
+      // Start native drag operation
+      event.sender.startDrag({
+        file: filePath,
+        icon: icon || undefined
+      });
+    } catch (err) {
+      console.error('[Webview Drag] Error starting drag:', err);
+    }
+  });
   
   // Initialize AI log analyzer
   const getLogAIAnalyzer = require('./log-ai-analyzer');
@@ -1387,6 +1428,18 @@ app.on('will-quit', (event) => {
     console.log(`[App] Unregistered ${registeredShortcuts.length} shortcuts`);
   }
   
+  // Cleanup webview search service
+  try {
+    const webviewSearch = require('./packages/agents/webview-search-service');
+    webviewSearch.destroy();
+    console.log('[App] Webview search service destroyed');
+  } catch (error) {
+    // Service may not be loaded yet, that's fine
+    if (!error.message.includes('Cannot find module')) {
+      console.error('[App] Error destroying webview search:', error);
+    }
+  }
+  
   // Final log flush
   if (logger && logger.flush) {
     try {
@@ -1439,6 +1492,51 @@ function setupSpacesAPI() {
       });
     } catch (error) {
       console.error('[SpacesAPI] Broadcast error:', error);
+    }
+  });
+  
+  // ---- WEBVIEW SEARCH SERVICE ----
+  
+  // Lazy-load the webview search service to avoid circular dependencies
+  let webviewSearchService = null;
+  
+  function getWebviewSearchService() {
+    if (!webviewSearchService) {
+      try {
+        webviewSearchService = require('./packages/agents/webview-search-service');
+      } catch (e) {
+        console.error('[WebviewSearch] Failed to load service:', e.message);
+      }
+    }
+    return webviewSearchService;
+  }
+  
+  // Handle web search requests from renderer processes
+  ipcMain.handle('search:web-query', async (event, query) => {
+    try {
+      const service = getWebviewSearchService();
+      if (!service) {
+        return { success: false, results: [], error: 'Search service not available' };
+      }
+      
+      const results = await service.search(query);
+      return { success: true, results };
+    } catch (error) {
+      console.error('[WebviewSearch] Search error:', error.message);
+      return { success: false, results: [], error: error.message };
+    }
+  });
+  
+  // Clear search cache
+  ipcMain.handle('search:clear-cache', async () => {
+    try {
+      const service = getWebviewSearchService();
+      if (service) {
+        service.clearCache();
+      }
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
     }
   });
   
@@ -14363,31 +14461,92 @@ function setupOrbIPC() {
     return global.agentCreationMode === true && claudeCodeWindow && !claudeCodeWindow.isDestroyed();
   });
   
+  // Store original bounds before expanding for text chat
+  let orbOriginalBounds = null;
+  
   // Resize orb window for text chat
-  ipcMain.handle('orb:expand-for-chat', () => {
+  ipcMain.handle('orb:expand-for-chat', (event, anchor = 'bottom-right') => {
     if (orbWindow && !orbWindow.isDestroyed()) {
       const currentBounds = orbWindow.getBounds();
+      
+      // Store original bounds so we can restore exactly on collapse
+      orbOriginalBounds = { ...currentBounds };
+      
       const newWidth = 380;
       const newHeight = 520;
-      // Keep bottom-right corner anchored
-      const newX = currentBounds.x + currentBounds.width - newWidth;
-      const newY = currentBounds.y + currentBounds.height - newHeight;
+      
+      // Get screen bounds to ensure window stays visible
+      const display = screen.getDisplayMatching(currentBounds);
+      const workArea = display.workArea;
+      const MIN_MARGIN = 10;
+      
+      let newX, newY;
+      
+      // Calculate position based on anchor (where the orb should stay)
+      switch (anchor) {
+        case 'bottom-left':
+          // Keep bottom-left corner anchored, expand up and right
+          newX = currentBounds.x;
+          newY = currentBounds.y + currentBounds.height - newHeight;
+          break;
+        case 'top-right':
+          // Keep top-right corner anchored, expand down and left
+          newX = currentBounds.x + currentBounds.width - newWidth;
+          newY = currentBounds.y;
+          break;
+        case 'top-left':
+          // Keep top-left corner anchored, expand down and right
+          newX = currentBounds.x;
+          newY = currentBounds.y;
+          break;
+        case 'bottom-right':
+        default:
+          // Keep bottom-right corner anchored, expand up and left
+          newX = currentBounds.x + currentBounds.width - newWidth;
+          newY = currentBounds.y + currentBounds.height - newHeight;
+          break;
+      }
+      
+      // Ensure window stays on screen
+      if (newY < workArea.y + MIN_MARGIN) {
+        newY = workArea.y + MIN_MARGIN;
+      }
+      if (newX < workArea.x + MIN_MARGIN) {
+        newX = workArea.x + MIN_MARGIN;
+      }
+      if (newX + newWidth > workArea.x + workArea.width - MIN_MARGIN) {
+        newX = workArea.x + workArea.width - newWidth - MIN_MARGIN;
+      }
+      if (newY + newHeight > workArea.y + workArea.height - MIN_MARGIN) {
+        newY = workArea.y + workArea.height - newHeight - MIN_MARGIN;
+      }
+      
       orbWindow.setBounds({ x: newX, y: newY, width: newWidth, height: newHeight }, true);
-      console.log('[VoiceOrb] Expanded for text chat:', newWidth, 'x', newHeight);
+      console.log('[VoiceOrb] Expanded for text chat:', newWidth, 'x', newHeight, 'at', newX, newY, 'anchor:', anchor);
       return { width: newWidth, height: newHeight };
     }
   });
   
   ipcMain.handle('orb:collapse-from-chat', () => {
     if (orbWindow && !orbWindow.isDestroyed()) {
+      // Restore to original bounds if we have them
+      if (orbOriginalBounds) {
+        const bounds = orbOriginalBounds;
+        orbOriginalBounds = null;
+        orbWindow.setBounds(bounds, true);
+        console.log('[VoiceOrb] Collapsed to original position:', bounds.x, bounds.y);
+        return { width: bounds.width, height: bounds.height };
+      }
+      
+      // Fallback: resize to compact size (matches createOrbWindow default)
       const currentBounds = orbWindow.getBounds();
-      const newWidth = 350;
-      const newHeight = 250;
-      // Keep bottom-right corner anchored
+      const newWidth = 360;
+      const newHeight = 280;
       const newX = currentBounds.x + currentBounds.width - newWidth;
       const newY = currentBounds.y + currentBounds.height - newHeight;
+      
       orbWindow.setBounds({ x: newX, y: newY, width: newWidth, height: newHeight }, true);
-      console.log('[VoiceOrb] Collapsed from text chat');
+      console.log('[VoiceOrb] Collapsed from text chat (fallback)');
       return { width: newWidth, height: newHeight };
     }
   });
@@ -14407,9 +14566,12 @@ function createOrbWindow() {
   const display = screen.getPrimaryDisplay();
   const { width: screenWidth, height: screenHeight } = display.workAreaSize;
   
-  // Window dimensions - large enough for text chat panel above orb
-  const windowWidth = 400;
-  const windowHeight = 550;
+  // Window dimensions - compact size for just orb + transcript tooltip
+  // Orb is 80x80, positioned with 20px margin from edge
+  // Transcript tooltip needs ~200px above/below for text
+  // Total: 120x120 is minimum, but we need room for transcript
+  const windowWidth = 360;  // Width for transcript tooltip (max 320px + margins)
+  const windowHeight = 280; // Height for orb (120px) + transcript space (160px)
   
   // Try to restore saved position, otherwise default to bottom-right
   let x, y;
@@ -14446,13 +14608,16 @@ function createOrbWindow() {
   if (savedPosition && typeof savedPosition.x === 'number' && typeof savedPosition.y === 'number' && !windowSizeChanged) {
     // Validate position is still on screen
     // The orb is at bottom-right of window (right: 20px, bottom: 20px, size: 80x80)
-    // Orb's left edge is at windowX + 250, right edge at windowX + 330
-    // Orb's top edge is at windowY + 150, bottom edge at windowY + 230
+    // Window size: 360x280
+    // Orb's left edge is at windowX + (360 - 20 - 80) = windowX + 260
+    // Orb's right edge is at windowX + (360 - 20) = windowX + 340
+    // Orb's top edge is at windowY + (280 - 20 - 80) = windowY + 180
+    // Orb's bottom edge is at windowY + (280 - 20) = windowY + 260
     // Allow negative window positions as long as the orb itself is visible
-    const orbLeftEdge = savedPosition.x + 250;
-    const orbRightEdge = savedPosition.x + 330;
-    const orbTopEdge = savedPosition.y + 150;
-    const orbBottomEdge = savedPosition.y + 230;
+    const orbLeftEdge = savedPosition.x + 260;
+    const orbRightEdge = savedPosition.x + 340;
+    const orbTopEdge = savedPosition.y + 180;
+    const orbBottomEdge = savedPosition.y + 260;
     
     const orbVisible = orbRightEdge > 50 && orbLeftEdge < screenWidth - 50 &&
                        orbBottomEdge > 50 && orbTopEdge < screenHeight - 50;
@@ -14513,6 +14678,22 @@ function createOrbWindow() {
   
   // Load the orb UI
   orbWindow.loadFile(path.join(__dirname, 'orb.html'));
+  
+  // Wire up global.speakFeedback when orb window is ready
+  orbWindow.webContents.on('did-finish-load', () => {
+    // Wire up global.speakFeedback to realtime speech
+    const { getRealtimeSpeech } = require('./realtime-speech');
+    global.speakFeedback = async (text) => {
+      try {
+        console.log('[VoiceOrb] speakFeedback:', text);
+        const speech = getRealtimeSpeech();
+        await speech.speak(text);
+      } catch (error) {
+        console.error('[VoiceOrb] speakFeedback error:', error);
+      }
+    };
+    console.log('[VoiceOrb] global.speakFeedback wired up');
+  });
   
   // Save position before closing
   orbWindow.on('close', () => {
@@ -15119,6 +15300,29 @@ function setupAgentManagerIPC() {
     const store = getAgentStore();
     await store.init();
     return store.compareVersions(agentId, versionA, versionB);
+  });
+  
+  // ==================== BUILTIN AGENTS ====================
+  
+  // Get enabled states for all builtin agents
+  ipcMain.handle('agents:get-builtin-states', async () => {
+    // Use settings manager to persist builtin agent states
+    if (global.settingsManager) {
+      return global.settingsManager.get('builtinAgentStates') || {};
+    }
+    return {};
+  });
+  
+  // Set enabled state for a builtin agent
+  ipcMain.handle('agents:set-builtin-enabled', async (event, agentId, enabled) => {
+    if (global.settingsManager) {
+      const states = global.settingsManager.get('builtinAgentStates') || {};
+      states[agentId] = enabled;
+      global.settingsManager.set('builtinAgentStates', states);
+      console.log(`[AgentManager] Builtin agent ${agentId} ${enabled ? 'enabled' : 'disabled'}`);
+      return true;
+    }
+    return false;
   });
   
   // ==================== GSX CONNECTIONS ====================

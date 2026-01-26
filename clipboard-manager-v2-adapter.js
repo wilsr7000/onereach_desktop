@@ -7546,7 +7546,7 @@ ${chunks[i]}`;
       
       // Merge: existing fields preserved, new fields added/updated
       const mergedMetadata = {
-        ...existingMetadata,  // Keep all existing fields (riffNoteId, _prefixed, assets, etc.)
+        ...existingMetadata,  // Keep all existing fields (playbookNoteId, _prefixed, assets, etc.)
         ...metadata           // Overlay with new/updated fields
       };
       

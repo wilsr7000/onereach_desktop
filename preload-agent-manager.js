@@ -42,6 +42,14 @@ contextBridge.exposeInMainWorld('agentManagerAPI', {
   
   // Refresh agents from GSX server
   refreshGSXAgents: (id) => ipcRenderer.invoke('gsx:refresh-agents', id),
+  
+  // ==================== BUILTIN AGENTS ====================
+  
+  // Get enabled states for all builtin agents
+  getBuiltinAgentStates: () => ipcRenderer.invoke('agents:get-builtin-states'),
+  
+  // Set enabled state for a builtin agent
+  setBuiltinAgentEnabled: (agentId, enabled) => ipcRenderer.invoke('agents:set-builtin-enabled', agentId, enabled),
 });
 
 console.log('[PreloadAgentManager] Agent Manager API exposed');

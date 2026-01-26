@@ -16,6 +16,8 @@
             height: 100%;
             background: transparent;
             overflow: hidden;
+            /* Make transparent areas click-through to apps behind */
+            pointer-events: none;
             /* Removed -webkit-app-region: drag - we handle dragging manually */
         }
         
@@ -25,6 +27,38 @@
             right: 20px;
             width: 80px;
             height: 80px;
+            transition: top 0.25s ease, bottom 0.25s ease, left 0.25s ease, right 0.25s ease;
+            /* Re-enable mouse events for the orb */
+            pointer-events: auto;
+        }
+        
+        /* Orb position variants for chat panel layout */
+        .orb-container.orb-bottom-right {
+            bottom: 20px;
+            right: 20px;
+            top: auto;
+            left: auto;
+        }
+        
+        .orb-container.orb-bottom-left {
+            bottom: 20px;
+            left: 20px;
+            top: auto;
+            right: auto;
+        }
+        
+        .orb-container.orb-top-right {
+            top: 20px;
+            right: 20px;
+            bottom: auto;
+            left: auto;
+        }
+        
+        .orb-container.orb-top-left {
+            top: 20px;
+            left: 20px;
+            bottom: auto;
+            right: auto;
         }
         
         .orb {
@@ -176,8 +210,9 @@
         }
         
         /* Transcript tooltip - elegant floating text */
+        /* Uses fixed positioning for reliable placement regardless of orb position */
         .transcript-tooltip {
-            position: absolute;
+            position: fixed;
             background: linear-gradient(135deg, rgba(15, 15, 20, 0.95) 0%, rgba(25, 25, 35, 0.9) 100%);
             color: rgba(255, 255, 255, 0.95);
             padding: 14px 20px;
@@ -188,10 +223,13 @@
             line-height: 1.5;
             font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
             max-width: 320px;
+            max-height: 150px;
+            overflow-y: auto;
             text-align: center;
             white-space: normal;
             word-wrap: break-word;
             opacity: 0;
+            /* Allow clicks through when hidden, enable when visible */
             pointer-events: none;
             -webkit-app-region: no-drag;
             /* Frosted glass effect */
@@ -203,15 +241,15 @@
                 0 8px 32px rgba(0, 0, 0, 0.4),
                 0 0 0 1px rgba(255, 255, 255, 0.05),
                 inset 0 1px 0 rgba(255, 255, 255, 0.1);
-            /* Position above orb, right-aligned with orb */
-            bottom: 115px;
-            right: 0;
+            /* Default position - will be overridden by JS */
+            bottom: 120px;
+            right: 20px;
             left: auto;
+            top: auto;
             /* Animation properties */
             transform: translateY(10px);
-            /* Ensure text doesn't get clipped */
-            overflow: visible;
             transition: opacity 0.4s ease, transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 100;
         }
         
         .transcript-tooltip.visible {
@@ -232,10 +270,8 @@
             font-weight: 300;
         }
         
-        /* Position below orb when near top of screen */
+        /* Position below orb when near top of window */
         .transcript-tooltip.below {
-            bottom: auto;
-            top: 115px;
             transform: translateY(-10px);
         }
         
@@ -245,18 +281,6 @@
         
         .transcript-tooltip.below.fading {
             transform: translateY(10px);
-        }
-        
-        /* Align to left side of window when orb is near right edge of screen */
-        .transcript-tooltip.align-left {
-            right: auto;
-            left: 0;
-        }
-        
-        /* Align to right side (default) when orb is near left edge of screen */
-        .transcript-tooltip.align-right {
-            left: auto;
-            right: 0;
         }
         
         /* ==================== CONTEXT MENU ==================== */
@@ -279,6 +303,7 @@
             transform: scale(0.95) translateY(-5px);
             transform-origin: top left;
             transition: opacity 0.15s ease, transform 0.15s ease;
+            /* Click-through when hidden, enabled when visible */
             pointer-events: none;
             z-index: 1000;
             -webkit-app-region: no-drag;
@@ -543,6 +568,50 @@
             fill: currentColor;
         }
         
+        /* Position variants based on orb location on screen */
+        /* Default: orb at bottom-right, chat appears above/left */
+        .text-chat-panel.pos-top-left {
+            /* Orb at bottom-right: chat above and to the left */
+            top: 15px;
+            left: 15px;
+            right: 15px;
+            bottom: 120px;
+        }
+        
+        .text-chat-panel.pos-top-right {
+            /* Orb at bottom-left: chat above and to the right */
+            top: 15px;
+            left: 15px;
+            right: 15px;
+            bottom: 120px;
+        }
+        
+        .text-chat-panel.pos-bottom-left {
+            /* Orb at top-right: chat below and to the left */
+            top: 120px;
+            left: 15px;
+            right: 15px;
+            bottom: 15px;
+            transform-origin: top center;
+        }
+        
+        .text-chat-panel.pos-bottom-left.visible {
+            transform: scale(1) translateY(0);
+        }
+        
+        .text-chat-panel.pos-bottom-right {
+            /* Orb at top-left: chat below and to the right */
+            top: 120px;
+            left: 15px;
+            right: 15px;
+            bottom: 15px;
+            transform-origin: top center;
+        }
+        
+        .text-chat-panel.pos-bottom-right.visible {
+            transform: scale(1) translateY(0);
+        }
+        
         /* Empty state */
         .chat-empty {
             display: flex;
@@ -654,7 +723,14 @@
         let lastProcessedTime = 0;
         const DEDUP_WINDOW_MS = 2000; // Ignore same transcript within 2 seconds
         let ttsEndTime = 0;
-        const TTS_COOLDOWN_MS = 1500; // Ignore transcripts for 1.5s after TTS ends
+        
+        // Track function call transcripts to avoid double-processing
+        // When using function calling, we get the transcript via function_call_transcript
+        // AND via the regular transcript event - we must skip the duplicate
+        let lastFunctionCallTranscript = '';
+        let lastFunctionCallTime = 0;
+        const FUNCTION_CALL_DEDUP_MS = 5000; // Skip regular transcript if function call handled it within 5s
+        const TTS_COOLDOWN_MS = 3000; // Ignore transcripts for 3s after TTS ends (prevent echo/ambient pickup)
         let pendingSpeakQueue = []; // Queue TTS requests to avoid collision
         
         // Initialize audio context for TTS playback
@@ -678,6 +754,52 @@
                 float32[i] = pcm16[i] / 32768;
             }
             return float32;
+        }
+        
+        // Play a pleasant ready chime using Web Audio API
+        // This is a short tone that won't trigger function calling
+        async function playReadyChime() {
+            try {
+                const ctx = new AudioContext();
+                
+                // Resume if suspended (autoplay policy)
+                if (ctx.state === 'suspended') {
+                    await ctx.resume();
+                }
+                
+                const now = ctx.currentTime;
+                
+                // Create a pleasant two-tone ascending chime
+                const frequencies = [523.25, 659.25]; // C5 and E5 - pleasant major third
+                const duration = 0.12; // Very short
+                const gap = 0.08;
+                
+                frequencies.forEach((freq, i) => {
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    
+                    osc.type = 'sine';
+                    osc.frequency.value = freq;
+                    
+                    // Gentle envelope - louder for audibility
+                    const startTime = now + (i * (duration + gap));
+                    gain.gain.setValueAtTime(0, startTime);
+                    gain.gain.linearRampToValueAtTime(0.3, startTime + 0.02); // Louder
+                    gain.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
+                    
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    
+                    osc.start(startTime);
+                    osc.stop(startTime + duration);
+                });
+                
+                // Close context after chime finishes
+                setTimeout(() => ctx.close(), 500);
+                console.log('[Orb] Ready chime played');
+            } catch (e) {
+                console.warn('[Orb] Could not play ready chime:', e);
+            }
         }
         
         // Play accumulated audio chunks
@@ -995,6 +1117,22 @@
                 const result = await window.orbAPI.submit(transcript);
                 console.log('[Orb] SDK submit result:', result);
                 
+                // Check if backend already handled AND suppressed AI response
+                // If suppressAIResponse is false, we should speak the message even if handled
+                if (result.suppressAIResponse === true) {
+                    console.log('[Orb] Response suppressed by backend, skipping frontend speech');
+                    hideTranscript();
+                    return;
+                }
+                
+                // If backend handled it but didn't suppress, speak the message
+                if (result.handled && result.message && result.suppressAIResponse === false) {
+                    console.log('[Orb] Backend handled, speaking message:', result.message);
+                    speakFeedback(result.message);
+                    hideTranscript();
+                    return;
+                }
+                
                 // Check if disambiguation is needed
                 if (result.clarificationNeeded && result.clarificationOptions?.length > 0) {
                     await handleDisambiguation(result, transcript);
@@ -1112,37 +1250,117 @@
         // Text chat state
         let isTextChatOpen = false;
         let chatHistory = [];
+        let chatInactivityTimer = null;
+        const CHAT_INACTIVITY_TIMEOUT = 30000; // 30 seconds
+        
+        // Reset the chat inactivity timer
+        function resetChatInactivityTimer() {
+            if (chatInactivityTimer) {
+                clearTimeout(chatInactivityTimer);
+                chatInactivityTimer = null;
+            }
+            
+            // Only set timer if chat is open
+            if (isTextChatOpen) {
+                chatInactivityTimer = setTimeout(() => {
+                    console.log('[TextChat] Auto-closing due to inactivity');
+                    closeTextChat();
+                }, CHAT_INACTIVITY_TIMEOUT);
+            }
+        }
+        
+        // Clear inactivity timer
+        function clearChatInactivityTimer() {
+            if (chatInactivityTimer) {
+                clearTimeout(chatInactivityTimer);
+                chatInactivityTimer = null;
+            }
+        }
         
         // ==================== CONTEXT MENU ====================
         
         function showContextMenu(x, y) {
-            console.log('[Orb] Showing context menu at', x, y);
+            console.log('[Orb] Showing context menu at window coords:', x, y);
             
-            // Position menu at click location, but ensure it's visible
-            const menuWidth = 180;
-            const menuHeight = 150;
+            const MIN_MARGIN = 8;
+            
+            // Window dimensions (the BrowserWindow client area)
             const windowWidth = window.innerWidth;
             const windowHeight = window.innerHeight;
             
-            // Adjust if menu would go off-screen
-            let menuX = x;
-            let menuY = y;
+            // Window position on physical screen
+            const windowX = window.screenX;
+            const windowY = window.screenY;
             
-            if (x + menuWidth > windowWidth) {
-                menuX = windowWidth - menuWidth - 10;
+            // Physical screen dimensions
+            const screenWidth = window.screen.availWidth;
+            const screenHeight = window.screen.availHeight;
+            
+            // Measure actual menu size (show off-screen first to get dimensions)
+            contextMenu.style.left = '-9999px';
+            contextMenu.style.top = '-9999px';
+            contextMenu.classList.add('visible');
+            
+            const rect = contextMenu.getBoundingClientRect();
+            const menuWidth = rect.width;
+            const menuHeight = rect.height;
+            
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'orb.html:showContextMenu',message:'Context menu dimensions',data:{clickX:x,clickY:y,windowWidth,windowHeight,windowX,windowY,screenWidth,screenHeight,menuWidth,menuHeight,spaceRightInWindow:windowWidth-x,spaceBottomInWindow:windowHeight-y},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A,B,C'})}).catch(()=>{});
+            // #endregion
+            
+            // Calculate where menu would appear in screen coordinates
+            let screenMenuX = windowX + x;
+            let screenMenuY = windowY + y;
+            
+            console.log('[Orb] Screen coords - window:', windowX, windowY, 'click:', screenMenuX, screenMenuY, 'screen size:', screenWidth, screenHeight, 'menu size:', menuWidth, menuHeight);
+            
+            // Horizontal: check if menu would go off right edge of screen
+            if (screenMenuX + menuWidth > screenWidth - MIN_MARGIN) {
+                // Flip to left of cursor
+                screenMenuX = Math.max(MIN_MARGIN, screenMenuX - menuWidth);
             }
-            if (y + menuHeight > windowHeight) {
-                menuY = y - menuHeight;
+            // Ensure not off left edge of screen
+            if (screenMenuX < MIN_MARGIN) {
+                screenMenuX = MIN_MARGIN;
             }
             
+            // Vertical: check if menu would go off bottom edge of screen
+            if (screenMenuY + menuHeight > screenHeight - MIN_MARGIN) {
+                // Flip to above cursor
+                screenMenuY = screenMenuY - menuHeight;
+            }
+            // Ensure not off top edge of screen
+            if (screenMenuY < MIN_MARGIN) {
+                screenMenuY = MIN_MARGIN;
+            }
+            
+            // Convert back to window-relative coordinates
+            let finalX = screenMenuX - windowX;
+            let finalY = screenMenuY - windowY;
+            
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'orb.html:showContextMenu:afterScreenCalc',message:'After screen boundary calc',data:{screenMenuX,screenMenuY,finalXBeforeClamp:finalX,finalYBeforeClamp:finalY},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A,B'})}).catch(()=>{});
+            // #endregion
+            
+            // Also ensure menu stays within window bounds (for very edge cases)
+            finalX = Math.max(0, Math.min(finalX, windowWidth - menuWidth));
+            finalY = Math.max(0, Math.min(finalY, windowHeight - menuHeight));
+            
+            // #region agent log
+            const wouldBeClippedRight = (finalX + menuWidth) > windowWidth;
+            const wouldBeClippedBottom = (finalY + menuHeight) > windowHeight;
+            fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'orb.html:showContextMenu:finalPosition',message:'Final position and clipping check',data:{finalX,finalY,menuRightEdge:finalX+menuWidth,menuBottomEdge:finalY+menuHeight,windowWidth,windowHeight,wouldBeClippedRight,wouldBeClippedBottom,menuFitsInWindow:(menuWidth<=windowWidth && menuHeight<=windowHeight)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C,D'})}).catch(()=>{});
+            // #endregion
+            
+            // Apply final position
             contextMenu.style.position = 'fixed';
-            contextMenu.style.left = menuX + 'px';
-            contextMenu.style.top = menuY + 'px';
+            contextMenu.style.left = finalX + 'px';
+            contextMenu.style.top = finalY + 'px';
             contextMenu.style.bottom = 'auto';
             contextMenu.style.right = 'auto';
             
-            contextMenu.classList.add('visible');
-            console.log('[Orb] Context menu should be visible now');
+            console.log('[Orb] Context menu final position:', finalX, finalY);
         }
         
         function hideContextMenu() {
@@ -1180,18 +1398,104 @@
         
         // ==================== TEXT CHAT ====================
         
-        function openTextChat() {
+        // Track current anchor for collapse
+        let currentChatAnchor = 'bottom-right';
+        
+        async function openTextChat() {
             isTextChatOpen = true;
+            
+            // Determine which quadrant of the screen the orb is in
+            const windowX = window.screenX;
+            const windowY = window.screenY;
+            const screenWidth = window.screen.availWidth;
+            const screenHeight = window.screen.availHeight;
+            
+            // Calculate center points
+            const windowCenterX = windowX + (window.outerWidth / 2);
+            const windowCenterY = windowY + (window.outerHeight / 2);
+            const screenCenterX = screenWidth / 2;
+            const screenCenterY = screenHeight / 2;
+            
+            // Determine quadrant
+            const isRight = windowCenterX > screenCenterX;
+            const isBottom = windowCenterY > screenCenterY;
+            
+            // Remove existing position classes
+            const orbContainer = document.querySelector('.orb-container');
+            orbContainer.classList.remove('orb-bottom-right', 'orb-bottom-left', 'orb-top-right', 'orb-top-left');
+            textChatPanel.classList.remove('pos-top-left', 'pos-top-right', 'pos-bottom-left', 'pos-bottom-right');
+            
+            // Determine anchor and apply classes based on quadrant
+            // Chat panel appears opposite to orb position
+            if (isBottom && isRight) {
+                // Orb at bottom-right of screen: orb stays bottom-right, chat above
+                currentChatAnchor = 'bottom-right';
+                orbContainer.classList.add('orb-bottom-right');
+                textChatPanel.classList.add('pos-top-left');
+            } else if (isBottom && !isRight) {
+                // Orb at bottom-left of screen: orb stays bottom-left, chat above
+                currentChatAnchor = 'bottom-left';
+                orbContainer.classList.add('orb-bottom-left');
+                textChatPanel.classList.add('pos-top-right');
+            } else if (!isBottom && isRight) {
+                // Orb at top-right of screen: orb moves to top-right, chat below
+                currentChatAnchor = 'top-right';
+                orbContainer.classList.add('orb-top-right');
+                textChatPanel.classList.add('pos-bottom-left');
+            } else {
+                // Orb at top-left of screen: orb moves to top-left, chat below
+                currentChatAnchor = 'top-left';
+                orbContainer.classList.add('orb-top-left');
+                textChatPanel.classList.add('pos-bottom-right');
+            }
+            
+            console.log('[TextChat] Position:', isRight ? 'right' : 'left', isBottom ? 'bottom' : 'top', 'anchor:', currentChatAnchor);
+            
+            // Expand the window to accommodate the chat panel
+            if (window.orbAPI?.expandForChat) {
+                try {
+                    await window.orbAPI.expandForChat(currentChatAnchor);
+                } catch (e) {
+                    console.warn('[TextChat] Could not expand window:', e);
+                }
+            }
+            
+            // Show the chat panel
             textChatPanel.classList.add('visible');
             setTimeout(() => chatInput.focus(), 150);
+            // Start inactivity timer
+            resetChatInactivityTimer();
         }
         
-        function closeTextChat() {
+        async function closeTextChat() {
             isTextChatOpen = false;
             textChatPanel.classList.remove('visible');
+            // Clear inactivity timer
+            clearChatInactivityTimer();
+            
+            // Collapse the window back to original size/position
+            if (window.orbAPI?.collapseFromChat) {
+                try {
+                    await window.orbAPI.collapseFromChat();
+                } catch (e) {
+                    console.warn('[TextChat] Could not collapse window:', e);
+                }
+            }
+            
+            // Reset orb to default position after collapse
+            const orbContainer = document.querySelector('.orb-container');
+            orbContainer.classList.remove('orb-bottom-right', 'orb-bottom-left', 'orb-top-right', 'orb-top-left');
+            textChatPanel.classList.remove('pos-top-left', 'pos-top-right', 'pos-bottom-left', 'pos-bottom-right');
+            currentChatAnchor = 'bottom-right'; // Reset to default
         }
         
         chatCloseBtn.addEventListener('click', closeTextChat);
+        
+        // Reset inactivity timer on any chat panel interaction
+        chatInput.addEventListener('input', resetChatInactivityTimer);
+        chatInput.addEventListener('focus', resetChatInactivityTimer);
+        chatMessages.addEventListener('scroll', resetChatInactivityTimer);
+        textChatPanel.addEventListener('mousemove', resetChatInactivityTimer);
         
         function addChatMessage(type, text) {
             // Remove empty state if present
@@ -1207,11 +1511,17 @@
             chatMessages.scrollTop = chatMessages.scrollHeight;
             
             chatHistory.push({ type, text, timestamp: Date.now() });
+            
+            // Reset inactivity timer when messages are added
+            resetChatInactivityTimer();
         }
         
         async function sendChatMessage() {
             const text = chatInput.value.trim();
             if (!text) return;
+            
+            // Reset inactivity timer on send
+            resetChatInactivityTimer();
             
             // Clear input
             chatInput.value = '';
@@ -1292,34 +1602,69 @@
             }
             
             // Remove fading state if it was fading
-            transcriptEl.classList.remove('fading');
+            transcriptEl.classList.remove('fading', 'below');
             
             transcriptEl.textContent = text;
-            transcriptEl.classList.add('visible');
             transcriptEl.classList.toggle('interim', isInterim);
             
-            // Smart positioning based on screen position
-            const windowX = window.screenX;
-            const windowY = window.screenY;
-            const screenWidth = window.screen.availWidth;
+            // Get the orb's position within the window
+            const orbContainer = document.querySelector('.orb-container');
+            const orbRect = orbContainer.getBoundingClientRect();
+            const windowWidth = window.innerWidth;
+            const windowHeight = window.innerHeight;
             
-            // Vertical: show below if near top of screen
-            if (windowY < 120) {
+            // Tooltip dimensions (estimate before visible)
+            const tooltipMaxWidth = 320;
+            const tooltipEstimatedHeight = Math.min(150, 50 + text.length * 0.5); // rough estimate
+            const margin = 15;
+            const gap = 15; // gap between orb and tooltip
+            
+            // Determine if orb is in top or bottom half of window
+            const orbCenterY = orbRect.top + orbRect.height / 2;
+            const orbCenterX = orbRect.left + orbRect.width / 2;
+            const showBelow = orbCenterY < windowHeight / 2;
+            
+            // Calculate vertical position
+            let top, bottom;
+            if (showBelow) {
+                // Position below the orb
+                top = orbRect.bottom + gap;
+                bottom = 'auto';
                 transcriptEl.classList.add('below');
             } else {
-                transcriptEl.classList.remove('below');
+                // Position above the orb
+                top = 'auto';
+                bottom = windowHeight - orbRect.top + gap;
             }
             
-            // Horizontal: align based on screen edge
-            transcriptEl.classList.remove('align-left', 'align-right');
-            if (windowX < 150) {
-                // Near left edge - align tooltip to the right
-                transcriptEl.classList.add('align-right');
-            } else if (windowX > screenWidth - 350) {
-                // Near right edge - align tooltip to the left
-                transcriptEl.classList.add('align-left');
+            // Calculate horizontal position - try to center on orb, but stay within bounds
+            let left, right;
+            const tooltipCenterX = orbCenterX;
+            const tooltipLeft = tooltipCenterX - tooltipMaxWidth / 2;
+            const tooltipRight = tooltipCenterX + tooltipMaxWidth / 2;
+            
+            if (tooltipLeft < margin) {
+                // Would overflow left edge - align to left
+                left = margin;
+                right = 'auto';
+            } else if (tooltipRight > windowWidth - margin) {
+                // Would overflow right edge - align to right
+                left = 'auto';
+                right = margin;
+            } else {
+                // Center on orb
+                left = tooltipLeft;
+                right = 'auto';
             }
-            // Otherwise stays centered (default)
+            
+            // Apply position
+            transcriptEl.style.top = typeof top === 'number' ? top + 'px' : top;
+            transcriptEl.style.bottom = typeof bottom === 'number' ? bottom + 'px' : bottom;
+            transcriptEl.style.left = typeof left === 'number' ? left + 'px' : left;
+            transcriptEl.style.right = typeof right === 'number' ? right + 'px' : right;
+            
+            // Now show it
+            transcriptEl.classList.add('visible');
         }
         
         function hideTranscript() {
@@ -1327,9 +1672,14 @@
             transcriptEl.classList.add('fading');
             transcriptEl.classList.remove('visible');
             
-            // Clean up classes after animation completes
+            // Clean up classes and inline styles after animation completes
             hideTranscriptTimeout = setTimeout(() => {
-                transcriptEl.classList.remove('fading', 'below', 'align-left', 'align-right', 'interim');
+                transcriptEl.classList.remove('fading', 'below', 'interim');
+                // Reset inline styles so CSS defaults take over
+                transcriptEl.style.top = '';
+                transcriptEl.style.bottom = '';
+                transcriptEl.style.left = '';
+                transcriptEl.style.right = '';
             }, 800);
         }
         
@@ -1366,11 +1716,12 @@
                 isConnected = true;
                 
                 // Set up event listener for transcripts and audio
-                removeEventListener = window.orbAPI.onEvent((event) => {
+                removeEventListener = window.orbAPI.onEvent(async (event) => {
                     if (event.type === 'session_updated') {
                         // Session is ready - now we can speak
                         isSessionReady = true;
                         console.log('[Orb] Session ready');
+                        
                         if (pendingSpeak) {
                             console.log('[Orb] Speaking pending text:', pendingSpeak);
                             speakFeedback(pendingSpeak);
@@ -1378,6 +1729,53 @@
                         }
                     } else if (event.type === 'transcript_delta') {
                         showTranscript(event.text, true);
+                    } else if (event.type === 'function_call_transcript') {
+                        // FUNCTION CALLING: AI called our function with the transcript
+                        // Process through our agents and respond
+                        const transcript = event.transcript;
+                        const callId = event.callId;
+                        const now = Date.now();
+                        
+                        // COOLDOWN CHECK: Ignore function calls right after TTS
+                        // This prevents the microphone from picking up echo/ambient noise
+                        const timeSinceTTS = now - ttsEndTime;
+                        if (timeSinceTTS < TTS_COOLDOWN_MS) {
+                            console.log('[Orb] Ignoring function call during TTS cooldown:', transcript, 'time since TTS:', timeSinceTTS);
+                            // Respond with empty to acknowledge but not speak
+                            try {
+                                await window.orbAPI.respondToFunction(callId, "");
+                            } catch (e) { /* ignore */ }
+                            return;
+                        }
+                        
+                        // Track this to prevent duplicate processing via regular transcript event
+                        lastFunctionCallTranscript = transcript?.toLowerCase() || '';
+                        lastFunctionCallTime = now;
+                        
+                        console.log('[Orb] Function call received:', transcript, 'callId:', callId);
+                        
+                        // Show the transcript
+                        showTranscript(transcript, false);
+                        
+                        // Process through exchange-bridge (our agents)
+                        try {
+                            const result = await window.orbAPI.submit(transcript);
+                            console.log('[Orb] Agent result:', result);
+                            
+                            // Get the response message
+                            let responseText = result.message || "I'm not sure how to help with that.";
+                            
+                            // Respond to the function call so AI speaks the result
+                            await window.orbAPI.respondToFunction(callId, responseText);
+                        } catch (err) {
+                            console.error('[Orb] Error processing function call:', err);
+                            // Respond with error message
+                            await window.orbAPI.respondToFunction(callId, "Sorry, something went wrong.");
+                        }
+                        
+                        // Hide transcript after a delay
+                        setTimeout(hideTranscript, 3000);
+                        return; // Don't process as regular transcript
                     } else if (event.type === 'transcript') {
                         const text = event.text?.trim();
                         const now = Date.now();
@@ -1388,6 +1786,19 @@
                             return;
                         }
                         
+                        // CRITICAL: Skip if already processed via function call
+                        // With function calling enabled, we receive transcripts twice:
+                        // 1. Via function_call_transcript (which we handle)
+                        // 2. Via regular transcript (which we must skip)
+                        // Normalize by removing punctuation for comparison (e.g., "Play music." vs "play music")
+                        const stripPunctuation = (s) => s.replace(/[.,!?;:'"]/g, '').trim();
+                        const normalizedFuncCall = stripPunctuation(lastFunctionCallTranscript);
+                        const normalizedText = stripPunctuation(text.toLowerCase());
+                        if (normalizedText === normalizedFuncCall && (now - lastFunctionCallTime) < FUNCTION_CALL_DEDUP_MS) {
+                            console.log('[Orb] Skipping transcript - already handled via function call:', text);
+                            return;
+                        }
+                        
                         // Skip if within TTS cooldown (prevents feedback loop)
                         if (now - ttsEndTime < TTS_COOLDOWN_MS) {
                             console.log('[Orb] Ignoring transcript during TTS cooldown:', text);
@@ -1395,7 +1806,7 @@
                         }
                         
                         // Skip if duplicate within dedup window
-                        const normalizedText = text.toLowerCase();
+                        // normalizedText already defined above
                         const normalizedLast = lastProcessedTranscript.toLowerCase();
                         if (normalizedText === normalizedLast && (now - lastProcessedTime) < DEDUP_WINDOW_MS) {
                             console.log('[Orb] Ignoring duplicate transcript:', text);
@@ -1411,18 +1822,28 @@
                         processVoiceCommand(text);
                         // Hide transcript after a delay
                         setTimeout(hideTranscript, 3000);
+                    } else if (event.type === 'response_cancelled' || event.type === 'clear_audio_buffer') {
+                        // FIX: When a response is cancelled OR we're about to speak something new,
+                        // clear any accumulated audio chunks to prevent mixing responses
+                        console.log('[Orb] Clearing audio buffer, reason:', event.type);
+                        ttsAudioChunks = [];
                     } else if (event.type === 'audio_delta') {
                         // TTS audio chunk from OpenAI
-                        if (isSpeaking && event.audio) {
+                        // FIX: Always collect audio chunks (backend may speak without frontend knowing)
+                        if (event.audio) {
                             const float32 = base64ToFloat32(event.audio);
                             ttsAudioChunks.push(float32);
                         }
                     } else if (event.type === 'audio_done') {
                         // TTS audio complete, play it
-                        if (isSpeaking) {
+                        if (ttsAudioChunks.length > 0) {
                             playTTSAudio();
+                            
+                            // FIX: With function calling, ALL our TTS is intentional
+                            // (via respondToFunctionCall). Always set cooldown when audio plays.
                             isSpeaking = false;
                             ttsEndTime = Date.now(); // Mark when TTS ended for cooldown
+                            console.log('[Orb] TTS ended, cooldown active until:', ttsEndTime + TTS_COOLDOWN_MS);
                             
                             // Process next item in speak queue
                             setTimeout(() => processSpeakQueue(), 200);
@@ -1468,13 +1889,9 @@
                 updateUI('listening');
                 console.log('[Orb] Started listening');
                 
-                // Say "ready" to indicate we're listening (wait for session to be ready)
-                if (isSessionReady) {
-                    speakFeedback('Ready');
-                } else {
-                    pendingSpeak = 'Ready';
-                    console.log('[Orb] Session not ready yet, queueing speak');
-                }
+                // Play ready chime - a short tone that won't trigger function calling
+                // (unlike spoken "Ready" which caused feedback loops)
+                playReadyChime();
                 
             } catch (error) {
                 console.error('[Orb] Start error:', error);
@@ -1615,6 +2032,9 @@
         // Right-click to show context menu
         orb.addEventListener('contextmenu', (e) => {
             console.log('[Orb] Right-click detected at', e.clientX, e.clientY);
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'orb.html:contextmenu',message:'Right-click event on orb',data:{clientX:e.clientX,clientY:e.clientY,screenX:e.screenX,screenY:e.screenY,target:e.target?.id||e.target?.className},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'E'})}).catch(()=>{});
+            // #endregion
             e.preventDefault();
             e.stopPropagation();
             showContextMenu(e.clientX, e.clientY);

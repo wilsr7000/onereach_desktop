@@ -8,6 +8,36 @@
 const path = require('path');
 
 /**
+ * Execute a task using the app's LLM client
+ */
+async function executeWithAppLLM(prompt, systemPrompt, task) {
+  try {
+    // Try to get the claude API from main process
+    const claudeAPI = require('../../claude-api');
+    
+    const response = await claudeAPI.chat([
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: prompt }
+    ], {
+      maxTokens: 1024,
+      temperature: 0.7
+    });
+    
+    return {
+      success: true,
+      result: response,
+      action: 'llm_response'
+    };
+  } catch (error) {
+    console.error('[DynamicAgent] LLM execution error:', error.message);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
  * Create a dynamic agent that handles user-defined agent definitions
  */
 function createDynamicAgent(exchangeUrl, agentDefinitions, llmClient) {
@@ -56,7 +86,6 @@ function createDynamicAgent(exchangeUrl, agentDefinitions, llmClient) {
       let bestMatch = null;
       let bestScore = 0;
       
-      
       for (const def of agentDefinitions) {
         if (!def.enabled) continue;
         
@@ -89,7 +118,6 @@ function createDynamicAgent(exchangeUrl, agentDefinitions, llmClient) {
     execute: async (task, context) => {
       const content = task.content.toLowerCase();
       
-      
       // Check for cancellation
       if (context.signal.aborted) {
         return { success: false, error: 'Task cancelled' };
@@ -120,6 +148,52 @@ function createDynamicAgent(exchangeUrl, agentDefinitions, llmClient) {
       }
       
       console.log('[DynamicAgent] Executing with agent:', bestMatch.name, 'type:', bestMatch.executionType);
+      
+      // Build the prompt based on agent definition
+      const systemPrompt = bestMatch.systemPrompt || `You are ${bestMatch.name}. ${bestMatch.description || ''}`;
+      const userPrompt = task.content;
+      
+      // Execute based on execution type
+      switch (bestMatch.executionType) {
+        case 'llm':
+        case 'chat':
+          return executeWithAppLLM(userPrompt, systemPrompt, task);
+          
+        case 'script':
+          // For script type, we'd execute a predefined script
+          console.log('[DynamicAgent] Script execution not yet implemented');
+          return {
+            success: false,
+            error: 'Script execution not yet implemented'
+          };
+          
+        case 'api':
+          // For API type, we'd call an external API
+          console.log('[DynamicAgent] API execution not yet implemented');
+          return {
+            success: false,
+            error: 'API execution not yet implemented'
+          };
+          
+        default:
+          // Default to LLM
+          return executeWithAppLLM(userPrompt, systemPrompt, task);
+      }
+    },
+  });
+}
+
+/**
+ * Start the dynamic agent with user-defined definitions
+ */
+async function startDynamicAgent(exchangeUrl) {
+  try {
+    // Load agent definitions from the agent store
+    const { getAgentStore } = require('../../src/voice-task-sdk/agent-store');
+    const agentStore = getAgentStore();
+    
+    // Get all enabled local agent definitions
+    const definitions = agentStore.getLocalAgents().filter(agent => agent.enabled !== false);
     
     if (definitions.length === 0) {
       console.log('[DynamicAgent] No user-defined agents to start');

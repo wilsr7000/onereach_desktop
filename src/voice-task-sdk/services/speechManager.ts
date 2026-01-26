@@ -56,7 +56,7 @@ class SpeechManager {
    * Initialize with API key from localStorage or parameter
    */
   initialize(apiKey?: string): boolean {
-    this.apiKey = apiKey || localStorage.getItem('riff-openai-key')
+    this.apiKey = apiKey || localStorage.getItem('playbook-openai-key')
     
     if (!this.apiKey) {
       console.warn('[SpeechManager] No API key available')

@@ -1447,7 +1447,7 @@ function renderHistoryItemToHtml(item) {
                 }
             }
             
-            const typeClass = isRiffNote(item) ? 'type-riff' : (item.type === 'file' ? `type-${item.fileCategory || 'file'}` : `type-${item.source || item.type}`);
+            const typeClass = isPlaybookNote(item) ? 'type-playbook' : (item.type === 'file' ? `type-${item.fileCategory || 'file'}` : `type-${item.source || item.type}`);
             const isSelected = selectedItems.has(item.id);
             
             // Determine the display type for CSS styling
@@ -1892,8 +1892,8 @@ function getTypeIcon(type, source, fileType, fileCategory, metadata, jsonSubtype
     if (jsonSubtype === 'chatbot-conversation') return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:14px;height:14px;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
     
     if (type === 'generated-document' || (metadata && metadata.type === 'generated-document')) return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:14px;height:14px;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>';
-    // Check for Riff notes (notes created in Riff app) - checks metadata, tags, and content marker
-    if (isRiffNote({ metadata, tags, content: preview })) return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:14px;height:14px;"><path d="M4 7h16M4 12h16M4 17h10"/></svg>';
+    // Check for Playbook notes (notes created in Playbook app) - checks metadata, tags, and content marker
+    if (isPlaybookNote({ metadata, tags, content: preview })) return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:14px;height:14px;"><path d="M4 7h16M4 12h16M4 17h10"/></svg>';
     if (type === 'file') {
         if (fileType === 'pdf') return '▥';
         if (fileType === 'flow') return '⧉';
@@ -2092,80 +2092,80 @@ async function openFileInSystem(filePath) {
     }
 }
 
-// Extract Riff note ID from item (checks all storage locations)
-function extractRiffNoteId(item) {
+// Extract Playbook note ID from item (checks all storage locations)
+function extractPlaybookNoteId(item) {
     if (!item) return null;
     
-    console.log('[Riff] Checking item for Riff ID:', {
+    console.log('[Playbook] Checking item for Playbook ID:', {
         hasMetadata: !!item.metadata,
-        _riffNoteId: item.metadata?._riffNoteId,
-        riffNoteId: item.metadata?.riffNoteId,
+        _playbookNoteId: item.metadata?._playbookNoteId,
+        playbookNoteId: item.metadata?.playbookNoteId,
         tags: item.tags,
         contentPreview: (item.content || item.preview || '').substring(0, 100)
     });
     
-    // 1. Check metadata (_riffNoteId or riffNoteId)
-    if (item.metadata?._riffNoteId) {
-        console.log('[Riff] Found in metadata._riffNoteId:', item.metadata._riffNoteId);
-        return item.metadata._riffNoteId;
+    // 1. Check metadata (_playbookNoteId or playbookNoteId)
+    if (item.metadata?._playbookNoteId) {
+        console.log('[Playbook] Found in metadata._playbookNoteId:', item.metadata._playbookNoteId);
+        return item.metadata._playbookNoteId;
     }
-    if (item.metadata?.riffNoteId) {
-        console.log('[Riff] Found in metadata.riffNoteId:', item.metadata.riffNoteId);
-        return item.metadata.riffNoteId;
+    if (item.metadata?.playbookNoteId) {
+        console.log('[Playbook] Found in metadata.playbookNoteId:', item.metadata.playbookNoteId);
+        return item.metadata.playbookNoteId;
     }
     
-    // 2. Check tags for riff-note:uuid format
+    // 2. Check tags for playbook-note:uuid format
     if (item.tags && Array.isArray(item.tags)) {
         for (const tag of item.tags) {
-            if (tag.startsWith('riff-note:')) {
-                const id = tag.replace('riff-note:', '');
-                console.log('[Riff] Found in tags:', id);
+            if (tag.startsWith('playbook-note:')) {
+                const id = tag.replace('playbook-note:', '');
+                console.log('[Playbook] Found in tags:', id);
                 return id;
             }
         }
     }
     
-    // 3. Check content for [RIFF:uuid] marker
+    // 3. Check content for [PLAYBOOK:uuid] marker
     const content = item.content || item.preview || '';
-    const riffMarkerMatch = content.match(/\[RIFF:([a-f0-9-]+)\]/i);
-    if (riffMarkerMatch) {
-        console.log('[Riff] Found in content marker:', riffMarkerMatch[1]);
-        return riffMarkerMatch[1];
+    const playbookMarkerMatch = content.match(/\[PLAYBOOK:([a-f0-9-]+)\]/i);
+    if (playbookMarkerMatch) {
+        console.log('[Playbook] Found in content marker:', playbookMarkerMatch[1]);
+        return playbookMarkerMatch[1];
     }
     
-    console.log('[Riff] No Riff ID found in item');
+    console.log('[Playbook] No Playbook ID found in item');
     return null;
 }
 
-// Check if item is a Riff note
-function isRiffNote(item) {
-    return !!extractRiffNoteId(item);
+// Check if item is a Playbook note
+function isPlaybookNote(item) {
+    return !!extractPlaybookNoteId(item);
 }
 
-// Open Riff note in GSX Riff tool
-function openInRiff() {
+// Open Playbook note in GSX Playbook tool
+function openInPlaybook() {
     if (!currentPreviewItem) {
-        console.error('No item selected for Riff');
+        console.error('No item selected for Playbook');
         return;
     }
     
-    const riffNoteId = extractRiffNoteId(currentPreviewItem);
-    if (!riffNoteId) {
-        console.error('No Riff note ID found');
-        showNotification({ type: 'error', message: 'This item is not a Riff note' });
+    const playbookNoteId = extractPlaybookNoteId(currentPreviewItem);
+    if (!playbookNoteId) {
+        console.error('No Playbook note ID found');
+        showNotification({ type: 'error', message: 'This item is not a Playbook note' });
         return;
     }
     
-    // GSX Riff deep link format
-    const baseUrl = 'https://files.edison.api.onereach.ai/public/35254342-4a2e-475b-aec1-18547e517e29/riff/index.html';
-    const deepLink = `${baseUrl}?riff=${riffNoteId}`;
+    // GSX Playbook deep link format
+    const baseUrl = 'https://files.edison.api.onereach.ai/public/35254342-4a2e-475b-aec1-18547e517e29/playbook/index.html';
+    const deepLink = `${baseUrl}?playbook=${playbookNoteId}`;
     
-    console.log('[Riff] Opening Riff note:', riffNoteId, deepLink);
+    console.log('[Playbook] Opening Playbook note:', playbookNoteId, deepLink);
     
     // Open in internal GSX window (not external browser)
     if (window.clipboard && window.clipboard.openGSXWindow) {
-        window.clipboard.openGSXWindow(deepLink, 'Riff');
-        showNotification({ type: 'success', message: 'Opening in Riff...' });
+        window.clipboard.openGSXWindow(deepLink, 'Playbook');
+        showNotification({ type: 'success', message: 'Opening in Playbook...' });
     } else if (window.electronAPI && window.electronAPI.openExternal) {
         // Fallback to external browser
         window.electronAPI.openExternal(deepLink);
@@ -2747,7 +2747,7 @@ function filterItems() {
                 if (item.type === 'file' && item.fileExt === '.md') return true;
                 return false;
             }
-            if (currentFilter === 'riff') return isRiffNote(item);
+            if (currentFilter === 'playbook') return isPlaybookNote(item);
             if (currentFilter === 'html') {
                 // HTML type items and .html files
                 if (item.type === 'html') return true;
@@ -2833,7 +2833,7 @@ async function searchItems(query) {
                 if (item.type === 'file' && item.fileExt === '.md') return true;
                 return false;
             }
-            if (currentFilter === 'riff') return isRiffNote(item);
+            if (currentFilter === 'playbook') return isPlaybookNote(item);
             if (currentFilter === 'html') {
                 if (item.type === 'html') return true;
                 if (item.type === 'generated-document' || item.metadata?.type === 'generated-document') return true;
@@ -6276,32 +6276,32 @@ async function showPreviewModal(itemId) {
             // Show TTS for plain text content (even if type is 'html')
             document.getElementById('textToSpeechSection').style.display = 'block';
         }
-    } else if (isRiffNote(historyItem)) {
-        // Riff notes - MUST come before Markdown check since Riff content is often Markdown
-        // Show Riff note preview - render as Markdown with metadata header
+    } else if (isPlaybookNote(historyItem)) {
+        // Playbook notes - MUST come before Markdown check since Playbook content is often Markdown
+        // Show Playbook note preview - render as Markdown with metadata header
         const viewMode = document.getElementById('previewViewMode');
         
-        // Strip [RIFF:uuid] marker from content if present
-        let riffContent = fullContent.replace(/\[RIFF:[a-f0-9-]+\]\s*/gi, '').trim();
+        // Strip [PLAYBOOK:uuid] marker from content if present
+        let playbookContent = fullContent.replace(/\[PLAYBOOK:[a-f0-9-]+\]\s*/gi, '').trim();
         
-        // Get Riff metadata for header
-        const riffTitle = historyItem.metadata?._title || historyItem.metadata?.title || 'Riff Note';
-        const riffKeywords = historyItem.metadata?._keywords || historyItem.metadata?.keywords || [];
+        // Get Playbook metadata for header
+        const playbookTitle = historyItem.metadata?._title || historyItem.metadata?.title || 'Playbook Note';
+        const playbookKeywords = historyItem.metadata?._keywords || historyItem.metadata?.keywords || [];
         
         // Check if content looks like Markdown
-        const isMarkdown = isMarkdownContent(riffContent, historyItem);
+        const isMarkdown = isMarkdownContent(playbookContent, historyItem);
         
         if (isMarkdown && typeof marked !== 'undefined') {
             // Render as Markdown
             const iframe = document.getElementById('previewHtmlFrame');
-            const renderedHtml = marked.parse(riffContent);
+            const renderedHtml = marked.parse(playbookContent);
             
-            // Build header with Riff info
-            const keywordsHtml = riffKeywords.length > 0 
-                ? `<div class="riff-keywords">${riffKeywords.map(k => `<span class="keyword-tag">${escapeHtml(k)}</span>`).join(' ')}</div>` 
+            // Build header with Playbook info
+            const keywordsHtml = playbookKeywords.length > 0 
+                ? `<div class="playbook-keywords">${playbookKeywords.map(k => `<span class="keyword-tag">${escapeHtml(k)}</span>`).join(' ')}</div>` 
                 : '';
             
-            const riffHtml = `
+            const playbookHtml = `
                 <!DOCTYPE html>
                 <html>
                 <head>
@@ -6315,12 +6315,12 @@ async function showPreviewModal(itemId) {
                             max-width: 800px;
                             margin: 0 auto;
                         }
-                        .riff-header {
+                        .playbook-header {
                             border-bottom: 1px solid rgba(100, 200, 255, 0.3);
                             padding-bottom: 12px;
                             margin-bottom: 20px;
                         }
-                        .riff-title {
+                        .playbook-title {
                             font-size: 18px;
                             font-weight: 600;
                             color: rgba(100, 200, 255, 0.9);
@@ -6329,11 +6329,11 @@ async function showPreviewModal(itemId) {
                             align-items: center;
                             gap: 8px;
                         }
-                        .riff-icon {
+                        .playbook-icon {
                             width: 18px;
                             height: 18px;
                         }
-                        .riff-keywords {
+                        .playbook-keywords {
                             display: flex;
                             flex-wrap: wrap;
                             gap: 6px;
@@ -6360,10 +6360,10 @@ async function showPreviewModal(itemId) {
                     </style>
                 </head>
                 <body>
-                    <div class="riff-header">
-                        <div class="riff-title">
-                            <svg class="riff-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
-                            ${escapeHtml(riffTitle)}
+                    <div class="playbook-header">
+                        <div class="playbook-title">
+                            <svg class="playbook-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+                            ${escapeHtml(playbookTitle)}
                         </div>
                         ${keywordsHtml}
                     </div>
@@ -6371,25 +6371,25 @@ async function showPreviewModal(itemId) {
                 </body>
                 </html>
             `;
-            iframe.srcdoc = riffHtml;
+            iframe.srcdoc = playbookHtml;
             document.getElementById('previewHtmlMode').style.display = 'block';
             viewMode.style.display = 'none';
         } else {
-            // Plain text Riff - show with nice formatting
+            // Plain text Playbook - show with nice formatting
             viewMode.innerHTML = `
                 <div style="padding: 20px;">
                     <div style="border-bottom: 1px solid rgba(100, 200, 255, 0.3); padding-bottom: 12px; margin-bottom: 20px;">
                         <div style="font-size: 16px; font-weight: 600; color: rgba(100, 200, 255, 0.9); display: flex; align-items: center; gap: 8px;">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 16px; height: 16px;"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
-                            ${escapeHtml(riffTitle)}
+                            ${escapeHtml(playbookTitle)}
                         </div>
-                        ${riffKeywords.length > 0 ? `
+                        ${playbookKeywords.length > 0 ? `
                             <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;">
-                                ${riffKeywords.map(k => `<span style="background: rgba(100, 200, 255, 0.15); color: rgba(100, 200, 255, 0.9); padding: 2px 8px; border-radius: 10px; font-size: 11px;">${escapeHtml(k)}</span>`).join('')}
+                                ${playbookKeywords.map(k => `<span style="background: rgba(100, 200, 255, 0.15); color: rgba(100, 200, 255, 0.9); padding: 2px 8px; border-radius: 10px; font-size: 11px;">${escapeHtml(k)}</span>`).join('')}
                             </div>
                         ` : ''}
                     </div>
-                    <pre style="white-space: pre-wrap; font-family: -apple-system, BlinkMacSystemFont, sans-serif; line-height: 1.6; margin: 0;">${escapeHtml(riffContent)}</pre>
+                    <pre style="white-space: pre-wrap; font-family: -apple-system, BlinkMacSystemFont, sans-serif; line-height: 1.6; margin: 0;">${escapeHtml(playbookContent)}</pre>
                 </div>
             `;
             viewMode.style.display = 'block';
@@ -6399,7 +6399,7 @@ async function showPreviewModal(itemId) {
             viewMode.style.flex = '1';
         }
         
-        // Show edit button and TTS for Riff
+        // Show edit button and TTS for Playbook
         document.getElementById('previewModeBtn').style.display = 'inline-block';
         document.getElementById('textToSpeechSection').style.display = 'block';
     } else if (isMarkdownContent(fullContent, historyItem) || historyItem.jsonSubtype === 'chatbot-conversation' || historyItem.metadata?.jsonSubtype === 'chatbot-conversation') {
@@ -6520,21 +6520,21 @@ async function showPreviewModal(itemId) {
     // Reset edit mode button
     updateEditModeButton();
     
-    // For Riff notes, update the Edit button to show "Edit in Riff" and hide the separate button
-    const editInRiffBtn = document.getElementById('editInRiffBtn');
+    // For Playbook notes, update the Edit button to show "Edit in Playbook" and hide the separate button
+    const editInPlaybookBtn = document.getElementById('editInPlaybookBtn');
     const previewModeBtn = document.getElementById('previewModeBtn');
-    const isRiff = isRiffNote(historyItem);
+    const isPlaybook = isPlaybookNote(historyItem);
     
-    console.log('[Preview] Riff check result:', { isRiff, itemId: historyItem.id, metadata: historyItem.metadata, tags: historyItem.tags });
+    console.log('[Preview] Playbook check result:', { isPlaybook, itemId: historyItem.id, metadata: historyItem.metadata, tags: historyItem.tags });
     
-    if (editInRiffBtn) {
-        // Hide the separate "Edit in Riff" button since main Edit button now handles it
-        editInRiffBtn.style.display = 'none';
+    if (editInPlaybookBtn) {
+        // Hide the separate "Edit in Playbook" button since main Edit button now handles it
+        editInPlaybookBtn.style.display = 'none';
     }
     
-    if (previewModeBtn && isRiff) {
-        // Change Edit button to show "Edit in Riff" for Riff notes
-        previewModeBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle;"><path d="M4 7h16M4 12h16M4 17h10"/></svg> Edit in Riff`;
+    if (previewModeBtn && isPlaybook) {
+        // Change Edit button to show "Edit in Playbook" for Playbook notes
+        previewModeBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle;"><path d="M4 7h16M4 12h16M4 17h10"/></svg> Edit in Playbook`;
         previewModeBtn.style.background = 'rgba(100, 200, 255, 0.15)';
         previewModeBtn.style.borderColor = 'rgba(100, 200, 255, 0.3)';
     } else if (previewModeBtn) {
@@ -7364,9 +7364,9 @@ function isMarkdownContent(content, item) {
 function togglePreviewEditMode() {
     if (!currentPreviewItem) return;
     
-    // For Riff notes, open in Riff tool instead of in-app editor
-    if (isRiffNote(currentPreviewItem)) {
-        openInRiff();
+    // For Playbook notes, open in Playbook tool instead of in-app editor
+    if (isPlaybookNote(currentPreviewItem)) {
+        openInPlaybook();
         return;
     }
     
@@ -7959,8 +7959,8 @@ function setupPreviewEventListeners() {
     // Mode toggle button
     document.getElementById('previewModeBtn').addEventListener('click', togglePreviewEditMode);
     
-    // Edit in Riff button
-    document.getElementById('editInRiffBtn').addEventListener('click', openInRiff);
+    // Edit in Playbook button
+    document.getElementById('editInPlaybookBtn').addEventListener('click', openInPlaybook);
     
     // Copy button
     document.getElementById('previewCopyBtn').addEventListener('click', copyPreviewContent);

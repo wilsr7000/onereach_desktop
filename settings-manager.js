@@ -139,7 +139,6 @@ class SettingsManager {
     
     // Return default settings
     return {
-      llmApiKey: '',
       llmProvider: 'anthropic',
       llmModel: 'claude-opus-4-5-20251101',
       theme: 'dark',
@@ -254,6 +253,11 @@ class SettingsManager {
   }
 
   get(key) {
+    // llmApiKey is now computed from dedicated provider keys for backwards compatibility
+    if (key === 'llmApiKey') {
+      return this._getComputedLLMApiKey();
+    }
+    
     // If the setting exists, return it
     if (this.settings[key] !== undefined) {
       return this.settings[key];
@@ -261,7 +265,6 @@ class SettingsManager {
     
     // Otherwise, return the default value
     const defaults = {
-      llmApiKey: '',
       llmProvider: 'anthropic',
       llmModel: 'claude-opus-4-5-20251101',
       theme: 'dark',
@@ -321,13 +324,34 @@ class SettingsManager {
     return this.saveSettings();
   }
 
+  // Compute the LLM API key based on the selected provider
+  _getComputedLLMApiKey() {
+    const provider = this.settings.llmProvider || 'anthropic';
+    
+    // Return the appropriate dedicated key based on provider
+    if (provider === 'anthropic') {
+      return this.settings.anthropicApiKey || '';
+    } else if (provider === 'openai') {
+      return this.settings.openaiApiKey || '';
+    }
+    
+    // For other providers, check if we have a matching key or fall back to anthropic
+    return this.settings.anthropicApiKey || this.settings.openaiApiKey || '';
+  }
+
   // LLM-specific methods
   getLLMApiKey() {
-    return this.get('llmApiKey') || '';
+    return this._getComputedLLMApiKey();
   }
 
   setLLMApiKey(apiKey) {
-    return this.set('llmApiKey', apiKey);
+    // Route to the appropriate dedicated key based on provider
+    const provider = this.settings.llmProvider || 'anthropic';
+    if (provider === 'anthropic' || apiKey.startsWith('sk-ant-')) {
+      return this.set('anthropicApiKey', apiKey);
+    } else {
+      return this.set('openaiApiKey', apiKey);
+    }
   }
 
   getLLMProvider() {
