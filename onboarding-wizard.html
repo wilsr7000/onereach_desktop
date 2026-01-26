@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Welcome to Onereach.ai</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 20px;
+      color: #333;
+    }
+
+    .wizard-container {
+      background: white;
+      border-radius: 20px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      max-width: 600px;
+      width: 100%;
+      padding: 35px;
+      text-align: center;
+      animation: slideIn 0.5s ease-out;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(30px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .logo {
+      font-size: 36px;
+      margin-bottom: 8px;
+    }
+
+    h1 {
+      font-size: 28px;
+      color: #667eea;
+      margin-bottom: 6px;
+      font-weight: 700;
+    }
+
+    .subtitle {
+      font-size: 15px;
+      color: #666;
+      margin-bottom: 20px;
+    }
+
+    .steps-list {
+      text-align: left;
+      margin: 20px 0;
+      background: #f8f9fa;
+      padding: 20px;
+      border-radius: 12px;
+    }
+
+    .step-item {
+      display: flex;
+      align-items: center;
+      margin-bottom: 12px;
+      padding: 10px;
+      background: white;
+      border-radius: 8px;
+      transition: transform 0.2s, box-shadow 0.2s;
+      cursor: default;
+    }
+
+    .step-item:hover {
+      transform: translateX(5px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+    }
+
+    .step-item:last-child {
+      margin-bottom: 0;
+    }
+
+    .step-number {
+      width: 32px;
+      height: 32px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      font-size: 15px;
+      margin-right: 12px;
+      flex-shrink: 0;
+    }
+
+    .step-text {
+      font-size: 14px;
+      color: #333;
+      font-weight: 500;
+    }
+
+    .cta-button {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      padding: 12px 32px;
+      font-size: 16px;
+      font-weight: 600;
+      border-radius: 50px;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+      margin-top: 15px;
+    }
+
+    .cta-button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 25px rgba(102, 126, 234, 0.4);
+    }
+
+    .cta-button:active {
+      transform: translateY(0);
+    }
+
+    .skip-link {
+      display: inline-block;
+      margin-top: 12px;
+      color: #999;
+      text-decoration: none;
+      font-size: 13px;
+      transition: color 0.2s;
+    }
+
+    .skip-link:hover {
+      color: #667eea;
+    }
+
+    .feature-highlight {
+      display: inline-block;
+      background: #fff3cd;
+      color: #856404;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 15px;
+    }
+
+    /* Progress Bar */
+    .progress-bar {
+      width: 100%;
+      height: 6px;
+      background: #e0e0e0;
+      border-radius: 10px;
+      margin-bottom: 20px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      transition: width 0.3s ease;
+    }
+
+    .step-indicator {
+      font-size: 13px;
+      color: #999;
+      margin-bottom: 15px;
+      font-weight: 500;
+    }
+
+    /* Form Styles */
+    .discovery-form {
+      text-align: left;
+      margin-top: 25px;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 14px;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 8px;
+    }
+
+    .form-group input,
+    .form-group textarea,
+    .form-group select {
+      width: 100%;
+      padding: 12px;
+      font-size: 14px;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      font-family: inherit;
+      transition: border-color 0.2s;
+    }
+
+    .form-group input:focus,
+    .form-group textarea:focus,
+    .form-group select:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+
+    .form-group textarea {
+      resize: vertical;
+      min-height: 120px;
+    }
+
+    .button-group {
+      display: flex;
+      gap: 12px;
+      margin-top: 25px;
+      justify-content: space-between;
+    }
+
+    .secondary-button {
+      background: #f0f0f0;
+      color: #666;
+      border: none;
+      padding: 12px 24px;
+      font-size: 16px;
+      font-weight: 600;
+      border-radius: 50px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .secondary-button:hover {
+      background: #e0e0e0;
+      transform: translateY(-1px);
+    }
+
+    .secondary-button:active {
+      transform: translateY(0);
+    }
+
+    /* Plan Container */
+    .plan-container {
+      max-width: 700px;
+    }
+
+    /* Plan Display */
+    .plan-display {
+      background: #f8f9fa;
+      border-radius: 12px;
+      padding: 20px;
+      margin: 20px 0;
+      text-align: left;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+
+    .plan-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 15px;
+      padding-bottom: 15px;
+      border-bottom: 2px solid #e0e0e0;
+    }
+
+    .plan-header h3 {
+      margin: 0;
+      color: #667eea;
+      font-size: 18px;
+    }
+
+    .priority-badge {
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .priority-badge.high { background: #ffe0e0; color: #c00; }
+    .priority-badge.medium { background: #fff3cd; color: #856404; }
+    .priority-badge.low { background: #e0f0ff; color: #0066cc; }
+
+    .plan-section {
+      margin-bottom: 15px;
+    }
+
+    .plan-section h4 {
+      font-size: 14px;
+      color: #333;
+      margin-bottom: 8px;
+    }
+
+    .plan-section p {
+      font-size: 13px;
+      color: #666;
+      line-height: 1.6;
+      margin: 0;
+    }
+
+    .plan-section ul {
+      margin: 0;
+      padding-left: 20px;
+    }
+
+    .plan-section li {
+      font-size: 13px;
+      color: #666;
+      line-height: 1.6;
+      margin-bottom: 5px;
+    }
+
+    /* Suggestions */
+    .suggestions-box {
+      background: #fff3cd;
+      border-radius: 10px;
+      padding: 15px;
+      margin: 15px 0;
+    }
+
+    .suggestion-header {
+      font-size: 13px;
+      font-weight: 600;
+      color: #856404;
+      margin-bottom: 10px;
+    }
+
+    .suggestion-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .suggestion-chip {
+      background: white;
+      border: 1px solid #ffc107;
+      color: #856404;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .suggestion-chip:hover {
+      background: #ffc107;
+      color: white;
+      transform: translateY(-1px);
+    }
+
+    /* Improvement Section */
+    .improvement-section {
+      margin: 15px 0;
+    }
+
+    .improvement-section label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 8px;
+    }
+
+    .improvement-input-group {
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+    }
+
+    .improvement-input-group textarea {
+      flex: 1;
+      padding: 10px;
+      font-size: 13px;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      font-family: inherit;
+      resize: none;
+    }
+
+    .improvement-input-group .secondary-button {
+      padding: 10px 20px;
+      font-size: 14px;
+      white-space: nowrap;
+    }
+
+    .approve-button {
+      background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+      color: white;
+      border: none;
+      padding: 12px 32px;
+      font-size: 16px;
+      font-weight: 600;
+      border-radius: 50px;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .approve-button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 25px rgba(40, 167, 69, 0.4);
+    }
+
+    /* Modal Styles */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.6);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+      animation: fadeIn 0.2s;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    .modal-content {
+      background: white;
+      border-radius: 20px;
+      padding: 40px;
+      max-width: 500px;
+      width: 90%;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      animation: slideUp 0.3s;
+    }
+
+    @keyframes slideUp {
+      from { transform: translateY(30px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+
+    .modal-content h2 {
+      font-size: 24px;
+      color: #333;
+      margin-bottom: 8px;
+    }
+
+    .modal-subtitle {
+      font-size: 14px;
+      color: #666;
+      margin-bottom: 25px;
+    }
+
+    .approval-options {
+      display: grid;
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+
+    .approval-option {
+      border: 2px solid #e0e0e0;
+      border-radius: 12px;
+      padding: 20px;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-align: left;
+    }
+
+    .approval-option:hover {
+      border-color: #667eea;
+      background: #f8f9ff;
+      transform: translateX(5px);
+    }
+
+    .option-icon {
+      font-size: 32px;
+      margin-bottom: 8px;
+    }
+
+    .approval-option h3 {
+      font-size: 16px;
+      color: #333;
+      margin: 0 0 5px 0;
+    }
+
+    .approval-option p {
+      font-size: 13px;
+      color: #666;
+      margin: 0;
+    }
+
+    .cancel-link {
+      background: none;
+      border: none;
+      color: #999;
+      font-size: 14px;
+      cursor: pointer;
+      transition: color 0.2s;
+    }
+
+    .cancel-link:hover {
+      color: #667eea;
+    }
+
+    .email-form {
+      text-align: left;
+    }
+
+    .checkbox-group label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: normal;
+      cursor: pointer;
+    }
+
+    .checkbox-group input[type="checkbox"] {
+      width: auto;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <!-- Welcome Screen -->
+  <div class="wizard-container" id="welcome-screen">
+    <div class="logo">🚀</div>
+    <h1>Let's do some work!</h1>
+    <p class="subtitle">We'll get you set up in just a few steps</p>
+
+    <div class="steps-list">
+      <div class="step-item">
+        <div class="step-number">1</div>
+        <div class="step-text">First, we'll discuss the nature of your project</div>
+      </div>
+
+      <div class="step-item">
+        <div class="step-number">2</div>
+        <div class="step-text">Next we'll make a plan</div>
+      </div>
+
+      <div class="step-item">
+        <div class="step-number">3</div>
+        <div class="step-text">We'll invite collaborators</div>
+      </div>
+
+      <div class="step-item">
+        <div class="step-number">4</div>
+        <div class="step-text">Then I can get to work!</div>
+      </div>
+    </div>
+
+    <button class="cta-button" onclick="startSetup()">Get Started →</button>
+    
+    <br>
+    <a href="#" class="skip-link" onclick="skipSetup()">I'll do this later</a>
+  </div>
+
+  <!-- Discovery Step -->
+  <div class="wizard-container" id="discovery-screen" style="display: none;">
+    <div class="progress-bar">
+      <div class="progress-fill" style="width: 25%"></div>
+    </div>
+    
+    <div class="step-indicator">Step 1 of 4</div>
+    <div class="logo">🔍</div>
+    <h1>Tell me about your project</h1>
+    <p class="subtitle">The more detail you provide, the better I can help you</p>
+
+    <form id="discovery-form" class="discovery-form">
+      <div class="form-group">
+        <label for="project-name">What should we call this project?</label>
+        <input type="text" id="project-name" placeholder="e.g., Customer Support Automation" required>
+      </div>
+
+      <div class="form-group">
+        <label for="project-description">What do you want your IDW to work on?</label>
+        <textarea 
+          id="project-description" 
+          rows="6" 
+          placeholder="Describe what you'd like to accomplish. Include details like:&#10;• What problem are you trying to solve?&#10;• Who will benefit from this?&#10;• What does success look like?&#10;• Any specific requirements or constraints?"
+          required
+        ></textarea>
+      </div>
+
+      <div class="form-group">
+        <label for="project-priority">What's the priority level?</label>
+        <select id="project-priority">
+          <option value="high">High - Urgent, needs immediate attention</option>
+          <option value="medium" selected>Medium - Important, but not urgent</option>
+          <option value="low">Low - Nice to have, when time allows</option>
+        </select>
+      </div>
+
+      <div class="button-group">
+        <button type="button" class="secondary-button" onclick="goBack()">← Back</button>
+        <button type="submit" class="cta-button">Continue →</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Planning Step -->
+  <div class="wizard-container plan-container" id="planning-screen" style="display: none;">
+    <div class="progress-bar">
+      <div class="progress-fill" style="width: 50%"></div>
+    </div>
+    
+    <div class="step-indicator">Step 2 of 4</div>
+    <div class="logo">📋</div>
+    <h1>Here's your project plan</h1>
+    <p class="subtitle">Review it and help me make it better</p>
+
+    <!-- Plan Display -->
+    <div class="plan-display" id="plan-display">
+      <div class="plan-header">
+        <h3 id="plan-project-name"></h3>
+        <span class="priority-badge" id="plan-priority"></span>
+      </div>
+      
+      <div class="plan-section">
+        <h4>📝 Overview</h4>
+        <p id="plan-overview"></p>
+      </div>
+
+      <div class="plan-section">
+        <h4>🎯 Goals</h4>
+        <ul id="plan-goals"></ul>
+      </div>
+
+      <div class="plan-section">
+        <h4>📅 Proposed Timeline</h4>
+        <p id="plan-timeline"></p>
+      </div>
+
+      <div class="plan-section">
+        <h4>✅ Success Metrics</h4>
+        <p id="plan-metrics"></p>
+      </div>
+    </div>
+
+    <!-- Improvement Suggestions -->
+    <div class="suggestions-box">
+      <div class="suggestion-header">💡 Make this plan even better:</div>
+      <div class="suggestion-chips">
+        <button class="suggestion-chip" onclick="requestImprovement('Add more specific milestones')">Add milestones</button>
+        <button class="suggestion-chip" onclick="requestImprovement('Include risk assessment')">Add risks</button>
+        <button class="suggestion-chip" onclick="requestImprovement('Define success metrics more clearly')">Better metrics</button>
+        <button class="suggestion-chip" onclick="requestImprovement('Add resource requirements')">Resources needed</button>
+      </div>
+    </div>
+
+    <!-- Improvement Request -->
+    <div class="improvement-section">
+      <label for="improvement-request">Request specific changes:</label>
+      <div class="improvement-input-group">
+        <textarea 
+          id="improvement-request" 
+          rows="2" 
+          placeholder="e.g., 'Can you add more detail about the implementation phase?'"
+        ></textarea>
+        <button class="secondary-button" onclick="improvePlan()">🔄 Improve Plan</button>
+      </div>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="button-group">
+      <button type="button" class="secondary-button" onclick="goBackToDiscovery()">← Back</button>
+      <button type="button" class="approve-button" onclick="showApprovalOptions()">✓ Approve Plan</button>
+    </div>
+  </div>
+
+  <!-- Approval Modal -->
+  <div class="modal-overlay" id="approval-modal" style="display: none;">
+    <div class="modal-content">
+      <h2>🎉 Great! How would you like to proceed?</h2>
+      <p class="modal-subtitle">Choose how you'd like to approve this plan</p>
+
+      <div class="approval-options">
+        <div class="approval-option" onclick="approveInWizard()">
+          <div class="option-icon">✓</div>
+          <h3>Approve Now</h3>
+          <p>Continue in the wizard and move to the next step</p>
+        </div>
+
+        <div class="approval-option" onclick="showEmailForm()">
+          <div class="option-icon">📧</div>
+          <h3>Email Me the Plan</h3>
+          <p>Review and approve via email at your convenience</p>
+        </div>
+      </div>
+
+      <button class="cancel-link" onclick="closeApprovalModal()">← Back to plan</button>
+    </div>
+  </div>
+
+  <!-- Email Form Modal -->
+  <div class="modal-overlay" id="email-modal" style="display: none;">
+    <div class="modal-content">
+      <h2>📧 Send plan via email</h2>
+      <p class="modal-subtitle">We'll send the plan to your email for review</p>
+
+      <form id="email-form" class="email-form">
+        <div class="form-group">
+          <label for="user-email">Email address</label>
+          <input type="email" id="user-email" placeholder="your.email@example.com" required>
+        </div>
+
+        <div class="form-group checkbox-group">
+          <label>
+            <input type="checkbox" id="send-copy" checked>
+            Send me a copy of the approval link
+          </label>
+        </div>
+
+        <div class="button-group">
+          <button type="button" class="secondary-button" onclick="closeEmailModal()">← Back</button>
+          <button type="submit" class="cta-button">Send Email →</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    let projectData = {
+      name: '',
+      description: '',
+      priority: 'medium',
+      plan: '',
+      collaborators: []
+    };
+
+    function startSetup() {
+      console.log('Starting setup wizard...');
+      document.getElementById('welcome-screen').style.display = 'none';
+      document.getElementById('discovery-screen').style.display = 'block';
+    }
+
+    function goBack() {
+      document.getElementById('discovery-screen').style.display = 'none';
+      document.getElementById('welcome-screen').style.display = 'block';
+    }
+
+    function skipSetup() {
+      console.log('User skipped setup');
+      if (window.api && window.api.send) {
+        window.api.send('close-wizard');
+      } else {
+        window.close();
+      }
+      return false;
+    }
+
+    // Handle discovery form submission
+    document.getElementById('discovery-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      
+      projectData.name = document.getElementById('project-name').value;
+      projectData.description = document.getElementById('project-description').value;
+      projectData.priority = document.getElementById('project-priority').value;
+      
+      console.log('Project data collected:', projectData);
+      
+      // Generate initial plan and show planning screen
+      generateInitialPlan();
+      document.getElementById('discovery-screen').style.display = 'none';
+      document.getElementById('planning-screen').style.display = 'block';
+    });
+
+    function generateInitialPlan() {
+      // Generate a plan based on the project data
+      projectData.plan = {
+        overview: projectData.description,
+        goals: [
+          'Define clear success criteria and KPIs',
+          'Identify key stakeholders and resources needed',
+          'Create detailed implementation timeline',
+          'Establish communication and feedback loops'
+        ],
+        timeline: 'Estimated 4-6 weeks for initial implementation, with ongoing optimization',
+        metrics: 'Success will be measured by completion of milestones, stakeholder satisfaction, and achievement of stated objectives'
+      };
+      
+      // Display the plan
+      displayPlan();
+    }
+
+    function displayPlan() {
+      document.getElementById('plan-project-name').textContent = projectData.name;
+      
+      const priorityBadge = document.getElementById('plan-priority');
+      priorityBadge.textContent = projectData.priority;
+      priorityBadge.className = 'priority-badge ' + projectData.priority;
+      
+      document.getElementById('plan-overview').textContent = projectData.plan.overview;
+      
+      const goalsList = document.getElementById('plan-goals');
+      goalsList.innerHTML = '';
+      projectData.plan.goals.forEach(goal => {
+        const li = document.createElement('li');
+        li.textContent = goal;
+        goalsList.appendChild(li);
+      });
+      
+      document.getElementById('plan-timeline').textContent = projectData.plan.timeline;
+      document.getElementById('plan-metrics').textContent = projectData.plan.metrics;
+    }
+
+    function requestImprovement(suggestion) {
+      document.getElementById('improvement-request').value = suggestion;
+      document.getElementById('improvement-request').focus();
+    }
+
+    function improvePlan() {
+      const improvement = document.getElementById('improvement-request').value;
+      if (!improvement.trim()) {
+        alert('Please describe what you\'d like to improve');
+        return;
+      }
+      
+      console.log('Improvement requested:', improvement);
+      
+      // Simulate plan improvement (in real implementation, this would call an API)
+      alert('Great suggestion! I\'m updating the plan to include: ' + improvement + '\n\n(In the full version, the AI would regenerate the plan with your feedback)');
+      
+      // Clear the input
+      document.getElementById('improvement-request').value = '';
+      
+      // You could regenerate the plan here with the improvement
+    }
+
+    function goBackToDiscovery() {
+      document.getElementById('planning-screen').style.display = 'none';
+      document.getElementById('discovery-screen').style.display = 'block';
+    }
+
+    function showApprovalOptions() {
+      document.getElementById('approval-modal').style.display = 'flex';
+    }
+
+    function closeApprovalModal() {
+      document.getElementById('approval-modal').style.display = 'none';
+    }
+
+    function approveInWizard() {
+      closeApprovalModal();
+      projectData.approvedInWizard = true;
+      console.log('Plan approved in wizard:', projectData);
+      
+      // TODO: Navigate to collaborators step
+      alert('✅ Plan approved!\n\nNext step: Inviting collaborators (coming soon)');
+    }
+
+    function showEmailForm() {
+      document.getElementById('approval-modal').style.display = 'none';
+      document.getElementById('email-modal').style.display = 'flex';
+    }
+
+    function closeEmailModal() {
+      document.getElementById('email-modal').style.display = 'none';
+      document.getElementById('approval-modal').style.display = 'flex';
+    }
+
+    // Handle email form submission
+    document.getElementById('email-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      
+      const email = document.getElementById('user-email').value;
+      const sendCopy = document.getElementById('send-copy').checked;
+      
+      projectData.email = email;
+      projectData.sendCopy = sendCopy;
+      projectData.approvalMethod = 'email';
+      
+      console.log('Sending plan to email:', email);
+      console.log('Project data:', projectData);
+      
+      // In real implementation, this would send the email via API
+      alert('📧 Plan sent to ' + email + '!\n\nYou\'ll receive an email with the full plan and an approval link. You can close this wizard now or continue setting up collaborators.');
+      
+      closeEmailModal();
+      
+      // Optionally move to next step or close
+      // For now, just show success
+    });
+
+    // Add keyboard support
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        if (document.getElementById('email-modal').style.display === 'flex') {
+          closeEmailModal();
+        } else if (document.getElementById('approval-modal').style.display === 'flex') {
+          closeApprovalModal();
+        } else {
+          skipSetup();
+        }
+      }
+    });
+  </script>
+</body>
+</html>

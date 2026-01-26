@@ -15,6 +15,8 @@ ation
 
 ## Development
 
+Want to contribute? Check out our **[Contributing Guide](CONTRIBUTING.md)** for detailed instructions!
+
 ### Prerequisites
 
 - Node.js (v14 or higher)
@@ -24,8 +26,8 @@ ation
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/onereach-ai.git
-cd onereach-ai
+git clone https://github.com/wilsr7000/onereach_desktop.git
+cd onereach_desktop
 
 # Install dependencies
 npm install

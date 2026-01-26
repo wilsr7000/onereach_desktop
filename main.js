@@ -746,6 +746,12 @@ app.whenReady().then(() => {
     }
   }, 3000);  // 3 second delay
   
+  // Auto-open onboarding wizard for demo/first-time experience
+  setTimeout(() => {
+    console.log('Auto-opening onboarding wizard...');
+    openOnboardingWizard();
+  }, 2000);  // 2 second delay after launch
+  
   // Initialize menus once the window is fully loaded
   const mainWindow = browserWindow.getMainWindow();
   if (mainWindow) {
@@ -2094,6 +2100,17 @@ function setupIPC() {
   ipcMain.on('open-setup-wizard', () => {
     console.log('Received direct request to open setup wizard');
     openSetupWizard();
+  });
+  
+  // Handler for closing wizard windows
+  ipcMain.on('close-wizard', () => {
+    console.log('Received request to close wizard');
+    const windows = BrowserWindow.getAllWindows();
+    windows.forEach(win => {
+      if (win.getTitle().includes('Welcome') || win.getTitle().includes('Wizard')) {
+        win.close();
+      }
+    });
   });
   
   // Direct handler for opening the settings window
@@ -5050,6 +5067,34 @@ function openSettingsWindow() {
 
 // Make settings window globally accessible
 global.openSettingsWindowGlobal = openSettingsWindow;
+
+// Function to open the new onboarding wizard
+function openOnboardingWizard() {
+  console.log('Opening onboarding wizard window...');
+  
+  const { BrowserWindow } = require('electron');
+  const path = require('path');
+  
+  const wizardWindow = new BrowserWindow({
+    width: 700,
+    height: 800,
+    center: true,
+    resizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js')
+    }
+  });
+  
+  wizardWindow.loadFile('onboarding-wizard.html');
+  
+  wizardWindow.on('closed', () => {
+    console.log('Onboarding wizard closed');
+  });
+}
 
 // Function to open the setup wizard modal
 function openSetupWizard() {
