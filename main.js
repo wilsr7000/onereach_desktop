@@ -1252,6 +1252,12 @@ app.whenReady().then(() => {
 app.on('before-quit', async (event) => {
   console.log('[App] before-quit event - coordinating shutdown');
   
+  // Skip cleanup if we're installing an update - let the updater handle everything
+  if (global.isUpdatingApp) {
+    console.log('[App] Skipping cleanup - app is updating');
+    return;
+  }
+  
   // Save browser tab state before quitting
   try {
     const mainWindow = browserWindow.getMainWindow();
@@ -1368,6 +1374,12 @@ app.on('window-all-closed', () => {
 // Final cleanup before process exits
 app.on('will-quit', (event) => {
   console.log('[App] will-quit event - final cleanup');
+  
+  // Skip cleanup if we're installing an update
+  if (global.isUpdatingApp) {
+    console.log('[App] Skipping final cleanup - app is updating');
+    return;
+  }
   
   // Last chance to save orb position
   if (typeof saveOrbPosition === 'function') {
@@ -13779,7 +13791,13 @@ function setupAutoUpdater() {
       if (result.response === 0) {
         // User chose to install and restart
         log.info('User chose to install update and restart');
-        autoUpdater.quitAndInstall();
+        // Set flag to skip cleanup handlers during update install
+        global.isUpdatingApp = true;
+        // Use quitAndInstall with isForceRunAfter=true to ensure app relaunches on macOS
+        // Small delay to ensure the dialog closes cleanly
+        setTimeout(() => {
+          autoUpdater.quitAndInstall(false, true);
+        }, 100);
       } else {
         // User chose to install later
         log.info('User chose to install update later');
@@ -13830,8 +13848,8 @@ function checkForUpdates() {
         dialog.showMessageBox(focusedWindow, {
           type: 'info',
           title: 'No Updates Available',
-          message: 'Update repository not configured',
-          detail: 'The public releases repository has not been created yet.\n\nTo enable auto-updates:\n1. Create repository: github.com/wilsr7000/onereach_desktop\n2. Make it PUBLIC\n3. Publish a release using: npm run release',
+          message: 'Could not check for updates',
+          detail: 'Unable to reach the update server. This could be due to:\n\n• No internet connection\n• GitHub is temporarily unavailable\n• No releases published yet\n\nPlease try again later.',
           buttons: ['OK']
         });
       }
