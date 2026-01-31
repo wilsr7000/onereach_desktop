@@ -6,6 +6,7 @@
  */
 
 const { getCircuit } = require('./circuit-breaker');
+const { getBudgetManager } = require('../../budget-manager');
 
 // Circuit breaker for OpenAI API calls
 const openaiCircuit = getCircuit('openai-decomposer', {
@@ -103,6 +104,24 @@ async function decomposeTasks(phrase, history = []) {
 
       return response.json();
     });
+
+    // Track API usage for cost monitoring
+    if (data.usage) {
+      try {
+        const budgetManager = getBudgetManager();
+        budgetManager.trackUsage({
+          provider: 'openai',
+          model: 'gpt-4o-mini',
+          inputTokens: data.usage.prompt_tokens || 0,
+          outputTokens: data.usage.completion_tokens || 0,
+          feature: 'task-decomposer',
+          operation: 'decompose-tasks',
+          projectId: null
+        });
+      } catch (trackError) {
+        console.warn('[TaskDecomposer] Failed to track usage:', trackError.message);
+      }
+    }
 
     const content = data.choices?.[0]?.message?.content;
     

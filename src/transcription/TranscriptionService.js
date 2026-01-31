@@ -20,6 +20,7 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { getOpenAIAPI } = require('../../openai-api.js');
 const { getSettingsManager } = require('../../settings-manager.js');
+const { getBudgetManager } = require('../../budget-manager.js');
 
 /**
  * Unified transcription service
@@ -578,6 +579,24 @@ Be confident in your identification if the evidence is strong. Use full names wh
               const errorMsg = response.error?.message || `API error: ${res.statusCode}`;
               reject(new Error(errorMsg));
               return;
+            }
+
+            // Track API usage for cost monitoring
+            if (response.usage) {
+              try {
+                const budgetManager = getBudgetManager();
+                budgetManager.trackUsage({
+                  provider: 'openai',
+                  model: model,
+                  inputTokens: response.usage.prompt_tokens || 0,
+                  outputTokens: response.usage.completion_tokens || 0,
+                  feature: 'speaker-identification',
+                  operation: 'identify-speakers',
+                  projectId: null
+                });
+              } catch (trackError) {
+                console.warn('[TranscriptionService] Failed to track usage:', trackError.message);
+              }
             }
 
             const content = response.choices[0]?.message?.content;

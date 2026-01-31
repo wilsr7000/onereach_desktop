@@ -611,6 +611,7 @@
         <div class="tabs">
             <button class="tab active" data-tab="store">Agent Store</button>
             <button class="tab" data-tab="local">My Agents</button>
+            <button class="tab" data-tab="test">Test Agents</button>
             <button class="tab" data-tab="gsx">GSX Connections</button>
         </div>
         
@@ -640,6 +641,63 @@
                 </div>
             </div>
             
+            <!-- Test Agents Tab -->
+            <div class="tab-content" id="tab-test">
+                <div class="toolbar">
+                    <span class="toolbar-title">Test Agent Bidding</span>
+                </div>
+                <div class="test-container" style="display: flex; gap: 24px; height: calc(100% - 50px);">
+                    <!-- Test Input Panel -->
+                    <div class="test-input-panel" style="flex: 1; display: flex; flex-direction: column;">
+                        <div class="form-group">
+                            <label class="form-label">Test Phrase</label>
+                            <input type="text" class="form-input" id="testPhrase" 
+                                   placeholder="e.g., What's the weather like today?" 
+                                   style="font-size: 16px; padding: 14px;" />
+                            <span class="form-hint">Enter a phrase to see which agents would bid and their confidence</span>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label">Test Mode</label>
+                            <div style="display: flex; gap: 12px;">
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                    <input type="radio" name="testMode" value="all" checked style="accent-color: #8b5cf6;" />
+                                    <span style="font-size: 13px;">All Agents</span>
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                    <input type="radio" name="testMode" value="single" style="accent-color: #8b5cf6;" />
+                                    <span style="font-size: 13px;">Single Agent</span>
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group" id="singleAgentSelect" style="display: none;">
+                            <label class="form-label">Select Agent</label>
+                            <select class="form-input" id="testAgentId">
+                                <!-- Populated dynamically -->
+                            </select>
+                        </div>
+                        
+                        <button class="btn primary" id="runTestBtn" style="margin-top: 8px; padding: 12px;">
+                            Evaluate Bids
+                        </button>
+                        
+                        <div id="testStatus" style="margin-top: 16px; font-size: 12px; color: #888;"></div>
+                    </div>
+                    
+                    <!-- Results Panel -->
+                    <div class="test-results-panel" style="flex: 2; background: rgba(0,0,0,0.2); border-radius: 12px; padding: 16px; overflow: auto;">
+                        <div class="toolbar-title" style="margin-bottom: 12px;">Bid Results</div>
+                        <div id="testResults">
+                            <div class="empty-state" style="padding: 32px;">
+                                <div class="empty-state-title">Enter a phrase and click Evaluate</div>
+                                <div class="empty-state-text">See how agents would bid on this task in real-time using LLM evaluation</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
             <!-- GSX Connections Tab -->
             <div class="tab-content" id="tab-gsx">
                 <div class="toolbar">
@@ -663,15 +721,53 @@
             <div class="modal-body">
                 <form id="agentForm">
                     <input type="hidden" id="agentId" />
+                    
+                    <!-- Basic Info -->
                     <div class="form-group">
                         <label class="form-label">Agent Name</label>
                         <input type="text" class="form-input" id="agentName" placeholder="e.g., Weather Assistant" required />
                     </div>
+                    
+                    <div class="form-row" style="display: flex; gap: 16px;">
+                        <div class="form-group" style="flex: 1;">
+                            <label class="form-label">Execution Type</label>
+                            <select class="form-input" id="agentExecutionType">
+                                <option value="llm">LLM (Conversational)</option>
+                                <option value="applescript">AppleScript (macOS)</option>
+                                <option value="shell">Shell Command</option>
+                                <option value="nodejs">Node.js Script</option>
+                            </select>
+                            <span class="form-hint">How the agent executes tasks</span>
+                        </div>
+                        <div class="form-group" style="flex: 1;">
+                            <label class="form-label">Confidence Threshold</label>
+                            <div style="display: flex; align-items: center; gap: 12px;">
+                                <input type="range" id="agentConfidence" min="0" max="100" value="70" 
+                                       style="flex: 1;" oninput="updateConfidenceDisplay(this.value)" />
+                                <span id="confidenceDisplay" style="min-width: 40px; text-align: right; font-size: 13px; color: #c4b5fd;">70%</span>
+                            </div>
+                            <span class="form-hint">Minimum confidence to bid on tasks</span>
+                        </div>
+                    </div>
+                    
                     <div class="form-group">
                         <label class="form-label">Keywords</label>
                         <input type="text" class="form-input" id="agentKeywords" placeholder="weather, forecast, temperature" required />
                         <span class="form-hint">Comma-separated words that trigger this agent</span>
                     </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Categories</label>
+                        <input type="text" class="form-input" id="agentCategories" placeholder="productivity, automation, media" />
+                        <span class="form-hint">Comma-separated categories for organization</span>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Capabilities</label>
+                        <input type="text" class="form-input" id="agentCapabilities" placeholder="Send emails, Schedule meetings, Search contacts" />
+                        <span class="form-hint">Comma-separated list of what this agent can do</span>
+                    </div>
+                    
                     <div class="form-group">
                         <label class="form-label">Prompt / Instructions</label>
                         <textarea class="form-input form-textarea" id="agentPrompt" placeholder="You are a helpful weather assistant..." required></textarea>
@@ -682,6 +778,24 @@
             <div class="modal-footer">
                 <button class="btn" id="agentModalCancel">Cancel</button>
                 <button class="btn primary" id="agentModalSave">Save Agent</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Version History Modal -->
+    <div class="modal-overlay" id="historyModal">
+        <div class="modal" style="width: 600px;">
+            <div class="modal-header">
+                <span class="modal-title" id="historyModalTitle">Version History</span>
+                <button class="modal-close" id="historyModalClose">&times;</button>
+            </div>
+            <div class="modal-body" style="max-height: 60vh; overflow: auto;">
+                <div id="historyList">
+                    <!-- Version history will be rendered here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" id="historyModalCancel">Close</button>
             </div>
         </div>
     </div>
@@ -940,13 +1054,26 @@
             agentList.innerHTML = agents.map(agent => `
                 <div class="agent-card">
                     <div class="agent-card-header">
-                        <span class="agent-name">${escapeHtml(agent.name)}</span>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <span class="agent-name">${escapeHtml(agent.name)}</span>
+                            <span class="execution-type-badge" style="
+                                padding: 2px 8px;
+                                border-radius: 10px;
+                                font-size: 10px;
+                                background: rgba(139, 92, 246, 0.15);
+                                color: #c4b5fd;
+                            ">${agent.executionType || 'llm'}</span>
+                            ${agent.version ? `<span style="font-size: 10px; color: #666;">v${agent.version}</span>` : ''}
+                        </div>
                         <div class="agent-actions">
                             <label class="toggle-switch">
                                 <input type="checkbox" ${agent.enabled ? 'checked' : ''} 
                                        onchange="toggleAgent('${agent.id}', this.checked)" />
                                 <span class="toggle-slider"></span>
                             </label>
+                            <button class="btn" onclick="testSingleAgent('${agent.id}')" title="Test this agent">Test</button>
+                            <button class="btn" onclick="addFeatureToAgent('${agent.id}')" title="Add new capability">+ Feature</button>
+                            <button class="btn" onclick="showVersionHistory('${agent.id}')" title="Version history">History</button>
                             <button class="btn" onclick="editAgent('${agent.id}')">Edit</button>
                             <button class="btn danger" onclick="deleteAgent('${agent.id}')">Delete</button>
                         </div>
@@ -954,9 +1081,38 @@
                     <div class="agent-keywords">
                         ${agent.keywords.map(kw => `<span class="keyword-tag">${escapeHtml(kw)}</span>`).join('')}
                     </div>
+                    ${agent.capabilities && agent.capabilities.length > 0 ? `
+                        <div class="agent-capabilities" style="margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px;">
+                            ${agent.capabilities.map(cap => `<span class="capability-tag">${escapeHtml(cap)}</span>`).join('')}
+                        </div>
+                    ` : ''}
                     <div class="agent-prompt">${escapeHtml(agent.prompt)}</div>
+                    ${agent.settings?.confidenceThreshold ? `
+                        <div style="margin-top: 8px; font-size: 11px; color: #666;">
+                            Confidence threshold: ${Math.round((agent.settings.confidenceThreshold || 0.7) * 100)}%
+                        </div>
+                    ` : ''}
+                    <div class="agent-stats" id="stats-${agent.id}" style="
+                        margin-top: 10px;
+                        padding-top: 10px;
+                        border-top: 1px solid rgba(255, 255, 255, 0.05);
+                        display: flex;
+                        gap: 16px;
+                        font-size: 11px;
+                        color: #666;
+                    ">
+                        <span>Loading stats...</span>
+                    </div>
                 </div>
             `).join('');
+            
+            // Load stats for each agent
+            loadAgentStats();
+        }
+        
+        // Confidence slider display
+        function updateConfidenceDisplay(value) {
+            document.getElementById('confidenceDisplay').textContent = value + '%';
         }
         
         function showAgentModal(agent = null) {
@@ -967,6 +1123,15 @@
             document.getElementById('agentName').value = agent?.name || '';
             document.getElementById('agentKeywords').value = (agent?.keywords || []).join(', ');
             document.getElementById('agentPrompt').value = agent?.prompt || '';
+            
+            // New fields
+            document.getElementById('agentExecutionType').value = agent?.executionType || 'llm';
+            document.getElementById('agentCategories').value = (agent?.categories || []).join(', ');
+            document.getElementById('agentCapabilities').value = (agent?.capabilities || []).join(', ');
+            
+            const confidence = Math.round((agent?.settings?.confidenceThreshold || 0.7) * 100);
+            document.getElementById('agentConfidence').value = confidence;
+            document.getElementById('confidenceDisplay').textContent = confidence + '%';
             
             agentModal.classList.add('visible');
         }
@@ -985,16 +1150,40 @@
                 .filter(k => k);
             const prompt = document.getElementById('agentPrompt').value.trim();
             
+            // New fields
+            const executionType = document.getElementById('agentExecutionType').value;
+            const categories = document.getElementById('agentCategories').value
+                .split(',')
+                .map(c => c.trim().toLowerCase())
+                .filter(c => c);
+            const capabilities = document.getElementById('agentCapabilities').value
+                .split(',')
+                .map(c => c.trim())
+                .filter(c => c);
+            const confidenceThreshold = parseInt(document.getElementById('agentConfidence').value) / 100;
+            
             if (!name || keywords.length === 0 || !prompt) {
-                alert('Please fill in all fields');
+                alert('Please fill in all required fields');
                 return;
             }
             
+            const agentData = {
+                name,
+                keywords,
+                prompt,
+                executionType,
+                categories: categories.length > 0 ? categories : ['general'],
+                capabilities,
+                settings: {
+                    confidenceThreshold
+                }
+            };
+            
             try {
                 if (editingAgentId) {
-                    await window.agentManagerAPI.updateAgent(editingAgentId, { name, keywords, prompt });
+                    await window.agentManagerAPI.updateAgent(editingAgentId, agentData);
                 } else {
-                    await window.agentManagerAPI.createAgent({ name, keywords, prompt });
+                    await window.agentManagerAPI.createAgent(agentData);
                 }
                 
                 hideAgentModal();
@@ -1142,6 +1331,240 @@
             }
         }
         
+        // ==================== TESTING ====================
+        
+        function testSingleAgent(agentId) {
+            // Switch to test tab
+            tabs.forEach(t => t.classList.remove('active'));
+            tabContents.forEach(tc => tc.classList.remove('active'));
+            document.querySelector('[data-tab="test"]').classList.add('active');
+            document.getElementById('tab-test').classList.add('active');
+            
+            // Set to single agent mode
+            document.querySelector('input[name="testMode"][value="single"]').checked = true;
+            document.getElementById('singleAgentSelect').style.display = 'block';
+            
+            // Populate and select the agent
+            populateAgentSelect();
+            document.getElementById('testAgentId').value = agentId;
+            
+            // Focus on phrase input
+            document.getElementById('testPhrase').focus();
+        }
+        
+        function populateAgentSelect() {
+            const select = document.getElementById('testAgentId');
+            const allAgents = [...agents];
+            
+            // Add builtin agents
+            BUILTIN_AGENTS.forEach(a => {
+                if (enabledBuiltinAgents[a.id] !== false) {
+                    allAgents.push({ id: a.id, name: a.name, builtin: true });
+                }
+            });
+            
+            select.innerHTML = allAgents.map(a => 
+                `<option value="${a.id}">${escapeHtml(a.name)}${a.builtin ? ' (Built-in)' : ''}</option>`
+            ).join('');
+        }
+        
+        async function runTest() {
+            const phrase = document.getElementById('testPhrase').value.trim();
+            if (!phrase) {
+                alert('Please enter a test phrase');
+                return;
+            }
+            
+            const testMode = document.querySelector('input[name="testMode"]:checked').value;
+            const resultsContainer = document.getElementById('testResults');
+            const statusEl = document.getElementById('testStatus');
+            
+            statusEl.textContent = 'Evaluating bids...';
+            resultsContainer.innerHTML = '<div style="text-align: center; padding: 32px; color: #888;">Running LLM evaluation...</div>';
+            
+            try {
+                let results;
+                if (testMode === 'single') {
+                    const agentId = document.getElementById('testAgentId').value;
+                    const result = await window.agentManagerAPI.testPhrase(agentId, phrase);
+                    results = [{ agentId, ...result }];
+                } else {
+                    results = await window.agentManagerAPI.testPhraseAllAgents(phrase);
+                }
+                
+                // Sort by confidence
+                results.sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+                
+                statusEl.textContent = `Evaluated ${results.length} agent${results.length !== 1 ? 's' : ''}`;
+                
+                if (results.length === 0) {
+                    resultsContainer.innerHTML = '<div class="empty-state"><div class="empty-state-title">No agents evaluated</div></div>';
+                    return;
+                }
+                
+                resultsContainer.innerHTML = results.map((r, i) => {
+                    const confidence = Math.round((r.confidence || 0) * 100);
+                    const wouldBid = confidence > 10;
+                    const isWinner = i === 0 && wouldBid;
+                    
+                    return `
+                        <div class="test-result-card" style="
+                            background: ${isWinner ? 'rgba(34, 197, 94, 0.1)' : 'rgba(255, 255, 255, 0.03)'};
+                            border: 1px solid ${isWinner ? 'rgba(34, 197, 94, 0.3)' : 'rgba(255, 255, 255, 0.08)'};
+                            border-radius: 10px;
+                            padding: 14px;
+                            margin-bottom: 10px;
+                        ">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <span style="font-weight: 600; color: #fff;">${escapeHtml(r.agentName || r.agentId)}</span>
+                                    ${isWinner ? '<span style="background: rgba(34, 197, 94, 0.2); color: #22c55e; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600;">WINNER</span>' : ''}
+                                    ${!wouldBid ? '<span style="background: rgba(239, 68, 68, 0.15); color: #ef4444; padding: 2px 8px; border-radius: 10px; font-size: 10px;">Would not bid</span>' : ''}
+                                </div>
+                                <span style="font-size: 18px; font-weight: 700; color: ${confidence > 70 ? '#22c55e' : confidence > 40 ? '#f59e0b' : '#ef4444'};">
+                                    ${confidence}%
+                                </span>
+                            </div>
+                            <div style="
+                                height: 6px;
+                                background: rgba(255, 255, 255, 0.1);
+                                border-radius: 3px;
+                                overflow: hidden;
+                                margin-bottom: 10px;
+                            ">
+                                <div style="
+                                    height: 100%;
+                                    width: ${confidence}%;
+                                    background: ${confidence > 70 ? '#22c55e' : confidence > 40 ? '#f59e0b' : '#ef4444'};
+                                    border-radius: 3px;
+                                    transition: width 0.3s;
+                                "></div>
+                            </div>
+                            ${r.plan || r.reasoning ? `
+                                <div style="font-size: 12px; color: #888; line-height: 1.5;">
+                                    <strong style="color: #aaa;">Reasoning:</strong> ${escapeHtml(r.plan || r.reasoning)}
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+                }).join('');
+                
+            } catch (error) {
+                console.error('Test error:', error);
+                statusEl.textContent = 'Error: ' + error.message;
+                resultsContainer.innerHTML = `<div class="empty-state"><div class="empty-state-title">Error</div><div class="empty-state-text">${escapeHtml(error.message)}</div></div>`;
+            }
+        }
+        
+        // ==================== VERSION HISTORY ====================
+        
+        let currentHistoryAgentId = null;
+        
+        async function showVersionHistory(agentId) {
+            currentHistoryAgentId = agentId;
+            const agent = agents.find(a => a.id === agentId);
+            
+            document.getElementById('historyModalTitle').textContent = `History: ${agent?.name || agentId}`;
+            
+            const historyList = document.getElementById('historyList');
+            historyList.innerHTML = '<div style="text-align: center; padding: 24px; color: #888;">Loading history...</div>';
+            
+            document.getElementById('historyModal').classList.add('visible');
+            
+            try {
+                const history = await window.agentManagerAPI.getVersionHistory(agentId);
+                
+                if (!history || history.length === 0) {
+                    historyList.innerHTML = '<div class="empty-state"><div class="empty-state-title">No version history</div><div class="empty-state-text">Changes to this agent will be tracked here</div></div>';
+                    return;
+                }
+                
+                historyList.innerHTML = history.map((v, i) => `
+                    <div class="history-item" style="
+                        background: rgba(255, 255, 255, 0.03);
+                        border: 1px solid rgba(255, 255, 255, 0.08);
+                        border-radius: 10px;
+                        padding: 14px;
+                        margin-bottom: 10px;
+                    ">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <span style="font-weight: 600; color: #c4b5fd;">Version ${v.versionNumber}</span>
+                                ${i === 0 ? '<span style="background: rgba(139, 92, 246, 0.2); color: #c4b5fd; padding: 2px 8px; border-radius: 10px; font-size: 10px;">Current</span>' : ''}
+                            </div>
+                            <span style="font-size: 11px; color: #666;">${new Date(v.timestamp).toLocaleString()}</span>
+                        </div>
+                        <div style="font-size: 12px; color: #888; margin-bottom: 8px;">
+                            <span style="
+                                display: inline-block;
+                                padding: 2px 8px;
+                                background: rgba(255, 255, 255, 0.05);
+                                border-radius: 6px;
+                                margin-right: 8px;
+                            ">${escapeHtml(v.reason || 'updated')}</span>
+                            ${v.description ? escapeHtml(v.description) : ''}
+                        </div>
+                        ${i > 0 ? `
+                            <div style="display: flex; gap: 8px; margin-top: 10px;">
+                                <button class="btn" onclick="viewVersion('${agentId}', ${v.versionNumber})">View</button>
+                                <button class="btn primary" onclick="revertToVersion('${agentId}', ${v.versionNumber})">Revert</button>
+                            </div>
+                        ` : ''}
+                    </div>
+                `).join('');
+                
+            } catch (error) {
+                console.error('Error loading history:', error);
+                historyList.innerHTML = `<div class="empty-state"><div class="empty-state-title">Error</div><div class="empty-state-text">${escapeHtml(error.message)}</div></div>`;
+            }
+        }
+        
+        function hideHistoryModal() {
+            document.getElementById('historyModal').classList.remove('visible');
+            currentHistoryAgentId = null;
+        }
+        
+        async function viewVersion(agentId, versionNumber) {
+            try {
+                const version = await window.agentManagerAPI.getVersion(agentId, versionNumber);
+                if (version && version.snapshot) {
+                    alert(`Version ${versionNumber} Details:\n\nName: ${version.snapshot.name}\nKeywords: ${version.snapshot.keywords?.join(', ')}\nPrompt: ${version.snapshot.prompt?.substring(0, 200)}...`);
+                }
+            } catch (error) {
+                alert('Error loading version: ' + error.message);
+            }
+        }
+        
+        async function revertToVersion(agentId, versionNumber) {
+            if (!confirm(`Revert to version ${versionNumber}? This will create a new version with the old settings.`)) return;
+            
+            try {
+                await window.agentManagerAPI.revertToVersion(agentId, versionNumber);
+                hideHistoryModal();
+                await loadAgents();
+            } catch (error) {
+                alert('Error reverting: ' + error.message);
+            }
+        }
+        
+        // ==================== ADD FEATURE ====================
+        
+        async function addFeatureToAgent(agentId) {
+            const agent = agents.find(a => a.id === agentId);
+            if (!agent) {
+                alert('Agent not found');
+                return;
+            }
+            
+            try {
+                // Open Agent Composer in enhance mode with this agent's context
+                await window.agentManagerAPI.enhanceAgent(agentId);
+            } catch (error) {
+                console.error('Error opening composer:', error);
+                alert('Could not open Agent Composer: ' + error.message);
+            }
+        }
+        
         // ==================== LOADING ====================
         
         async function loadAgents() {
@@ -1151,6 +1574,73 @@
             } catch (error) {
                 console.error('Error loading agents:', error);
             }
+        }
+        
+        async function loadAgentStats() {
+            try {
+                const allStats = await window.agentManagerAPI.getAllStats();
+                
+                for (const agent of agents) {
+                    const statsEl = document.getElementById(`stats-${agent.id}`);
+                    if (!statsEl) continue;
+                    
+                    const stats = allStats[agent.id];
+                    if (!stats || stats.totalBids === 0) {
+                        statsEl.innerHTML = '<span style="font-style: italic;">No activity yet</span>';
+                        continue;
+                    }
+                    
+                    const winRate = Math.round(stats.winRate * 100);
+                    const successRate = Math.round(stats.successRate * 100);
+                    const avgConf = Math.round(stats.avgConfidence * 100);
+                    
+                    const avgTime = stats.avgExecutionTimeMs;
+                    const avgTimeStr = avgTime !== null ? formatDuration(avgTime) : null;
+                    
+                    statsEl.innerHTML = `
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <span style="color: ${winRate > 50 ? '#22c55e' : winRate > 20 ? '#f59e0b' : '#ef4444'};">
+                                Win: ${winRate}%
+                            </span>
+                            <span style="color: #444;">|</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <span style="color: ${successRate > 80 ? '#22c55e' : successRate > 50 ? '#f59e0b' : '#ef4444'};">
+                                Success: ${successRate}%
+                            </span>
+                            <span style="color: #444;">|</span>
+                        </div>
+                        <div>Avg Conf: ${avgConf}%</div>
+                        ${avgTimeStr ? `<div style="color: #888;">Avg Run: ${avgTimeStr}</div>` : ''}
+                        <div style="color: #555;">Bids: ${stats.totalBids}</div>
+                        ${stats.lastActive ? `<div style="color: #444;">Last: ${formatTimeAgo(stats.lastActive)}</div>` : ''}
+                    `;
+                }
+            } catch (error) {
+                console.error('Error loading stats:', error);
+            }
+        }
+        
+        function formatTimeAgo(isoString) {
+            const date = new Date(isoString);
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMins / 60);
+            const diffDays = Math.floor(diffHours / 24);
+            
+            if (diffMins < 1) return 'just now';
+            if (diffMins < 60) return `${diffMins}m ago`;
+            if (diffHours < 24) return `${diffHours}h ago`;
+            return `${diffDays}d ago`;
+        }
+        
+        function formatDuration(ms) {
+            if (ms < 1000) return `${ms}ms`;
+            if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+            const mins = Math.floor(ms / 60000);
+            const secs = Math.round((ms % 60000) / 1000);
+            return `${mins}m ${secs}s`;
         }
         
         async function loadGSXConnections() {
@@ -1200,12 +1690,37 @@
         gsxModalCancel.addEventListener('click', hideGSXModal);
         gsxModalSave.addEventListener('click', saveGSX);
         
+        // History modal
+        document.getElementById('historyModalClose').addEventListener('click', hideHistoryModal);
+        document.getElementById('historyModalCancel').addEventListener('click', hideHistoryModal);
+        
+        // Test tab
+        document.getElementById('runTestBtn').addEventListener('click', runTest);
+        document.getElementById('testPhrase').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') runTest();
+        });
+        
+        // Test mode toggle
+        document.querySelectorAll('input[name="testMode"]').forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                document.getElementById('singleAgentSelect').style.display = 
+                    e.target.value === 'single' ? 'block' : 'none';
+                if (e.target.value === 'all') {
+                    // Populate agent select for future use
+                    populateAgentSelect();
+                }
+            });
+        });
+        
         // Close modals on overlay click
         agentModal.addEventListener('click', (e) => {
             if (e.target === agentModal) hideAgentModal();
         });
         gsxModal.addEventListener('click', (e) => {
             if (e.target === gsxModal) hideGSXModal();
+        });
+        document.getElementById('historyModal').addEventListener('click', (e) => {
+            if (e.target.id === 'historyModal') hideHistoryModal();
         });
         
         // ==================== INITIALIZATION ====================
@@ -1217,14 +1732,21 @@
         }
         
         if (window.agentManagerAPI) {
-            init();
+            console.log('[AgentManager] API available, starting init...');
+            init().then(() => {
+                console.log('[AgentManager] Init complete');
+            }).catch(err => {
+                console.error('[AgentManager] Init failed:', err);
+                // Still try to render store with defaults
+                renderStore();
+            });
         } else {
             console.error('[AgentManager] API not available');
             // Still render store with defaults
             renderStore();
         }
         
-        console.log('[AgentManager] Initialized');
+        console.log('[AgentManager] Script loaded');
     </script>
 </body>
 </html>

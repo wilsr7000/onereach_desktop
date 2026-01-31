@@ -1,82 +1,127 @@
 /**
- * Small Talk Agent
+ * Small Talk Agent - A Thinking Agent
  * 
  * Handles greetings, goodbyes, thanks, and basic conversational exchanges.
- * Provides friendly, natural responses to make the assistant feel more human.
+ * 
+ * Thinking Agent features:
+ * - Remembers user's name for personalized greetings
+ * - Tracks conversation style preferences
+ * - Learns from interactions to improve responses
  */
+
+const { getAgentMemory } = require('../../lib/agent-memory-store');
+const { learnFromInteraction, getTimeContext } = require('../../lib/thinking-agent');
 
 const smalltalkAgent = {
   id: 'smalltalk-agent',
   name: 'Small Talk Agent',
-  description: 'Handles greetings and casual conversation',
+  description: 'Handles greetings and casual conversation - remembers your name',
   categories: ['conversation', 'social'],
   keywords: [
     'hi', 'hello', 'hey', 'howdy', 'greetings',
     'good morning', 'good afternoon', 'good evening', 'good night',
     'bye', 'goodbye', 'see you', 'later', 'farewell',
     'thanks', 'thank you', 'appreciate',
-    'how are you', "what's up", 'whats up', "how's it going", 'hows it going',
-    'nice to meet', 'pleased to meet',
+    'how are you', "what's up", 'whats up', "how's it going",
     'sorry', 'my bad', 'apologies',
-    'yes', 'no', 'okay', 'ok', 'sure', 'alright', 'yep', 'nope',
-    'wow', 'cool', 'awesome', 'great', 'nice', 'amazing'
+    'yes', 'no', 'okay', 'ok', 'sure', 'alright',
+    'wow', 'cool', 'awesome', 'great', 'nice', 'amazing',
+    'my name is', "i'm called", 'call me'
   ],
+  
+  // Memory instance
+  memory: null,
+  
+  /**
+   * Initialize memory
+   */
+  async initialize() {
+    if (!this.memory) {
+      this.memory = getAgentMemory('smalltalk-agent', { displayName: 'Small Talk Agent' });
+      await this.memory.load();
+      this._ensureMemorySections();
+    }
+    return this.memory;
+  },
+  
+  /**
+   * Ensure required memory sections exist
+   */
+  _ensureMemorySections() {
+    const sections = this.memory.getSectionNames();
+    
+    if (!sections.includes('Learned Preferences')) {
+      this.memory.updateSection('Learned Preferences', `- User Name: *Not set*
+- Conversation Style: Friendly
+- Formality: Casual`);
+    }
+    
+    if (!sections.includes('Conversation Notes')) {
+      this.memory.updateSection('Conversation Notes', `*Notes about conversations will appear here*`);
+    }
+    
+    if (this.memory.isDirty()) {
+      this.memory.save();
+    }
+  },
   
   /**
    * Bid on a task
-   * @param {Object} task - { content, ... }
-   * @returns {Object|null} - { confidence } or null to not bid
    */
   bid(task) {
     if (!task?.content) return null;
     
     const lower = task.content.toLowerCase().trim();
     
+    // Name introduction - high confidence
+    if (/my name is|i'm called|call me|i am (\w+)/i.test(lower)) {
+      return { confidence: 0.98, reasoning: 'Name introduction' };
+    }
+    
     // Very short greetings - high confidence
     if (/^(hi|hey|hello|yo|howdy|hiya)[\s!.,?]*$/i.test(lower)) {
-      return { confidence: 0.98 };
+      return { confidence: 0.98, reasoning: 'Greeting' };
     }
     
     // Good morning/afternoon/evening/night
     if (/^good\s+(morning|afternoon|evening|night)[\s!.,?]*$/i.test(lower)) {
-      return { confidence: 0.98 };
+      return { confidence: 0.98, reasoning: 'Time greeting' };
     }
     
     // Goodbyes
-    if (/^(bye|goodbye|see you|later|farewell|take care|goodnight)[\s!.,?]*$/i.test(lower) ||
-        /^(see you later|catch you later|talk to you later)[\s!.,?]*$/i.test(lower)) {
-      return { confidence: 0.98 };
+    if (/^(bye|goodbye|see you|later|farewell|take care|goodnight)[\s!.,?]*$/i.test(lower)) {
+      return { confidence: 0.98, reasoning: 'Goodbye' };
     }
     
     // Thanks
-    if (/^(thanks|thank you|thx|ty|appreciate it|much appreciated)[\s!.,?]*$/i.test(lower)) {
-      return { confidence: 0.98 };
+    if (/^(thanks|thank you|thx|ty|appreciate)[\s!.,?]*$/i.test(lower)) {
+      return { confidence: 0.98, reasoning: 'Thanks' };
     }
     
-    // How are you variants
-    if (/how are you|how('s| is) it going|what'?s up|how('s| is) everything|how('s| is) your day/i.test(lower)) {
-      return { confidence: 0.95 };
+    // How are you
+    if (/how are you|how('s| is) it going|what'?s up|how('s| is) everything/i.test(lower)) {
+      return { confidence: 0.95, reasoning: 'How are you' };
     }
     
     // Affirmative/negative responses
-    if (/^(yes|no|yeah|nope|yep|nah|sure|okay|ok|alright|fine|got it)[\s!.,?]*$/i.test(lower)) {
-      return { confidence: 0.85 };
+    if (/^(yes|no|yeah|nope|yep|nah|sure|okay|ok|alright|fine)[\s!.,?]*$/i.test(lower)) {
+      return { confidence: 0.85, reasoning: 'Affirmative/negative' };
     }
     
     // Reactions
-    if (/^(wow|cool|awesome|great|nice|amazing|neat|sweet|perfect|wonderful)[\s!.,?]*$/i.test(lower)) {
-      return { confidence: 0.85 };
+    if (/^(wow|cool|awesome|great|nice|amazing|neat|sweet|perfect)[\s!.,?]*$/i.test(lower)) {
+      return { confidence: 0.85, reasoning: 'Reaction' };
     }
     
     // Apologies
-    if (/^(sorry|my bad|apologies|oops|whoops)[\s!.,?]*$/i.test(lower)) {
-      return { confidence: 0.90 };
+    if (/^(sorry|my bad|apologies|oops)[\s!.,?]*$/i.test(lower)) {
+      return { confidence: 0.90, reasoning: 'Apology' };
     }
     
     // Check for keywords in longer phrases
     for (const keyword of this.keywords) {
       if (lower.includes(keyword)) {
-        return { confidence: 0.7 };
+        return { confidence: 0.7, reasoning: 'Keyword match' };
       }
     }
     
@@ -85,63 +130,91 @@ const smalltalkAgent = {
   
   /**
    * Execute the task
-   * @param {Object} task - { content, context, ... }
-   * @returns {Object} - { success, message }
    */
   async execute(task, context = {}) {
-    const lower = task.content.toLowerCase().trim();
+    // Initialize memory
+    if (!this.memory) {
+      await this.initialize();
+    }
     
-    // Greetings
+    const lower = task.content.toLowerCase().trim();
+    const prefs = this.memory.parseSectionAsKeyValue('Learned Preferences') || {};
+    const userName = prefs['User Name'];
+    const hasName = userName && userName !== '*Not set*';
+    const timeContext = getTimeContext();
+    
+    // Handle name introduction
+    const nameMatch = task.content.match(/(?:my name is|i'm called|call me|i am)\s+(\w+)/i);
+    if (nameMatch) {
+      const name = nameMatch[1];
+      await learnFromInteraction(this.memory, task, { success: true }, {
+        learnedPreferences: { 'User Name': name }
+      });
+      return { 
+        success: true, 
+        message: `Nice to meet you, ${name}! I'll remember that.` 
+      };
+    }
+    
+    // Greetings with personalization
     if (/^(hi|hey|hello|yo|howdy|hiya)[\s!.,?]*$/i.test(lower)) {
-      return this.randomResponse([
-        "Hey there! How can I help you?",
-        "Hello! What can I do for you?",
-        "Hi! I'm here to help.",
-        "Hey! What's on your mind?"
-      ]);
+      const greeting = hasName 
+        ? this.randomPick([
+            `Hey ${userName}! How can I help you?`,
+            `Hello ${userName}! What can I do for you?`,
+            `Hi ${userName}! I'm here to help.`
+          ])
+        : this.randomPick([
+            "Hey there! How can I help you?",
+            "Hello! What can I do for you?",
+            "Hi! I'm here to help."
+          ]);
+      return { success: true, message: greeting };
     }
     
     // Time-based greetings
     if (/good morning/i.test(lower)) {
-      return this.randomResponse([
-        "Good morning! How can I help you today?",
-        "Morning! What can I do for you?",
-        "Good morning! Ready to help."
-      ]);
+      const greeting = hasName
+        ? `Good morning, ${userName}! How can I help you today?`
+        : "Good morning! How can I help you today?";
+      return { success: true, message: greeting };
     }
     
     if (/good afternoon/i.test(lower)) {
-      return this.randomResponse([
-        "Good afternoon! How can I help?",
-        "Afternoon! What can I do for you?",
-        "Good afternoon! What do you need?"
-      ]);
+      const greeting = hasName
+        ? `Good afternoon, ${userName}! How can I help?`
+        : "Good afternoon! How can I help?";
+      return { success: true, message: greeting };
     }
     
     if (/good evening/i.test(lower)) {
-      return this.randomResponse([
-        "Good evening! How can I help you?",
-        "Evening! What can I do for you?",
-        "Good evening! I'm here to help."
-      ]);
+      const greeting = hasName
+        ? `Good evening, ${userName}! How can I help you?`
+        : "Good evening! How can I help you?";
+      return { success: true, message: greeting };
     }
     
     if (/good night/i.test(lower)) {
-      return this.randomResponse([
-        "Good night! Sleep well.",
-        "Night! Take care.",
-        "Good night! See you tomorrow."
-      ]);
+      const farewell = hasName
+        ? `Good night, ${userName}! Sleep well.`
+        : "Good night! Sleep well.";
+      return { success: true, message: farewell };
     }
     
     // Goodbyes
     if (/bye|goodbye|see you|later|farewell|take care/i.test(lower)) {
-      return this.randomResponse([
-        "Goodbye! Have a great day!",
-        "See you later!",
-        "Take care! Come back anytime.",
-        "Bye! Let me know if you need anything else."
-      ]);
+      const farewell = hasName
+        ? this.randomPick([
+            `Goodbye, ${userName}! Have a great ${timeContext.partOfDay}!`,
+            `See you later, ${userName}!`,
+            `Take care, ${userName}!`
+          ])
+        : this.randomPick([
+            `Goodbye! Have a great ${timeContext.partOfDay}!`,
+            "See you later!",
+            "Take care!"
+          ]);
+      return { success: true, message: farewell };
     }
     
     // Thanks
@@ -157,21 +230,18 @@ const smalltalkAgent = {
     
     // How are you
     if (/how are you|how('s| is) it going|what'?s up|how('s| is) everything/i.test(lower)) {
-      return this.randomResponse([
-        "I'm doing well, thanks for asking! How can I help you?",
-        "All good here! What can I do for you?",
-        "I'm great! Ready to help. What do you need?",
-        "Doing fine! What's on your mind?"
-      ]);
+      const response = hasName
+        ? `I'm doing well, ${userName}! How can I help you?`
+        : "I'm doing well, thanks for asking! How can I help you?";
+      return { success: true, message: response };
     }
     
     // Affirmative responses
-    if (/^(yes|yeah|yep|sure|okay|ok|alright|fine|got it)[\s!.,?]*$/i.test(lower)) {
+    if (/^(yes|yeah|yep|sure|okay|ok|alright|fine)[\s!.,?]*$/i.test(lower)) {
       return this.randomResponse([
         "Great! What would you like me to do?",
         "Alright! How can I help?",
-        "Okay! What's next?",
-        "Got it. What do you need?"
+        "Okay! What's next?"
       ]);
     }
     
@@ -185,16 +255,16 @@ const smalltalkAgent = {
     }
     
     // Reactions
-    if (/^(wow|cool|awesome|great|nice|amazing|neat|sweet|perfect|wonderful)[\s!.,?]*$/i.test(lower)) {
+    if (/^(wow|cool|awesome|great|nice|amazing|neat|sweet|perfect)[\s!.,?]*$/i.test(lower)) {
       return this.randomResponse([
         "Glad you think so!",
         "Thanks! Anything else I can help with?",
-        "Happy to hear that! What else can I do?"
+        "Happy to hear that!"
       ]);
     }
     
     // Apologies
-    if (/sorry|my bad|apologies|oops|whoops/i.test(lower)) {
+    if (/sorry|my bad|apologies|oops/i.test(lower)) {
       return this.randomResponse([
         "No worries at all!",
         "That's okay! How can I help?",
@@ -202,7 +272,7 @@ const smalltalkAgent = {
       ]);
     }
     
-    // Fallback for other small talk
+    // Fallback
     return this.randomResponse([
       "I'm here to help! Just let me know what you need.",
       "How can I assist you?",
@@ -211,12 +281,17 @@ const smalltalkAgent = {
   },
   
   /**
+   * Pick a random item from array
+   */
+  randomPick(items) {
+    return items[Math.floor(Math.random() * items.length)];
+  },
+  
+  /**
    * Return a random response from an array
-   * @param {string[]} responses 
-   * @returns {Object} - { success, message }
    */
   randomResponse(responses) {
-    const message = responses[Math.floor(Math.random() * responses.length)];
+    const message = this.randomPick(responses);
     return { success: true, message };
   }
 };

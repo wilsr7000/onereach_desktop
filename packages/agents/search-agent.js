@@ -1,5 +1,5 @@
 /**
- * Search Agent
+ * Search Agent - A Thinking Agent
  * 
  * Handles informational queries by searching the web.
  * Can answer questions about weather, current events, facts, definitions, etc.
@@ -7,9 +7,15 @@
  * Uses webview-based search (hidden BrowserWindow) as primary method.
  * Falls back to DuckDuckGo API if webview unavailable.
  * Uses Omni Data Agent for context (location, preferences, etc.)
+ * 
+ * Thinking Agent features:
+ * - Remembers recent searches
+ * - Tracks preferred sources
+ * - Learns from search results quality
  */
 
 const { getCircuit } = require('./circuit-breaker');
+const { getAgentMemory } = require('../../lib/agent-memory-store');
 const omniData = require('./omni-data-agent');
 
 // Lazy-load webview search service (only available in main process)
@@ -102,9 +108,45 @@ const EXCLUDE_KEYWORDS = [
 const searchAgent = {
   id: 'search-agent',
   name: 'Search Agent',
-  description: 'Searches the web for information (weather, facts, current events, etc.)',
+  description: 'Searches the web for information - remembers your search history',
   categories: ['search', 'information', 'weather', 'knowledge'],
   keywords: SEARCH_KEYWORDS,
+  
+  // Memory instance
+  memory: null,
+  
+  /**
+   * Initialize memory
+   */
+  async initialize() {
+    if (!this.memory) {
+      this.memory = getAgentMemory('search-agent', { displayName: 'Search Agent' });
+      await this.memory.load();
+      this._ensureMemorySections();
+    }
+    return this.memory;
+  },
+  
+  /**
+   * Ensure required memory sections exist
+   */
+  _ensureMemorySections() {
+    const sections = this.memory.getSectionNames();
+    
+    if (!sections.includes('Learned Preferences')) {
+      this.memory.updateSection('Learned Preferences', `- Preferred Sources: Any
+- Detail Level: Concise
+- Include Sources: No`);
+    }
+    
+    if (!sections.includes('Recent Searches')) {
+      this.memory.updateSection('Recent Searches', `*Your recent searches will appear here*`);
+    }
+    
+    if (this.memory.isDirty()) {
+      this.memory.save();
+    }
+  },
   
   /**
    * Bid on a task
@@ -208,11 +250,25 @@ const searchAgent = {
    * @returns {Object} - { success, message }
    */
   async _executeInternal(task, context = {}) {
+    // Initialize memory
+    if (!this.memory) {
+      await this.initialize();
+    }
+    
     let query = task.content;
     const { onProgress = () => {} } = context;
     const action = task.data?.action || task.action;
     
     console.log(`[SearchAgent] Searching for: "${query}" (action: ${action || 'web_search'})`);
+    
+    // Track search in memory
+    try {
+      const timestamp = new Date().toISOString().split('T')[0];
+      this.memory.appendToSection('Recent Searches', `- ${timestamp}: "${query.slice(0, 50)}..."`, 20);
+      await this.memory.save();
+    } catch (e) {
+      // Non-fatal, continue with search
+    }
     
     try {
       // Step 0: Pull context from Omni Data Agent

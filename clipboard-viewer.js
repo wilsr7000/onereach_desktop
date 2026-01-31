@@ -475,13 +475,25 @@ function setupSpaceDragAndDrop() {
             try {
                 // Check for external file drop first
                 if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                    console.log('[Drag] External file drop detected:', e.dataTransfer.files.length, 'file(s)');
+                    const fileCount = e.dataTransfer.files.length;
+                    console.log('[Drag] External file drop detected:', fileCount, 'file(s)');
                     
                     const spaceName = spaceItem.querySelector('.space-name')?.textContent || 'space';
                     let successCount = 0;
                     
-                    for (const file of e.dataTransfer.files) {
+                    // Show progress for multiple files
+                    if (fileCount > 1) {
+                        showNotification(`Processing ${fileCount} files...`);
+                    }
+                    
+                    for (let i = 0; i < fileCount; i++) {
+                        const file = e.dataTransfer.files[i];
                         console.log('[Drag] Processing file:', file.name, file.type, file.size);
+                        
+                        // Update progress for large batches
+                        if (fileCount > 3 && (i + 1) % 3 === 0) {
+                            showNotification(`Processing file ${i + 1} of ${fileCount}...`);
+                        }
                         
                         try {
                             // Read file content - always as data URL to preserve binary data
@@ -8895,10 +8907,10 @@ async function bulkDeleteItems() {
     }
     
     try {
-        // Show loading state
+        // Show loading state with count
         const deleteBtn = document.getElementById('bulkDeleteBtn');
         const originalText = deleteBtn.innerHTML;
-        deleteBtn.innerHTML = '<span>⏳</span><span>Deleting...</span>';
+        deleteBtn.innerHTML = `<span>Deleting ${count} item${count > 1 ? 's' : ''}...</span>`;
         deleteBtn.disabled = true;
         
         // Convert Set to Array for API call
@@ -9017,11 +9029,13 @@ async function bulkMoveItems(targetSpaceId) {
     // Close the dropdown
     document.getElementById('bulkMoveDropdown').classList.remove('visible');
     
+    const count = selectedItems.size;
+    
     try {
-        // Show loading state on move button
+        // Show loading state on move button with count
         const moveBtn = document.getElementById('bulkMoveBtn');
         const originalText = moveBtn.innerHTML;
-        moveBtn.innerHTML = '<span>⏳</span><span>Moving...</span>';
+        moveBtn.innerHTML = `<span>Moving ${count} item${count > 1 ? 's' : ''}...</span>`;
         moveBtn.disabled = true;
         
         // Convert Set to Array for API call

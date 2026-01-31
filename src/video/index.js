@@ -4,6 +4,11 @@
  * @module src/video
  */
 
+// Budget tracking
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const { getBudgetManager } = require('../../budget-manager');
+
 // Core services
 import { VideoProcessor, formatDuration, formatTime, parseTime } from './core/VideoProcessor.js';
 import { ThumbnailService } from './core/ThumbnailService.js';
@@ -720,7 +725,34 @@ export class VideoEditor {
       req.end();
     });
 
-    return JSON.parse(response);
+    const parsedResponse = JSON.parse(response);
+    
+    // Track Whisper API usage for cost monitoring
+    // Whisper pricing: $0.006 per minute of audio
+    try {
+      const budgetManager = getBudgetManager();
+      const audioDurationMinutes = (parsedResponse.duration || 0) / 60;
+      
+      budgetManager.trackUsage({
+        provider: 'openai',
+        model: 'whisper-1',
+        inputTokens: 0,
+        outputTokens: 0,
+        feature: 'video-transcription',
+        operation: 'transcribe-audio',
+        projectId: null,
+        metadata: {
+          audioDurationSeconds: parsedResponse.duration || 0,
+          audioDurationMinutes: audioDurationMinutes,
+          costPerMinute: 0.006,
+          language: language
+        }
+      });
+    } catch (trackError) {
+      console.warn('[VideoEditor] Failed to track Whisper usage:', trackError.message);
+    }
+    
+    return parsedResponse;
   }
 
   // ==================== IPC SETUP ====================

@@ -1199,6 +1199,15 @@ proactive_suggestions: true
     const itemId = item.id || this.generateId();
     const itemDir = path.join(this.itemsDir, itemId);
     
+    // Sanitize file name if present (removes quotes and other invalid characters)
+    if (item.fileName) {
+      const originalFileName = item.fileName;
+      item.fileName = this.sanitizeFileName(item.fileName);
+      if (item.fileName !== originalFileName) {
+        console.log(`[Storage] Sanitized filename: "${originalFileName}" -> "${item.fileName}"`);
+      }
+    }
+    
     // Determine content path
     let contentPath;
     if (item.type === 'file' && item.fileName) {
@@ -1927,9 +1936,15 @@ proactive_suggestions: true
   createSpace(space) {
     const spaceId = space.id || this.generateId();
     
+    // Sanitize space name to be safe for GSX sync
+    const sanitizedName = this.sanitizeFileName(space.name);
+    if (sanitizedName !== space.name) {
+      console.log(`[Storage] Sanitized space name: "${space.name}" -> "${sanitizedName}"`);
+    }
+    
     const newSpace = {
       id: spaceId,
-      name: space.name,
+      name: sanitizedName,
       icon: space.icon || '◯',
       color: space.color || '#64c8ff',
       itemCount: 0,
@@ -2194,6 +2209,15 @@ proactive_suggestions: true
       return false;
     }
     
+    // Sanitize space name if being updated
+    if (updates.name) {
+      const sanitizedName = this.sanitizeFileName(updates.name);
+      if (sanitizedName !== updates.name) {
+        console.log(`[Storage] Sanitized space name: "${updates.name}" -> "${sanitizedName}"`);
+        updates.name = sanitizedName;
+      }
+    }
+    
     Object.assign(space, updates);
     
     // Update notebook if provided
@@ -2352,6 +2376,21 @@ proactive_suggestions: true
   // Helper methods
   generateId() {
     return crypto.randomBytes(16).toString('hex');
+  }
+  
+  /**
+   * Sanitize a filename to be safe for storage and GSX sync
+   * Removes characters that GSX and filesystems don't allow
+   */
+  sanitizeFileName(name) {
+    if (!name) return name;
+    return name
+      .replace(/['"]/g, '')           // Remove quotes (GSX doesn't allow them)
+      .replace(/[/\\:*?<>|]/g, '-')   // Replace invalid path characters
+      .replace(/\s+/g, ' ')           // Normalize spaces (keep single spaces for readability)
+      .replace(/-{2,}/g, '-')         // Replace multiple dashes with single
+      .replace(/^[-\s]+|[-\s]+$/g, '') // Remove leading/trailing dashes and spaces
+      .trim();
   }
   
   getExtension(type, content = null) {

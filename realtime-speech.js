@@ -10,6 +10,7 @@
 const WebSocket = require('ws');
 const { ipcMain } = require('electron');
 const { getSpeechQueue, PRIORITY } = require('./src/voice-task-sdk/audio/speechQueue');
+const { getBudgetManager } = require('./budget-manager');
 
 class RealtimeSpeech {
   constructor() {
@@ -31,6 +32,10 @@ class RealtimeSpeech {
     this.languageHistory = [];  // Last 3 detected languages
     this.currentResponseLanguage = 'en';  // Default to English
     this.languageConsistencyThreshold = 2;  // Need 2 consecutive same-language inputs to switch
+    
+    // Track sanctioned responses (ones we create) vs unwanted direct AI responses
+    this.sanctionedResponseIds = new Set();
+    this.pendingResponseCreate = false; // Flag when we're about to create a response
   }
 
   /**
@@ -248,7 +253,16 @@ class RealtimeSpeech {
             type: 'session.update',
             session: {
               modalities: ['text', 'audio'],
-              instructions: 'You are a voice assistant router. For EVERY user input, you MUST call the handle_user_request function. Never respond directly - always use the function. After receiving the function result, speak it exactly as provided.',
+              instructions: `You are a voice command router that MUST use tools for every input.
+
+CRITICAL RULES:
+1. ALWAYS call handle_user_request for EVERY user input - no exceptions
+2. NEVER respond directly to the user - only use functions
+3. NEVER say "I can't" or "I'm sorry" - the function will handle everything
+4. You can play music, control apps, set timers - the function handles it all
+5. After receiving function results, speak exactly what is returned
+
+Your ONLY job is to route requests to handle_user_request and speak the results.`,
               input_audio_format: 'pcm16',
               input_audio_transcription: {
                 model: 'whisper-1'
@@ -263,7 +277,7 @@ class RealtimeSpeech {
               tools: [{
                 type: 'function',
                 name: 'handle_user_request',
-                description: 'Process any user request, question, or command. This function MUST be called for every user input.',
+                description: 'REQUIRED: Process ALL user requests. This function handles everything - music playback, timers, questions, commands, and more. The system has full capability through this function. Always call this, never respond directly.',
                 parameters: {
                   type: 'object',
                   properties: {
@@ -385,16 +399,14 @@ class RealtimeSpeech {
           console.log('[RealtimeSpeech] Transcription:', finalText);
           
           
-          // Detect and track language for consistency checking
-          const detectedLang = this.detectLanguage(finalText);
-          const responseLang = this.updateLanguageHistory(detectedLang);
-          
+          // Language detection disabled - always use English to prevent confusion
+          // (Auto-switching was causing issues with misdetected languages)
           this.broadcast({ 
             type: 'transcript', 
             text: finalText, 
             isFinal: true,
-            detectedLanguage: detectedLang,
-            responseLanguage: responseLang
+            detectedLanguage: 'en',
+            responseLanguage: 'en'
           });
         }
         break;
@@ -423,8 +435,14 @@ class RealtimeSpeech {
 
       case 'response.audio.delta':
         // Audio chunk for TTS output - broadcast to renderer for playback
+        // Only forward audio from sanctioned responses (ones we created)
         if (event.delta) {
-          this.broadcast({ type: 'audio_delta', audio: event.delta, responseId: event.response_id });
+          if (this.sanctionedResponseIds.has(event.response_id)) {
+            this.broadcast({ type: 'audio_delta', audio: event.delta, responseId: event.response_id });
+          } else {
+            // Silently drop audio from unsanctioned responses
+            // This prevents the AI from speaking when it bypasses function calling
+          }
         }
         break;
 
@@ -462,11 +480,53 @@ class RealtimeSpeech {
       case 'response.created':
         this.hasActiveResponse = true;
         this.activeResponseId = event.response?.id;
+        
+        // Check if this is a sanctioned response (one we created)
+        if (this.pendingResponseCreate) {
+          // We created this response - mark it as sanctioned
+          this.sanctionedResponseIds.add(event.response?.id);
+          this.pendingResponseCreate = false;
+          console.log('[RealtimeSpeech] Sanctioned response created:', event.response?.id);
+        } else {
+          // Unsanctioned direct response from AI - cancel it immediately
+          console.warn('[RealtimeSpeech] Cancelling unsanctioned direct AI response:', event.response?.id);
+          this.sendEvent({ type: 'response.cancel' });
+        }
         break;
 
       case 'response.done':
         this.hasActiveResponse = false;
+        // Clean up sanctioned response tracking
+        if (event.response?.id) {
+          this.sanctionedResponseIds.delete(event.response.id);
+        }
         this.activeResponseId = null;
+        
+        // Track API usage for cost monitoring
+        if (event.response?.usage) {
+          try {
+            const usage = event.response.usage;
+            const budgetManager = getBudgetManager();
+            budgetManager.trackUsage({
+              provider: 'openai',
+              model: 'gpt-4o-realtime-preview',
+              inputTokens: usage.input_tokens || 0,
+              outputTokens: usage.output_tokens || 0,
+              feature: 'realtime-voice',
+              operation: 'voice-response',
+              projectId: null,
+              // Additional details for realtime API
+              metadata: {
+                totalTokens: usage.total_tokens,
+                inputDetails: usage.input_token_details,
+                outputDetails: usage.output_token_details
+              }
+            });
+            console.log(`[RealtimeSpeech] Tracked usage: ${usage.input_tokens} in, ${usage.output_tokens} out`);
+          } catch (trackError) {
+            console.warn('[RealtimeSpeech] Failed to track usage:', trackError.message);
+          }
+        }
         break;
       
       // FUNCTION CALLING: Handle our handle_user_request function
@@ -574,6 +634,9 @@ class RealtimeSpeech {
    * @private
    */
   async _doSpeak(text) {
+    // CRITICAL: Ensure orb window is subscribed for audio playback
+    this._ensureOrbSubscribed();
+    
     if (!this.isConnected) {
       console.log('[RealtimeSpeech] _doSpeak: Not connected, connecting first...');
       try {
@@ -596,30 +659,27 @@ class RealtimeSpeech {
     
     console.log('[RealtimeSpeech] Speaking:', text);
     
-    // Create an assistant message (not user) to avoid triggering function calls
-    const itemId = `speak_${Date.now()}`;
-    this.sendEvent({
-      type: 'conversation.item.create',
-      item: {
-        id: itemId,
-        type: 'message',
-        role: 'assistant',
-        content: [{ type: 'text', text: text }]
-      }
-    });
+    // Use response.create to speak the text directly
+    // ALWAYS use English - disable language auto-switching to prevent confusion
+    const langInstruction = 'You MUST respond in English only.';
     
-    // Use response.create to generate audio for this text
-    const langInstruction = this.currentResponseLanguage === 'en' 
-      ? 'Respond in English.'
-      : `Respond in ${this.getLanguageName(this.currentResponseLanguage)}.`;
+    // Reset language tracking to prevent drift
+    this.currentResponseLanguage = 'en';
     
+    // Mark this as a sanctioned response
+    this.pendingResponseCreate = true;
+    
+    // Create a response that will generate audio
     this.sendEvent({
       type: 'response.create',
       response: {
         modalities: ['audio', 'text'],
-        instructions: `${langInstruction} Say exactly: "${text}". Nothing else.`
+        instructions: `${langInstruction} Say ONLY this to the user: "${text}"`,
+        tool_choice: 'none'  // CRITICAL: Disable function calls so AI speaks directly
       }
     });
+    
+    console.log('[RealtimeSpeech] Sent response.create for text:', text.slice(0, 50));
     
     return true;
   }
@@ -644,7 +704,7 @@ class RealtimeSpeech {
       return false;
     }
     
-    console.log('[RealtimeSpeech] Responding to function call:', callId, 'with:', result);
+    console.log('[RealtimeSpeech] Responding to function call:', callId, 'with:', result?.slice?.(0, 50) || result);
     
     // ALWAYS create the function call output first (required by OpenAI)
     this.sendEvent({
@@ -652,9 +712,16 @@ class RealtimeSpeech {
       item: {
         type: 'function_call_output',
         call_id: callId,
-        output: JSON.stringify({ response: result })
+        output: JSON.stringify({ response: result || '' })
       }
     });
+    
+    // If result is empty, don't create a response - just acknowledge the function call
+    // This is used for async tasks where the actual response comes later via speak()
+    if (!result || result.trim() === '') {
+      console.log('[RealtimeSpeech] Empty result, skipping response.create (async task acknowledgment)');
+      return true;
+    }
     
     // If already speaking or something in queue, queue this response
     // This prevents "conversation_already_has_active_response" errors
@@ -668,6 +735,8 @@ class RealtimeSpeech {
     }
     
     // Otherwise, directly create the response (more immediate)
+    // Mark this as a sanctioned response
+    this.pendingResponseCreate = true;
     this.sendEvent({
       type: 'response.create',
       response: {
@@ -777,16 +846,62 @@ class RealtimeSpeech {
     this.subscribers.delete(webContentsId);
     console.log(`[RealtimeSpeech] Subscriber removed: ${webContentsId}, total: ${this.subscribers.size}`);
     
-    // Disconnect if no subscribers
+    // Disconnect if no subscribers AND no active/pending speech
     if (this.subscribers.size === 0) {
+      // Check if there's active speech or pending speech in queue
+      // Use this.speechQueue which is already loaded
+      const hasPendingSpeech = this.speechQueue && this.speechQueue.hasPendingOrActiveSpeech();
+      
+      if (this.hasActiveResponse || hasPendingSpeech) {
+        console.log('[RealtimeSpeech] Skipping disconnect - active/pending speech');
+        return;
+      }
+      
       this.disconnect();
+    }
+  }
+  
+  /**
+   * Ensure orb window is subscribed for audio playback
+   * Called before speaking to make sure audio will be received
+   */
+  _ensureOrbSubscribed() {
+    try {
+      const { BrowserWindow } = require('electron');
+      const windows = BrowserWindow.getAllWindows();
+      
+      const orbWindow = windows.find(w => {
+        try {
+          const url = w.webContents?.getURL() || '';
+          return url.includes('orb.html');
+        } catch { return false; }
+      });
+      
+      if (orbWindow && !orbWindow.isDestroyed()) {
+        const orbId = orbWindow.webContents.id;
+        
+        // Only subscribe if not already subscribed
+        if (!this.subscribers.has(orbId)) {
+          console.log(`[RealtimeSpeech] Auto-subscribing orb window (id: ${orbId})`);
+          
+          this.subscribe(orbId, (speechEvent) => {
+            if (!orbWindow.isDestroyed()) {
+              orbWindow.webContents.send('realtime-speech:event', speechEvent);
+            }
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('[RealtimeSpeech] Error ensuring orb subscribed:', err.message);
     }
   }
 
   /**
    * Broadcast event to all subscribers
+   * Also sends directly to orb window for audio events if no subscribers
    */
   broadcast(event) {
+    // Send to all registered subscribers
     this.subscribers.forEach((callback, id) => {
       try {
         callback(event);
@@ -794,6 +909,30 @@ class RealtimeSpeech {
         console.error(`[RealtimeSpeech] Error broadcasting to ${id}:`, err);
       }
     });
+    
+    // CRITICAL FIX: For audio events, send directly to orb window if no subscribers
+    // This handles the case where exchange-bridge speaks but orb has disconnected
+    if (this.subscribers.size === 0 && (event.type === 'audio_delta' || event.type === 'audio_done' || event.type === 'clear_audio_buffer')) {
+      try {
+        const { BrowserWindow } = require('electron');
+        const windows = BrowserWindow.getAllWindows();
+        
+        console.log(`[RealtimeSpeech] No subscribers, sending ${event.type} to all ${windows.length} windows`);
+        
+        // Send to ALL windows - let them filter
+        for (const win of windows) {
+          try {
+            if (!win.isDestroyed() && win.webContents) {
+              win.webContents.send('realtime-speech:event', event);
+            }
+          } catch (e) {
+            // Ignore individual window errors
+          }
+        }
+      } catch (err) {
+        console.error('[RealtimeSpeech] Error sending to windows:', err.message);
+      }
+    }
   }
 
   /**
@@ -811,6 +950,10 @@ class RealtimeSpeech {
     
     // Reset language tracking on disconnect
     this.resetLanguageTracking();
+    
+    // Clear sanctioned response tracking
+    this.sanctionedResponseIds.clear();
+    this.pendingResponseCreate = false;
   }
 
   /**

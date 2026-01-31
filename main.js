@@ -43,10 +43,8 @@ let introWizardWindow = null;
 
 // Enable Speech Recognition API in Electron
 // These must be set before app.whenReady()
-if (app && app.commandLine) {
-  app.commandLine.appendSwitch('enable-speech-dispatcher');
-  app.commandLine.appendSwitch('enable-experimental-web-platform-features');
-}
+app.commandLine.appendSwitch('enable-speech-dispatcher');
+app.commandLine.appendSwitch('enable-experimental-web-platform-features');
 
 // Global Aider Bridge instance (main/shared)
 let aiderBridge = null;
@@ -834,45 +832,6 @@ app.whenReady().then(() => {
       console.error('[debug:log] failed to write', err?.message || err);
     }
   });
-
-  // ========================================
-  // Webview Native Drag Handler
-  // Enables outbound drag from webview content to desktop/external apps
-  // ========================================
-  ipcMain.on('webview-start-native-drag', (event, { filePath, iconPath }) => {
-    try {
-      const fs = require('fs');
-      const { nativeImage } = require('electron');
-      
-      // Validate file exists
-      if (!filePath || !fs.existsSync(filePath)) {
-        console.error('[Webview Drag] File not found:', filePath);
-        return;
-      }
-      
-      // Create icon for drag operation
-      let icon;
-      if (iconPath && fs.existsSync(iconPath)) {
-        icon = nativeImage.createFromPath(iconPath);
-      } else {
-        // Use a default drag icon
-        const defaultIconPath = path.join(__dirname, 'assets', 'drag-icon.png');
-        if (fs.existsSync(defaultIconPath)) {
-          icon = nativeImage.createFromPath(defaultIconPath);
-        }
-      }
-      
-      console.log('[Webview Drag] Starting native drag for:', filePath);
-      
-      // Start native drag operation
-      event.sender.startDrag({
-        file: filePath,
-        icon: icon || undefined
-      });
-    } catch (err) {
-      console.error('[Webview Drag] Error starting drag:', err);
-    }
-  });
   
   // Initialize AI log analyzer
   const getLogAIAnalyzer = require('./log-ai-analyzer');
@@ -1293,6 +1252,19 @@ app.whenReady().then(() => {
 app.on('before-quit', async (event) => {
   console.log('[App] before-quit event - coordinating shutdown');
   
+  // Save browser tab state before quitting
+  try {
+    const mainWindow = browserWindow.getMainWindow();
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+      console.log('[App] Sending save-tabs-state to main window');
+      mainWindow.webContents.send('save-tabs-state');
+      // Give renderer a moment to save
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  } catch (error) {
+    console.error('[App] Error saving tab state:', error);
+  }
+  
   // Save voice orb position before quitting
   if (typeof saveOrbPosition === 'function') {
     try {
@@ -1309,6 +1281,17 @@ app.on('before-quit', async (event) => {
     } catch (error) {
       console.error('[App] Error stopping built-in agents:', error);
     }
+  }
+  
+  // Stop app manager agent (background scanner)
+  try {
+    if (global.appManagerAgent) {
+      console.log('[App] Stopping app manager agent...');
+      global.appManagerAgent.stop();
+      global.appManagerAgent = null;
+    }
+  } catch (error) {
+    console.error('[App] Error stopping app manager agent:', error);
   }
   
   // Shutdown exchange bridge
@@ -1428,18 +1411,6 @@ app.on('will-quit', (event) => {
     console.log(`[App] Unregistered ${registeredShortcuts.length} shortcuts`);
   }
   
-  // Cleanup webview search service
-  try {
-    const webviewSearch = require('./packages/agents/webview-search-service');
-    webviewSearch.destroy();
-    console.log('[App] Webview search service destroyed');
-  } catch (error) {
-    // Service may not be loaded yet, that's fine
-    if (!error.message.includes('Cannot find module')) {
-      console.error('[App] Error destroying webview search:', error);
-    }
-  }
-  
   // Final log flush
   if (logger && logger.flush) {
     try {
@@ -1492,51 +1463,6 @@ function setupSpacesAPI() {
       });
     } catch (error) {
       console.error('[SpacesAPI] Broadcast error:', error);
-    }
-  });
-  
-  // ---- WEBVIEW SEARCH SERVICE ----
-  
-  // Lazy-load the webview search service to avoid circular dependencies
-  let webviewSearchService = null;
-  
-  function getWebviewSearchService() {
-    if (!webviewSearchService) {
-      try {
-        webviewSearchService = require('./packages/agents/webview-search-service');
-      } catch (e) {
-        console.error('[WebviewSearch] Failed to load service:', e.message);
-      }
-    }
-    return webviewSearchService;
-  }
-  
-  // Handle web search requests from renderer processes
-  ipcMain.handle('search:web-query', async (event, query) => {
-    try {
-      const service = getWebviewSearchService();
-      if (!service) {
-        return { success: false, results: [], error: 'Search service not available' };
-      }
-      
-      const results = await service.search(query);
-      return { success: true, results };
-    } catch (error) {
-      console.error('[WebviewSearch] Search error:', error.message);
-      return { success: false, results: [], error: error.message };
-    }
-  });
-  
-  // Clear search cache
-  ipcMain.handle('search:clear-cache', async () => {
-    try {
-      const service = getWebviewSearchService();
-      if (service) {
-        service.clearCache();
-      }
-      return { success: true };
-    } catch (error) {
-      return { success: false, error: error.message };
     }
   });
   
@@ -2113,6 +2039,411 @@ function setupSpacesAPI() {
   });
   
   console.log('[SpacesAPI] ✅ All IPC handlers registered (including tags and smart folders)');
+  
+  // ---- MULTI-TENANT TOKEN IPC HANDLERS ----
+  const { session } = require('electron');
+  const multiTenantStore = require('./multi-tenant-store');
+  
+  // Get multi-tenant token for environment (returns metadata only, NOT the value)
+  ipcMain.handle('multi-tenant:get-token', async (event, environment) => {
+    const token = multiTenantStore.getToken(environment);
+    if (!token) return null;
+    
+    // Return metadata only, NOT the value (security)
+    return {
+      environment,
+      domain: token.domain,
+      expiresAt: token.expiresAt,
+      capturedAt: token.capturedAt,
+      isValid: multiTenantStore.hasValidToken(environment)
+    };
+  });
+  
+  // Check if multi-tenant token exists AND is not expired
+  ipcMain.handle('multi-tenant:has-token', async (event, environment) => {
+    return multiTenantStore.hasValidToken(environment);
+  });
+  
+  // Inject token into a specific partition
+  ipcMain.handle('multi-tenant:inject-token', async (event, { environment, partition }) => {
+    // SECURITY: Validate partition format
+    const validTabPattern = /^persist:tab-\d+-[a-z0-9]+$/;
+    const validGsxPattern = /^persist:gsx-(edison|staging|production|dev)$/;
+    
+    if (!validTabPattern.test(partition) && !validGsxPattern.test(partition)) {
+      console.warn(`[MultiTenant] Rejected invalid partition: ${partition}`);
+      return { success: false, error: 'Invalid partition format' };
+    }
+    
+    // SECURITY: For GSX partitions, verify environment matches
+    if (partition.startsWith('persist:gsx-')) {
+      const expectedPartition = `persist:gsx-${environment}`;
+      if (partition !== expectedPartition) {
+        console.warn(`[MultiTenant] Environment mismatch: ${environment} vs ${partition}`);
+        return { success: false, error: 'Environment/partition mismatch' };
+      }
+    }
+    
+    const token = multiTenantStore.getToken(environment);
+    
+    // Validate token exists
+    if (!token) {
+      return { success: false, error: 'No token available' };
+    }
+    
+    // Check expiration
+    if (token.expiresAt && token.expiresAt * 1000 < Date.now()) {
+      console.log(`[MultiTenant] Token for ${environment} expired, clearing`);
+      multiTenantStore.clearToken(environment);
+      return { success: false, error: 'Token expired' };
+    }
+    
+    // Validate token value
+    if (!token.value || token.value.length < 10) {
+      return { success: false, error: 'Invalid token value' };
+    }
+    
+    try {
+      const ses = session.fromPartition(partition);
+      // Use broader domain to cover all subdomains (auth, idw, chat, api)
+      const broaderDomain = multiTenantStore.getBroaderDomain(environment);
+      
+      // Log token details for debugging
+      console.log(`[MultiTenant] Token details for ${environment}:`, {
+        hasValue: !!token.value,
+        valueLength: token.value?.length,
+        originalDomain: token.domain,
+        targetDomain: broaderDomain,
+        expiresAt: token.expiresAt,
+        expiresDate: token.expiresAt ? new Date(token.expiresAt * 1000).toISOString() : 'none',
+        isExpired: token.expiresAt ? (token.expiresAt * 1000 < Date.now()) : false
+      });
+      
+      // CRITICAL: Set cookie on BROADER domain first so it's sent to all subdomains
+      // The original domain (e.g., .edison.api.onereach.ai) is too narrow -
+      // it won't be sent to auth.edison.onereach.ai or idw.edison.onereach.ai
+      
+      // First, set the BROADER domain cookie (this is the one auth server will see)
+      await ses.cookies.set({
+        url: `https://auth${broaderDomain}`,  // e.g., https://auth.edison.onereach.ai
+        name: 'mult',
+        value: token.value,
+        domain: broaderDomain,               // e.g., .edison.onereach.ai (covers ALL subdomains)
+        path: '/',
+        secure: true,
+        httpOnly: true,
+        sameSite: 'no_restriction',          // Allow cross-site requests (needed for SSO)
+        expirationDate: token.expiresAt
+      });
+      
+      console.log(`[MultiTenant] Injected ${environment} mult token with BROADER domain ${broaderDomain}`);
+      
+      // Verify the broader domain cookie was set
+      const broadCookies = await ses.cookies.get({ name: 'mult', domain: broaderDomain });
+      console.log(`[MultiTenant] Broader domain cookies:`, broadCookies.map(c => ({
+        domain: c.domain,
+        path: c.path
+      })));
+      
+      // Also set on original domain for API calls (if different)
+      const originalDomain = token.domain;
+      if (originalDomain && originalDomain !== broaderDomain) {
+        try {
+          await ses.cookies.set({
+            url: `https://${originalDomain.replace(/^\./, '')}`,
+            name: 'mult',
+            value: token.value,
+            domain: originalDomain,
+            path: token.path || '/',
+            secure: token.secure !== false,
+            httpOnly: token.httpOnly !== false,
+            sameSite: 'no_restriction',
+            expirationDate: token.expiresAt
+          });
+          console.log(`[MultiTenant] Also set original domain cookie: ${originalDomain}`);
+        } catch (e) {
+          console.log(`[MultiTenant] Could not set original domain cookie: ${e.message}`);
+        }
+      }
+      
+      // Final verification - show ALL mult cookies in this session with full details
+      const allCookies = await ses.cookies.get({ name: 'mult' });
+      console.log(`[MultiTenant] ALL mult cookies in ${partition}:`, allCookies.map(c => ({
+        domain: c.domain,
+        path: c.path,
+        secure: c.secure,
+        httpOnly: c.httpOnly,
+        sameSite: c.sameSite,
+        expirationDate: c.expirationDate ? new Date(c.expirationDate * 1000).toISOString() : 'session'
+      })));
+      
+      // CRITICAL: Flush cookie store to ensure cookies are persisted before navigation
+      // Without this, the first request may not include the cookie due to timing
+      await ses.cookies.flushStore();
+      
+      // Post-flush verification - confirm cookies are still present
+      const postFlushCookies = await ses.cookies.get({ name: 'mult' });
+      console.log(`[MultiTenant] Cookie store flushed. ${postFlushCookies.length} mult cookies confirmed in ${partition}`);
+      
+      // NOTE: We intentionally do NOT inject the 'or' token here.
+      // The 'or' cookie is ACCOUNT-SPECIFIC - it only works for the account it was created for.
+      // If we inject an 'or' token for Account A into a tab loading Account B, it will fail.
+      // Each tab should establish its own 'or' session when authenticating.
+      // The 'mult' cookie alone enables SSO (skip password, just confirm account).
+      
+      return { success: true };
+    } catch (err) {
+      console.error(`[MultiTenant] Failed to inject token:`, err.message);
+      return { success: false, error: err.message };
+    }
+  });
+  
+  // Attach cookie listener to a partition
+  ipcMain.handle('multi-tenant:attach-listener', async (event, { partition }) => {
+    multiTenantStore.attachCookieListener(partition);
+    return { success: true };
+  });
+  
+  // Remove cookie listener (for tab partitions only)
+  ipcMain.handle('multi-tenant:remove-listener', async (event, { partition }) => {
+    multiTenantStore.removeCookieListener(partition);
+    return { success: true };
+  });
+  
+  // Diagnostic: Get cookies from a partition (for SSO debugging)
+  ipcMain.handle('multi-tenant:get-cookies', async (event, { partition, name, domain }) => {
+    try {
+      const ses = session.fromPartition(partition);
+      const filter = {};
+      if (name) filter.name = name;
+      if (domain) filter.domain = domain;
+      const cookies = await ses.cookies.get(filter);
+      return cookies;
+    } catch (err) {
+      console.error(`[MultiTenant] Failed to get cookies:`, err.message);
+      return [];
+    }
+  });
+  
+  // Register partition for refresh propagation
+  ipcMain.handle('multi-tenant:register-partition', async (event, { environment, partition }) => {
+    multiTenantStore.registerPartition(environment, partition);
+    return { success: true };
+  });
+  
+  // Unregister partition when tab closes
+  ipcMain.handle('multi-tenant:unregister-partition', async (event, { environment, partition }) => {
+    multiTenantStore.unregisterPartition(environment, partition);
+    return { success: true };
+  });
+  
+  // Get all environments with valid tokens (for debugging/UI)
+  ipcMain.handle('multi-tenant:get-environments', async () => {
+    return multiTenantStore.getEnvironmentsWithTokens();
+  });
+  
+  // Get user data for localStorage injection (enables SSO) - async version
+  ipcMain.handle('multi-tenant:get-user-data', async (event, environment) => {
+    const userData = multiTenantStore.getOrTokenUserData(environment);
+    return userData;
+  });
+  
+  // Get user data SYNCHRONOUSLY for preload scripts (critical for SSO timing)
+  ipcMain.on('multi-tenant:get-user-data-sync', (event, environment) => {
+    const userData = multiTenantStore.getOrTokenUserData(environment);
+    event.returnValue = userData;
+  });
+  
+  console.log('[MultiTenant] ✅ All IPC handlers registered');
+  
+  // ---- ONEREACH AUTO-LOGIN IPC HANDLERS ----
+  const credentialManager = require('./credential-manager');
+  const { getTOTPManager } = require('./lib/totp-manager');
+  const { getQRScanner } = require('./lib/qr-scanner');
+  
+  // Get OneReach credentials
+  ipcMain.handle('onereach:get-credentials', async () => {
+    try {
+      const creds = await credentialManager.getOneReachCredentials();
+      console.log('[OneReach] Get credentials result:', creds ? { email: creds.email, has2FA: creds.has2FA } : null);
+      return creds;
+    } catch (error) {
+      console.error('[OneReach] Failed to get credentials:', error);
+      return null;
+    }
+  });
+  
+  // Save OneReach credentials
+  ipcMain.handle('onereach:save-credentials', async (event, { email, password }) => {
+    try {
+      console.log('[OneReach] Saving credentials for:', email);
+      const success = await credentialManager.saveOneReachCredentials(email, password);
+      console.log('[OneReach] Credentials save result:', success);
+      return { success };
+    } catch (error) {
+      console.error('[OneReach] Failed to save credentials:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Delete OneReach credentials
+  ipcMain.handle('onereach:delete-credentials', async () => {
+    try {
+      const success = await credentialManager.deleteOneReachCredentials();
+      return { success };
+    } catch (error) {
+      console.error('[OneReach] Failed to delete credentials:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Save TOTP secret
+  ipcMain.handle('onereach:save-totp', async (event, { secret }) => {
+    try {
+      const totpManager = getTOTPManager();
+      
+      // Validate the secret by trying to generate a code
+      if (!totpManager.isValidSecret(secret)) {
+        return { success: false, error: 'Invalid TOTP secret' };
+      }
+      
+      const success = await credentialManager.saveTOTPSecret(secret);
+      return { success };
+    } catch (error) {
+      console.error('[OneReach] Failed to save TOTP:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Delete TOTP secret
+  ipcMain.handle('onereach:delete-totp', async () => {
+    try {
+      const success = await credentialManager.deleteTOTPSecret();
+      return { success };
+    } catch (error) {
+      console.error('[OneReach] Failed to delete TOTP:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Scan QR code from screen
+  ipcMain.handle('totp:scan-qr-screen', async () => {
+    try {
+      const qrScanner = getQRScanner();
+      const totpManager = getTOTPManager();
+      
+      const qrData = await qrScanner.scanFromScreen();
+      
+      if (!qrData) {
+        return { success: false, error: 'No QR code found' };
+      }
+      
+      if (!qrScanner.isOTPAuthURI(qrData)) {
+        return { success: false, error: 'QR code is not an authenticator setup code' };
+      }
+      
+      const parsed = totpManager.parseOTPAuthURI(qrData);
+      
+      return {
+        success: true,
+        secret: parsed.secret,
+        issuer: parsed.issuer,
+        account: parsed.account
+      };
+    } catch (error) {
+      console.error('[TOTP] QR scan error:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Get current TOTP code
+  ipcMain.handle('totp:get-current-code', async () => {
+    try {
+      const totpSecret = await credentialManager.getTOTPSecret();
+      
+      if (!totpSecret) {
+        return { success: false, error: 'No TOTP secret configured' };
+      }
+      
+      const totpManager = getTOTPManager();
+      const codeInfo = totpManager.getCurrentCodeInfo(totpSecret);
+      
+      return {
+        success: true,
+        code: codeInfo.code,
+        formattedCode: codeInfo.formattedCode,
+        timeRemaining: codeInfo.timeRemaining
+      };
+    } catch (error) {
+      console.error('[TOTP] Failed to get code:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Test login (opens a test window)
+  ipcMain.handle('onereach:test-login', async () => {
+    try {
+      // Open a test IDW window
+      const testUrl = 'https://idw.edison.onereach.ai/';
+      const { openGSXWindow } = require('./browserWindow');
+      openGSXWindow(testUrl);
+      return { success: true };
+    } catch (error) {
+      console.error('[OneReach] Test login error:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Execute JavaScript in webview iframe (for cross-origin auth frames)
+  ipcMain.handle('onereach:execute-in-frame', async (event, { webContentsId, urlPattern, script }) => {
+    try {
+      const { webContents, webFrameMain } = require('electron');
+      
+      // Get the webContents by ID
+      const wc = webContents.fromId(webContentsId);
+      if (!wc) {
+        console.error('[OneReach] WebContents not found:', webContentsId);
+        return { success: false, error: 'WebContents not found' };
+      }
+      
+      console.log(`[OneReach] Looking for frame matching: ${urlPattern}`);
+      
+      // Get all frames in the webContents
+      const mainFrame = wc.mainFrame;
+      const allFrames = [mainFrame, ...mainFrame.framesInSubtree];
+      
+      console.log(`[OneReach] Found ${allFrames.length} frames total`);
+      
+      // Find frame matching the URL pattern
+      let targetFrame = null;
+      for (const frame of allFrames) {
+        const frameUrl = frame.url;
+        console.log(`[OneReach] Frame: ${frameUrl}`);
+        if (frameUrl && frameUrl.includes(urlPattern)) {
+          targetFrame = frame;
+          console.log(`[OneReach] Found matching frame: ${frameUrl}`);
+          break;
+        }
+      }
+      
+      if (!targetFrame) {
+        console.log('[OneReach] No matching frame found');
+        return { success: false, error: 'No matching frame found' };
+      }
+      
+      // Execute script in the frame
+      console.log('[OneReach] Executing script in frame...');
+      const result = await targetFrame.executeJavaScript(script);
+      console.log('[OneReach] Script execution result:', result);
+      
+      return { success: true, result };
+    } catch (error) {
+      console.error('[OneReach] Execute in frame error:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  console.log('[OneReach] ✅ Auto-login IPC handlers registered');
   
   // ---- CONVERSATION CAPTURE IPC HANDLERS ----
   
@@ -3931,6 +4262,32 @@ function setupAiderIPC() {
                 
                 if (response.data && response.data[0]) {
                   console.log(`[Design] Successfully generated image for ${approach.id}`);
+                  
+                  // Track DALL-E usage for cost monitoring
+                  // DALL-E 3 1024x1024 standard = $0.04 per image
+                  try {
+                    if (budgetManager) {
+                      budgetManager.trackUsage({
+                        provider: 'openai',
+                        model: 'dall-e-3',
+                        inputTokens: 0,
+                        outputTokens: 0,
+                        feature: 'design-generation',
+                        operation: 'generate-image',
+                        projectId: null,
+                        // DALL-E pricing is per-image, not per-token
+                        metadata: {
+                          imageCount: 1,
+                          size: '1024x1024',
+                          quality: 'standard',
+                          costPerImage: 0.04
+                        }
+                      });
+                    }
+                  } catch (trackError) {
+                    console.warn('[Design] Failed to track usage:', trackError.message);
+                  }
+                  
                   resolve({
                     id: approach.id,
                     name: approach.name,
@@ -4069,6 +4426,29 @@ function setupAiderIPC() {
                 return;
               }
               if (response.data && response.data[0]) {
+                // Track DALL-E usage for cost monitoring
+                try {
+                  if (budgetManager) {
+                    budgetManager.trackUsage({
+                      provider: 'openai',
+                      model: 'dall-e-3',
+                      inputTokens: 0,
+                      outputTokens: 0,
+                      feature: 'design-generation',
+                      operation: 'regenerate-image',
+                      projectId: null,
+                      metadata: {
+                        imageCount: 1,
+                        size: '1024x1024',
+                        quality: 'standard',
+                        costPerImage: 0.04
+                      }
+                    });
+                  }
+                } catch (trackError) {
+                  console.warn('[Design] Failed to track usage:', trackError.message);
+                }
+                
                 resolve({
                   id: approach.id,
                   name: approach.name,
@@ -8012,13 +8392,9 @@ function setupIPC() {
     }
     
     // Handle other custom actions here
-    if (data.action === 'open-idw-url' && data.url) {
-      console.log(`Opening IDW URL: ${data.url}`);
-      const mainWindow = BrowserWindow.getAllWindows()[0];
-      if (mainWindow) {
-        mainWindow.loadURL(data.url);
-      }
-    } else if (data.action === 'open-external-bot' && data.url) {
+    // NOTE: 'open-idw-url' is handled below at line ~8171 - DO NOT add a duplicate handler here
+    // The previous handler here used mainWindow.loadURL() which broke the tabbed browser
+    if (data.action === 'open-external-bot' && data.url) {
       // Handle external bot opening in separate windows
       openExternalAIWindow(data.url, data.label || 'External AI', {
         width: 1400,
@@ -14461,92 +14837,31 @@ function setupOrbIPC() {
     return global.agentCreationMode === true && claudeCodeWindow && !claudeCodeWindow.isDestroyed();
   });
   
-  // Store original bounds before expanding for text chat
-  let orbOriginalBounds = null;
-  
   // Resize orb window for text chat
-  ipcMain.handle('orb:expand-for-chat', (event, anchor = 'bottom-right') => {
+  ipcMain.handle('orb:expand-for-chat', () => {
     if (orbWindow && !orbWindow.isDestroyed()) {
       const currentBounds = orbWindow.getBounds();
-      
-      // Store original bounds so we can restore exactly on collapse
-      orbOriginalBounds = { ...currentBounds };
-      
       const newWidth = 380;
       const newHeight = 520;
-      
-      // Get screen bounds to ensure window stays visible
-      const display = screen.getDisplayMatching(currentBounds);
-      const workArea = display.workArea;
-      const MIN_MARGIN = 10;
-      
-      let newX, newY;
-      
-      // Calculate position based on anchor (where the orb should stay)
-      switch (anchor) {
-        case 'bottom-left':
-          // Keep bottom-left corner anchored, expand up and right
-          newX = currentBounds.x;
-          newY = currentBounds.y + currentBounds.height - newHeight;
-          break;
-        case 'top-right':
-          // Keep top-right corner anchored, expand down and left
-          newX = currentBounds.x + currentBounds.width - newWidth;
-          newY = currentBounds.y;
-          break;
-        case 'top-left':
-          // Keep top-left corner anchored, expand down and right
-          newX = currentBounds.x;
-          newY = currentBounds.y;
-          break;
-        case 'bottom-right':
-        default:
-          // Keep bottom-right corner anchored, expand up and left
-          newX = currentBounds.x + currentBounds.width - newWidth;
-          newY = currentBounds.y + currentBounds.height - newHeight;
-          break;
-      }
-      
-      // Ensure window stays on screen
-      if (newY < workArea.y + MIN_MARGIN) {
-        newY = workArea.y + MIN_MARGIN;
-      }
-      if (newX < workArea.x + MIN_MARGIN) {
-        newX = workArea.x + MIN_MARGIN;
-      }
-      if (newX + newWidth > workArea.x + workArea.width - MIN_MARGIN) {
-        newX = workArea.x + workArea.width - newWidth - MIN_MARGIN;
-      }
-      if (newY + newHeight > workArea.y + workArea.height - MIN_MARGIN) {
-        newY = workArea.y + workArea.height - newHeight - MIN_MARGIN;
-      }
-      
+      // Keep bottom-right corner anchored
+      const newX = currentBounds.x + currentBounds.width - newWidth;
+      const newY = currentBounds.y + currentBounds.height - newHeight;
       orbWindow.setBounds({ x: newX, y: newY, width: newWidth, height: newHeight }, true);
-      console.log('[VoiceOrb] Expanded for text chat:', newWidth, 'x', newHeight, 'at', newX, newY, 'anchor:', anchor);
+      console.log('[VoiceOrb] Expanded for text chat:', newWidth, 'x', newHeight);
       return { width: newWidth, height: newHeight };
     }
   });
   
   ipcMain.handle('orb:collapse-from-chat', () => {
     if (orbWindow && !orbWindow.isDestroyed()) {
-      // Restore to original bounds if we have them
-      if (orbOriginalBounds) {
-        const bounds = orbOriginalBounds;
-        orbOriginalBounds = null;
-        orbWindow.setBounds(bounds, true);
-        console.log('[VoiceOrb] Collapsed to original position:', bounds.x, bounds.y);
-        return { width: bounds.width, height: bounds.height };
-      }
-      
-      // Fallback: resize to compact size (matches createOrbWindow default)
       const currentBounds = orbWindow.getBounds();
-      const newWidth = 360;
-      const newHeight = 280;
+      const newWidth = 350;
+      const newHeight = 250;
+      // Keep bottom-right corner anchored
       const newX = currentBounds.x + currentBounds.width - newWidth;
       const newY = currentBounds.y + currentBounds.height - newHeight;
-      
       orbWindow.setBounds({ x: newX, y: newY, width: newWidth, height: newHeight }, true);
-      console.log('[VoiceOrb] Collapsed from text chat (fallback)');
+      console.log('[VoiceOrb] Collapsed from text chat');
       return { width: newWidth, height: newHeight };
     }
   });
@@ -14566,12 +14881,9 @@ function createOrbWindow() {
   const display = screen.getPrimaryDisplay();
   const { width: screenWidth, height: screenHeight } = display.workAreaSize;
   
-  // Window dimensions - compact size for just orb + transcript tooltip
-  // Orb is 80x80, positioned with 20px margin from edge
-  // Transcript tooltip needs ~200px above/below for text
-  // Total: 120x120 is minimum, but we need room for transcript
-  const windowWidth = 360;  // Width for transcript tooltip (max 320px + margins)
-  const windowHeight = 280; // Height for orb (120px) + transcript space (160px)
+  // Window dimensions - large enough for text chat panel above orb
+  const windowWidth = 400;
+  const windowHeight = 550;
   
   // Try to restore saved position, otherwise default to bottom-right
   let x, y;
@@ -14608,16 +14920,13 @@ function createOrbWindow() {
   if (savedPosition && typeof savedPosition.x === 'number' && typeof savedPosition.y === 'number' && !windowSizeChanged) {
     // Validate position is still on screen
     // The orb is at bottom-right of window (right: 20px, bottom: 20px, size: 80x80)
-    // Window size: 360x280
-    // Orb's left edge is at windowX + (360 - 20 - 80) = windowX + 260
-    // Orb's right edge is at windowX + (360 - 20) = windowX + 340
-    // Orb's top edge is at windowY + (280 - 20 - 80) = windowY + 180
-    // Orb's bottom edge is at windowY + (280 - 20) = windowY + 260
+    // Orb's left edge is at windowX + 250, right edge at windowX + 330
+    // Orb's top edge is at windowY + 150, bottom edge at windowY + 230
     // Allow negative window positions as long as the orb itself is visible
-    const orbLeftEdge = savedPosition.x + 260;
-    const orbRightEdge = savedPosition.x + 340;
-    const orbTopEdge = savedPosition.y + 180;
-    const orbBottomEdge = savedPosition.y + 260;
+    const orbLeftEdge = savedPosition.x + 250;
+    const orbRightEdge = savedPosition.x + 330;
+    const orbTopEdge = savedPosition.y + 150;
+    const orbBottomEdge = savedPosition.y + 230;
     
     const orbVisible = orbRightEdge > 50 && orbLeftEdge < screenWidth - 50 &&
                        orbBottomEdge > 50 && orbTopEdge < screenHeight - 50;
@@ -14678,22 +14987,6 @@ function createOrbWindow() {
   
   // Load the orb UI
   orbWindow.loadFile(path.join(__dirname, 'orb.html'));
-  
-  // Wire up global.speakFeedback when orb window is ready
-  orbWindow.webContents.on('did-finish-load', () => {
-    // Wire up global.speakFeedback to realtime speech
-    const { getRealtimeSpeech } = require('./realtime-speech');
-    global.speakFeedback = async (text) => {
-      try {
-        console.log('[VoiceOrb] speakFeedback:', text);
-        const speech = getRealtimeSpeech();
-        await speech.speak(text);
-      } catch (error) {
-        console.error('[VoiceOrb] speakFeedback error:', error);
-      }
-    };
-    console.log('[VoiceOrb] global.speakFeedback wired up');
-  });
   
   // Save position before closing
   orbWindow.on('close', () => {
@@ -15302,29 +15595,6 @@ function setupAgentManagerIPC() {
     return store.compareVersions(agentId, versionA, versionB);
   });
   
-  // ==================== BUILTIN AGENTS ====================
-  
-  // Get enabled states for all builtin agents
-  ipcMain.handle('agents:get-builtin-states', async () => {
-    // Use settings manager to persist builtin agent states
-    if (global.settingsManager) {
-      return global.settingsManager.get('builtinAgentStates') || {};
-    }
-    return {};
-  });
-  
-  // Set enabled state for a builtin agent
-  ipcMain.handle('agents:set-builtin-enabled', async (event, agentId, enabled) => {
-    if (global.settingsManager) {
-      const states = global.settingsManager.get('builtinAgentStates') || {};
-      states[agentId] = enabled;
-      global.settingsManager.set('builtinAgentStates', states);
-      console.log(`[AgentManager] Builtin agent ${agentId} ${enabled ? 'enabled' : 'disabled'}`);
-      return true;
-    }
-    return false;
-  });
-  
   // ==================== GSX CONNECTIONS ====================
   
   // Get GSX connections
@@ -15352,6 +15622,217 @@ function setupAgentManagerIPC() {
     return store.deleteGSXConnection(id);
   });
   
+  // ==================== BUILTIN AGENTS ====================
+  
+  // Get enabled states for all builtin agents
+  ipcMain.handle('agents:get-builtin-states', async () => {
+    if (global.settingsManager) {
+      return global.settingsManager.get('builtinAgentStates') || {};
+    }
+    return {};
+  });
+  
+  // Set enabled state for a builtin agent
+  ipcMain.handle('agents:set-builtin-enabled', async (event, agentId, enabled) => {
+    if (global.settingsManager) {
+      const states = global.settingsManager.get('builtinAgentStates') || {};
+      states[agentId] = enabled;
+      global.settingsManager.set('builtinAgentStates', states);
+      return true;
+    }
+    return false;
+  });
+  
+  // ==================== AGENT TESTING ====================
+  
+  // Test a single agent with a phrase
+  ipcMain.handle('agents:test-phrase', async (event, agentId, phrase) => {
+    try {
+      const { evaluateAgentBid } = require('./packages/agents/unified-bidder');
+      const store = getAgentStore();
+      await store.init();
+      
+      // Get the agent
+      let agent = store.getAgent(agentId);
+      
+      // If not a custom agent, check builtin agents
+      if (!agent) {
+        const builtinAgents = {
+          'time-agent': { id: 'time-agent', name: 'Time Agent', keywords: ['time', 'clock', 'date', 'day', 'month', 'year'], capabilities: ['Tell current time', 'Tell current date'] },
+          'weather-agent': { id: 'weather-agent', name: 'Weather Agent', keywords: ['weather', 'temperature', 'forecast', 'rain'], capabilities: ['Check weather', 'Provide forecasts'] },
+          'media-agent': { id: 'media-agent', name: 'Media Agent', keywords: ['play', 'pause', 'stop', 'music', 'volume'], capabilities: ['Play music', 'Control playback', 'Adjust volume'] },
+          'help-agent': { id: 'help-agent', name: 'Help Agent', keywords: ['help', 'assist', 'capabilities'], capabilities: ['Explain features', 'Provide guidance'] },
+          'search-agent': { id: 'search-agent', name: 'Search Agent', keywords: ['search', 'find', 'look up'], capabilities: ['Search the web', 'Find information'] },
+          'smalltalk-agent': { id: 'smalltalk-agent', name: 'Smalltalk Agent', keywords: ['hello', 'hi', 'thanks', 'goodbye'], capabilities: ['Greetings', 'Social conversation'] },
+        };
+        agent = builtinAgents[agentId];
+      }
+      
+      if (!agent) {
+        return { confidence: 0, plan: 'Agent not found', error: 'Agent not found' };
+      }
+      
+      const result = await evaluateAgentBid(agent, { content: phrase });
+      return {
+        agentId,
+        agentName: agent.name,
+        confidence: result.confidence,
+        plan: result.plan,
+        reasoning: result.plan,
+      };
+    } catch (error) {
+      console.error('[AgentManager] Test phrase error:', error);
+      return { confidence: 0, plan: error.message, error: error.message };
+    }
+  });
+  
+  // Test all enabled agents with a phrase
+  ipcMain.handle('agents:test-phrase-all', async (event, phrase) => {
+    try {
+      const { evaluateAgentBid } = require('./packages/agents/unified-bidder');
+      const store = getAgentStore();
+      await store.init();
+      
+      const results = [];
+      
+      // Get custom agents
+      const customAgents = store.getLocalAgents().filter(a => a.enabled);
+      
+      // Get enabled builtin agents
+      const builtinStates = global.settingsManager?.get('builtinAgentStates') || {};
+      const builtinAgents = [
+        { id: 'time-agent', name: 'Time Agent', keywords: ['time', 'clock', 'date', 'day', 'month', 'year'], capabilities: ['Tell current time', 'Tell current date'] },
+        { id: 'weather-agent', name: 'Weather Agent', keywords: ['weather', 'temperature', 'forecast', 'rain'], capabilities: ['Check weather', 'Provide forecasts'] },
+        { id: 'media-agent', name: 'Media Agent', keywords: ['play', 'pause', 'stop', 'music', 'volume'], capabilities: ['Play music', 'Control playback', 'Adjust volume'] },
+        { id: 'help-agent', name: 'Help Agent', keywords: ['help', 'assist', 'capabilities'], capabilities: ['Explain features', 'Provide guidance'] },
+        { id: 'search-agent', name: 'Search Agent', keywords: ['search', 'find', 'look up'], capabilities: ['Search the web', 'Find information'] },
+        { id: 'smalltalk-agent', name: 'Smalltalk Agent', keywords: ['hello', 'hi', 'thanks', 'goodbye'], capabilities: ['Greetings', 'Social conversation'] },
+      ].filter(a => builtinStates[a.id] !== false);
+      
+      const allAgents = [...customAgents, ...builtinAgents];
+      
+      // Evaluate all agents in parallel
+      const evaluations = await Promise.all(
+        allAgents.map(async (agent) => {
+          try {
+            const result = await evaluateAgentBid(agent, { content: phrase });
+            return {
+              agentId: agent.id,
+              agentName: agent.name,
+              confidence: result.confidence,
+              plan: result.plan,
+              reasoning: result.plan,
+            };
+          } catch (err) {
+            return {
+              agentId: agent.id,
+              agentName: agent.name,
+              confidence: 0,
+              plan: err.message,
+              error: err.message,
+            };
+          }
+        })
+      );
+      
+      return evaluations;
+    } catch (error) {
+      console.error('[AgentManager] Test all agents error:', error);
+      return [];
+    }
+  });
+  
+  // ==================== VERSION HISTORY (aliases) ====================
+  
+  // Get version history (alias for agents:get-versions)
+  ipcMain.handle('agents:get-version-history', async (event, agentId) => {
+    const store = getAgentStore();
+    await store.init();
+    return store.getVersionHistory(agentId);
+  });
+  
+  // Revert to version (alias for agents:revert)
+  ipcMain.handle('agents:revert-to-version', async (event, agentId, versionNumber) => {
+    const store = getAgentStore();
+    await store.init();
+    return store.revertToVersion(agentId, versionNumber);
+  });
+  
+  // ==================== ENHANCE AGENT ====================
+  
+  // Open Agent Composer in enhance mode
+  ipcMain.handle('agents:enhance', async (event, agentId) => {
+    const store = getAgentStore();
+    await store.init();
+    const agent = store.getAgent(agentId);
+    
+    if (!agent) {
+      throw new Error('Agent not found');
+    }
+    
+    // Open the composer with enhance mode and agent context
+    createClaudeCodeWindow({
+      mode: 'enhance',
+      existingAgent: agent
+    });
+    
+    return true;
+  });
+  
+  // ==================== AGENT STATISTICS ====================
+  
+  // Get stats for a single agent
+  ipcMain.handle('agents:get-stats', async (event, agentId) => {
+    try {
+      const { getAgentStats } = require('./src/voice-task-sdk/agent-stats');
+      const stats = getAgentStats();
+      await stats.init();
+      return stats.getStats(agentId);
+    } catch (error) {
+      console.error('[AgentManager] Get stats error:', error);
+      return null;
+    }
+  });
+  
+  // Get stats for all agents
+  ipcMain.handle('agents:get-all-stats', async () => {
+    try {
+      const { getAgentStats } = require('./src/voice-task-sdk/agent-stats');
+      const stats = getAgentStats();
+      await stats.init();
+      return stats.getAllStats();
+    } catch (error) {
+      console.error('[AgentManager] Get all stats error:', error);
+      return {};
+    }
+  });
+  
+  // Get bid history
+  ipcMain.handle('agents:get-bid-history', async (event, limit) => {
+    try {
+      const { getAgentStats } = require('./src/voice-task-sdk/agent-stats');
+      const stats = getAgentStats();
+      await stats.init();
+      return stats.getBidHistory(limit || 50);
+    } catch (error) {
+      console.error('[AgentManager] Get bid history error:', error);
+      return [];
+    }
+  });
+  
+  // Get bid history for a specific agent
+  ipcMain.handle('agents:get-agent-bid-history', async (event, agentId, limit) => {
+    try {
+      const { getAgentStats } = require('./src/voice-task-sdk/agent-stats');
+      const stats = getAgentStats();
+      await stats.init();
+      return stats.getAgentBidHistory(agentId, limit || 20);
+    } catch (error) {
+      console.error('[AgentManager] Get agent bid history error:', error);
+      return [];
+    }
+  });
+  
   console.log('[AgentManager] IPC handlers registered');
 }
 
@@ -15364,15 +15845,22 @@ let pendingComposerInit = null; // Store initial description while window loads
  * Create and show the GSX Agent Composer window
  * @param {Object} options - Optional configuration
  * @param {string} options.initialDescription - Initial agent description to auto-plan
+ * @param {string} options.mode - 'create' (default) or 'enhance'
+ * @param {Object} options.existingAgent - Agent to enhance (when mode='enhance')
  */
 function createClaudeCodeWindow(options = {}) {
-  const { initialDescription } = options;
+  const { initialDescription, mode, existingAgent } = options;
   
   if (claudeCodeWindow && !claudeCodeWindow.isDestroyed()) {
     claudeCodeWindow.focus();
     
-    // If window already exists and we have a description, send it
-    if (initialDescription) {
+    // If window already exists, send the appropriate init message
+    if (mode === 'enhance' && existingAgent) {
+      claudeCodeWindow.webContents.send('agent-composer:init', { 
+        mode: 'enhance',
+        existingAgent
+      });
+    } else if (initialDescription) {
       claudeCodeWindow.webContents.send('agent-composer:init', { 
         description: initialDescription 
       });
@@ -15382,8 +15870,12 @@ function createClaudeCodeWindow(options = {}) {
   
   console.log('[AgentComposer] Creating GSX Create window...');
   
-  // Store the initial description to send after window loads
-  pendingComposerInit = initialDescription ? { description: initialDescription } : null;
+  // Store the init data to send after window loads
+  if (mode === 'enhance' && existingAgent) {
+    pendingComposerInit = { mode: 'enhance', existingAgent };
+  } else {
+    pendingComposerInit = initialDescription ? { description: initialDescription } : null;
+  }
   
   claudeCodeWindow = new BrowserWindow({
     width: 1100,

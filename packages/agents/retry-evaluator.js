@@ -164,21 +164,25 @@ async function extractIntent(request) {
             role: 'system',
             content: `Extract music search intent from the user's request. Return JSON:
 {
-  "intent": "what the user wants (play music, search for X, etc)",
+  "intent": "what the user wants (play music, search for X, switch output, etc)",
   "searchTerm": "the best search term to use, or null",
   "genre": "detected genre like 'jazz', 'rock', etc, or null",
   "artist": "detected artist name, or null",
   "mood": "detected mood like 'upbeat', 'relaxing', or null",
-  "durationSeconds": "number of seconds if a duration was specified, or null"
+  "durationSeconds": "number of seconds if a duration was specified, or null",
+  "outputDevice": "target speaker/device name if specified (e.g. 'Living Room', 'HomePod', 'Kitchen'), or null"
 }
 
 Examples:
-- "play some jazz" → {"intent": "play genre", "searchTerm": "jazz", "genre": "jazz", "artist": null, "durationSeconds": null}
-- "play Beatles" → {"intent": "play artist", "searchTerm": "Beatles", "genre": null, "artist": "Beatles", "durationSeconds": null}
-- "play something relaxing" → {"intent": "play mood", "searchTerm": "relaxing", "genre": null, "artist": null, "mood": "relaxing", "durationSeconds": null}
-- "play jazz for 30 minutes" → {"intent": "play genre", "searchTerm": "jazz", "genre": "jazz", "artist": null, "durationSeconds": 1800}
-- "play rock for an hour" → {"intent": "play genre", "searchTerm": "rock", "genre": "rock", "artist": null, "durationSeconds": 3600}
-- "play music for 5 minutes" → {"intent": "play music", "searchTerm": null, "genre": null, "artist": null, "durationSeconds": 300}`
+- "play some jazz" → {"intent": "play genre", "searchTerm": "jazz", "genre": "jazz", "artist": null, "durationSeconds": null, "outputDevice": null}
+- "play Beatles" → {"intent": "play artist", "searchTerm": "Beatles", "genre": null, "artist": "Beatles", "durationSeconds": null, "outputDevice": null}
+- "play something relaxing" → {"intent": "play mood", "searchTerm": "relaxing", "genre": null, "artist": null, "mood": "relaxing", "durationSeconds": null, "outputDevice": null}
+- "play jazz for 30 minutes" → {"intent": "play genre", "searchTerm": "jazz", "genre": "jazz", "artist": null, "durationSeconds": 1800, "outputDevice": null}
+- "play rock for an hour" → {"intent": "play genre", "searchTerm": "rock", "genre": "rock", "artist": null, "durationSeconds": 3600, "outputDevice": null}
+- "play music for 5 minutes" → {"intent": "play music", "searchTerm": null, "genre": null, "artist": null, "durationSeconds": 300, "outputDevice": null}
+- "play jazz on living room" → {"intent": "play on device", "searchTerm": "jazz", "genre": "jazz", "artist": null, "durationSeconds": null, "outputDevice": "Living Room"}
+- "switch to kitchen speaker" → {"intent": "switch output", "searchTerm": null, "genre": null, "artist": null, "durationSeconds": null, "outputDevice": "Kitchen"}
+- "play on HomePod" → {"intent": "switch output", "searchTerm": null, "genre": null, "artist": null, "durationSeconds": null, "outputDevice": "HomePod"}`
           }, {
             role: 'user',
             content: request

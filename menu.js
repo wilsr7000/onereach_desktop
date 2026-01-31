@@ -141,6 +141,722 @@ const menuCache = {
   }
 };
 
+// ============================================
+// RESILIENT AUTO-LOGIN SYSTEM
+// ============================================
+
+/**
+ * Custom error for window destruction during async operations
+ */
+class WindowDestroyedError extends Error {
+  constructor(message = 'Window was closed') {
+    super(message);
+    this.name = 'WindowDestroyedError';
+  }
+}
+
+/**
+ * Sleep utility for async delays
+ * @param {number} ms - Milliseconds to sleep
+ */
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Rate limit tracking for login attempts per environment
+ */
+const loginAttempts = new Map(); // environment -> { count, lastAttempt, lastSuccess }
+
+/**
+ * Check if we can attempt login (rate limit protection)
+ * @param {string} environment - The IDW environment
+ * @returns {{ allowed: boolean, waitMs?: number }}
+ */
+function canAttemptLogin(environment) {
+  const record = loginAttempts.get(environment) || { count: 0, lastAttempt: 0, lastSuccess: 0 };
+  
+  // Reset count if last success was recent (within 5 minutes)
+  if (record.lastSuccess > 0 && Date.now() - record.lastSuccess < 300000) {
+    return { allowed: true };
+  }
+  
+  // Exponential backoff: 5s, 10s, 15s, 20s, 25s, 30s (max)
+  const cooldown = Math.min(record.count * 5000, 30000);
+  
+  if (record.count > 0 && Date.now() - record.lastAttempt < cooldown) {
+    const waitMs = cooldown - (Date.now() - record.lastAttempt);
+    console.log(`[AutoLogin] Rate limited for ${environment}, wait ${Math.ceil(waitMs/1000)}s`);
+    return { allowed: false, waitMs };
+  }
+  return { allowed: true };
+}
+
+/**
+ * Record a login attempt
+ * @param {string} environment - The IDW environment
+ * @param {boolean} success - Whether the attempt succeeded
+ */
+function recordLoginAttempt(environment, success) {
+  const record = loginAttempts.get(environment) || { count: 0, lastAttempt: 0, lastSuccess: 0 };
+  
+  if (success) {
+    // Reset on success
+    loginAttempts.set(environment, { count: 0, lastAttempt: Date.now(), lastSuccess: Date.now() });
+  } else {
+    // Increment failure count
+    loginAttempts.set(environment, { 
+      count: record.count + 1, 
+      lastAttempt: Date.now(),
+      lastSuccess: record.lastSuccess 
+    });
+  }
+}
+
+/**
+ * Safe execution wrapper for executeJavaScript calls
+ * Handles window destruction, timeouts, and retries
+ * 
+ * @param {BrowserWindow} gsxWindow - The window to execute in
+ * @param {string} script - JavaScript to execute
+ * @param {Object} options - Options: timeout (ms), retries (count)
+ * @returns {Promise<any>} Result of script execution
+ * @throws {WindowDestroyedError} If window is closed
+ */
+async function safeExecute(gsxWindow, script, options = {}) {
+  const { timeout = 5000, retries = 1 } = options;
+  
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    // Check if window still exists
+    if (!gsxWindow || gsxWindow.isDestroyed()) {
+      throw new WindowDestroyedError('Window closed during operation');
+    }
+    
+    try {
+      // Race between execution and timeout
+      const result = await Promise.race([
+        gsxWindow.webContents.executeJavaScript(script),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Script execution timeout')), timeout)
+        )
+      ]);
+      return result;
+    } catch (err) {
+      // Check if window was destroyed during execution
+      if (gsxWindow.isDestroyed()) {
+        throw new WindowDestroyedError('Window closed during script execution');
+      }
+      
+      // If this was our last retry, throw the error
+      if (attempt === retries) {
+        console.error(`[SafeExecute] Failed after ${retries + 1} attempts:`, err.message);
+        throw err;
+      }
+      
+      // Wait briefly before retry
+      console.log(`[SafeExecute] Attempt ${attempt + 1} failed, retrying...`);
+      await sleep(100);
+    }
+  }
+}
+
+/**
+ * Safe execution wrapper for frame.executeJavaScript calls
+ * Similar to safeExecute but works with webFrameMain
+ * 
+ * @param {BrowserWindow} gsxWindow - The parent window (for destruction check)
+ * @param {WebFrameMain} frame - The frame to execute in
+ * @param {string} script - JavaScript to execute
+ * @param {Object} options - Options: timeout (ms), retries (count)
+ * @returns {Promise<any>} Result of script execution
+ */
+async function safeFrameExecute(gsxWindow, frame, script, options = {}) {
+  const { timeout = 5000, retries = 1 } = options;
+  
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    // Check if window still exists
+    if (!gsxWindow || gsxWindow.isDestroyed()) {
+      throw new WindowDestroyedError('Window closed during operation');
+    }
+    
+    // Check if frame is still valid
+    if (!frame || !frame.url) {
+      throw new Error('Frame is no longer valid');
+    }
+    
+    try {
+      const result = await Promise.race([
+        frame.executeJavaScript(script),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Frame script execution timeout')), timeout)
+        )
+      ]);
+      return result;
+    } catch (err) {
+      if (gsxWindow.isDestroyed()) {
+        throw new WindowDestroyedError('Window closed during frame script execution');
+      }
+      
+      if (attempt === retries) {
+        console.error(`[SafeFrameExecute] Failed after ${retries + 1} attempts:`, err.message);
+        throw err;
+      }
+      
+      console.log(`[SafeFrameExecute] Attempt ${attempt + 1} failed, retrying...`);
+      await sleep(100);
+    }
+  }
+}
+
+/**
+ * Update the status overlay in the GSX window
+ * @param {BrowserWindow} gsxWindow - The window
+ * @param {string} status - Status message to display
+ * @param {string} type - Type: 'loading', 'success', 'error', 'waiting'
+ * @param {Object} extra - Extra options: countdown, showRetry, showManual
+ */
+async function updateStatusOverlay(gsxWindow, status, type = 'loading', extra = {}) {
+  if (!gsxWindow || gsxWindow.isDestroyed()) return;
+  
+  const { countdown, showRetry, showManual } = extra;
+  
+  try {
+    await gsxWindow.webContents.executeJavaScript(`
+      (function() {
+        let overlay = document.getElementById('gsx-loading-overlay');
+        if (!overlay) {
+          // Create overlay if it doesn't exist
+          overlay = document.createElement('div');
+          overlay.id = 'gsx-loading-overlay';
+          document.body.appendChild(overlay);
+        }
+        
+        // Remove fade-out class if present
+        overlay.classList.remove('gsx-fade-out');
+        
+        const type = ${JSON.stringify(type)};
+        const status = ${JSON.stringify(status)};
+        const countdown = ${countdown || 'null'};
+        const showRetry = ${!!showRetry};
+        const showManual = ${!!showManual};
+        
+        let iconHtml = '';
+        if (type === 'loading' || type === 'waiting') {
+          iconHtml = '<div id="gsx-loading-spinner"></div>';
+        } else if (type === 'success') {
+          iconHtml = '<div style="font-size:48px;margin-bottom:20px;">&#10003;</div>';
+        } else if (type === 'error') {
+          iconHtml = '<div style="font-size:48px;margin-bottom:20px;color:#ff6b6b;">&#9888;</div>';
+        }
+        
+        let buttonsHtml = '';
+        if (showRetry || showManual) {
+          buttonsHtml = '<div style="display:flex;gap:12px;margin-top:20px;">';
+          if (showRetry) {
+            buttonsHtml += '<button onclick="window.__gsxRetryLogin && window.__gsxRetryLogin()" style="background:#4f8cff;color:white;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-size:14px;font-weight:500;">Try Again</button>';
+          }
+          if (showManual) {
+            buttonsHtml += '<button onclick="document.getElementById(\\'gsx-loading-overlay\\').classList.add(\\'gsx-fade-out\\')" style="background:transparent;color:rgba(255,255,255,0.7);border:1px solid rgba(255,255,255,0.3);padding:10px 24px;border-radius:6px;cursor:pointer;font-size:14px;">Login Manually</button>';
+          }
+          buttonsHtml += '</div>';
+        }
+        
+        let countdownHtml = '';
+        if (countdown !== null) {
+          countdownHtml = '<div style="margin-top:8px;font-size:24px;font-weight:600;">' + countdown + 's</div>';
+        }
+        
+        overlay.innerHTML = iconHtml + 
+          '<div id="gsx-loading-text">' + status + '</div>' +
+          '<div id="gsx-loading-status">' + (countdown !== null ? 'Fresh code in' : '') + '</div>' +
+          countdownHtml +
+          buttonsHtml;
+        
+        // Apply type-specific styling
+        const textEl = overlay.querySelector('#gsx-loading-text');
+        if (textEl) {
+          if (type === 'error') {
+            textEl.style.color = '#ff6b6b';
+          } else if (type === 'success') {
+            textEl.style.color = '#6bff8a';
+          } else {
+            textEl.style.color = 'rgba(255,255,255,0.9)';
+          }
+        }
+      })();
+    `);
+  } catch (err) {
+    // Silently ignore - overlay update is non-critical
+  }
+}
+
+/**
+ * Hide the status overlay with fade animation
+ * @param {BrowserWindow} gsxWindow - The window
+ * @param {boolean} showSuccess - Whether to briefly show success state first
+ */
+async function hideStatusOverlay(gsxWindow, showSuccess = false) {
+  if (!gsxWindow || gsxWindow.isDestroyed()) return;
+  
+  try {
+    if (showSuccess) {
+      await updateStatusOverlay(gsxWindow, 'Signed in!', 'success');
+      await sleep(800);
+    }
+    
+    await gsxWindow.webContents.executeJavaScript(`
+      const overlay = document.getElementById('gsx-loading-overlay');
+      if (overlay) {
+        overlay.classList.add('gsx-fade-out');
+        setTimeout(() => overlay.remove(), 300);
+      }
+    `);
+  } catch (err) {
+    // Silently ignore
+  }
+}
+
+/**
+ * Attempt auto-login for GSX windows with full resilience
+ * @param {BrowserWindow} gsxWindow - The GSX window
+ * @param {string} url - The current URL
+ * @param {Object} state - Auto-login state tracker
+ * @param {string} environment - The IDW environment
+ */
+async function attemptGSXAutoLogin(gsxWindow, url, state, environment) {
+  const credentialManager = require('./credential-manager');
+  const { TOTPManager } = require('./lib/totp-manager');
+  
+  console.log('[GSX AutoLogin] Attempting login for:', url);
+  
+  try {
+    // Check for window destruction
+    if (!gsxWindow || gsxWindow.isDestroyed()) {
+      console.log('[GSX AutoLogin] Window destroyed, aborting');
+      return;
+    }
+    
+    // Check rate limiting
+    const rateCheck = canAttemptLogin(environment);
+    if (!rateCheck.allowed) {
+      console.log(`[GSX AutoLogin] Rate limited, waiting ${Math.ceil(rateCheck.waitMs/1000)}s`);
+      await updateStatusOverlay(gsxWindow, `Please wait ${Math.ceil(rateCheck.waitMs/1000)}s...`, 'waiting');
+      await sleep(rateCheck.waitMs);
+    }
+    
+    // Get stored credentials
+    const credentials = await credentialManager.getOneReachCredentials();
+    if (!credentials || !credentials.email || !credentials.password) {
+      console.log('[GSX AutoLogin] No credentials stored, showing manual login option');
+      await updateStatusOverlay(gsxWindow, 'No saved credentials', 'error', { 
+        showManual: true 
+      });
+      state.inProgress = false;
+      return;
+    }
+    
+    // Update status
+    await updateStatusOverlay(gsxWindow, 'Signing in...', 'loading');
+    
+    // Check if window is still valid
+    if (gsxWindow.isDestroyed()) {
+      throw new WindowDestroyedError();
+    }
+    
+    // Find auth frame
+    const mainFrame = gsxWindow.webContents.mainFrame;
+    const allFrames = [mainFrame, ...mainFrame.framesInSubtree];
+    
+    let authFrame = null;
+    for (const frame of allFrames) {
+      if (frame.url && frame.url.includes('auth.') && frame.url.includes('onereach.ai')) {
+        authFrame = frame;
+        break;
+      }
+    }
+    
+    if (!authFrame) {
+      console.log('[GSX AutoLogin] No auth frame found');
+      state.inProgress = false;
+      await hideStatusOverlay(gsxWindow);
+      return;
+    }
+    
+    console.log('[GSX AutoLogin] Found auth frame:', authFrame.url);
+    
+    // Check what type of page we're on (login or 2FA)
+    const pageType = await safeFrameExecute(gsxWindow, authFrame, `
+      (function() {
+        const totpInput = document.querySelector('input[name="totp"], input[type="number"][maxlength="6"], input[autocomplete="one-time-code"]');
+        const emailInput = document.querySelector('input[type="email"], input[name="email"], input[autocomplete="email"]');
+        const passwordInput = document.querySelector('input[type="password"]');
+        
+        if (totpInput) {
+          return { is2FAPage: true, reason: 'totp_input_found' };
+        } else if (emailInput && passwordInput) {
+          return { isLoginPage: true, reason: 'login_form_found' };
+        } else if (emailInput) {
+          return { isLoginPage: true, reason: 'email_only' };
+        }
+        return { isLoginPage: false, is2FAPage: false, reason: 'no_form_found' };
+      })()
+    `);
+    
+    console.log('[GSX AutoLogin] Page type:', pageType);
+    
+    if (pageType.isLoginPage) {
+      // Fill login form
+      const result = await safeFrameExecute(gsxWindow, authFrame, `
+        (function() {
+          const email = ${JSON.stringify(credentials.email)};
+          const password = ${JSON.stringify(credentials.password)};
+          
+          const emailInput = document.querySelector('input[type="email"], input[name="email"], input[autocomplete="email"]');
+          const passwordInput = document.querySelector('input[type="password"]');
+          
+          if (emailInput) {
+            emailInput.value = email;
+            emailInput.dispatchEvent(new Event('input', { bubbles: true }));
+            emailInput.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          
+          if (passwordInput) {
+            passwordInput.value = password;
+            passwordInput.dispatchEvent(new Event('input', { bubbles: true }));
+            passwordInput.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          
+          // Find and click submit button
+          const submitBtn = document.querySelector('button[type="submit"], input[type="submit"]');
+          if (submitBtn) {
+            setTimeout(() => submitBtn.click(), 100);
+          } else {
+            // Try finding button by text
+            const buttons = document.querySelectorAll('button');
+            for (const btn of buttons) {
+              const text = btn.textContent.toLowerCase();
+              if (text.includes('sign in') || text.includes('log in') || text.includes('continue')) {
+                setTimeout(() => btn.click(), 100);
+                break;
+              }
+            }
+          }
+          
+          return { success: true, emailFound: !!emailInput, passwordFound: !!passwordInput };
+        })()
+      `);
+      
+      console.log('[GSX AutoLogin] Login form fill result:', result);
+      
+      // Wait for 2FA page and handle it
+      await sleep(1500);
+      
+      // Check window still exists before continuing
+      if (!gsxWindow.isDestroyed()) {
+        await handleGSX2FA(gsxWindow, state, environment, 0);
+      }
+      
+    } else if (pageType.is2FAPage) {
+      await handleGSX2FA(gsxWindow, state, environment, 0);
+    } else {
+      console.log('[GSX AutoLogin] No actionable form found');
+      state.inProgress = false;
+      await hideStatusOverlay(gsxWindow);
+    }
+    
+  } catch (err) {
+    if (err instanceof WindowDestroyedError) {
+      console.log('[GSX AutoLogin] Window closed during login, aborting silently');
+      return;
+    }
+    
+    console.error('[GSX AutoLogin] Error:', err.message);
+    recordLoginAttempt(environment, false);
+    
+    // Show error with retry option
+    if (gsxWindow && !gsxWindow.isDestroyed()) {
+      await updateStatusOverlay(gsxWindow, 'Login failed', 'error', { 
+        showRetry: true, 
+        showManual: true 
+      });
+      
+      // Setup retry handler
+      try {
+        await gsxWindow.webContents.executeJavaScript(`
+          window.__gsxRetryLogin = function() {
+            window.electronAPI && window.electronAPI.retryAutoLogin && window.electronAPI.retryAutoLogin();
+          };
+        `);
+      } catch (e) {
+        // Ignore - retry button just won't work
+      }
+    }
+    
+    state.inProgress = false;
+  }
+}
+
+/**
+ * Handle 2FA for GSX windows with full resilience
+ * Includes TOTP timing awareness, error detection, and smart retry
+ */
+async function handleGSX2FA(gsxWindow, state, environment, attempt = 0) {
+  const credentialManager = require('./credential-manager');
+  const { TOTPManager } = require('./lib/totp-manager');
+  
+  const MAX_ATTEMPTS = 5;
+  
+  try {
+    // Check window destruction
+    if (!gsxWindow || gsxWindow.isDestroyed()) {
+      throw new WindowDestroyedError();
+    }
+    
+    if (attempt >= MAX_ATTEMPTS) {
+      console.log('[GSX AutoLogin] Max 2FA attempts reached');
+      recordLoginAttempt(environment, false);
+      await updateStatusOverlay(gsxWindow, '2FA verification failed', 'error', {
+        showRetry: true,
+        showManual: true
+      });
+      state.inProgress = false;
+      return;
+    }
+    
+    console.log(`[GSX AutoLogin] 2FA attempt ${attempt + 1}/${MAX_ATTEMPTS}`);
+    
+    // Update status
+    await updateStatusOverlay(gsxWindow, 'Verifying 2FA...', 'loading');
+    
+    // Find auth frame
+    const mainFrame = gsxWindow.webContents.mainFrame;
+    const allFrames = [mainFrame, ...mainFrame.framesInSubtree];
+    
+    let authFrame = null;
+    for (const frame of allFrames) {
+      if (frame.url && frame.url.includes('auth.') && frame.url.includes('onereach.ai')) {
+        authFrame = frame;
+        break;
+      }
+    }
+    
+    if (!authFrame) {
+      console.log('[GSX AutoLogin] Auth frame lost, login may have completed');
+      recordLoginAttempt(environment, true);
+      await hideStatusOverlay(gsxWindow, true);
+      state.complete = true;
+      state.inProgress = false;
+      return;
+    }
+    
+    // Check if 2FA input exists
+    const formCheck = await safeFrameExecute(gsxWindow, authFrame, `
+      (function() {
+        const totpInput = document.querySelector('input[name="totp"], input[type="number"][maxlength="6"], input[autocomplete="one-time-code"], input[inputmode="numeric"]');
+        const errorEl = document.querySelector('.error, .alert-error, [class*="error-message"]');
+        const bodyText = document.body?.innerText?.toLowerCase() || '';
+        
+        return {
+          has2FA: !!totpInput,
+          hasError: !!errorEl || bodyText.includes('invalid code') || bodyText.includes('incorrect code'),
+          errorMessage: errorEl?.textContent || '',
+          hasRateLimit: bodyText.includes('too many') || bodyText.includes('try again later')
+        };
+      })()
+    `);
+    
+    // Handle rate limiting from server
+    if (formCheck.hasRateLimit) {
+      console.log('[GSX AutoLogin] Server rate limit detected');
+      recordLoginAttempt(environment, false);
+      await updateStatusOverlay(gsxWindow, 'Too many attempts - please wait', 'error', {
+        showManual: true
+      });
+      state.inProgress = false;
+      return;
+    }
+    
+    // Handle invalid code error - retry with fresh code
+    if (formCheck.hasError && attempt > 0) {
+      console.log('[GSX AutoLogin] Invalid code detected, will retry with fresh code');
+      // Wait for fresh TOTP window
+      const totpManager = new TOTPManager();
+      const timeRemaining = totpManager.getTimeRemaining();
+      
+      await updateStatusOverlay(gsxWindow, 'Code expired, waiting for new code...', 'waiting', {
+        countdown: timeRemaining + 1
+      });
+      
+      // Wait for fresh code
+      await sleep((timeRemaining + 1) * 1000);
+      
+      // Retry with fresh code
+      if (!gsxWindow.isDestroyed()) {
+        await handleGSX2FA(gsxWindow, state, environment, attempt + 1);
+      }
+      return;
+    }
+    
+    if (!formCheck.has2FA) {
+      console.log('[GSX AutoLogin] No 2FA input found, retrying...');
+      await sleep(500);
+      if (!gsxWindow.isDestroyed()) {
+        await handleGSX2FA(gsxWindow, state, environment, attempt + 1);
+      }
+      return;
+    }
+    
+    // Get TOTP secret
+    const totpSecret = await credentialManager.getTOTPSecret();
+    if (!totpSecret) {
+      console.log('[GSX AutoLogin] No TOTP secret stored');
+      await updateStatusOverlay(gsxWindow, 'No 2FA secret configured', 'error', {
+        showManual: true
+      });
+      state.inProgress = false;
+      return;
+    }
+    
+    // TOTP TIMING CHECK - Wait for fresh code if near expiration
+    const totpManager = new TOTPManager();
+    let timeRemaining = totpManager.getTimeRemaining();
+    
+    if (timeRemaining < 5) {
+      console.log(`[GSX AutoLogin] TOTP expires in ${timeRemaining}s, waiting for fresh code`);
+      await updateStatusOverlay(gsxWindow, 'Waiting for fresh code...', 'waiting', {
+        countdown: timeRemaining + 1
+      });
+      
+      // Wait for fresh code with countdown
+      while (timeRemaining > 0 && !gsxWindow.isDestroyed()) {
+        await sleep(1000);
+        timeRemaining = totpManager.getTimeRemaining();
+        if (timeRemaining > 25) break; // Fresh code is ready
+        await updateStatusOverlay(gsxWindow, 'Waiting for fresh code...', 'waiting', {
+          countdown: timeRemaining
+        });
+      }
+      
+      await updateStatusOverlay(gsxWindow, 'Verifying 2FA...', 'loading');
+    }
+    
+    // Generate TOTP code
+    let totpCode;
+    try {
+      totpCode = totpManager.generateCode(totpSecret);
+      console.log('[GSX AutoLogin] Generated TOTP code');
+    } catch (err) {
+      console.error('[GSX AutoLogin] Failed to generate TOTP:', err.message);
+      await updateStatusOverlay(gsxWindow, 'Invalid 2FA secret', 'error', {
+        showManual: true
+      });
+      state.inProgress = false;
+      return;
+    }
+    
+    // Fill 2FA form
+    const result = await safeFrameExecute(gsxWindow, authFrame, `
+      (function() {
+        const code = ${JSON.stringify(totpCode)};
+        const totpInput = document.querySelector('input[name="totp"], input[type="number"][maxlength="6"], input[autocomplete="one-time-code"], input[inputmode="numeric"]');
+        
+        if (totpInput) {
+          // Clear existing value first
+          totpInput.value = '';
+          totpInput.dispatchEvent(new Event('input', { bubbles: true }));
+          
+          // Set new value
+          totpInput.value = code;
+          totpInput.dispatchEvent(new Event('input', { bubbles: true }));
+          totpInput.dispatchEvent(new Event('change', { bubbles: true }));
+          
+          // Find and click submit/verify button
+          const buttons = document.querySelectorAll('button');
+          let clicked = false;
+          for (const btn of buttons) {
+            const text = btn.textContent.toLowerCase();
+            if (text.includes('verify') || text.includes('submit') || text.includes('continue') || btn.type === 'submit') {
+              setTimeout(() => btn.click(), 100);
+              clicked = true;
+              break;
+            }
+          }
+          
+          // Fallback: try form submit
+          if (!clicked) {
+            const form = totpInput.closest('form');
+            if (form) setTimeout(() => form.submit(), 100);
+          }
+          
+          return { success: true };
+        }
+        return { success: false, reason: 'totp_input_not_found' };
+      })()
+    `);
+    
+    console.log('[GSX AutoLogin] 2FA fill result:', result);
+    
+    // Wait a moment then check for errors
+    await sleep(1500);
+    
+    // Check if we're still on auth page (indicates failure)
+    if (!gsxWindow.isDestroyed()) {
+      const stillOnAuth = await safeFrameExecute(gsxWindow, authFrame, `
+        (function() {
+          const totpInput = document.querySelector('input[name="totp"], input[type="number"][maxlength="6"], input[autocomplete="one-time-code"], input[inputmode="numeric"]');
+          const errorEl = document.querySelector('.error, .alert-error, [class*="error"]');
+          const bodyText = document.body?.innerText?.toLowerCase() || '';
+          
+          return {
+            stillOnPage: !!totpInput,
+            hasError: !!errorEl || bodyText.includes('invalid') || bodyText.includes('incorrect') || bodyText.includes('expired')
+          };
+        })()
+      `).catch(() => ({ stillOnPage: false, hasError: false }));
+      
+      if (stillOnAuth.stillOnPage && stillOnAuth.hasError) {
+        console.log('[GSX AutoLogin] 2FA error detected, retrying with fresh code');
+        await handleGSX2FA(gsxWindow, state, environment, attempt + 1);
+        return;
+      }
+    }
+    
+    // Success!
+    console.log('[GSX AutoLogin] 2FA completed successfully');
+    recordLoginAttempt(environment, true);
+    await hideStatusOverlay(gsxWindow, true);
+    state.complete = true;
+    state.inProgress = false;
+    
+  } catch (err) {
+    if (err instanceof WindowDestroyedError) {
+      console.log('[GSX AutoLogin] Window closed during 2FA, aborting silently');
+      return;
+    }
+    
+    console.error('[GSX AutoLogin] 2FA error:', err.message);
+    
+    // Retry on transient errors
+    if (attempt < MAX_ATTEMPTS - 1 && !gsxWindow.isDestroyed()) {
+      console.log('[GSX AutoLogin] Retrying after error...');
+      await sleep(500);
+      await handleGSX2FA(gsxWindow, state, environment, attempt + 1);
+      return;
+    }
+    
+    // Show error on final failure
+    if (gsxWindow && !gsxWindow.isDestroyed()) {
+      recordLoginAttempt(environment, false);
+      await updateStatusOverlay(gsxWindow, '2FA failed', 'error', {
+        showRetry: true,
+        showManual: true
+      });
+    }
+    
+    state.inProgress = false;
+  }
+}
+
 /**
  * Helper function to open GSX content in a large app window
  * @param {string} url The URL to load
@@ -183,9 +899,17 @@ function openGSXLargeWindow(url, title, windowTitle, loadingMessage = 'Loading..
   // Create session partition name based ONLY on the IDW environment
   // This allows all GSX windows in the same IDW group to share cookies
   // while keeping different IDW groups sandboxed from each other
-  const partitionName = `gsx-${idwEnvironment}`;
+  const partitionName = idwEnvironment ? `gsx-${idwEnvironment}` : `gsx-tool-${Date.now()}`;
+  const fullPartition = `persist:${partitionName}`;
   
   console.log(`[Menu] Using shared session partition for IDW group: ${partitionName}`);
+  
+  // Only register with multi-tenant store if idwEnvironment is set (actual GSX windows)
+  if (idwEnvironment) {
+    const multiTenantStore = require('./multi-tenant-store');
+    multiTenantStore.registerPartition(idwEnvironment, fullPartition);
+    multiTenantStore.attachCookieListener(fullPartition);
+  }
   
   const gsxWindow = new BrowserWindow({
     width: 1600,
@@ -195,7 +919,7 @@ function openGSXLargeWindow(url, title, windowTitle, loadingMessage = 'Loading..
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
-      partition: `persist:${partitionName}`,  // Session partitioning for cookie isolation
+      partition: fullPartition,  // Session partitioning for cookie isolation
       sandbox: false,
       webSecurity: true,
       webviewTag: false
@@ -204,297 +928,364 @@ function openGSXLargeWindow(url, title, windowTitle, loadingMessage = 'Loading..
     show: false
   });
   
-  // Show loading indicator with a unique class
+  // PERFORMANCE: Show responsive animated loading indicator immediately
   let loadingIndicatorInserted = false;
   gsxWindow.webContents.on('did-start-loading', () => {
     if (!loadingIndicatorInserted) {
       loadingIndicatorInserted = true;
       gsxWindow.webContents.insertCSS(`
-        body::before {
-          content: '${loadingMessage}';
-          position: fixed;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
-          font-size: 24px;
-          color: #666;
-          z-index: 99999;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          background: rgba(255, 255, 255, 0.95);
-          padding: 20px 40px;
-          border-radius: 8px;
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        @keyframes gsx-pulse {
+          0%, 100% { opacity: 0.6; transform: translate(-50%, -50%) scale(1); }
+          50% { opacity: 1; transform: translate(-50%, -50%) scale(1.02); }
         }
-        body.gsx-loaded::before {
-          display: none !important;
+        @keyframes gsx-spin {
+          to { transform: rotate(360deg); }
+        }
+        #gsx-loading-overlay {
+          position: fixed;
+          top: 0; left: 0; right: 0; bottom: 0;
+          background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+          z-index: 99999;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          transition: opacity 0.3s ease-out;
+        }
+        #gsx-loading-overlay.gsx-fade-out {
+          opacity: 0;
+          pointer-events: none;
+        }
+        #gsx-loading-spinner {
+          width: 48px;
+          height: 48px;
+          border: 3px solid rgba(255, 255, 255, 0.1);
+          border-top-color: #4f8cff;
+          border-radius: 50%;
+          animation: gsx-spin 0.8s linear infinite;
+          margin-bottom: 20px;
+        }
+        #gsx-loading-text {
+          color: rgba(255, 255, 255, 0.9);
+          font-size: 18px;
+          font-weight: 500;
+          animation: gsx-pulse 2s ease-in-out infinite;
+        }
+        #gsx-loading-status {
+          color: rgba(255, 255, 255, 0.5);
+          font-size: 12px;
+          margin-top: 8px;
         }
       `);
+      // Inject overlay HTML immediately
+      gsxWindow.webContents.executeJavaScript(`
+        if (!document.getElementById('gsx-loading-overlay')) {
+          const overlay = document.createElement('div');
+          overlay.id = 'gsx-loading-overlay';
+          overlay.innerHTML = '<div id="gsx-loading-spinner"></div><div id="gsx-loading-text">${loadingMessage}</div><div id="gsx-loading-status">Connecting...</div>';
+          document.body.appendChild(overlay);
+        }
+      `).catch(() => {});
     }
   });
   
-  // Inject minimal toolbar after page loads
+  // PERFORMANCE: Single consolidated did-finish-load handler
   gsxWindow.webContents.on('did-finish-load', () => {
-    // Add class to hide the loading indicator
-    gsxWindow.webContents.executeJavaScript(`
-      document.body.classList.add('gsx-loaded');
-    `).catch(err => console.error('[GSX Window] Error hiding loading indicator:', err));
-    
-    // Inject the minimal toolbar
+    // Single executeJavaScript call with all UI setup
     gsxWindow.webContents.executeJavaScript(`
       (function() {
-        // Check if toolbar already exists
-        if (document.getElementById('gsx-minimal-toolbar')) return;
-        
-        // Create toolbar
-        const toolbar = document.createElement('div');
-        toolbar.id = 'gsx-minimal-toolbar';
-        toolbar.innerHTML = \`
-          <button id="gsx-back" title="Back">◀</button>
-          <button id="gsx-forward" title="Forward">▶</button>
-          <button id="gsx-refresh" title="Refresh">↻</button>
-          <button id="gsx-mission-control" title="Show All Windows">⊞</button>
-          <button id="gsx-close" title="Close Window">×</button>
-        \`;
-        
-        // Add styles
-        const style = document.createElement('style');
-        style.textContent = \`
-          #gsx-minimal-toolbar {
-            position: fixed;
-            bottom: 0;
-            left: 50%;
-            transform: translateX(-50%);
-            z-index: 999999;
-            background: rgba(0, 0, 0, 0.6);
-            backdrop-filter: blur(8px);
-            padding: 4px 8px;
-            display: flex;
-            gap: 4px;
-            border-radius: 8px 8px 0 0;
-            opacity: 0.4;
-            transition: opacity 0.3s, padding 0.2s;
-          }
-          
-          #gsx-minimal-toolbar:hover {
-            opacity: 1;
-            padding: 6px 10px;
-          }
-          
-          #gsx-minimal-toolbar button {
-            background: transparent;
-            border: none;
-            color: rgba(255, 255, 255, 0.7);
-            width: 28px;
-            height: 28px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.2s;
-          }
-          
-          #gsx-minimal-toolbar button:hover {
-            background: rgba(255, 255, 255, 0.15);
-            color: rgba(255, 255, 255, 1);
-            transform: scale(1.1);
-          }
-          
-          #gsx-minimal-toolbar button:active {
-            transform: scale(0.95);
-          }
-          
-          #gsx-minimal-toolbar button:disabled {
-            opacity: 0.3;
-            cursor: not-allowed;
-          }
-          
-          #gsx-minimal-toolbar button#gsx-close {
-            margin-left: 8px;
-            border-left: 1px solid rgba(255, 255, 255, 0.1);
-            padding-left: 12px;
-          }
-          
-          #gsx-minimal-toolbar button#gsx-close:hover {
-            background: rgba(255, 59, 48, 0.2);
-            color: #ff3b30;
-          }
-        \`;
-        
-        document.head.appendChild(style);
-        document.body.appendChild(toolbar);
-        
-        // Add event listeners
-        document.getElementById('gsx-back').addEventListener('click', () => {
-          window.history.back();
-        });
-        
-        document.getElementById('gsx-forward').addEventListener('click', () => {
-          window.history.forward();
-        });
-        
-        document.getElementById('gsx-refresh').addEventListener('click', () => {
-          // Clear cache and reload using Electron API
-          if (window.electronAPI && window.electronAPI.clearCacheAndReload) {
-            window.electronAPI.clearCacheAndReload();
-          } else {
-            window.location.reload();
-          }
-        });
-        
-        document.getElementById('gsx-mission-control').addEventListener('click', () => {
-          // This will be handled by IPC
-          if (window.electronAPI && window.electronAPI.triggerMissionControl) {
-            window.electronAPI.triggerMissionControl();
-          }
-        });
-        
-        document.getElementById('gsx-close').addEventListener('click', () => {
-          window.close();
-        });
-        
-        // Update button states based on history
-        function updateNavigationButtons() {
-          const backBtn = document.getElementById('gsx-back');
-          const forwardBtn = document.getElementById('gsx-forward');
-          
-          if (backBtn) backBtn.disabled = !window.history.length || window.history.length <= 1;
-          if (forwardBtn) forwardBtn.disabled = false; // Can't easily check forward history
+        // Hide loading overlay with animation
+        const overlay = document.getElementById('gsx-loading-overlay');
+        if (overlay) {
+          overlay.classList.add('gsx-fade-out');
+          setTimeout(() => overlay.remove(), 300);
         }
         
-        updateNavigationButtons();
-        window.addEventListener('popstate', updateNavigationButtons);
-      })();
-    `).catch(err => console.error('[GSX Window] Error injecting toolbar:', err));
-    
-    // Inject window keep-alive and zombie detection
-    gsxWindow.webContents.executeJavaScript(`
-      (function() {
         // Skip if already initialized
-        if (window.__gsxKeepAliveInitialized) return;
-        window.__gsxKeepAliveInitialized = true;
+        if (window.__gsxUIInitialized) return;
+        window.__gsxUIInitialized = true;
         
-        console.log('[GSX Keep-Alive] Initializing connection monitoring');
-        
-        let lastPong = Date.now();
-        let lastActivity = Date.now();
-        let emergencyUIShown = false;
-        let pingIntervalId = null;
-        let zombieCheckIntervalId = null;
-        let pongCleanup = null;
-        
-        // Track pong responses
-        if (window.electronAPI && window.electronAPI.onPong) {
-          pongCleanup = window.electronAPI.onPong((data) => {
-            lastPong = Date.now();
-            console.log('[GSX Keep-Alive] Pong received');
-          });
+        // ===== TOOLBAR =====
+        if (!document.getElementById('gsx-minimal-toolbar')) {
+          const toolbar = document.createElement('div');
+          toolbar.id = 'gsx-minimal-toolbar';
+          toolbar.innerHTML = '<button id="gsx-back" title="Back">&#9664;</button><button id="gsx-forward" title="Forward">&#9654;</button><button id="gsx-refresh" title="Refresh">&#8635;</button><button id="gsx-mission-control" title="Show All Windows">&#8862;</button><button id="gsx-close" title="Close Window">&times;</button>';
+          
+          const style = document.createElement('style');
+          style.textContent = '#gsx-minimal-toolbar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);z-index:999999;background:rgba(0,0,0,0.6);backdrop-filter:blur(8px);padding:4px 8px;display:flex;gap:4px;border-radius:8px 8px 0 0;opacity:0.4;transition:opacity 0.3s,padding 0.2s}#gsx-minimal-toolbar:hover{opacity:1;padding:6px 10px}#gsx-minimal-toolbar button{background:transparent;border:none;color:rgba(255,255,255,0.7);width:28px;height:28px;border-radius:4px;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;transition:all 0.2s}#gsx-minimal-toolbar button:hover{background:rgba(255,255,255,0.15);color:#fff;transform:scale(1.1)}#gsx-minimal-toolbar button:active{transform:scale(0.95)}#gsx-minimal-toolbar button:disabled{opacity:0.3;cursor:not-allowed}#gsx-minimal-toolbar button#gsx-close{margin-left:8px;border-left:1px solid rgba(255,255,255,0.1);padding-left:12px}#gsx-minimal-toolbar button#gsx-close:hover{background:rgba(255,59,48,0.2);color:#ff3b30}';
+          document.head.appendChild(style);
+          document.body.appendChild(toolbar);
+          
+          document.getElementById('gsx-back').onclick = () => history.back();
+          document.getElementById('gsx-forward').onclick = () => history.forward();
+          document.getElementById('gsx-refresh').onclick = () => window.electronAPI?.clearCacheAndReload?.() || location.reload();
+          document.getElementById('gsx-mission-control').onclick = () => window.electronAPI?.triggerMissionControl?.();
+          document.getElementById('gsx-close').onclick = () => window.close();
         }
         
-        // Wrap electronAPI to track activity (smart keep-alive)
-        if (window.electronAPI) {
-          const originalAPI = window.electronAPI;
-          const activityProxy = new Proxy(originalAPI, {
-            get(target, prop) {
-              if (typeof target[prop] === 'function' && prop !== 'onPong') {
-                return function(...args) {
-                  lastActivity = Date.now();
-                  return target[prop](...args);
-                };
-              }
-              return target[prop];
+        // ===== KEEP-ALIVE (lazy loaded after 5 seconds) =====
+        setTimeout(() => {
+          if (window.__gsxKeepAliveInitialized) return;
+          window.__gsxKeepAliveInitialized = true;
+          
+          let lastPong = Date.now();
+          let lastActivity = Date.now();
+          let emergencyUIShown = false;
+          
+          if (window.electronAPI?.onPong) {
+            window.electronAPI.onPong(() => { lastPong = Date.now(); });
+          }
+          
+          // Backup ping only when idle for 4 minutes
+          setInterval(() => {
+            if (Date.now() - lastActivity > 240000 && window.electronAPI?.ping) {
+              window.electronAPI.ping();
             }
-          });
-          window.electronAPI = activityProxy;
-        }
-        
-        // Backup ping only when idle for 4 minutes
-        pingIntervalId = setInterval(() => {
-          const idleTime = Date.now() - lastActivity;
-          if (idleTime > 240000 && window.electronAPI && window.electronAPI.ping) {
-            console.log('[GSX Keep-Alive] Sending idle ping');
-            window.electronAPI.ping();
-          }
-        }, 60000); // Check every minute
-        
-        // Detect zombie state (no pong for 10 minutes)
-        zombieCheckIntervalId = setInterval(() => {
-          const timeSinceLastPong = Date.now() - lastPong;
-          if (timeSinceLastPong > 600000 && !emergencyUIShown) {
-            console.error('[GSX Keep-Alive] Connection lost - window is zombie');
-            showEmergencyUI();
-            emergencyUIShown = true;
-          }
-        }, 30000); // Check every 30 seconds
-        
-        // Cleanup function for window close
-        function cleanup() {
-          console.log('[GSX Keep-Alive] Cleaning up intervals and listeners');
-          if (pingIntervalId) clearInterval(pingIntervalId);
-          if (zombieCheckIntervalId) clearInterval(zombieCheckIntervalId);
-          if (pongCleanup) pongCleanup();
-        }
-        
-        // Listen for window closing signal from main process
-        if (window.electronAPI && window.electronAPI.onPong) {
-          // Piggyback on existing IPC infrastructure
-          window.addEventListener('beforeunload', cleanup);
-        }
-        
-        // Also listen for explicit close signal
-        window.addEventListener('window-closing', cleanup);
-        
-        // Show emergency UI when connection is dead
-        function showEmergencyUI() {
-          const emergency = document.createElement('div');
-          emergency.id = 'gsx-emergency-banner';
-          emergency.innerHTML = \`
-            <div style="display: flex; align-items: center; gap: 12px;">
-              <span style="font-size: 20px;">⚠️</span>
-              <div style="flex: 1;">
-                <div style="font-weight: 600; margin-bottom: 4px;">Window Connection Lost</div>
-                <div style="font-size: 12px; opacity: 0.9;">Close button may not work. Use Cmd+Q to quit the app.</div>
-              </div>
-              <button onclick="window.close()" style="
-                background: rgba(255,59,48,0.2);
-                border: 1px solid #ff3b30;
-                color: #ff3b30;
-                padding: 8px 16px;
-                border-radius: 6px;
-                cursor: pointer;
-                font-weight: 600;
-                font-size: 12px;
-              ">Try Close Anyway</button>
-            </div>
-          \`;
+          }, 60000);
           
-          emergency.style.cssText = \`
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            z-index: 9999999;
-            background: rgba(255,165,0,0.95);
-            color: white;
-            padding: 16px 24px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            font-size: 14px;
-            backdrop-filter: blur(10px);
-          \`;
+          // Detect zombie state (no pong for 10 minutes)
+          setInterval(() => {
+            if (Date.now() - lastPong > 600000 && !emergencyUIShown) {
+              emergencyUIShown = true;
+              const banner = document.createElement('div');
+              banner.innerHTML = '<div style="display:flex;align-items:center;gap:12px"><span style="font-size:20px">Warning</span><div style="flex:1"><div style="font-weight:600;margin-bottom:4px">Window Connection Lost</div><div style="font-size:12px;opacity:0.9">Close button may not work. Use Cmd+Q to quit the app.</div></div><button onclick="window.close()" style="background:rgba(255,59,48,0.2);border:1px solid #ff3b30;color:#ff3b30;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:600;font-size:12px">Try Close</button></div>';
+              banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999999;background:rgba(255,165,0,0.95);color:white;padding:16px 24px;box-shadow:0 4px 12px rgba(0,0,0,0.3);font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:14px';
+              document.body.appendChild(banner);
+            }
+          }, 30000);
           
-          document.body.appendChild(emergency);
-        }
+          // Track activity
+          if (window.electronAPI) {
+            const orig = window.electronAPI;
+            window.electronAPI = new Proxy(orig, {
+              get(t, p) {
+                if (typeof t[p] === 'function' && p !== 'onPong') {
+                  return (...a) => { lastActivity = Date.now(); return t[p](...a); };
+                }
+                return t[p];
+              }
+            });
+          }
+        }, 5000); // Lazy load keep-alive after 5 seconds
       })();
-    `).catch(err => console.error('[GSX Window] Error injecting keep-alive:', err));
+    `).catch(err => console.error('[GSX Window] Error injecting UI:', err));
   });
   
-  // Also remove on did-stop-loading as a fallback
-  gsxWindow.webContents.on('did-stop-loading', () => {
-    gsxWindow.webContents.executeJavaScript(`
-      document.body.classList.add('gsx-loaded');
-    `).catch(err => console.error('[GSX Window] Error hiding loading indicator:', err));
+  // Auto-login handling for GSX windows - ONLY when idwEnvironment is explicitly set
+  // This prevents auto-login for non-GSX tools or when user wants manual login
+  if (idwEnvironment) {
+    const gsxAutoLoginState = { inProgress: false, complete: false };
+
+    // Handle full page navigation (for auth redirects from GSX apps)
+    gsxWindow.webContents.on('did-navigate', async (event, navUrl) => {
+      console.log(`[GSX Window] Full navigation: ${navUrl}`);
+
+      // Auto-login for auth pages (when GSX redirects to auth.*.onereach.ai)
+      if (navUrl && navUrl.includes('auth.') && navUrl.includes('onereach.ai')) {
+        if (gsxAutoLoginState.inProgress || gsxAutoLoginState.complete) {
+          console.log('[GSX AutoLogin] Skipping - already in progress or complete');
+          return;
+        }
+        gsxAutoLoginState.inProgress = true;
+        console.log('[GSX AutoLogin] Auth page detected via redirect, starting auto-login...');
+        
+        // Update loading status to show auto-login in progress
+        gsxWindow.webContents.executeJavaScript(`
+          const status = document.getElementById('gsx-loading-status');
+          if (status) status.textContent = 'Signing in...';
+        `).catch(() => {});
+
+        // PERFORMANCE: Reduced from 1500ms to 500ms - form is usually ready faster
+        setTimeout(async () => {
+          try {
+            await attemptGSXAutoLogin(gsxWindow, navUrl, gsxAutoLoginState, idwEnvironment);
+          } catch (err) {
+            console.error('[GSX AutoLogin] Error:', err.message);
+            gsxAutoLoginState.inProgress = false;
+          }
+        }, 500);
+      }
+    });
+  }
+  
+  // Error handling - show helpful messages for access issues
+  gsxWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+    console.log(`[GSX Window] Load failed: ${errorCode} - ${errorDescription} for ${validatedURL}`);
+    
+    const errorPage = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #e0e0e0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+          }
+          .error-container {
+            max-width: 500px;
+            text-align: center;
+            background: rgba(255,255,255,0.05);
+            padding: 40px;
+            border-radius: 16px;
+            border: 1px solid rgba(255,255,255,0.1);
+          }
+          h1 { color: #ff6b6b; margin-bottom: 16px; font-size: 24px; }
+          .error-code { color: #888; font-size: 14px; margin-bottom: 24px; }
+          p { line-height: 1.6; margin-bottom: 16px; }
+          .suggestions { text-align: left; background: rgba(0,0,0,0.2); padding: 20px; border-radius: 8px; margin-top: 20px; }
+          .suggestions h3 { margin-top: 0; color: #4ecdc4; }
+          .suggestions ul { margin: 0; padding-left: 20px; }
+          .suggestions li { margin-bottom: 8px; }
+          .btn { display: inline-block; padding: 12px 24px; background: #4ecdc4; color: #1a1a2e; border-radius: 8px; text-decoration: none; margin-top: 20px; font-weight: 600; cursor: pointer; border: none; }
+          .btn:hover { background: #45b7aa; }
+          .url { word-break: break-all; font-size: 12px; color: #666; margin-top: 16px; }
+        </style>
+      </head>
+      <body>
+        <div class="error-container">
+          <h1>Unable to Load GSX</h1>
+          <p class="error-code">Error: ${errorDescription || 'Connection failed'} (${errorCode})</p>
+          <p>The GSX application couldn't be loaded. This might be a temporary issue or an access problem.</p>
+          
+          <div class="suggestions">
+            <h3>Possible Solutions</h3>
+            <ul>
+              <li><strong>Check your internet connection</strong> - Make sure you're connected to the network</li>
+              <li><strong>Verify access permissions</strong> - You may need to request access from your administrator</li>
+              <li><strong>Guest users</strong> - If you only have guest access, you may need to upgrade to user access for GSX tools</li>
+              <li><strong>VPN required</strong> - Some environments require VPN connection</li>
+              <li><strong>Try again later</strong> - The service might be temporarily unavailable</li>
+            </ul>
+          </div>
+          
+          <button class="btn" onclick="location.reload()">Try Again</button>
+          <p class="url">URL: ${validatedURL}</p>
+        </div>
+      </body>
+      </html>
+    `;
+    
+    gsxWindow.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(errorPage)}`);
+  });
+  
+  // Detect access denied errors from page content
+  gsxWindow.webContents.on('did-finish-load', async () => {
+    // Check for common access error patterns after page loads
+    try {
+      const accessCheck = await gsxWindow.webContents.executeJavaScript(`
+        (function() {
+          const body = document.body ? document.body.innerText : '';
+          const title = document.title || '';
+          
+          // Check for common access error patterns
+          const accessDenied = /access denied|unauthorized|forbidden|not authorized|permission denied|403|401/i;
+          const noAccount = /unexpected account|account not found|invalid account|no access/i;
+          const needsAccess = /request access|contact administrator|upgrade.*account/i;
+          
+          if (accessDenied.test(body) || accessDenied.test(title)) {
+            return { error: true, type: 'access_denied', message: body.substring(0, 500) };
+          }
+          if (noAccount.test(body)) {
+            return { error: true, type: 'wrong_account', message: body.substring(0, 500) };
+          }
+          if (needsAccess.test(body)) {
+            return { error: true, type: 'needs_access', message: body.substring(0, 500) };
+          }
+          return { error: false };
+        })()
+      `);
+      
+      if (accessCheck.error) {
+        console.log(`[GSX Window] Access issue detected: ${accessCheck.type}`);
+        
+        const errorMessages = {
+          access_denied: {
+            title: 'Access Denied',
+            desc: 'You do not have permission to access this GSX tool.',
+            tip: 'Contact your administrator to request access to this account.'
+          },
+          wrong_account: {
+            title: 'Account Mismatch',
+            desc: 'This GSX tool is configured for a different account than you have access to.',
+            tip: 'The account ID in the URL may not match your permissions. Contact your administrator.'
+          },
+          needs_access: {
+            title: 'Access Required',
+            desc: 'Additional permissions are needed to use this tool.',
+            tip: 'You may have guest access only. Request user-level access from your administrator.'
+          }
+        };
+        
+        const errInfo = errorMessages[accessCheck.type] || errorMessages.access_denied;
+        
+        const accessErrorPage = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <style>
+              body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+                color: #e0e0e0;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100vh;
+                margin: 0;
+                padding: 20px;
+                box-sizing: border-box;
+              }
+              .error-container {
+                max-width: 550px;
+                text-align: center;
+                background: rgba(255,255,255,0.05);
+                padding: 40px;
+                border-radius: 16px;
+                border: 1px solid rgba(255,255,255,0.1);
+              }
+              h1 { color: #feca57; margin-bottom: 16px; font-size: 24px; }
+              p { line-height: 1.6; margin-bottom: 16px; }
+              .tip { background: rgba(78, 205, 196, 0.1); border-left: 3px solid #4ecdc4; padding: 16px; text-align: left; border-radius: 4px; margin: 20px 0; }
+              .tip strong { color: #4ecdc4; }
+              .actions { margin-top: 24px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+              .btn { padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; cursor: pointer; border: none; }
+              .btn-primary { background: #4ecdc4; color: #1a1a2e; }
+              .btn-secondary { background: rgba(255,255,255,0.1); color: #e0e0e0; }
+              .btn:hover { opacity: 0.9; }
+            </style>
+          </head>
+          <body>
+            <div class="error-container">
+              <h1>${errInfo.title}</h1>
+              <p>${errInfo.desc}</p>
+              
+              <div class="tip">
+                <strong>Tip:</strong> ${errInfo.tip}
+              </div>
+              
+              <div class="actions">
+                <button class="btn btn-primary" onclick="location.reload()">Try Again</button>
+                <button class="btn btn-secondary" onclick="window.close()">Close Window</button>
+              </div>
+            </div>
+          </body>
+          </html>
+        `;
+        
+        gsxWindow.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(accessErrorPage)}`);
+      }
+    } catch (err) {
+      // Ignore errors from checking - page might be navigating
+    }
   });
   
   // Load the URL
@@ -3518,14 +4309,46 @@ function refreshGSXLinks() {
 }
 
 // Helper: generate default GSX links for all IDWs ----------------------------
-function generateDefaultGSXLinks(idwEnvironments=[], accountId='') {
+function generateDefaultGSXLinks(idwEnvironments=[], defaultAccountId='') {
   if (!Array.isArray(idwEnvironments) || idwEnvironments.length === 0) return [];
   const links = [];
-  const withAccount = url => accountId ? `${url}?accountId=${accountId}` : url;
+  
   idwEnvironments.forEach(env => {
     const envName = env.environment;
     const idwId   = env.id;
     if (!envName || !idwId) return; // skip incomplete entries
+    
+    // Extract accountId - priority order:
+    // 1. Explicit gsxAccountId field (if user configured it)
+    // 2. accountId query param in chatUrl or url
+    // 3. UUID in /chat/ path (this is actually chatId but used as fallback)
+    // 4. Default accountId
+    let accountId = defaultAccountId;
+    const urlToCheck = env.chatUrl || env.url || '';
+    
+    // First check explicit gsxAccountId
+    if (env.gsxAccountId) {
+      accountId = env.gsxAccountId;
+      console.log(`[Menu] Using configured gsxAccountId ${accountId} for IDW ${idwId}`);
+    } else if (urlToCheck) {
+      // Try query parameter first (most reliable)
+      let urlMatch = urlToCheck.match(/accountId=([a-f0-9-]+)/i);
+      if (urlMatch) {
+        accountId = urlMatch[1];
+        console.log(`[Menu] Extracted accountId ${accountId} from query param for IDW ${idwId}`);
+      } else {
+        // Try extracting UUID from path (e.g., /chat/05bd3c92-5d3c-4dc5-a95d-0c584695cea4)
+        // NOTE: This is actually the chatId/botId, not accountId - but used as fallback
+        urlMatch = urlToCheck.match(/\/chat\/([a-f0-9-]{36})/i);
+        if (urlMatch) {
+          accountId = urlMatch[1];
+          console.log(`[Menu] Using chatId ${accountId} as accountId fallback for IDW ${idwId} (may not be correct)`);
+        }
+      }
+    }
+    
+    const withAccount = url => accountId ? `${url}?accountId=${accountId}` : url;
+    
     links.push(
       { id:`hitl-${envName}-${idwId}`,       label:'HITL',       url: withAccount(`https://hitl.${envName}.onereach.ai/`),              environment: envName, idwId },
       { id:`actiondesk-${envName}-${idwId}`, label:'Action Desk',url: withAccount(`https://actiondesk.${envName}.onereach.ai/dashboard/`), environment: envName, idwId },

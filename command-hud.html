@@ -328,6 +328,143 @@
         .confidence-value.medium { color: #eab308; }
         .confidence-value.low { color: #ef4444; }
         
+        /* Agent Info Section */
+        .agent-info-section {
+            display: none;
+            margin-bottom: 12px;
+            padding: 10px 12px;
+            background: rgba(139, 92, 246, 0.08);
+            border: 1px solid rgba(139, 92, 246, 0.15);
+            border-radius: 10px;
+        }
+        
+        .agent-info-section.visible {
+            display: block;
+        }
+        
+        .agent-name-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 4px;
+        }
+        
+        .agent-name {
+            font-size: 12px;
+            font-weight: 600;
+            color: #c4b5fd;
+        }
+        
+        .agent-reasoning {
+            font-size: 11px;
+            color: #888;
+            line-height: 1.3;
+            font-style: italic;
+        }
+        
+        /* Bids Summary */
+        .bids-summary {
+            display: none;
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid rgba(139, 92, 246, 0.1);
+        }
+        
+        .bids-summary.visible {
+            display: block;
+        }
+        
+        .bids-toggle {
+            font-size: 10px;
+            color: #888;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        
+        .bids-toggle:hover {
+            color: #c4b5fd;
+        }
+        
+        .bids-list {
+            display: none;
+            margin-top: 6px;
+        }
+        
+        .bids-list.expanded {
+            display: block;
+        }
+        
+        .bid-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 4px 0;
+            font-size: 10px;
+            color: #777;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+        }
+        
+        .bid-item:last-child {
+            border-bottom: none;
+        }
+        
+        .bid-item.winner {
+            color: #c4b5fd;
+        }
+        
+        .bid-agent-name {
+            flex: 1;
+        }
+        
+        .bid-confidence {
+            width: 40px;
+            text-align: right;
+            font-weight: 500;
+        }
+        
+        .bid-reasoning {
+            flex: 2;
+            margin-left: 8px;
+            font-size: 9px;
+            color: #666;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        /* Pending Context Indicator */
+        .pending-context-indicator {
+            display: none;
+            margin-top: 8px;
+            padding: 6px 10px;
+            background: rgba(234, 179, 8, 0.1);
+            border: 1px solid rgba(234, 179, 8, 0.2);
+            border-radius: 6px;
+            font-size: 10px;
+            color: #eab308;
+        }
+        
+        .pending-context-indicator.visible {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .pending-dot {
+            width: 6px;
+            height: 6px;
+            background: #eab308;
+            border-radius: 50%;
+            animation: pulse-dot 1.5s ease-in-out infinite;
+        }
+        
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        
         /* Empty state */
         .empty-state {
             text-align: center;
@@ -656,6 +793,32 @@
                     </div>
                 </div>
                 
+                <!-- Agent Info Section -->
+                <div class="agent-info-section" id="agentInfoSection">
+                    <div class="agent-name-row">
+                        <span class="agent-name" id="agentName">Agent</span>
+                        <span class="bid-confidence" id="agentConfidence">95%</span>
+                    </div>
+                    <div class="agent-reasoning" id="agentReasoning">Reasoning...</div>
+                    
+                    <!-- Bids Summary (collapsible) -->
+                    <div class="bids-summary" id="bidsSummary">
+                        <div class="bids-toggle" id="bidsToggle">
+                            <span id="bidsCount">3 agents bid</span>
+                            <span id="bidsArrow">+</span>
+                        </div>
+                        <div class="bids-list" id="bidsList">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Pending Context Indicator -->
+                <div class="pending-context-indicator" id="pendingContextIndicator">
+                    <span class="pending-dot"></span>
+                    <span id="pendingContextText">Awaiting your response...</span>
+                </div>
+                
                 <div class="params-section" id="paramsSection" style="display: none;">
                     <div class="params-title">Parameters</div>
                     <div class="params-list" id="paramsList"></div>
@@ -808,6 +971,29 @@
         const btnDismiss = document.getElementById('btnDismiss');
         const btnRetry = document.getElementById('btnRetry');
         
+        // New context elements
+        const agentInfoSection = document.getElementById('agentInfoSection');
+        const agentNameEl = document.getElementById('agentName');
+        const agentConfidenceEl = document.getElementById('agentConfidence');
+        const agentReasoningEl = document.getElementById('agentReasoning');
+        const bidsSummary = document.getElementById('bidsSummary');
+        const bidsToggle = document.getElementById('bidsToggle');
+        const bidsCount = document.getElementById('bidsCount');
+        const bidsArrow = document.getElementById('bidsArrow');
+        const bidsList = document.getElementById('bidsList');
+        const pendingContextIndicator = document.getElementById('pendingContextIndicator');
+        const pendingContextText = document.getElementById('pendingContextText');
+        
+        // Bids list expanded state
+        let bidsExpanded = false;
+        
+        // Toggle bids list
+        bidsToggle.addEventListener('click', () => {
+            bidsExpanded = !bidsExpanded;
+            bidsList.classList.toggle('expanded', bidsExpanded);
+            bidsArrow.textContent = bidsExpanded ? '-' : '+';
+        });
+        
         // Show HUD
         function show() {
             hudContainer.classList.remove('hiding');
@@ -918,6 +1104,76 @@
             // Update status
             updateStatus(task.status || 'pending');
             
+            // ==================== AGENT INFO SECTION ====================
+            if (task.agentName || task.agentId) {
+                agentInfoSection.classList.add('visible');
+                
+                // Format agent name nicely
+                const displayName = (task.agentName || task.agentId || 'Unknown')
+                    .replace(/-/g, ' ')
+                    .replace(/\b\w/g, c => c.toUpperCase());
+                agentNameEl.textContent = displayName;
+                
+                // Show confidence
+                if (task.confidence !== undefined) {
+                    const conf = Math.round(task.confidence * 100);
+                    agentConfidenceEl.textContent = conf + '%';
+                    agentConfidenceEl.style.color = conf >= 80 ? '#22c55e' : conf >= 50 ? '#eab308' : '#ef4444';
+                } else {
+                    agentConfidenceEl.textContent = '';
+                }
+                
+                // Show reasoning
+                if (task.agentReasoning) {
+                    agentReasoningEl.textContent = task.agentReasoning;
+                    agentReasoningEl.style.display = 'block';
+                } else {
+                    agentReasoningEl.style.display = 'none';
+                }
+                
+                // Show bids summary if multiple agents bid
+                if (task.bidsSummary && task.bidsSummary.length > 0) {
+                    bidsSummary.classList.add('visible');
+                    bidsCount.textContent = `${task.bidsSummary.length} agent${task.bidsSummary.length > 1 ? 's' : ''} bid`;
+                    
+                    // Build bids list HTML
+                    bidsList.innerHTML = task.bidsSummary.map((bid, index) => {
+                        const isWinner = index === 0;
+                        const conf = Math.round((bid.confidence || 0) * 100);
+                        const name = (bid.agentName || bid.agentId || 'Unknown')
+                            .replace(/-/g, ' ')
+                            .replace(/\b\w/g, c => c.toUpperCase());
+                        return `
+                            <div class="bid-item ${isWinner ? 'winner' : ''}">
+                                <span class="bid-agent-name">${isWinner ? '* ' : ''}${name}</span>
+                                <span class="bid-confidence">${conf}%</span>
+                                <span class="bid-reasoning">${bid.reasoning || ''}</span>
+                            </div>
+                        `;
+                    }).join('');
+                    
+                    // Reset expanded state
+                    bidsExpanded = false;
+                    bidsList.classList.remove('expanded');
+                    bidsArrow.textContent = '+';
+                } else {
+                    bidsSummary.classList.remove('visible');
+                }
+            } else {
+                agentInfoSection.classList.remove('visible');
+            }
+            
+            // ==================== PENDING CONTEXT INDICATOR ====================
+            if (task.pendingContext && task.pendingContext.agents && task.pendingContext.agents.length > 0) {
+                pendingContextIndicator.classList.add('visible');
+                const agentNames = task.pendingContext.agents
+                    .map(a => a.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()))
+                    .join(', ');
+                pendingContextText.textContent = `Conversation with ${agentNames}`;
+            } else {
+                pendingContextIndicator.classList.remove('visible');
+            }
+            
             // Show parameters if any
             if (task.params && Object.keys(task.params).length > 0) {
                 paramsSection.style.display = 'block';
@@ -933,16 +1189,8 @@
                 paramsSection.style.display = 'none';
             }
             
-            // Show confidence if available
-            if (task.confidence !== undefined) {
-                confidenceRow.style.display = 'flex';
-                const conf = Math.round(task.confidence * 100);
-                confidenceValue.textContent = conf + '%';
-                confidenceValue.className = 'confidence-value ' + 
-                    (conf >= 80 ? 'high' : conf >= 50 ? 'medium' : 'low');
-            } else {
-                confidenceRow.style.display = 'none';
-            }
+            // Hide the old confidence row (now shown in agent info section)
+            confidenceRow.style.display = 'none';
             
             // Show/hide progress based on status
             if (task.status === 'running' || task.status === 'pending') {
@@ -995,6 +1243,14 @@
             clearAutoHide();
             clearErrorFade();
             clearPreviousResult();
+            
+            // Reset new context elements
+            agentInfoSection.classList.remove('visible');
+            bidsSummary.classList.remove('visible');
+            pendingContextIndicator.classList.remove('visible');
+            bidsExpanded = false;
+            bidsList.classList.remove('expanded');
+            bidsArrow.textContent = '+';
         }
         
         // Button handlers

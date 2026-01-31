@@ -232,6 +232,17 @@ class AgentStore {
     await this.addVersion(agent.id, agent, VERSION_REASONS.CREATE, 'Initial creation');
 
     console.log('[AgentStore] Created local agent:', agent.name);
+    
+    // Hot-connect the new agent to the running exchange
+    try {
+      const { hotConnectAgent } = require('./exchange-bridge');
+      if (agent.enabled) {
+        await hotConnectAgent(agent);
+      }
+    } catch (e) {
+      console.log('[AgentStore] Could not hot-connect agent (exchange may not be running):', e.message);
+    }
+    
     return agent;
   }
 
@@ -245,6 +256,10 @@ class AgentStore {
   async updateAgent(id, updates, reason = VERSION_REASONS.UPDATE, description = '') {
     const agent = this.agents.get(id);
     if (!agent) throw new Error('Agent not found');
+
+    // Track if enabled state changed
+    const wasEnabled = agent.enabled;
+    const willBeEnabled = updates.enabled !== undefined ? updates.enabled : wasEnabled;
 
     // Save current state to version history before updating
     await this.addVersion(id, agent, reason, description || `Updated: ${Object.keys(updates).join(', ')}`);
@@ -261,6 +276,28 @@ class AgentStore {
     this.agents.set(id, updated);
     await this.saveAgents();
 
+    // Handle enabled state changes
+    try {
+      const { hotConnectAgent, disconnectAgent } = require('./exchange-bridge');
+      
+      if (wasEnabled && !willBeEnabled) {
+        // Agent was disabled - disconnect
+        disconnectAgent(id);
+        console.log('[AgentStore] Disconnected disabled agent:', updated.name);
+      } else if (!wasEnabled && willBeEnabled) {
+        // Agent was enabled - connect
+        await hotConnectAgent(updated);
+        console.log('[AgentStore] Reconnected enabled agent:', updated.name);
+      } else if (willBeEnabled) {
+        // Agent is still enabled but may have changed keywords/etc - reconnect
+        disconnectAgent(id);
+        await hotConnectAgent(updated);
+        console.log('[AgentStore] Reconnected updated agent:', updated.name);
+      }
+    } catch (e) {
+      console.log('[AgentStore] Could not update agent connection:', e.message);
+    }
+
     console.log('[AgentStore] Updated local agent:', updated.name, '-> version', updated.version);
     return updated;
   }
@@ -271,6 +308,14 @@ class AgentStore {
   async deleteAgent(id) {
     const agent = this.agents.get(id);
     if (!agent) throw new Error('Agent not found');
+
+    // Disconnect from exchange before deleting
+    try {
+      const { disconnectAgent } = require('./exchange-bridge');
+      disconnectAgent(id);
+    } catch (e) {
+      // Exchange may not be running
+    }
 
     this.agents.delete(id);
     await this.saveAgents();

@@ -153,7 +153,7 @@ contextBridge.exposeInMainWorld('orbAPI', {
   onTaskEvent: (callback) => {
     const events = ['voice-task:queued', 'voice-task:started', 'voice-task:completed', 
                     'voice-task:failed', 'voice-task:retry', 'voice-task:cancelled', 
-                    'voice-task:deadletter', 'voice-task:progress'];
+                    'voice-task:deadletter', 'voice-task:progress', 'voice-task:needs-input'];
     const handlers = events.map(event => {
       const handler = (e, data) => callback({ type: event.replace('voice-task:', ''), ...data });
       ipcRenderer.on(event, handler);

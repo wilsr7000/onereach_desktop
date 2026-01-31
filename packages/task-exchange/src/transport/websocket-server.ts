@@ -114,7 +114,15 @@ export class WebSocketTransport {
 
       if (registeredAgentId) {
         this.socketToAgent.delete(ws);
-        this.exchange.agents.unregister(registeredAgentId, reasonStr);
+        
+        // CRITICAL: Only unregister if this WebSocket is still the current one for this agent
+        // If a new connection has replaced this one, don't unregister (the new one is valid)
+        const currentAgent = this.exchange.agents.get(registeredAgentId);
+        if (currentAgent && (currentAgent as any).ws === ws) {
+          this.exchange.agents.unregister(registeredAgentId, reasonStr);
+        } else {
+          console.log(`[WebSocket] Skipping unregister for ${registeredAgentId} - replaced by new connection`);
+        }
       }
     });
 

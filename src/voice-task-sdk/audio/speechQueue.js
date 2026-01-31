@@ -279,6 +279,23 @@ class SpeechQueue extends EventEmitter {
   }
   
   /**
+   * Check if there's any pending or active speech
+   * Use this before disconnecting to prevent cutting off speech
+   * @returns {boolean}
+   */
+  hasPendingOrActiveSpeech() {
+    return this.isSpeaking || this.queue.length > 0;
+  }
+  
+  /**
+   * Get queue length
+   * @returns {number}
+   */
+  getQueueLength() {
+    return this.queue.length;
+  }
+  
+  /**
    * Get queue status
    */
   getStatus() {

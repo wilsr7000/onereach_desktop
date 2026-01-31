@@ -45,6 +45,1156 @@ function injectSpacesUploadEnhancer(webview) {
     });
 }
 
+// Track auto-login state per tab to prevent duplicate attempts
+const autoLoginState = new Map();
+
+// Global rate limiting for auto-login across ALL tabs
+let globalLastLoginAttempt = 0;
+let globalLoginQueue = []; // Array of { tabId, loginFn, webview }
+let globalLoginInProgress = false;
+const tabsWithActiveLogin = new Set(); // Track tabs with queued OR in-progress login
+
+// Rate limit: 30 seconds between login attempts (server is VERY strict)
+const LOGIN_RATE_LIMIT_MS = 30000;
+
+/**
+ * Show a loading overlay in a webview with countdown
+ */
+function showLoginQueueOverlay(webview, waitSeconds, queuePosition) {
+    const overlayScript = `
+        (function() {
+            // Remove existing overlay if any
+            const existing = document.getElementById('onereach-login-queue-overlay');
+            if (existing) existing.remove();
+            
+            const overlay = document.createElement('div');
+            overlay.id = 'onereach-login-queue-overlay';
+            overlay.innerHTML = \`
+                <style>
+                    #onereach-login-queue-overlay {
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        right: 0;
+                        bottom: 0;
+                        background: rgba(0, 0, 0, 0.85);
+                        display: flex;
+                        flex-direction: column;
+                        align-items: center;
+                        justify-content: center;
+                        z-index: 999999;
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        color: white;
+                    }
+                    #onereach-login-queue-overlay .spinner {
+                        width: 48px;
+                        height: 48px;
+                        border: 3px solid rgba(255,255,255,0.3);
+                        border-top-color: #3b82f6;
+                        border-radius: 50%;
+                        animation: spin 1s linear infinite;
+                        margin-bottom: 24px;
+                    }
+                    @keyframes spin {
+                        to { transform: rotate(360deg); }
+                    }
+                    #onereach-login-queue-overlay .message {
+                        font-size: 18px;
+                        font-weight: 500;
+                        margin-bottom: 8px;
+                    }
+                    #onereach-login-queue-overlay .countdown {
+                        font-size: 14px;
+                        color: rgba(255,255,255,0.7);
+                        margin-bottom: 16px;
+                    }
+                    #onereach-login-queue-overlay .hint {
+                        font-size: 12px;
+                        color: rgba(255,255,255,0.5);
+                        max-width: 300px;
+                        text-align: center;
+                    }
+                </style>
+                <div class="spinner"></div>
+                <div class="message">Preparing secure login...</div>
+                <div class="countdown" id="queue-countdown">Please wait ~${waitSeconds} seconds</div>
+                <div class="hint">Multiple tabs require sequential authentication to avoid rate limits</div>
+            \`;
+            document.body.appendChild(overlay);
+        })();
+    `;
+    webview.executeJavaScript(overlayScript).catch(() => {});
+}
+
+/**
+ * Update the countdown on the loading overlay
+ */
+function updateLoginQueueOverlay(webview, secondsRemaining) {
+    const updateScript = `
+        (function() {
+            const countdown = document.getElementById('queue-countdown');
+            if (countdown) {
+                countdown.textContent = 'Please wait ~${secondsRemaining} seconds';
+            }
+        })();
+    `;
+    webview.executeJavaScript(updateScript).catch(() => {});
+}
+
+/**
+ * Hide the loading overlay (login starting or complete)
+ */
+function hideLoginQueueOverlay(webview) {
+    const hideScript = `
+        (function() {
+            const overlay = document.getElementById('onereach-login-queue-overlay');
+            if (overlay) {
+                overlay.style.transition = 'opacity 0.3s';
+                overlay.style.opacity = '0';
+                setTimeout(() => overlay.remove(), 300);
+            }
+        })();
+    `;
+    webview.executeJavaScript(hideScript).catch(() => {});
+}
+
+/**
+ * Queue a login attempt with global rate limiting
+ * Only one login happens at a time, with 30 second spacing
+ * Only one login per tab can be queued/active at a time
+ */
+function queueGlobalLogin(tabId, loginFn, webview) {
+    // Don't queue if this tab already has an active login (queued or in progress)
+    if (tabsWithActiveLogin.has(tabId)) {
+        console.log(`[AutoLogin] Skipping queue for ${tabId} - already has active login`);
+        return;
+    }
+    
+    // Also check if login is already complete or in progress via state tracking
+    const state = autoLoginState.get(tabId);
+    if (state) {
+        if (state.loginComplete) {
+            console.log(`[AutoLogin] Skipping queue for ${tabId} - login already complete`);
+            return;
+        }
+        if (state.formFilled && Date.now() - state.formFilledAt < 30000) {
+            console.log(`[AutoLogin] Skipping queue for ${tabId} - form filled, waiting for 2FA`);
+            return;
+        }
+    }
+    
+    tabsWithActiveLogin.add(tabId);
+    globalLoginQueue.push({ tabId, loginFn, webview });
+    console.log(`[AutoLogin] Queued login for ${tabId} (queue size: ${globalLoginQueue.length})`);
+    
+    // Check if we need to show the wait overlay
+    const timeSinceLastLogin = Date.now() - globalLastLoginAttempt;
+    if (globalLoginInProgress || timeSinceLastLogin < LOGIN_RATE_LIMIT_MS) {
+        // Calculate wait time
+        const waitTime = globalLoginInProgress 
+            ? LOGIN_RATE_LIMIT_MS + (LOGIN_RATE_LIMIT_MS - timeSinceLastLogin)
+            : LOGIN_RATE_LIMIT_MS - timeSinceLastLogin;
+        const waitSeconds = Math.ceil(waitTime / 1000);
+        const queuePosition = globalLoginQueue.length;
+        
+        // Show overlay with countdown
+        showLoginQueueOverlay(webview, waitSeconds, queuePosition);
+        
+        // Start countdown updates
+        startCountdownUpdates(tabId, webview, waitSeconds);
+    }
+    
+    processGlobalLoginQueue();
+}
+
+/**
+ * Start countdown updates for a queued tab
+ */
+function startCountdownUpdates(tabId, webview, initialSeconds) {
+    let remaining = initialSeconds;
+    const interval = setInterval(() => {
+        remaining--;
+        if (remaining <= 0 || !tabsWithActiveLogin.has(tabId)) {
+            clearInterval(interval);
+            return;
+        }
+        updateLoginQueueOverlay(webview, remaining);
+    }, 1000);
+    
+    // Store interval so we can clear it when login starts
+    if (!autoLoginState.has(tabId)) {
+        autoLoginState.set(tabId, {});
+    }
+    autoLoginState.get(tabId).countdownInterval = interval;
+}
+
+/**
+ * Mark a tab's login as complete (removes from active tracking)
+ */
+function clearActiveLogin(tabId) {
+    tabsWithActiveLogin.delete(tabId);
+    // Clear countdown interval if any
+    const state = autoLoginState.get(tabId);
+    if (state && state.countdownInterval) {
+        clearInterval(state.countdownInterval);
+    }
+}
+
+async function processGlobalLoginQueue() {
+    if (globalLoginInProgress || globalLoginQueue.length === 0) return;
+    
+    // Wait at least 30 seconds between login attempts (server rate limit is very strict)
+    const timeSinceLastLogin = Date.now() - globalLastLoginAttempt;
+    if (timeSinceLastLogin < LOGIN_RATE_LIMIT_MS) {
+        const waitTime = LOGIN_RATE_LIMIT_MS - timeSinceLastLogin;
+        console.log(`[AutoLogin] Global rate limit: waiting ${Math.ceil(waitTime/1000)}s before next login`);
+        setTimeout(processGlobalLoginQueue, waitTime);
+        return;
+    }
+    
+    globalLoginInProgress = true;
+    const { tabId, loginFn, webview } = globalLoginQueue.shift();
+    // NOTE: Don't remove from tabsWithActiveLogin here - login is still in progress
+    
+    // Hide the queue overlay - login is starting
+    if (webview) {
+        hideLoginQueueOverlay(webview);
+    }
+    
+    // Clear countdown interval
+    const state = autoLoginState.get(tabId);
+    if (state && state.countdownInterval) {
+        clearInterval(state.countdownInterval);
+    }
+    
+    try {
+        globalLastLoginAttempt = Date.now();
+        console.log(`[AutoLogin] Processing queued login for ${tabId}`);
+        await loginFn();
+    } catch (e) {
+        console.error('[AutoLogin] Queued login error:', e);
+        // On error, clear the active login so it can be retried
+        clearActiveLogin(tabId);
+    } finally {
+        globalLoginInProgress = false;
+        // Process next in queue after rate limit delay
+        if (globalLoginQueue.length > 0) {
+            setTimeout(processGlobalLoginQueue, LOGIN_RATE_LIMIT_MS);
+        }
+    }
+}
+
+/**
+ * Check if a URL is an actual auth/login page (not just any onereach page)
+ */
+function isAuthPage(url) {
+    if (!url) return false;
+    // Only trigger for actual auth pages, not landing pages
+    return url.includes('auth.') && url.includes('onereach.ai') ||
+           url.includes('/login') && url.includes('onereach.ai');
+}
+
+/**
+ * Extract the auth domain from a URL for comparison
+ * This helps identify if two URLs are part of the same auth flow
+ */
+function getAuthDomain(url) {
+    if (!url) return null;
+    try {
+        const parsed = new URL(url);
+        // For auth pages, we consider auth.*.onereach.ai as the key
+        if (parsed.hostname.includes('auth.') && parsed.hostname.includes('onereach.ai')) {
+            return parsed.hostname; // e.g., auth.edison.onereach.ai
+        }
+        // For idw login pages, extract the environment
+        if (parsed.hostname.includes('idw.') && url.includes('/login')) {
+            return parsed.hostname; // e.g., idw.edison.onereach.ai
+        }
+        return parsed.hostname;
+    } catch (e) {
+        return null;
+    }
+}
+
+/**
+ * Check if two URLs are part of the same auth flow
+ */
+function isSameAuthFlow(url1, url2) {
+    if (!url1 || !url2) return false;
+    
+    const domain1 = getAuthDomain(url1);
+    const domain2 = getAuthDomain(url2);
+    
+    // Same domain means same auth flow
+    if (domain1 === domain2) return true;
+    
+    // Also consider idw.*.onereach.ai/login and auth.*.onereach.ai as same flow
+    // They share the same environment (edison, staging, etc.)
+    const env1 = url1.match(/\.(edison|staging|store|production)\./)?.[1];
+    const env2 = url2.match(/\.(edison|staging|store|production)\./)?.[1];
+    
+    if (env1 && env2 && env1 === env2) {
+        return true;
+    }
+    
+    return false;
+}
+
+/**
+ * Check if auto-login is already in progress or completed for a tab
+ * @param {string} tabId - The tab identifier
+ * @param {string} url - The current URL (to detect new auth pages)
+ */
+function shouldAttemptAutoLogin(tabId, url = '') {
+    const state = autoLoginState.get(tabId);
+    if (!state) return true;
+    
+    // Don't attempt if login completed successfully
+    if (state.loginComplete) {
+        console.log(`[AutoLogin] Skipping ${tabId} - login already complete`);
+        return false;
+    }
+    
+    // If form was already filled, don't start over - wait for 2FA
+    if (state.formFilled && Date.now() - state.formFilledAt < 30000) {
+        console.log(`[AutoLogin] Skipping ${tabId} - form already filled, waiting for 2FA`);
+        return false;
+    }
+    
+    // Don't attempt if already in progress (within 5 seconds) on SAME auth flow
+    if (state.inProgress && Date.now() - state.lastAttempt < 5000) {
+        if (isSameAuthFlow(url, state.lastUrl)) {
+            console.log(`[AutoLogin] Skipping ${tabId} - login in progress on same auth flow`);
+            return false;
+        }
+    }
+    
+    // Don't attempt if we just gave up (within 10 seconds)
+    if (state.gaveUp && Date.now() - state.gaveUpAt < 10000) {
+        console.log(`[AutoLogin] Skipping ${tabId} - recently gave up`);
+        return false;
+    }
+    
+    return true;
+}
+
+/**
+ * Mark auto-login as in progress for a tab
+ */
+function markAutoLoginInProgress(tabId, url = '') {
+    autoLoginState.set(tabId, {
+        ...(autoLoginState.get(tabId) || {}),
+        inProgress: true,
+        lastAttempt: Date.now(),
+        lastUrl: url,
+        gaveUp: false
+    });
+}
+
+/**
+ * Mark that login form was successfully filled
+ */
+function markFormFilled(tabId) {
+    autoLoginState.set(tabId, {
+        ...(autoLoginState.get(tabId) || {}),
+        formFilled: true,
+        formFilledAt: Date.now()
+    });
+}
+
+/**
+ * Mark auto-login as complete for a tab
+ */
+function markAutoLoginComplete(tabId, success) {
+    autoLoginState.set(tabId, {
+        ...(autoLoginState.get(tabId) || {}),
+        inProgress: false,
+        loginComplete: success,
+        completedAt: Date.now(),
+        formFilled: false,
+        gaveUp: false
+    });
+    // Clear from active login tracking so queue can process
+    clearActiveLogin(tabId);
+}
+
+/**
+ * Mark auto-login as gave up (no form found after retries)
+ */
+function markAutoLoginGaveUp(tabId) {
+    autoLoginState.set(tabId, {
+        ...(autoLoginState.get(tabId) || {}),
+        inProgress: false,
+        gaveUp: true,
+        gaveUpAt: Date.now()
+    });
+    // Clear from active login tracking so queue can process
+    clearActiveLogin(tabId);
+}
+
+/**
+ * Attempt auto-login with retry mechanism for async-loaded forms
+ */
+async function attemptAutoLoginWithRetry(webview, url, tabId, attempt) {
+    const maxAttempts = 5;
+    const retryDelay = 1000;
+    
+    // Get the CURRENT URL from the webview (page may have navigated during queue wait)
+    let currentUrl;
+    try {
+        currentUrl = await webview.executeJavaScript('window.location.href');
+    } catch (e) {
+        console.log(`[AutoLogin] ${tabId} - webview not accessible, skipping`);
+        markAutoLoginGaveUp(tabId);
+        return;
+    }
+    
+    // Only attempt on actual auth pages (check CURRENT url, not queued url)
+    if (!isAuthPage(currentUrl)) {
+        console.log(`[AutoLogin] Skipping ${tabId} - page is no longer on auth page: ${currentUrl}`);
+        markAutoLoginGaveUp(tabId);
+        return;
+    }
+    
+    // Check if we should attempt login
+    if (attempt === 0 && !shouldAttemptAutoLogin(tabId, currentUrl)) {
+        return;
+    }
+    
+    // Mark as in progress on first attempt
+    if (attempt === 0) {
+        markAutoLoginInProgress(tabId, currentUrl);
+    }
+    
+    console.log(`[AutoLogin] Attempt ${attempt + 1}/${maxAttempts} for ${tabId} (url: ${currentUrl})`);
+    
+    // Check if form fields exist yet
+    const formInfo = await webview.executeJavaScript(`
+        (function() {
+            // Check main document
+            const hasPasswordInMain = !!document.querySelector('input[type="password"]');
+            if (hasPasswordInMain) {
+                console.log('[AutoLogin] Form found in main document');
+                return { location: 'main', crossOrigin: false };
+            }
+            
+            // Check for iframes
+            const iframes = document.querySelectorAll('iframe');
+            console.log('[AutoLogin] Found ' + iframes.length + ' iframes');
+            
+            let hasCrossOriginIframe = false;
+            
+            for (let i = 0; i < iframes.length; i++) {
+                const iframe = iframes[i];
+                const src = iframe.src || '';
+                
+                try {
+                    const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+                    if (iframeDoc && iframeDoc.querySelector('input[type="password"]')) {
+                        console.log('[AutoLogin] Form found in same-origin iframe ' + i);
+                        return { location: 'iframe-' + i, crossOrigin: false };
+                    }
+                } catch (e) {
+                    // Cross-origin iframe - we can't access it directly
+                    console.log('[AutoLogin] Cross-origin iframe detected: ' + src);
+                    // Check if this looks like an auth iframe
+                    if (src.includes('auth.') && src.includes('onereach.ai')) {
+                        hasCrossOriginIframe = true;
+                    }
+                }
+            }
+            
+            if (hasCrossOriginIframe) {
+                return { location: 'cross-origin', crossOrigin: true };
+            }
+            
+            return { location: 'none', crossOrigin: false };
+        })()
+    `).catch(() => ({ location: 'error', crossOrigin: false }));
+    
+    console.log(`[AutoLogin] Form info for ${tabId}:`, formInfo);
+    
+    if (formInfo.location === 'main') {
+        // Form is in main document, proceed with normal login
+        await attemptAutoLogin(webview, url, tabId);
+    } else if (formInfo.location.startsWith('iframe-')) {
+        // Form is in a same-origin iframe
+        console.log(`[AutoLogin] Form is in same-origin iframe, attempting iframe login...`);
+        await attemptIframeAutoLogin(webview, url, tabId);
+    } else if (formInfo.crossOrigin) {
+        // Cross-origin iframe detected - use main process to access it
+        console.log(`[AutoLogin] Cross-origin auth iframe detected, using main process...`);
+        await attemptCrossOriginAutoLogin(webview, tabId);
+    } else if (formInfo.location === 'none' && attempt < maxAttempts - 1) {
+        // No form yet, retry after delay
+        console.log(`[AutoLogin] No form found, retrying in ${retryDelay}ms...`);
+        setTimeout(() => {
+            attemptAutoLoginWithRetry(webview, url, tabId, attempt + 1);
+        }, retryDelay);
+    } else {
+        console.log(`[AutoLogin] No form found after ${attempt + 1} attempts, giving up`);
+        markAutoLoginGaveUp(tabId);
+    }
+}
+
+/**
+ * Attempt auto-login inside an iframe
+ */
+async function attemptIframeAutoLogin(webview, url, tabId) {
+    try {
+        const credentials = await window.api.invoke('onereach:get-credentials');
+        if (!credentials || !credentials.email || !credentials.password) {
+            console.log(`[AutoLogin] No credentials configured`);
+            return;
+        }
+        
+        console.log(`[AutoLogin] Filling iframe login form for ${credentials.email}`);
+        
+        const filled = await webview.executeJavaScript(`
+            (function() {
+                const email = ${JSON.stringify(credentials.email)};
+                const password = ${JSON.stringify(credentials.password)};
+                
+                function fillInput(input, value) {
+                    if (!input) return false;
+                    input.focus();
+                    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                        window.HTMLInputElement.prototype, 'value'
+                    ).set;
+                    nativeInputValueSetter.call(input, value);
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                    return true;
+                }
+                
+                // Find the iframe with the form
+                const iframes = document.querySelectorAll('iframe');
+                for (let iframe of iframes) {
+                    try {
+                        const doc = iframe.contentDocument || iframe.contentWindow.document;
+                        if (!doc) continue;
+                        
+                        const passwordField = doc.querySelector('input[type="password"]');
+                        if (!passwordField) continue;
+                        
+                        const emailField = doc.querySelector(
+                            'input[type="email"], input[type="text"][name*="email" i], ' +
+                            'input[type="text"][name*="user" i], input[name="email"], input[name="username"], ' +
+                            'input[placeholder*="email" i], input[placeholder*="user" i]'
+                        );
+                        
+                        if (emailField) fillInput(emailField, email);
+                        fillInput(passwordField, password);
+                        
+                        // Click submit
+                        setTimeout(() => {
+                            const submitBtn = doc.querySelector('button[type="submit"], input[type="submit"]') ||
+                                             doc.querySelector('form button');
+                            if (submitBtn) {
+                                console.log('[AutoLogin] Clicking iframe submit button');
+                                submitBtn.click();
+                            }
+                        }, 500);
+                        
+                        console.log('[AutoLogin] Filled iframe form');
+                        return true;
+                    } catch (e) {
+                        console.log('[AutoLogin] Could not access iframe:', e.message);
+                    }
+                }
+                return false;
+            })()
+        `);
+        
+        // Mark form as filled if successful
+        if (filled) {
+            markFormFilled(tabId);
+        }
+    } catch (error) {
+        console.error(`[AutoLogin] Iframe login error:`, error);
+    }
+}
+
+/**
+ * Attempt auto-login in cross-origin iframe via main process
+ * This uses webFrameMain to access frames that same-origin policy blocks
+ */
+async function attemptCrossOriginAutoLogin(webview, tabId) {
+    try {
+        // Get credentials
+        const credentials = await window.api.invoke('onereach:get-credentials');
+        if (!credentials || !credentials.email || !credentials.password) {
+            console.log(`[AutoLogin] No credentials configured`);
+            return;
+        }
+        
+        // Get the webview's webContentsId
+        const webContentsId = webview.getWebContentsId();
+        console.log(`[AutoLogin] Using webContentsId: ${webContentsId} for cross-origin login`);
+        
+        // Build the login script
+        const loginScript = `
+            (function() {
+                const email = ${JSON.stringify(credentials.email)};
+                const password = ${JSON.stringify(credentials.password)};
+                
+                console.log('[CrossOrigin AutoLogin] Running in auth frame');
+                console.log('[CrossOrigin AutoLogin] URL:', window.location.href);
+                
+                // Log all inputs for debugging
+                const allInputs = document.querySelectorAll('input');
+                console.log('[CrossOrigin AutoLogin] Found ' + allInputs.length + ' inputs');
+                allInputs.forEach((inp, i) => {
+                    if (inp.type !== 'hidden') {
+                        console.log('[CrossOrigin AutoLogin] Input ' + i + ': type=' + inp.type + ', name=' + inp.name);
+                    }
+                });
+                
+                function fillInput(input, value) {
+                    if (!input) return false;
+                    input.focus();
+                    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                        window.HTMLInputElement.prototype, 'value'
+                    ).set;
+                    if (nativeInputValueSetter) {
+                        nativeInputValueSetter.call(input, value);
+                    } else {
+                        input.value = value;
+                    }
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                    input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+                    console.log('[CrossOrigin AutoLogin] Filled:', input.name || input.type);
+                    return true;
+                }
+                
+                // Find email field (broad search)
+                const emailField = document.querySelector(
+                    'input[type="email"], input[type="text"][name*="email" i], ' +
+                    'input[type="text"][name*="user" i], input[name="email"], input[name="username"], ' +
+                    'input[autocomplete="email"], input[autocomplete="username"], ' +
+                    'input[placeholder*="email" i], input[placeholder*="user" i], ' +
+                    'input[type="text"]:not([name*="search"])' // Fallback: first text input
+                );
+                
+                // Find password field
+                const passwordField = document.querySelector('input[type="password"]');
+                
+                if (!passwordField) {
+                    console.log('[CrossOrigin AutoLogin] No password field found');
+                    return { success: false, reason: 'no_password_field' };
+                }
+                
+                if (emailField) {
+                    fillInput(emailField, email);
+                }
+                fillInput(passwordField, password);
+                
+                // Click submit after a delay
+                setTimeout(() => {
+                    const submitBtn = document.querySelector(
+                        'button[type="submit"], input[type="submit"], button.submit'
+                    ) || document.querySelector('form button:not([type="button"])');
+                    
+                    if (submitBtn) {
+                        console.log('[CrossOrigin AutoLogin] Clicking submit:', submitBtn.textContent || submitBtn.type);
+                        submitBtn.click();
+                    } else {
+                        // Find by text
+                        const buttons = document.querySelectorAll('button');
+                        for (const btn of buttons) {
+                            const text = (btn.textContent || '').toLowerCase();
+                            if (text.includes('sign in') || text.includes('log in') || text.includes('login') || text.includes('continue')) {
+                                console.log('[CrossOrigin AutoLogin] Clicking button by text:', btn.textContent);
+                                btn.click();
+                                break;
+                            }
+                        }
+                    }
+                }, 500);
+                
+                return { success: true, emailFound: !!emailField, passwordFound: !!passwordField };
+            })()
+        `;
+        
+        // Execute in the auth iframe via main process
+        const result = await window.api.invoke('onereach:execute-in-frame', {
+            webContentsId,
+            urlPattern: 'auth.',  // Match auth.*.onereach.ai frames
+            script: loginScript
+        });
+        
+        console.log('[AutoLogin] Cross-origin login result:', result);
+
+        if (result.success) {
+            console.log('[AutoLogin] Successfully filled cross-origin login form');
+            
+            // Mark form as filled to prevent re-attempts during auth flow
+            markFormFilled(tabId);
+
+            // After login submission, monitor for 2FA page
+            console.log('[AutoLogin] Setting up 2FA monitoring...');
+            setTimeout(() => {
+                attemptCrossOrigin2FA(webview, tabId, 0);
+            }, 2000);  // Wait 2 seconds for login to process
+        } else {
+            console.log('[AutoLogin] Cross-origin login failed:', result.error);
+        }
+        
+    } catch (error) {
+        console.error(`[AutoLogin] Cross-origin login error:`, error);
+    }
+}
+
+/**
+ * Attempt 2FA code entry in cross-origin iframe
+ */
+async function attemptCrossOrigin2FA(webview, tabId, attempt) {
+    const maxAttempts = 5;
+    const retryDelay = 1500;
+    
+    // Check if 2FA already completed for this tab
+    const state = autoLoginState.get(tabId);
+    if (state && state.twoFAComplete) {
+        console.log(`[AutoLogin 2FA] Skipping ${tabId} - 2FA already complete`);
+        return;
+    }
+    
+    try {
+        console.log(`[AutoLogin 2FA] Attempt ${attempt + 1}/${maxAttempts} for ${tabId}`);
+        
+        // Get the webview's webContentsId
+        const webContentsId = webview.getWebContentsId();
+        
+        // First, check if we're on a 2FA page
+        const detect2FAScript = `
+            (function() {
+                console.log('[2FA Detection] Checking for 2FA page...');
+                console.log('[2FA Detection] URL:', window.location.href);
+                
+                const allInputs = document.querySelectorAll('input');
+                console.log('[2FA Detection] Found ' + allInputs.length + ' inputs');
+                allInputs.forEach((inp, i) => {
+                    if (inp.type !== 'hidden') {
+                        console.log('[2FA Detection] Input ' + i + ': type=' + inp.type + ', name=' + inp.name + ', maxlength=' + inp.maxLength);
+                    }
+                });
+                
+                // Check for 2FA indicators
+                const pageText = document.body ? document.body.innerText.toLowerCase() : '';
+                const has2FAText = pageText.includes('two-factor') || pageText.includes('2fa') || 
+                                  pageText.includes('verification code') || pageText.includes('authenticator') ||
+                                  pageText.includes('enter the code') || pageText.includes('6-digit') ||
+                                  pageText.includes('security code') || pageText.includes('authentication code');
+                
+                // Look for 2FA input fields
+                const totpInput = document.querySelector(
+                    'input[name="totp"], input[name="code"], input[name="otp"], ' +
+                    'input[name="verificationCode"], input[name="twoFactorCode"], ' +
+                    'input[autocomplete="one-time-code"], ' +
+                    'input[inputmode="numeric"][maxlength="6"], ' +
+                    'input[maxlength="6"]:not([type="password"]):not([name*="email"]):not([name*="user"]), ' +
+                    'input[placeholder*="code" i], input[placeholder*="2fa" i], input[placeholder*="authenticator" i]'
+                );
+                
+                // Also check for password field (means we're still on login)
+                const passwordField = document.querySelector('input[type="password"]');
+                
+                if (totpInput) {
+                    console.log('[2FA Detection] Found 2FA input field');
+                    return { is2FAPage: true, reason: 'totp_input_found' };
+                }
+                
+                if (has2FAText && !passwordField) {
+                    console.log('[2FA Detection] 2FA text detected, no password field');
+                    return { is2FAPage: true, reason: '2fa_text_found' };
+                }
+                
+                if (passwordField) {
+                    console.log('[2FA Detection] Still on login page (password field present)');
+                    return { is2FAPage: false, reason: 'still_login_page' };
+                }
+                
+                return { is2FAPage: false, reason: 'unknown' };
+            })()
+        `;
+        
+        const detectResult = await window.api.invoke('onereach:execute-in-frame', {
+            webContentsId,
+            urlPattern: 'auth.',
+            script: detect2FAScript
+        });
+        
+        console.log('[AutoLogin 2FA] Detection result:', detectResult);
+        
+        if (!detectResult.success) {
+            console.log('[AutoLogin 2FA] Could not access auth frame');
+            if (attempt < maxAttempts - 1) {
+                setTimeout(() => attemptCrossOrigin2FA(webview, tabId, attempt + 1), retryDelay);
+            }
+            return;
+        }
+        
+        const detection = detectResult.result;
+        
+        if (!detection || !detection.is2FAPage) {
+            if (attempt < maxAttempts - 1) {
+                console.log(`[AutoLogin 2FA] Not on 2FA page yet, retrying in ${retryDelay}ms...`);
+                setTimeout(() => attemptCrossOrigin2FA(webview, tabId, attempt + 1), retryDelay);
+            } else {
+                console.log('[AutoLogin 2FA] Not on 2FA page after max attempts (login may have succeeded without 2FA)');
+            }
+            return;
+        }
+        
+        // We're on the 2FA page - get the TOTP code
+        console.log('[AutoLogin 2FA] On 2FA page, getting TOTP code...');
+        
+        const codeResult = await window.api.invoke('totp:get-current-code');
+        
+        if (!codeResult || !codeResult.success) {
+            console.error('[AutoLogin 2FA] Failed to get TOTP code:', codeResult?.error);
+            return;
+        }
+        
+        const totpCode = codeResult.code;
+        console.log('[AutoLogin 2FA] Got TOTP code, filling form...');
+        
+        // Fill in the 2FA code
+        const fill2FAScript = `
+            (function() {
+                const code = ${JSON.stringify(totpCode)};
+                
+                console.log('[2FA Fill] Attempting to fill 2FA code');
+                
+                function fillInput(input, value) {
+                    if (!input) return false;
+                    input.focus();
+                    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                        window.HTMLInputElement.prototype, 'value'
+                    ).set;
+                    if (nativeInputValueSetter) {
+                        nativeInputValueSetter.call(input, value);
+                    } else {
+                        input.value = value;
+                    }
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                    input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+                    return true;
+                }
+                
+                // Find 2FA input
+                const totpInput = document.querySelector(
+                    'input[name="totp"], input[name="code"], input[name="otp"], ' +
+                    'input[name="verificationCode"], input[name="twoFactorCode"], ' +
+                    'input[autocomplete="one-time-code"], ' +
+                    'input[inputmode="numeric"][maxlength="6"], ' +
+                    'input[maxlength="6"]:not([type="password"]):not([name*="email"]):not([name*="user"]), ' +
+                    'input[placeholder*="code" i]'
+                );
+                
+                if (!totpInput) {
+                    // Try finding any numeric input
+                    const numericInputs = document.querySelectorAll('input[type="text"], input[type="tel"], input[inputmode="numeric"]');
+                    for (const inp of numericInputs) {
+                        if (inp.maxLength === 6 || inp.placeholder.toLowerCase().includes('code')) {
+                            console.log('[2FA Fill] Found potential 2FA input by heuristic');
+                            fillInput(inp, code);
+                            
+                            setTimeout(() => {
+                                const submitBtn = document.querySelector('button[type="submit"]') || 
+                                                 document.querySelector('form button');
+                                if (submitBtn) {
+                                    console.log('[2FA Fill] Clicking submit');
+                                    submitBtn.click();
+                                }
+                            }, 500);
+                            
+                            return { success: true, method: 'heuristic' };
+                        }
+                    }
+                    console.log('[2FA Fill] No 2FA input found');
+                    return { success: false, reason: 'no_totp_input' };
+                }
+                
+                console.log('[2FA Fill] Found 2FA input:', totpInput.name || totpInput.id);
+                fillInput(totpInput, code);
+                
+                // Click submit after a delay
+                setTimeout(() => {
+                    const submitBtn = document.querySelector('button[type="submit"]') || 
+                                     document.querySelector('form button:not([type="button"])');
+                    if (submitBtn) {
+                        console.log('[2FA Fill] Clicking submit:', submitBtn.textContent);
+                        submitBtn.click();
+                    } else {
+                        // Try finding verify/continue button
+                        const buttons = document.querySelectorAll('button');
+                        for (const btn of buttons) {
+                            const text = (btn.textContent || '').toLowerCase();
+                            if (text.includes('verify') || text.includes('confirm') || text.includes('submit') || text.includes('continue')) {
+                                console.log('[2FA Fill] Clicking button by text:', btn.textContent);
+                                btn.click();
+                                break;
+                            }
+                        }
+                    }
+                }, 500);
+                
+                return { success: true, method: 'direct' };
+            })()
+        `;
+        
+        const fillResult = await window.api.invoke('onereach:execute-in-frame', {
+            webContentsId,
+            urlPattern: 'auth.',
+            script: fill2FAScript
+        });
+        
+        console.log('[AutoLogin 2FA] Fill result:', fillResult);
+
+        if (fillResult.success && fillResult.result?.success) {
+            console.log('[AutoLogin 2FA] Successfully filled 2FA code!');
+            // Mark 2FA as complete to prevent further attempts
+            autoLoginState.set(tabId, {
+                ...(autoLoginState.get(tabId) || {}),
+                twoFAComplete: true,
+                loginComplete: true,
+                completedAt: Date.now()
+            });
+        } else {
+            console.log('[AutoLogin 2FA] Failed to fill 2FA code');
+        }
+        
+    } catch (error) {
+        console.error('[AutoLogin 2FA] Error:', error);
+    }
+}
+
+/**
+ * Attempt auto-login for OneReach pages
+ * Detects login and 2FA pages and fills them automatically
+ */
+async function attemptAutoLogin(webview, url, tabId) {
+    console.log(`[AutoLogin] Checking URL: ${url} (tab: ${tabId})`);
+    
+    try {
+        // Check if auto-login is enabled
+        const settings = await window.api.getSettings();
+        const autoLoginSettings = settings.autoLoginSettings || {};
+        console.log(`[AutoLogin] Settings loaded, enabled: ${autoLoginSettings.enabled !== false}`);
+        
+        if (autoLoginSettings.enabled === false) {
+            console.log(`[AutoLogin] Auto-login disabled, skipping`);
+            return;
+        }
+        
+        // Detect page type (login, 2fa, or other)
+        const pageType = await webview.executeJavaScript(`
+            (function() {
+                // Log all inputs for debugging
+                const allInputs = document.querySelectorAll('input');
+                console.log('[AutoLogin] Found ' + allInputs.length + ' input fields on page');
+                allInputs.forEach((inp, i) => {
+                    if (inp.type !== 'hidden') {
+                        console.log('[AutoLogin] Input ' + i + ': type=' + inp.type + ', name=' + inp.name + ', placeholder=' + inp.placeholder + ', id=' + inp.id);
+                    }
+                });
+                
+                // Check for 2FA input first (more specific)
+                const totpInputs = document.querySelectorAll(
+                    'input[name="totp"], input[name="code"], input[name="otp"], ' +
+                    'input[autocomplete="one-time-code"], ' +
+                    'input[inputmode="numeric"][maxlength="6"], ' +
+                    'input[placeholder*="code" i], input[placeholder*="2fa" i], ' +
+                    'input[placeholder*="authenticator" i]'
+                );
+                
+                const visible2FA = Array.from(totpInputs).find(input => {
+                    const rect = input.getBoundingClientRect();
+                    return rect.width > 0 && rect.height > 0;
+                });
+                
+                if (visible2FA) {
+                    console.log('[AutoLogin] Found 2FA field');
+                    return '2fa';
+                }
+                
+                // Check for login form - broader search
+                const passwordInput = document.querySelector('input[type="password"]');
+                const emailInput = document.querySelector(
+                    'input[type="email"], input[type="text"][name*="email" i], ' +
+                    'input[type="text"][name*="user" i], input[name="email"], input[name="username"], ' +
+                    'input[autocomplete="email"], input[autocomplete="username"], ' +
+                    'input[placeholder*="email" i], input[placeholder*="user" i]'
+                );
+                
+                console.log('[AutoLogin] Email field found:', !!emailInput, 'Password field found:', !!passwordInput);
+                
+                if (passwordInput && emailInput) {
+                    console.log('[AutoLogin] Login form detected');
+                    return 'login';
+                }
+                
+                // Check for password-only (might be second step)
+                if (passwordInput) {
+                    console.log('[AutoLogin] Password field only - might be step 2');
+                    return 'password-only';
+                }
+                
+                return 'other';
+            })()
+        `);
+        
+        console.log(`[AutoLogin] Page type for ${tabId}: ${pageType}`);
+        
+        if (pageType === 'other') {
+            return; // Not a login page, nothing to do
+        }
+        
+        // Get credentials
+        const credentials = await window.api.invoke('onereach:get-credentials');
+        
+        if (!credentials || !credentials.email || !credentials.password) {
+            console.log(`[AutoLogin] No credentials configured`);
+            return;
+        }
+        
+        if (pageType === 'login' || pageType === 'password-only') {
+            console.log(`[AutoLogin] Filling ${pageType} form for ${credentials.email}`);
+            
+            await webview.executeJavaScript(`
+                (function() {
+                    const email = ${JSON.stringify(credentials.email)};
+                    const password = ${JSON.stringify(credentials.password)};
+                    
+                    function fillInput(input, value) {
+                        if (!input) return false;
+                        input.focus();
+                        
+                        // React compatibility - set native value
+                        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                            window.HTMLInputElement.prototype, 'value'
+                        ).set;
+                        nativeInputValueSetter.call(input, value);
+                        
+                        // Dispatch events
+                        input.dispatchEvent(new Event('input', { bubbles: true }));
+                        input.dispatchEvent(new Event('change', { bubbles: true }));
+                        input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+                        
+                        console.log('[AutoLogin] Filled field:', input.name || input.type);
+                        return true;
+                    }
+                    
+                    // Find and fill email (broader search)
+                    const emailInput = document.querySelector(
+                        'input[type="email"], input[type="text"][name*="email" i], ' +
+                        'input[type="text"][name*="user" i], input[name="email"], input[name="username"], ' +
+                        'input[autocomplete="email"], input[autocomplete="username"], ' +
+                        'input[placeholder*="email" i], input[placeholder*="user" i]'
+                    );
+                    if (emailInput) {
+                        fillInput(emailInput, email);
+                    }
+                    
+                    // Find and fill password
+                    const passwordInput = document.querySelector('input[type="password"]');
+                    if (passwordInput) {
+                        fillInput(passwordInput, password);
+                    }
+                    
+                    // Auto-submit after a delay
+                    setTimeout(() => {
+                        // Try multiple submit button selectors
+                        const submitBtn = document.querySelector(
+                            'button[type="submit"], input[type="submit"], ' +
+                            'button.submit, button.login, button.signin'
+                        ) || document.querySelector('form button:not([type="button"])');
+                        
+                        if (submitBtn) {
+                            console.log('[AutoLogin] Clicking submit button:', submitBtn.textContent || submitBtn.type);
+                            submitBtn.click();
+                        } else {
+                            // Try finding by text content
+                            const buttons = document.querySelectorAll('button');
+                            for (const btn of buttons) {
+                                const text = (btn.textContent || '').toLowerCase();
+                                if (text.includes('sign in') || text.includes('log in') || text.includes('login') || text.includes('submit') || text.includes('continue')) {
+                                    console.log('[AutoLogin] Clicking button by text:', btn.textContent);
+                                    btn.click();
+                                    break;
+                                }
+                            }
+                        }
+                    }, 500);
+                    
+                    return true;
+                })()
+            `);
+            
+        } else if (pageType === '2fa') {
+            if (!credentials.totpSecret) {
+                console.log(`[AutoLogin] No TOTP secret configured, cannot fill 2FA`);
+                return;
+            }
+            
+            // Get current TOTP code
+            const codeResult = await window.api.invoke('totp:get-current-code');
+            
+            if (!codeResult.success) {
+                console.error(`[AutoLogin] Failed to get TOTP code: ${codeResult.error}`);
+                return;
+            }
+            
+            console.log(`[AutoLogin] Filling 2FA code`);
+            
+            await webview.executeJavaScript(`
+                (function() {
+                    const code = ${JSON.stringify(codeResult.code)};
+                    
+                    const totpInput = document.querySelector(
+                        'input[name="totp"], input[name="code"], input[name="otp"], ' +
+                        'input[autocomplete="one-time-code"], ' +
+                        'input[inputmode="numeric"][maxlength="6"], ' +
+                        'input[placeholder*="code" i], input[placeholder*="2fa" i], ' +
+                        'input[type="text"][maxlength="6"], input[type="number"][maxlength="6"]'
+                    );
+                    
+                    if (!totpInput) return false;
+                    
+                    totpInput.focus();
+                    totpInput.value = code;
+                    totpInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    totpInput.dispatchEvent(new Event('change', { bubbles: true }));
+                    
+                    // React compatibility
+                    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                        window.HTMLInputElement.prototype, 'value'
+                    ).set;
+                    nativeInputValueSetter.call(totpInput, code);
+                    totpInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    
+                    // Auto-submit
+                    const submitBtn = document.querySelector(
+                        'button[type="submit"], input[type="submit"]'
+                    ) || document.querySelector('form button');
+                    
+                    if (submitBtn) {
+                        setTimeout(() => submitBtn.click(), 300);
+                    }
+                    
+                    return true;
+                })()
+            `);
+        }
+        
+    } catch (error) {
+        console.error(`[AutoLogin] Error:`, error);
+    }
+}
+
 /**
  * Initialize LLM Badge handler
  * Shows a badge in the tab bar when LLM API calls are made
@@ -315,7 +1465,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 menuItem.addEventListener('click', () => {
                     console.log('Opening IDW environment in new tab:', env.label);
                     // Store the IDW ID in the tab for better tracking
-                    const newTab = createNewTab(env.homeUrl || env.chatUrl);
+                    // Use chatUrl first (the actual chat interface), fall back to homeUrl
+                    const newTab = createNewTab(env.chatUrl || env.homeUrl);
                     if (newTab) {
                         newTab.idwId = env.id;
                         newTab.idwLabel = env.label;
@@ -935,6 +2086,12 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log('Saving tab state before app quit');
         saveTabState();
     });
+    
+    // Backup: Also save tabs on beforeunload in case IPC message doesn't arrive
+    window.addEventListener('beforeunload', () => {
+        console.log('Window beforeunload - saving tab state');
+        saveTabState();
+    });
 
     // Listen for auth URL handling
     window.api.receive('handle-auth-url', (url) => {
@@ -1082,26 +2239,40 @@ function loadSavedTabs() {
             console.log('Restoring saved tabs:', savedTabs);
             
             if (savedTabs.tabs && savedTabs.tabs.length > 0) {
-                // Create each saved tab
-                savedTabs.tabs.forEach((tabData, index) => {
-                    console.log(`Restoring tab ${index}: URL=${tabData.url}, Partition=${tabData.partition}`);
-                    // Create the tab with the saved URL and partition
-                    createNewTabWithPartition(tabData.url, tabData.partition);
+                // Filter out invalid tabs (empty or missing URLs)
+                const validTabs = savedTabs.tabs.filter((tabData, index) => {
+                    const hasValidUrl = tabData.url && 
+                                       tabData.url.trim() !== '' && 
+                                       tabData.url.startsWith('http');
+                    if (!hasValidUrl) {
+                        console.warn(`Skipping invalid tab ${index}: URL="${tabData.url}"`);
+                    }
+                    return hasValidUrl;
                 });
                 
-                // Activate the previously active tab
-                if (savedTabs.activeTabIndex >= 0 && savedTabs.activeTabIndex < tabs.length) {
-                    activateTab(tabs[savedTabs.activeTabIndex].id);
+                if (validTabs.length > 0) {
+                    // Create each valid saved tab
+                    validTabs.forEach((tabData, index) => {
+                        console.log(`Restoring tab ${index}: URL=${tabData.url}, Partition=${tabData.partition}`);
+                        // Create the tab with the saved URL and partition
+                        createNewTabWithPartition(tabData.url, tabData.partition);
+                    });
+                    
+                    // Activate the previously active tab (adjusted for filtered tabs)
+                    const adjustedIndex = Math.min(savedTabs.activeTabIndex, tabs.length - 1);
+                    if (adjustedIndex >= 0 && adjustedIndex < tabs.length) {
+                        activateTab(tabs[adjustedIndex].id);
+                    }
+                    
+                    return;
                 }
-                
-                return;
             }
         }
     } catch (error) {
         console.error('Error loading saved tabs:', error);
     }
     
-    // If no tabs were loaded or there was an error, create a default tab
+    // If no valid tabs were loaded or there was an error, create a default tab
     createNewTab('https://my.onereach.ai/');
 }
 
@@ -1109,10 +2280,14 @@ function loadSavedTabs() {
 function saveTabState() {
     try {
         const tabsToSave = tabs.map(tab => {
+            // Use tab.currentUrl instead of tab.webview.src because webview.src may not
+            // be set yet during async token injection for OneReach environments.
+            // tab.currentUrl is set at creation time and updated on navigation events.
+            const url = tab.currentUrl || tab.webview.src || 'https://my.onereach.ai/';
             return {
-                url: tab.webview.src,
+                url: url,
                 title: tab.element.querySelector('.tab-title').textContent,
-                partition: tab.webview.dataset.partition
+                partition: tab.partition || tab.webview.dataset.partition
             };
         });
         
@@ -1172,6 +2347,28 @@ function updateTabFavicon(tabId, url) {
     img.src = faviconUrl;
 }
 
+/**
+ * Extract OneReach environment from URL
+ * @param {string} url - URL to extract environment from
+ * @returns {string|null} Environment name or null if not OneReach
+ */
+function extractEnvironmentFromUrl(url) {
+    try {
+        const hostname = new URL(url).hostname.toLowerCase();
+        
+        if (hostname.includes('edison')) return 'edison';
+        if (hostname.includes('staging')) return 'staging';
+        if (hostname.includes('dev.')) return 'dev';
+        
+        // Default to production for onereach.ai domains
+        if (hostname.includes('onereach.ai')) return 'production';
+        
+        return null; // Not a OneReach URL
+    } catch {
+        return null;
+    }
+}
+
 // Create a new tab with the given URL and partition
 function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = null) {
     // Close any open IDW menu as available environments will change
@@ -1218,6 +2415,9 @@ function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = 
     // Use the provided partition or create a new unique one for complete isolation
     const partitionName = partition || `persist:tab-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
     
+    // Detect OneReach environment for multi-tenant token handling
+    const environment = extractEnvironmentFromUrl(url);
+    
     console.log(`Creating webview for tab ${tabId} with partition: ${partitionName} for URL: ${url}`);
     
     // Create the webview element
@@ -1233,8 +2433,56 @@ function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = 
     webview.setAttribute('partition', partitionName);
     webview.partition = partitionName;  // Also set as property
     
-    // Set src after partition to ensure it's applied
-    webview.src = url;
+    // Multi-tenant token injection - MUST complete before navigation starts
+    // Use a flag to track when webview should load
+    let tokenInjectionComplete = false;
+    let pendingUrl = url;
+    
+    // Function to actually load the URL after token injection
+    const loadUrlWhenReady = () => {
+        if (!tokenInjectionComplete) return;
+        console.log(`[Tab] Token injection complete, loading URL: ${pendingUrl}`);
+        webview.src = pendingUrl;
+    };
+    
+    if (environment) {
+        (async () => {
+            try {
+                const hasToken = await window.api.invoke('multi-tenant:has-token', environment);
+                if (hasToken) {
+                    console.log(`[Tab] Injecting ${environment} multi-tenant token into ${partitionName}`);
+                    const result = await window.api.invoke('multi-tenant:inject-token', {
+                        environment,
+                        partition: partitionName
+                    });
+                    
+                    if (result.success) {
+                        // Pre-register partition for refresh propagation
+                        await window.api.invoke('multi-tenant:register-partition', {
+                            environment,
+                            partition: partitionName
+                        });
+                        console.log(`[Tab] Successfully injected and registered ${environment} token`);
+                    } else {
+                        console.warn(`[Tab] Token injection failed: ${result.error}`);
+                    }
+                } else {
+                    console.log(`[Tab] No ${environment} token available, user will need to login`);
+                }
+            } catch (err) {
+                console.error('[Tab] Error during token injection:', err);
+                // Continue anyway - user can still login manually
+            } finally {
+                // Always mark injection as complete and load URL
+                tokenInjectionComplete = true;
+                loadUrlWhenReady();
+            }
+        })();
+    } else {
+        // No environment detected, load URL immediately
+        tokenInjectionComplete = true;
+        webview.src = url;
+    }
     
     // Add preload script for IDW sites to handle authentication
     if (url && (url.includes('onereach.ai') || url.includes('edison.onereach.ai'))) {
@@ -1546,6 +2794,17 @@ function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = 
         webviewReady = true;
         clearTimeout(loadingTimeout);
         
+        // Attach multi-tenant cookie listener for this partition
+        if (environment) {
+            window.api.invoke('multi-tenant:attach-listener', { partition: partitionName })
+                .then(() => console.log(`[Tab] Cookie listener attached for ${tabId}`))
+                .catch(err => console.warn(`[Tab] Failed to attach cookie listener:`, err));
+            
+            // NOTE: localStorage injection DISABLED
+            // The 'or' cookie/localStorage data is account-specific and doesn't help with SSO.
+            // The 'mult' cookie (injected before webview.src is set) is sufficient to enable SSO.
+        }
+        
         // Get the webContents ID and use it to access the webContents directly
         const webContentsId = webview.getWebContentsId();
         console.log(`Webview ${tabId} webContentsId:`, webContentsId);
@@ -1742,6 +3001,28 @@ function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = 
             updateNavigationState(tabId);
         }
         
+        // Auto-login for OneReach auth pages only (with retry for async-loaded forms)
+        const currentUrl = webview.getURL();
+        console.log(`[AutoLogin] Webview loaded: ${currentUrl} (tab: ${tabId})`);
+        if (currentUrl && isAuthPage(currentUrl)) {
+            // Check if we should attempt login (debounce)
+            if (!shouldAttemptAutoLogin(tabId, currentUrl)) {
+                console.log(`[AutoLogin] Skipping - already in progress or complete`);
+            } else {
+                console.log(`[AutoLogin] Auth page detected, queueing auto-login for ${tabId}...`);
+                // Queue login with global rate limiting (one per tab)
+                queueGlobalLogin(tabId, async () => {
+                    // Re-check state before executing (may have changed while in queue)
+                    if (!shouldAttemptAutoLogin(tabId, currentUrl)) {
+                        console.log(`[AutoLogin] Skipping ${tabId} - state changed while in queue`);
+                        return;
+                    }
+                    await new Promise(r => setTimeout(r, 500)); // Wait for form
+                    attemptAutoLoginWithRetry(webview, currentUrl, tabId, 0);
+                }, webview);
+            }
+        }
+        
         // Mark initial load as complete
         isInitialLoad = false;
     });
@@ -1771,6 +3052,24 @@ function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = 
     
     webview.addEventListener('did-navigate', (e) => {
         console.log(`Webview ${tabId} did-navigate to: ${e.url}`);
+        
+        // SSO Diagnostic: Log when auth pages are accessed
+        if (e.url.includes('auth.') && e.url.includes('onereach.ai')) {
+            console.log(`[SSO Diagnostic] Auth page accessed in ${tabId}: ${e.url}`);
+            // Check if this partition has the mult cookie
+            const partition = webview.partition || webview.getAttribute('partition');
+            if (partition && window.api) {
+                window.api.invoke('multi-tenant:get-cookies', { partition, name: 'mult' })
+                    .then(cookies => {
+                        console.log(`[SSO Diagnostic] mult cookies in ${partition}:`, cookies?.map(c => ({
+                            domain: c.domain,
+                            path: c.path,
+                            sameSite: c.sameSite
+                        })) || 'none');
+                    })
+                    .catch(err => console.log(`[SSO Diagnostic] Could not check cookies: ${err.message}`));
+            }
+        }
         
         // Update the tab's current URL
         const tab = tabs.find(t => t.id === tabId);
@@ -1810,6 +3109,23 @@ function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = 
     webview.addEventListener('did-navigate-in-page', (e) => {
         console.log(`Webview ${tabId} did-navigate-in-page to: ${e.url}`);
         
+        // SSO Diagnostic: Log when auth pages are accessed via in-page navigation
+        if (e.url.includes('auth.') && e.url.includes('onereach.ai')) {
+            console.log(`[SSO Diagnostic] Auth page accessed (in-page) in ${tabId}: ${e.url}`);
+            const partition = webview.partition || webview.getAttribute('partition');
+            if (partition && window.api) {
+                window.api.invoke('multi-tenant:get-cookies', { partition, name: 'mult' })
+                    .then(cookies => {
+                        console.log(`[SSO Diagnostic] mult cookies in ${partition}:`, cookies?.map(c => ({
+                            domain: c.domain,
+                            path: c.path,
+                            sameSite: c.sameSite
+                        })) || 'none');
+                    })
+                    .catch(err => console.log(`[SSO Diagnostic] Could not check cookies: ${err.message}`));
+            }
+        }
+        
         // Update the tab's current URL for in-page navigation too
         const tab = tabs.find(t => t.id === tabId);
         if (tab) {
@@ -1835,6 +3151,27 @@ function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = 
         // This is critical for chat interfaces that use history API
         if (tabId === activeTabId) {
             updateNavigationState(tabId);
+        }
+        
+        // Auto-login for auth pages (SPA navigation)
+        // The actual login form is at auth.*.onereach.ai/login
+        if (isAuthPage(e.url)) {
+            // Check if we should attempt login (debounce) - pass URL to detect new auth pages
+            if (!shouldAttemptAutoLogin(tabId, e.url)) {
+                return;
+            }
+            console.log(`[AutoLogin] Auth page detected via SPA navigation for ${tabId}: ${e.url}`);
+            const authUrl = e.url;
+            // Queue login with global rate limiting (one per tab)
+            queueGlobalLogin(tabId, async () => {
+                // Re-check state before executing
+                if (!shouldAttemptAutoLogin(tabId, authUrl)) {
+                    console.log(`[AutoLogin] Skipping ${tabId} - state changed while in queue`);
+                    return;
+                }
+                await new Promise(r => setTimeout(r, 500)); // Wait for form
+                attemptAutoLoginWithRetry(webview, authUrl, tabId, 0);
+            }, webview);
         }
     });
     
@@ -1941,6 +3278,8 @@ function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = 
         container: webviewContainer,
         webview: webview,
         currentUrl: url || 'https://my.onereach.ai/',
+        partition: partitionName,        // Track partition for multi-tenant cleanup
+        environment: environment,         // Track OneReach environment (edison, staging, etc.)
         isReady: () => webviewReady,
         checkSession: () => {
             // Test session isolation by checking local storage and session info
@@ -2113,6 +3452,22 @@ function closeTab(tabId) {
         // Unregister from IDW Registry
         idwRegistry.unregisterTab(tabId);
         console.log(`[Tab Close] Unregistered tab ${tabId} from IDW Registry`);
+        
+        // Cleanup multi-tenant token tracking
+        if (tab.partition && tab.environment) {
+            // Unregister partition from refresh propagation
+            window.api.invoke('multi-tenant:unregister-partition', {
+                environment: tab.environment,
+                partition: tab.partition
+            }).catch(err => console.warn('[Tab Close] Failed to unregister partition:', err));
+            
+            // Remove cookie listener (memory cleanup)
+            window.api.invoke('multi-tenant:remove-listener', {
+                partition: tab.partition
+            }).catch(err => console.warn('[Tab Close] Failed to remove listener:', err));
+            
+            console.log(`[Tab Close] Cleaned up multi-tenant resources for ${tab.partition}`);
+        }
         
         // Close any open IDW menu as available environments have changed
         const existingMenu = document.querySelector('.idw-menu');

@@ -516,6 +516,125 @@
             </div>
         </div>
         
+        <!-- OneReach Authentication Section -->
+        <div class="section">
+            <h2 class="section-title">OneReach Auto-Login</h2>
+            <p class="section-subtitle">Configure once to automatically log into all IDW and GSX windows, including 2FA</p>
+            
+            <!-- Credentials -->
+            <div class="form-group">
+                <label for="onereach-email">
+                    Email / Username
+                    <span id="onereach-creds-status" class="api-key-status"></span>
+                </label>
+                <input type="email" id="onereach-email" placeholder="your@email.com">
+            </div>
+            
+            <div class="form-group">
+                <label for="onereach-password">Password</label>
+                <div class="api-key-group">
+                    <input type="password" id="onereach-password" placeholder="Your OneReach password">
+                    <button class="toggle-visibility" onclick="toggleOneReachPasswordVisibility()">Show</button>
+                </div>
+            </div>
+            
+            <!-- 2FA Setup -->
+            <div class="api-section-header" style="margin-top: 24px;">
+                <h3>Two-Factor Authentication (2FA)</h3>
+                <div class="api-section-line"></div>
+            </div>
+            
+            <div id="totp-not-configured">
+                <p class="info-text" style="margin-bottom: 16px;">
+                    Scan your OneReach 2FA QR code to enable automatic code entry. 
+                    Make sure the QR code is visible on your screen before clicking "Scan".
+                </p>
+                
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button class="btn-secondary" onclick="scanQRFromScreen()" style="display: flex; align-items: center; gap: 6px;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="7" height="7"/>
+                            <rect x="14" y="3" width="7" height="7"/>
+                            <rect x="3" y="14" width="7" height="7"/>
+                            <rect x="14" y="14" width="7" height="7"/>
+                        </svg>
+                        Scan QR from Screen
+                    </button>
+                    <button class="btn-secondary" onclick="toggleManualSecretEntry()">Enter Secret Manually</button>
+                </div>
+                
+                <div id="manual-secret-entry" style="display: none; margin-top: 16px;">
+                    <div class="form-group">
+                        <label for="totp-secret-input">TOTP Secret Key</label>
+                        <input type="text" id="totp-secret-input" placeholder="JBSWY3DPEHPK3PXP" style="font-family: monospace;">
+                        <p class="info-text">Found in your authenticator setup, usually shown as "Secret Key" or "Manual Entry"</p>
+                    </div>
+                    <button class="btn-primary" onclick="saveManualTOTPSecret()" style="margin-top: 8px;">Save Secret</button>
+                </div>
+            </div>
+            
+            <div id="totp-configured" style="display: none;">
+                <div style="background: #1e1e1e; border-radius: 8px; padding: 20px; text-align: center;">
+                    <div style="font-size: 12px; color: #888; margin-bottom: 8px;">Current Code</div>
+                    <div id="current-totp-code" style="font-size: 32px; font-family: monospace; font-weight: 600; letter-spacing: 4px; color: #4CAF50;">
+                        --- ---
+                    </div>
+                    <div style="margin-top: 12px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                        <div id="totp-countdown-bar" style="width: 100px; height: 4px; background: #3e3e3e; border-radius: 2px; overflow: hidden;">
+                            <div id="totp-countdown-fill" style="width: 100%; height: 100%; background: #4CAF50; transition: width 1s linear;"></div>
+                        </div>
+                        <span id="totp-countdown-text" style="font-size: 12px; color: #888;">30s</span>
+                    </div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px; margin-top: 12px; color: #4CAF50;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M20 6L9 17l-5-5"/>
+                    </svg>
+                    <span>2FA configured and working</span>
+                </div>
+                <button class="btn-secondary" onclick="removeTOTPSecret()" style="margin-top: 12px; color: #f44336; border-color: #f44336;">
+                    Remove 2FA
+                </button>
+            </div>
+            
+            <!-- Environment Selection -->
+            <div class="api-section-header" style="margin-top: 24px;">
+                <h3>Auto-Login Environments</h3>
+                <div class="api-section-line"></div>
+            </div>
+            
+            <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+                <label class="checkbox-group">
+                    <input type="checkbox" id="autologin-edison" checked>
+                    <span>Edison</span>
+                </label>
+                <label class="checkbox-group">
+                    <input type="checkbox" id="autologin-staging" checked>
+                    <span>Staging</span>
+                </label>
+                <label class="checkbox-group">
+                    <input type="checkbox" id="autologin-production" checked>
+                    <span>Production</span>
+                </label>
+            </div>
+            
+            <!-- Auto-Login Toggle -->
+            <div class="form-group" style="margin-top: 20px;">
+                <label class="checkbox-group">
+                    <input type="checkbox" id="autologin-enabled" checked>
+                    <span>Enable automatic login (fill forms and submit automatically)</span>
+                </label>
+                <p class="info-text">When disabled, credentials will be pre-filled but you'll need to click submit</p>
+            </div>
+            
+            <!-- Actions -->
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button class="btn-primary" onclick="saveOneReachCredentials()">Save Credentials</button>
+                <button class="btn-secondary" onclick="testOneReachLogin()">Test Login</button>
+                <button class="btn-secondary" onclick="clearOneReachCredentials()" style="color: #f44336;">Clear All</button>
+            </div>
+        </div>
+        
         <!-- LLM Configuration Section -->
         <div class="section">
             <h2 class="section-title">LLM Configuration</h2>
@@ -683,21 +802,35 @@
             </div>
             
             <div class="form-group api-key-group">
+                <label for="gsxRefreshUrl">
+                    GSX Refresh URL
+                    <span id="gsxRefreshUrlStatus" class="api-key-status"></span>
+                </label>
+                <div style="position: relative;">
+                    <input type="text" id="gsxRefreshUrl" placeholder="https://em.edison.api.onereach.ai/http/YOUR_ACCOUNT_ID/refresh_token">
+                </div>
+                <div class="info-text">The URL that returns a fresh GSX token. The app will call this automatically.</div>
+                <div style="margin-top: 10px;">
+                    <button class="btn-secondary" onclick="fetchGSXToken()" style="padding: 6px 12px; font-size: 12px;">
+                        Fetch Token Now
+                    </button>
+                </div>
+            </div>
+            
+            <div class="form-group api-key-group">
                 <label for="gsxToken">
-                    GSX Token
+                    GSX Token (Auto-fetched)
                     <span id="gsxTokenStatus" class="api-key-status"></span>
                     <a href="#" class="test-connection" onclick="testGSXConnection()">Test Connection</a>
                 </label>
                 <div style="position: relative;">
-                    <input type="password" id="gsxToken" placeholder="Paste your OneReach GSX token here">
-                    <button class="toggle-visibility" onclick="toggleGSXTokenVisibility()">👁</button>
+                    <input type="password" id="gsxToken" placeholder="Token will be fetched automatically from Refresh URL" readonly>
+                    <button class="toggle-visibility" onclick="toggleGSXTokenVisibility()">Show</button>
                 </div>
+                <div class="info-text">This token is automatically fetched and refreshed from the Refresh URL above.</div>
                 <div style="margin-top: 10px;">
-                    <button class="btn-secondary" onclick="pasteGSXToken()" style="padding: 6px 12px; font-size: 12px;">
-                        📋 Paste Token from Clipboard
-                    </button>
-                    <button class="btn-secondary" onclick="refreshGSXToken()" style="padding: 6px 12px; font-size: 12px; margin-left: 10px;">
-                        🔄 Refresh Token
+                    <button class="btn-secondary" onclick="refreshGSXToken()" style="padding: 6px 12px; font-size: 12px;">
+                        Refresh Token
                     </button>
                     <button class="btn-secondary" onclick="clearGSXToken()" style="padding: 6px 12px; font-size: 12px; margin-left: 10px;">
                         🗑️ Clear Token
@@ -970,8 +1103,9 @@
                 document.getElementById('aiTypeFile').disabled = isAllTypes;
                 
                 // GSX Settings
+                document.getElementById('gsxRefreshUrl').value = settings.gsxRefreshUrl || '';
                 document.getElementById('gsxToken').value = settings.gsxToken || '';
-                document.getElementById('gsxEnvironment').value = settings.gsxEnvironment || 'production';
+                document.getElementById('gsxEnvironment').value = settings.gsxEnvironment || 'edison';
                 document.getElementById('gsxAccountId').value = settings.gsxAccountId || '';
                 document.getElementById('gsxAutoSync').checked = settings.gsxAutoSync === true;
                 document.getElementById('gsxSyncInterval').value = settings.gsxSyncInterval || 'daily';
@@ -980,6 +1114,12 @@
                 document.getElementById('learningApiUrl').value = settings.learningApiUrl || 'https://em.staging.api.onereach.ai/http/48cc49ef-ab05-4d51-acc6-559c7ff22150/idw_quick_starts';
                 document.getElementById('learningApiMethod').value = settings.learningApiMethod || 'POST';
                 document.getElementById('learningApiCache').checked = settings.learningApiCache !== false;
+                
+                // Check if GSX refresh URL exists
+                if (settings.gsxRefreshUrl) {
+                    document.getElementById('gsxRefreshUrlStatus').textContent = '(Configured)';
+                    document.getElementById('gsxRefreshUrlStatus').className = 'api-key-status status-valid';
+                }
                 
                 // Check if GSX token exists
                 if (settings.gsxToken) {
@@ -1108,6 +1248,7 @@
                 autoGenerateScreenshotMetadata: document.getElementById('autoGenerateScreenshotMetadata').checked,
                 autoAIMetadata: document.getElementById('autoAIMetadata').checked,
                 autoAIMetadataTypes: aiMetadataTypes,
+                gsxRefreshUrl: document.getElementById('gsxRefreshUrl').value,
                 gsxToken: document.getElementById('gsxToken').value,
                 gsxEnvironment: document.getElementById('gsxEnvironment').value,
                 gsxAccountId: document.getElementById('gsxAccountId').value,
@@ -1620,13 +1761,61 @@
             }
         }
         
+        async function fetchGSXToken() {
+            const refreshUrl = document.getElementById('gsxRefreshUrl').value;
+            const statusEl = document.getElementById('gsxTokenStatus');
+            const refreshUrlStatusEl = document.getElementById('gsxRefreshUrlStatus');
+            
+            if (!refreshUrl) {
+                showStatus('Please enter a GSX Refresh URL first', 'error');
+                return;
+            }
+            
+            statusEl.textContent = '(Fetching...)';
+            statusEl.className = 'api-key-status';
+            showStatus('Fetching GSX token...', 'info');
+            
+            try {
+                // First save the refresh URL
+                await window.api.saveSettings({ gsxRefreshUrl: refreshUrl });
+                
+                // Then call the refresh endpoint
+                const result = await window.electronAPI.refreshGSXToken();
+                
+                if (result.success && result.token) {
+                    document.getElementById('gsxToken').value = result.token;
+                    statusEl.textContent = '(Token fetched!)';
+                    statusEl.className = 'api-key-status status-valid';
+                    refreshUrlStatusEl.textContent = '(Valid)';
+                    refreshUrlStatusEl.className = 'api-key-status status-valid';
+                    showStatus('GSX token fetched successfully!', 'success');
+                } else {
+                    statusEl.textContent = '(Fetch failed)';
+                    statusEl.className = 'api-key-status status-invalid';
+                    showStatus('Token fetch failed: ' + (result.error || 'Unknown error'), 'error');
+                }
+            } catch (error) {
+                statusEl.textContent = '(Fetch failed)';
+                statusEl.className = 'api-key-status status-invalid';
+                showStatus('Token fetch error: ' + error.message, 'error');
+            }
+        }
+        
         async function testGSXConnection() {
-            const token = document.getElementById('gsxToken').value;
+            let token = document.getElementById('gsxToken').value;
             const environment = document.getElementById('gsxEnvironment').value;
             const accountId = document.getElementById('gsxAccountId').value;
+            const refreshUrl = document.getElementById('gsxRefreshUrl').value;
+            
+            // If no token but we have a refresh URL, try to fetch one first
+            if (!token && refreshUrl) {
+                showStatus('No token - fetching from refresh URL...', 'info');
+                await fetchGSXToken();
+                token = document.getElementById('gsxToken').value;
+            }
             
             if (!token) {
-                showStatus('Please enter a GSX token first', 'error');
+                showStatus('Please configure a GSX Refresh URL to get a token', 'error');
                 return;
             }
             
@@ -1663,7 +1852,18 @@
         }
         
         async function syncCompleteBackup() {
-            showStatus('Starting complete backup...', 'success');
+            // Get the button and disable it during backup
+            const backupBtn = event.target;
+            const originalText = backupBtn.textContent;
+            backupBtn.disabled = true;
+            backupBtn.textContent = 'Backing up...';
+            backupBtn.style.opacity = '0.6';
+            
+            // Show persistent status
+            const statusEl = document.getElementById('statusMessage');
+            statusEl.textContent = 'Starting complete backup... This may take a few minutes.';
+            statusEl.className = 'status-message status-info';
+            statusEl.style.display = 'block';
             
             try {
                 const result = await window.api.syncGSXCompleteBackup();
@@ -1695,6 +1895,11 @@
                 }
             } catch (error) {
                 showStatus(`Error during backup: ${error.message}`, 'error');
+            } finally {
+                // Re-enable the button
+                backupBtn.disabled = false;
+                backupBtn.textContent = originalText;
+                backupBtn.style.opacity = '1';
             }
         }
         
@@ -1942,7 +2147,287 @@
         loadSettings = async function() {
             await originalLoadSettings.call(this);
             await initContextProviders();
+            await loadOneReachCredentials();
         };
+        
+        // ============================================================
+        // OneReach Auto-Login Functions
+        // ============================================================
+        
+        let oneReachPasswordVisible = false;
+        let totpUpdateInterval = null;
+        
+        // Load OneReach credentials on settings load
+        async function loadOneReachCredentials() {
+            try {
+                console.log('[OneReach] Loading credentials...');
+                const result = await window.api.invoke('onereach:get-credentials');
+                console.log('[OneReach] Got credentials result:', result ? { email: result.email, has2FA: result.has2FA } : null);
+                
+                if (result && result.email) {
+                    document.getElementById('onereach-email').value = result.email;
+                    document.getElementById('onereach-password').value = result.password || '';
+                    
+                    document.getElementById('onereach-creds-status').textContent = '(Saved)';
+                    document.getElementById('onereach-creds-status').className = 'api-key-status status-valid';
+                    
+                    if (result.has2FA && result.totpSecret) {
+                        console.log('[OneReach] 2FA configured, showing TOTP display');
+                        show2FAConfigured(result.totpSecret);
+                    }
+                }
+                
+                // Load auto-login settings from persisted settings
+                console.log('[OneReach] Loading autoLoginSettings from:', settings.autoLoginSettings);
+                const autoLoginSettings = settings.autoLoginSettings || {};
+                document.getElementById('autologin-edison').checked = autoLoginSettings.edison !== false;
+                document.getElementById('autologin-staging').checked = autoLoginSettings.staging !== false;
+                document.getElementById('autologin-production').checked = autoLoginSettings.production !== false;
+                document.getElementById('autologin-enabled').checked = autoLoginSettings.enabled !== false;
+                
+                console.log('[OneReach] Credentials loaded successfully');
+            } catch (error) {
+                console.error('Failed to load OneReach credentials:', error);
+            }
+        }
+        
+        // Save OneReach credentials
+        async function saveOneReachCredentials() {
+            const email = document.getElementById('onereach-email').value.trim();
+            const password = document.getElementById('onereach-password').value;
+            
+            if (!email || !password) {
+                showStatus('Please enter both email and password', 'error');
+                return;
+            }
+            
+            try {
+                showStatus('Saving credentials...', 'info');
+                
+                const result = await window.api.invoke('onereach:save-credentials', {
+                    email,
+                    password
+                });
+                
+                if (result.success) {
+                    document.getElementById('onereach-creds-status').textContent = '(Saved)';
+                    document.getElementById('onereach-creds-status').className = 'api-key-status status-valid';
+
+                    // Save auto-login settings to disk
+                    const autoLoginSettings = {
+                        edison: document.getElementById('autologin-edison').checked,
+                        staging: document.getElementById('autologin-staging').checked,
+                        production: document.getElementById('autologin-production').checked,
+                        enabled: document.getElementById('autologin-enabled').checked
+                    };
+                    settings.autoLoginSettings = autoLoginSettings;
+                    
+                    // Persist to settings file
+                    console.log('[OneReach] Saving autoLoginSettings:', autoLoginSettings);
+                    const saveResult = await window.api.saveSettings({ autoLoginSettings });
+                    console.log('[OneReach] Settings save result:', saveResult);
+                    
+                    showStatus('Credentials saved successfully', 'success');
+                } else {
+                    showStatus('Failed to save credentials: ' + (result.error || 'Unknown error'), 'error');
+                }
+            } catch (error) {
+                console.error('Failed to save credentials:', error);
+                showStatus('Failed to save credentials: ' + error.message, 'error');
+            }
+        }
+        
+        // Clear OneReach credentials
+        async function clearOneReachCredentials() {
+            if (!confirm('Are you sure you want to remove your OneReach credentials? This will disable auto-login.')) {
+                return;
+            }
+            
+            try {
+                await window.api.invoke('onereach:delete-credentials');
+                
+                document.getElementById('onereach-email').value = '';
+                document.getElementById('onereach-password').value = '';
+                document.getElementById('onereach-creds-status').textContent = '';
+                
+                // Reset 2FA UI
+                document.getElementById('totp-not-configured').style.display = 'block';
+                document.getElementById('totp-configured').style.display = 'none';
+                if (totpUpdateInterval) {
+                    clearInterval(totpUpdateInterval);
+                    totpUpdateInterval = null;
+                }
+                
+                showStatus('Credentials removed', 'success');
+            } catch (error) {
+                showStatus('Failed to remove credentials: ' + error.message, 'error');
+            }
+        }
+        
+        // Toggle password visibility
+        function toggleOneReachPasswordVisibility() {
+            const input = document.getElementById('onereach-password');
+            const button = input.parentElement.querySelector('.toggle-visibility');
+            
+            if (oneReachPasswordVisible) {
+                input.type = 'password';
+                button.textContent = 'Show';
+                oneReachPasswordVisible = false;
+            } else {
+                input.type = 'text';
+                button.textContent = 'Hide';
+                oneReachPasswordVisible = true;
+            }
+        }
+        
+        // Toggle manual secret entry
+        function toggleManualSecretEntry() {
+            const el = document.getElementById('manual-secret-entry');
+            el.style.display = el.style.display === 'none' ? 'block' : 'none';
+        }
+        
+        // Scan QR code from screen
+        async function scanQRFromScreen() {
+            try {
+                showStatus('Scanning screen for QR code... Make sure the QR code is visible!', 'info');
+                
+                const result = await window.api.invoke('totp:scan-qr-screen');
+                
+                if (result.success && result.secret) {
+                    // Save the TOTP secret
+                    const saveResult = await window.api.invoke('onereach:save-totp', { secret: result.secret });
+                    
+                    if (saveResult.success) {
+                        show2FAConfigured(result.secret);
+                        showStatus('2FA configured successfully! Code: ' + result.issuer + ' - ' + result.account, 'success');
+                    } else {
+                        showStatus('Found QR but failed to save: ' + saveResult.error, 'error');
+                    }
+                } else {
+                    showStatus('No QR code found on screen. Make sure the authenticator setup QR code is visible.', 'error');
+                }
+            } catch (error) {
+                console.error('QR scan error:', error);
+                showStatus('Failed to scan QR: ' + error.message, 'error');
+            }
+        }
+        
+        // Save manually entered TOTP secret
+        async function saveManualTOTPSecret() {
+            const secretInput = document.getElementById('totp-secret-input');
+            const secret = secretInput.value.trim().toUpperCase().replace(/\s/g, '');
+            
+            if (!secret) {
+                showStatus('Please enter a TOTP secret', 'error');
+                return;
+            }
+            
+            // Basic validation
+            if (!/^[A-Z2-7]+=*$/.test(secret)) {
+                showStatus('Invalid secret format. It should only contain letters A-Z and numbers 2-7.', 'error');
+                return;
+            }
+            
+            try {
+                showStatus('Verifying secret...', 'info');
+                
+                const result = await window.api.invoke('onereach:save-totp', { secret });
+                
+                if (result.success) {
+                    show2FAConfigured(secret);
+                    secretInput.value = '';
+                    document.getElementById('manual-secret-entry').style.display = 'none';
+                    showStatus('2FA configured successfully!', 'success');
+                } else {
+                    showStatus('Failed to save secret: ' + (result.error || 'Invalid secret'), 'error');
+                }
+            } catch (error) {
+                showStatus('Failed to save secret: ' + error.message, 'error');
+            }
+        }
+        
+        // Show 2FA configured state with live code
+        async function show2FAConfigured(secret) {
+            document.getElementById('totp-not-configured').style.display = 'none';
+            document.getElementById('totp-configured').style.display = 'block';
+            
+            // Start updating the code
+            updateTOTPCode();
+            
+            // Clear any existing interval
+            if (totpUpdateInterval) {
+                clearInterval(totpUpdateInterval);
+            }
+            
+            // Update every second
+            totpUpdateInterval = setInterval(updateTOTPCode, 1000);
+        }
+        
+        // Update TOTP code display
+        async function updateTOTPCode() {
+            try {
+                const result = await window.api.invoke('totp:get-current-code');
+                
+                if (result.success) {
+                    // Update code display
+                    document.getElementById('current-totp-code').textContent = result.formattedCode;
+                    
+                    // Update countdown
+                    const remaining = result.timeRemaining;
+                    const percentage = (remaining / 30) * 100;
+                    
+                    document.getElementById('totp-countdown-fill').style.width = percentage + '%';
+                    document.getElementById('totp-countdown-text').textContent = remaining + 's';
+                    
+                    // Change color when time is low
+                    const fillColor = remaining <= 5 ? '#f44336' : '#4CAF50';
+                    document.getElementById('totp-countdown-fill').style.background = fillColor;
+                }
+            } catch (error) {
+                console.error('Failed to update TOTP code:', error);
+            }
+        }
+        
+        // Remove 2FA
+        async function removeTOTPSecret() {
+            if (!confirm('Are you sure you want to remove 2FA? You will need to scan the QR code again to re-enable it.')) {
+                return;
+            }
+            
+            try {
+                await window.api.invoke('onereach:delete-totp');
+                
+                // Reset UI
+                document.getElementById('totp-not-configured').style.display = 'block';
+                document.getElementById('totp-configured').style.display = 'none';
+                
+                if (totpUpdateInterval) {
+                    clearInterval(totpUpdateInterval);
+                    totpUpdateInterval = null;
+                }
+                
+                showStatus('2FA removed', 'success');
+            } catch (error) {
+                showStatus('Failed to remove 2FA: ' + error.message, 'error');
+            }
+        }
+        
+        // Test OneReach login
+        async function testOneReachLogin() {
+            showStatus('Testing login... Opening test window', 'info');
+            
+            try {
+                const result = await window.api.invoke('onereach:test-login');
+                
+                if (result.success) {
+                    showStatus('Login test initiated. Watch the test window.', 'success');
+                } else {
+                    showStatus('Test failed: ' + (result.error || 'Unknown error'), 'error');
+                }
+            } catch (error) {
+                showStatus('Test failed: ' + error.message, 'error');
+            }
+        }
     </script>
 </body>
 </html> 

@@ -1,7 +1,7 @@
 # Onereach.ai Punch List
 
 > Master list of bugs, fixes, and small features to address.
-> Updated: January 2026
+> Updated: January 2026 | Current Version: 3.10.0
 
 ---
 
@@ -64,6 +64,10 @@
 - [ ] **Multi-window support** - Can't have same agent in multiple windows
 - [ ] **Keyboard shortcuts** - No shortcuts for switching agents
 
+### Custom Agents
+- [ ] **Agent dashboard** - See which agents are working
+- [ ] **Agent chaining** - Connect agents to work together
+
 ### IDW Management
 - [ ] **Bulk import/export** - No way to backup all IDW configs
 - [ ] **Environment detection** - Sometimes misidentifies environment
@@ -110,7 +114,7 @@
   - ✅ Quick start guide: `TEST-AI-CONVERSATION-QUICK-START.md`
   - ✅ Full documentation: `test/README-AI-CONVERSATION-TESTS.md`
   - Run with: `npm run test:e2e:ai-conversation`
-- [ ] **Test coverage** - Many other features still lack automated tests
+- [ ] **Test coverage** - Many features still lack automated tests
 
 ### Documentation
 - [ ] **User guide** - No end-user documentation
@@ -143,6 +147,21 @@
 
 ## ✅ Recently Completed
 
+- [x] **IDW Tab Persistence Fix** (v3.10.x)
+  - Fixed: IDW tabs not persisting across app restarts
+  - Root causes identified and fixed:
+    1. `saveTabState()` used `tab.webview.src` which may be empty during async token injection → now uses `tab.currentUrl`
+    2. `save-tabs-state` IPC message was never sent from main process → added to `before-quit` handler
+    3. Plus button opened homeUrl instead of chatUrl → fixed to prioritize chatUrl
+  - Also added:
+    - Validation to skip invalid tabs (empty URLs) during restoration
+    - `beforeunload` event handler as backup for saving tabs
+  - Files: `browser-renderer.js`, `main.js`
+- [x] **Custom Agent Improvements** (v3.10.0)
+  - Better voice command routing to the right agent
+  - Undo/revert support when editing custom agents
+  - New agents work immediately without app restart
+  - Improved reliability with automatic retry on failures
 - [x] **Space Filtering Race Condition Fix** (v3.8.14)
   - Fixed: Clicking a space would briefly show filtered items then revert to showing all
   - Root cause: Chunked rendering callbacks from previous renders continued running

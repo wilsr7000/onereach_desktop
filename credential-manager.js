@@ -11,6 +11,12 @@ const keytar = require('keytar');
 // Service name for keytar - all credentials stored under this service
 const SERVICE_NAME = 'OneReach.ai-IDW';
 
+// Separate service for TOTP secrets (2FA)
+const TOTP_SERVICE_NAME = 'OneReach.ai-TOTP';
+
+// Key for the unified OneReach login credentials
+const ONEREACH_ACCOUNT_KEY = 'onereach-unified-login';
+
 class CredentialManager {
   constructor() {
     // Temporary storage for credentials captured during login
@@ -339,6 +345,229 @@ class CredentialManager {
       return true;
     } catch (error) {
       console.error('[CredentialManager] Failed to update password:', error);
+      return false;
+    }
+  }
+
+  // ============================================================
+  // OneReach Unified Login Methods (for Auto-Login with 2FA)
+  // ============================================================
+
+  /**
+   * Save unified OneReach login credentials
+   * These are used for automatic login across all OneReach environments
+   * @param {string} email - OneReach email/username
+   * @param {string} password - OneReach password
+   * @param {string} totpSecret - Optional TOTP secret for 2FA (Base32 encoded)
+   * @returns {Promise<boolean>}
+   */
+  async saveOneReachCredentials(email, password, totpSecret = null) {
+    try {
+      // Save email as metadata
+      const metadata = JSON.stringify({
+        email,
+        savedAt: Date.now(),
+        has2FA: !!totpSecret
+      });
+      await keytar.setPassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY, metadata);
+      
+      // Save password
+      await keytar.setPassword(SERVICE_NAME, ONEREACH_ACCOUNT_KEY, password);
+      
+      // Save TOTP secret if provided
+      if (totpSecret) {
+        await keytar.setPassword(TOTP_SERVICE_NAME, ONEREACH_ACCOUNT_KEY, totpSecret);
+        console.log('[CredentialManager] Saved OneReach credentials with 2FA for:', email);
+      } else {
+        console.log('[CredentialManager] Saved OneReach credentials (no 2FA) for:', email);
+      }
+      
+      return true;
+    } catch (error) {
+      console.error('[CredentialManager] Failed to save OneReach credentials:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Get unified OneReach login credentials
+   * @returns {Promise<{email: string, password: string, totpSecret: string|null}|null>}
+   */
+  async getOneReachCredentials() {
+    try {
+      // Get metadata (contains email)
+      const metaStr = await keytar.getPassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY);
+      if (!metaStr) {
+        return null;
+      }
+      
+      const meta = JSON.parse(metaStr);
+      
+      // Get password
+      const password = await keytar.getPassword(SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
+      if (!password) {
+        return null;
+      }
+      
+      // Try to get TOTP secret
+      let totpSecret = null;
+      try {
+        totpSecret = await keytar.getPassword(TOTP_SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
+      } catch (e) {
+        // TOTP might not be configured
+      }
+      
+      return {
+        email: meta.email,
+        password,
+        totpSecret,
+        has2FA: !!totpSecret,
+        savedAt: meta.savedAt
+      };
+    } catch (error) {
+      console.error('[CredentialManager] Failed to get OneReach credentials:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Check if OneReach credentials are configured
+   * @returns {Promise<{hasCredentials: boolean, has2FA: boolean}>}
+   */
+  async hasOneReachCredentials() {
+    try {
+      const creds = await this.getOneReachCredentials();
+      return {
+        hasCredentials: creds !== null,
+        has2FA: creds?.has2FA || false
+      };
+    } catch (error) {
+      return { hasCredentials: false, has2FA: false };
+    }
+  }
+
+  /**
+   * Save only the TOTP secret (when adding 2FA to existing credentials)
+   * @param {string} totpSecret - Base32 encoded TOTP secret
+   * @returns {Promise<boolean>}
+   */
+  async saveTOTPSecret(totpSecret) {
+    try {
+      await keytar.setPassword(TOTP_SERVICE_NAME, ONEREACH_ACCOUNT_KEY, totpSecret);
+      
+      // Update metadata to reflect 2FA is now enabled
+      const metaStr = await keytar.getPassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY);
+      if (metaStr) {
+        const meta = JSON.parse(metaStr);
+        meta.has2FA = true;
+        meta.totpAddedAt = Date.now();
+        await keytar.setPassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY, JSON.stringify(meta));
+      }
+      
+      console.log('[CredentialManager] Saved TOTP secret');
+      return true;
+    } catch (error) {
+      console.error('[CredentialManager] Failed to save TOTP secret:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Get only the TOTP secret
+   * @returns {Promise<string|null>}
+   */
+  async getTOTPSecret() {
+    try {
+      return await keytar.getPassword(TOTP_SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
+    } catch (error) {
+      console.error('[CredentialManager] Failed to get TOTP secret:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Delete TOTP secret (disable 2FA)
+   * @returns {Promise<boolean>}
+   */
+  async deleteTOTPSecret() {
+    try {
+      await keytar.deletePassword(TOTP_SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
+      
+      // Update metadata
+      const metaStr = await keytar.getPassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY);
+      if (metaStr) {
+        const meta = JSON.parse(metaStr);
+        meta.has2FA = false;
+        delete meta.totpAddedAt;
+        await keytar.setPassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY, JSON.stringify(meta));
+      }
+      
+      console.log('[CredentialManager] Deleted TOTP secret');
+      return true;
+    } catch (error) {
+      console.error('[CredentialManager] Failed to delete TOTP secret:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Delete all unified OneReach credentials
+   * @returns {Promise<boolean>}
+   */
+  async deleteOneReachCredentials() {
+    try {
+      await keytar.deletePassword(SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
+      await keytar.deletePassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY);
+      
+      try {
+        await keytar.deletePassword(TOTP_SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
+      } catch (e) {
+        // TOTP might not exist
+      }
+      
+      console.log('[CredentialManager] Deleted OneReach credentials');
+      return true;
+    } catch (error) {
+      console.error('[CredentialManager] Failed to delete OneReach credentials:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Update just the email (preserves password and TOTP)
+   * @param {string} newEmail - New email address
+   * @returns {Promise<boolean>}
+   */
+  async updateOneReachEmail(newEmail) {
+    try {
+      const metaStr = await keytar.getPassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY);
+      if (metaStr) {
+        const meta = JSON.parse(metaStr);
+        meta.email = newEmail;
+        meta.updatedAt = Date.now();
+        await keytar.setPassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY, JSON.stringify(meta));
+        console.log('[CredentialManager] Updated OneReach email');
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('[CredentialManager] Failed to update OneReach email:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Update just the password (preserves email and TOTP)
+   * @param {string} newPassword - New password
+   * @returns {Promise<boolean>}
+   */
+  async updateOneReachPassword(newPassword) {
+    try {
+      await keytar.setPassword(SERVICE_NAME, ONEREACH_ACCOUNT_KEY, newPassword);
+      console.log('[CredentialManager] Updated OneReach password');
+      return true;
+    } catch (error) {
+      console.error('[CredentialManager] Failed to update OneReach password:', error);
       return false;
     }
   }

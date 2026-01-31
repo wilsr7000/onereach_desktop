@@ -73,6 +73,9 @@ class FlipboardReader {
         
         // Track Blob URLs for cleanup (prevent memory leaks)
         this.currentAudioBlobUrl = null;
+        
+        // Initialize RSS data handling and playlist bar
+        this.initializeRSSHandling();
     }
     
     // Helper to set audio source and clean up old Blob URLs
@@ -112,16 +115,16 @@ class FlipboardReader {
         }
         console.log('[Memory] ⚠️ performance.memory not available');
         return null;
-        
+    }
+    
+    // Initialize RSS data handling and playlist bar (called from constructor)
+    initializeRSSHandling() {
         // Setup playlist bar when DOM is ready
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', () => this.setupPlaylistBar());
         } else {
             this.setupPlaylistBar();
         }
-        
-        // Clear old playlist preferences to start fresh (remove this after fix is verified)
-        // localStorage.removeItem('playlistPreferences');
         
         // Listen for RSS data if the API is available
         if (window.flipboardAPI && typeof window.flipboardAPI.onRSSData === 'function') {

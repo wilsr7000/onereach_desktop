@@ -453,7 +453,29 @@ contextBridge.exposeInMainWorld(
         'credentials-save-pending',
         'credentials-save-manual',
         'credentials-delete',
-        'credentials-delete-all'
+        'credentials-delete-all',
+        // Multi-tenant token channels
+        'multi-tenant:get-token',
+        'multi-tenant:has-token',
+        'multi-tenant:inject-token',
+        'multi-tenant:attach-listener',
+        'multi-tenant:remove-listener',
+        'multi-tenant:register-partition',
+        'multi-tenant:unregister-partition',
+        'multi-tenant:get-environments',
+        'multi-tenant:get-user-data',
+        'multi-tenant:get-cookies',
+        // OneReach auto-login channels
+        'onereach:get-credentials',
+        'onereach:save-credentials',
+        'onereach:delete-credentials',
+        'onereach:save-totp',
+        'onereach:delete-totp',
+        'onereach:test-login',
+        'onereach:execute-in-frame',
+        // TOTP channels
+        'totp:scan-qr-screen',
+        'totp:get-current-code'
       ];
       if (validChannels.includes(channel)) {
         return ipcRenderer.invoke(channel, ...args);
@@ -587,7 +609,18 @@ contextBridge.exposeInMainWorld(
           // Lessons/Tutorials API channels
           'get-current-user',
           'fetch-user-lessons',
-          'update-lesson-progress'
+          'update-lesson-progress',
+          // OneReach auto-login channels
+          'onereach:get-credentials',
+          'onereach:save-credentials',
+          'onereach:delete-credentials',
+          'onereach:save-totp',
+          'onereach:delete-totp',
+          'onereach:test-login',
+          'onereach:execute-in-frame',
+          // TOTP channels
+          'totp:scan-qr-screen',
+          'totp:get-current-code'
         ];
         if (validChannels.includes(channel)) {
           return ipcRenderer.invoke(channel, ...args);

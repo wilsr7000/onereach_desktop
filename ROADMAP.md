@@ -1,7 +1,7 @@
 # Onereach.ai Product Roadmap
 
 > Strategic roadmap for all products within the Onereach.ai desktop application.
-> Updated: January 2026 | Current Version: 3.7.0
+> Updated: January 2026 | Current Version: 3.10.0
 
 ---
 
@@ -30,15 +30,15 @@
 
 ## 🚀 GSX Create
 
-*AI-powered development assistant using Aider for code generation*
+*AI-powered development assistant for building apps and agents*
 
-### Current State (v3.7.0)
+### Current State (v3.10.0)
 - ✅ Task queue with 7-phase workflow
-- ✅ Agent activity HUD with real-time updates
+- ✅ Real-time progress display
 - ✅ LLM summarization of activities
-- ✅ Budget integration & cost tracking
-- ✅ State persistence across restarts
-- ✅ Graceful shutdown with state save
+- ✅ Budget tracking (see how much you're spending)
+- ✅ Work persists across restarts
+- ✅ Graceful shutdown (never lose work)
 
 ### Roadmap
 
@@ -65,13 +65,16 @@
 
 *Professional video editing with AI-powered features*
 
-### Current State
+### Current State (v3.10.0)
 - ✅ Timeline-based editing
 - ✅ Range markers with metadata
-- ✅ ElevenLabs audio replacement
+- ✅ ElevenLabs audio replacement (9 voices)
 - ✅ Smart transcription (instant from existing data)
 - ✅ Waveform visualization
 - ✅ Scene detection
+- ✅ **Electron-compatible dialogs** (v3.8.14) - Fixed prompt() crashes
+- ✅ **YouTube download status** (v3.8.14) - Correct completion tracking
+- ✅ **FFprobe validation** - Better error messages
 
 ### Roadmap
 
@@ -104,13 +107,16 @@
 
 *Content organization, storage, and synchronization*
 
-### Current State
+### Current State (v3.10.0)
 - ✅ Hierarchical space organization
 - ✅ Drag & drop content
 - ✅ GSX synchronization
 - ✅ Metadata management
 - ✅ Search functionality
 - ✅ Browser extension integration
+- ✅ **Tufte-inspired design** (v3.8.13) - Clean geometric icons, neutral palette
+- ✅ **Bulk operations** (v3.8.16) - Multi-select delete and move
+- ✅ **Spaces upload** (v3.8.14) - Upload to ChatGPT, Claude from Spaces
 
 ### Roadmap
 
@@ -118,13 +124,13 @@
 - [ ] **Smart folders** - Auto-organize by rules
 - [ ] **Tags system** - Cross-space tagging
 - [ ] **Version history** - Track item changes
-- [x] **Bulk operations** - Multi-select actions (v3.8.16 - Multi-select delete implemented)
+- [ ] **Collections** - Curated item groups
 
 #### Q2 2026
-- [ ] **Collections** - Curated item groups
 - [ ] **Sharing** - Share spaces/items externally
 - [ ] **Comments** - Annotate items
 - [ ] **Activity feed** - Track all changes
+- [ ] **Advanced search** - Full-text and metadata search
 
 #### Future
 - [ ] **AI organization** - Auto-categorize content
@@ -211,40 +217,46 @@
 
 ---
 
-## 🤖 AI Agents
+## 🤖 AI Agents & Creators
 
-*External AI service integrations*
+*Access external AI services and capture your creations*
 
-### Current State
-- ✅ ChatGPT integration
-- ✅ Claude integration
-- ✅ Perplexity integration
-- ✅ Gemini integration
-- ✅ Grok integration
-- ✅ Custom agent support
-- ✅ AI Image creators (Midjourney, DALL-E, etc.)
-- ✅ AI Video creators (Veo3, Runway, Pika, etc.)
-- ✅ AI Audio generators
-- ✅ AI UI Design tools (Stitch, Figma AI, etc.)
+### Current State (v3.10.0)
+
+**Conversation Capture:**
+- ✅ ChatGPT - Auto-saves to "ChatGPT Conversations" Space
+- ✅ Claude - Auto-saves to "Claude Conversations" Space
+- ✅ Gemini - Auto-saves to "Gemini Conversations" Space
+- ✅ Grok - Auto-saves to "Grok Conversations" Space
+- ✅ Perplexity - Auto-saves to "Perplexity Conversations" Space
+
+**AI Creators:**
+- ✅ Image: Midjourney, DALL-E, Ideogram, Leonardo AI
+- ✅ Video: Veo3, Runway, Pika, Kling
+- ✅ Audio: ElevenLabs, Suno, Udio
+- ✅ Design: Stitch, Figma AI
+
+**Custom Agents:**
+- ✅ Create your own voice-activated agents
+- ✅ Undo/revert when editing agents
+- ✅ New agents work immediately (no restart needed)
 
 ### Roadmap
 
 #### Q1 2026
-- [ ] **Conversation persistence** - Save/resume chats
+- [ ] **Conversation persistence** - Resume chats across sessions
 - [ ] **Multi-window** - Same agent in multiple windows
 - [ ] **Keyboard shortcuts** - Quick agent switching
-- [ ] **Context sharing** - Share Spaces content with agents
+- [ ] **Context sharing** - Share Spaces content with AI agents
 
 #### Q2 2026
-- [ ] **Agent chaining** - Pass output between agents
-- [ ] **Prompt library** - Save/reuse prompts
-- [ ] **Cost tracking** - Track API costs per agent
-- [ ] **Rate limiting** - Prevent accidental overuse
+- [ ] **Agent chaining** - Connect agents to work together
+- [ ] **Prompt library** - Save and reuse your best prompts
+- [ ] **Cost tracking** - See how much you're spending
 
 #### Future
-- [ ] **Local models** - Run models locally (Ollama, etc.)
-- [ ] **Fine-tuning** - Custom model training
-- [ ] **Agent builder** - Create custom AI agents
+- [ ] **Local models** - Run AI locally (Ollama, etc.)
+- [ ] **Agent marketplace** - Share/discover community agents
 
 ---
 
@@ -331,9 +343,10 @@
 
 | Version | Target | Focus |
 |---------|--------|-------|
-| 3.8.0 | Feb 2026 | Notarization, Voice selector |
-| 3.9.0 | Mar 2026 | Windows signing, Performance |
-| 4.0.0 | Q2 2026 | Plugin system, Multi-repo GSX |
+| 3.10.0 | Jan 2026 | **Released** - Custom agent improvements |
+| 3.11.0 | Feb 2026 | Voice selector for Video Editor |
+| 3.12.0 | Mar 2026 | Mac App Store ready |
+| 4.0.0 | Q2 2026 | Plugin system, multi-project support |
 | 5.0.0 | Q3 2026 | Cloud sync, Team features |
 
 ---

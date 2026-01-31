@@ -12,6 +12,17 @@
 import type { Action, AppContext, ClassifiedTask, TaskPriority, ClarificationOption } from '../core/types'
 import type { PromptBuilder } from './promptBuilder'
 
+// Budget tracking - import CommonJS module
+import { createRequire } from 'module'
+const require = createRequire(import.meta.url)
+let budgetManager: { trackUsage: (params: Record<string, unknown>) => void } | null = null
+try {
+  const { getBudgetManager } = require('../../../budget-manager')
+  budgetManager = getBudgetManager()
+} catch {
+  // Budget manager not available in this context
+}
+
 export interface AIClassifierConfig {
   apiKey: string
   model?: string
@@ -73,6 +84,11 @@ export interface OpenAIClient {
             content: string | null
           }
         }>
+        usage?: {
+          prompt_tokens: number
+          completion_tokens: number
+          total_tokens: number
+        }
       }>
     }
   }
@@ -234,6 +250,23 @@ export function createAIClassifier(
         max_tokens: config.maxTokens ?? 256,
         response_format: { type: 'json_object' },
       })
+
+      // Track API usage for cost monitoring
+      if (response.usage && budgetManager) {
+        try {
+          budgetManager.trackUsage({
+            provider: 'openai',
+            model: config.model ?? 'gpt-4o-mini',
+            inputTokens: response.usage.prompt_tokens || 0,
+            outputTokens: response.usage.completion_tokens || 0,
+            feature: 'ai-classifier',
+            operation: 'classify-intent',
+            projectId: null
+          })
+        } catch {
+          // Silently ignore tracking errors
+        }
+      }
 
       const content = response.choices[0]?.message?.content
       if (!content) {

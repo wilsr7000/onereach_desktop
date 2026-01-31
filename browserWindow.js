@@ -16,6 +16,626 @@ let shutdownHandlersRegistered = false;
 let authWindow = null;
 let authTokens = new Map();
 
+// Credential manager and TOTP manager for auto-login
+let credentialManager = null;
+let totpManager = null;
+
+// Track auto-login state per GSX window to prevent duplicate attempts
+const gsxAutoLoginState = new Map();
+
+/**
+ * Check if auto-login should be attempted for a GSX window
+ */
+function shouldAttemptGSXAutoLogin(windowId) {
+  const state = gsxAutoLoginState.get(windowId);
+  if (!state) return true;
+  
+  // Don't attempt if login completed successfully
+  if (state.loginComplete) {
+    console.log(`[GSX AutoLogin] Skipping window ${windowId} - login already complete`);
+    return false;
+  }
+  
+  // Don't attempt if already in progress (within 5 seconds)
+  if (state.inProgress && Date.now() - state.lastAttempt < 5000) {
+    console.log(`[GSX AutoLogin] Skipping window ${windowId} - login in progress`);
+    return false;
+  }
+  
+  return true;
+}
+
+/**
+ * Attempt auto-login for GSX windows with retry mechanism
+ * @param {BrowserWindow} gsxWindow - The GSX window
+ * @param {string} url - Current URL  
+ * @param {number} attempt - Current attempt number
+ */
+async function attemptGSXAutoLoginWithRetry(gsxWindow, url, attempt = 0) {
+  const maxAttempts = 5;
+  const retryDelay = 1000;
+  const windowId = gsxWindow.id;
+  
+  // Check if we should attempt login
+  if (attempt === 0 && !shouldAttemptGSXAutoLogin(windowId)) {
+    return;
+  }
+  
+  // Mark as in progress on first attempt
+  if (attempt === 0) {
+    gsxAutoLoginState.set(windowId, {
+      ...(gsxAutoLoginState.get(windowId) || {}),
+      inProgress: true,
+      lastAttempt: Date.now()
+    });
+  }
+  
+  console.log(`[GSX AutoLogin] Attempt ${attempt + 1}/${maxAttempts} for window ${windowId}`);
+  
+  try {
+    // Check if form fields exist yet (including cross-origin detection)
+    const formInfo = await gsxWindow.webContents.executeJavaScript(`
+      (function() {
+        const hasPasswordInMain = !!document.querySelector('input[type="password"]');
+        if (hasPasswordInMain) {
+          console.log('[GSX AutoLogin] Form found in main document');
+          return { location: 'main', crossOrigin: false };
+        }
+        
+        // Check iframes
+        const iframes = document.querySelectorAll('iframe');
+        console.log('[GSX AutoLogin] Found ' + iframes.length + ' iframes');
+        
+        let hasCrossOriginAuthIframe = false;
+        
+        for (let i = 0; i < iframes.length; i++) {
+          const iframe = iframes[i];
+          const src = iframe.src || '';
+          
+          try {
+            const doc = iframe.contentDocument || iframe.contentWindow.document;
+            if (doc && doc.querySelector('input[type="password"]')) {
+              console.log('[GSX AutoLogin] Form found in same-origin iframe ' + i);
+              return { location: 'iframe', crossOrigin: false };
+            }
+          } catch (e) {
+            // Cross-origin iframe
+            console.log('[GSX AutoLogin] Cross-origin iframe detected: ' + src);
+            if (src.includes('auth.') && src.includes('onereach.ai')) {
+              hasCrossOriginAuthIframe = true;
+            }
+          }
+        }
+        
+        if (hasCrossOriginAuthIframe) {
+          return { location: 'cross-origin', crossOrigin: true };
+        }
+        
+        return { location: 'none', crossOrigin: false };
+      })()
+    `).catch(() => ({ location: 'error', crossOrigin: false }));
+    
+    console.log(`[GSX AutoLogin] Form info for window ${windowId}:`, formInfo);
+    
+    if (formInfo.location === 'main' || formInfo.location === 'iframe') {
+      await attemptGSXAutoLogin(gsxWindow, url);
+      // Mark as complete after successful login attempt
+      gsxAutoLoginState.set(windowId, {
+        ...(gsxAutoLoginState.get(windowId) || {}),
+        inProgress: false,
+        loginComplete: true
+      });
+    } else if (formInfo.crossOrigin) {
+      // Cross-origin iframe - use webFrameMain to access it
+      console.log(`[GSX AutoLogin] Cross-origin auth iframe detected, accessing via frames...`);
+      await attemptGSXCrossOriginLogin(gsxWindow, windowId);
+    } else if (formInfo.location === 'none' && attempt < maxAttempts - 1) {
+      console.log(`[GSX AutoLogin] No form found, retrying in ${retryDelay}ms...`);
+      setTimeout(() => {
+        attemptGSXAutoLoginWithRetry(gsxWindow, url, attempt + 1);
+      }, retryDelay);
+    } else {
+      console.log(`[GSX AutoLogin] No form found after ${attempt + 1} attempts`);
+    }
+  } catch (error) {
+    console.error('[GSX AutoLogin] Retry error:', error);
+  }
+}
+
+/**
+ * Attempt cross-origin login for GSX windows using webFrameMain
+ */
+async function attemptGSXCrossOriginLogin(gsxWindow, windowId) {
+  try {
+    // Lazy load credential manager
+    if (!credentialManager) {
+      credentialManager = require('./credential-manager');
+    }
+    
+    const credentials = await credentialManager.getOneReachCredentials();
+    if (!credentials || !credentials.email || !credentials.password) {
+      console.log('[GSX CrossOrigin] No credentials configured');
+      return;
+    }
+    
+    // Get all frames
+    const mainFrame = gsxWindow.webContents.mainFrame;
+    const allFrames = [mainFrame, ...mainFrame.framesInSubtree];
+    
+    console.log(`[GSX CrossOrigin] Found ${allFrames.length} frames total`);
+    
+    // Find the auth frame
+    let authFrame = null;
+    for (const frame of allFrames) {
+      const frameUrl = frame.url;
+      console.log(`[GSX CrossOrigin] Frame: ${frameUrl}`);
+      if (frameUrl && frameUrl.includes('auth.') && frameUrl.includes('onereach.ai')) {
+        authFrame = frame;
+        console.log(`[GSX CrossOrigin] Found auth frame: ${frameUrl}`);
+        break;
+      }
+    }
+    
+    if (!authFrame) {
+      console.log('[GSX CrossOrigin] No auth frame found');
+      return;
+    }
+    
+    // Build and execute login script
+    const loginScript = `
+      (function() {
+        const email = ${JSON.stringify(credentials.email)};
+        const password = ${JSON.stringify(credentials.password)};
+        
+        console.log('[GSX CrossOrigin] Running in auth frame');
+        console.log('[GSX CrossOrigin] URL:', window.location.href);
+        
+        function fillInput(input, value) {
+          if (!input) return false;
+          input.focus();
+          const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+            window.HTMLInputElement.prototype, 'value'
+          ).set;
+          if (nativeInputValueSetter) {
+            nativeInputValueSetter.call(input, value);
+          } else {
+            input.value = value;
+          }
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+          input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+          console.log('[GSX CrossOrigin] Filled:', input.name || input.type);
+          return true;
+        }
+        
+        // Find email field
+        const emailField = document.querySelector(
+          'input[type="email"], input[type="text"][name*="email" i], ' +
+          'input[type="text"][name*="user" i], input[name="email"], input[name="username"], ' +
+          'input[placeholder*="email" i], input[type="text"]:not([name*="search"])'
+        );
+        
+        // Find password field
+        const passwordField = document.querySelector('input[type="password"]');
+        
+        if (!passwordField) {
+          console.log('[GSX CrossOrigin] No password field found');
+          return { success: false, reason: 'no_password_field' };
+        }
+        
+        if (emailField) fillInput(emailField, email);
+        fillInput(passwordField, password);
+        
+        // Click submit
+        setTimeout(() => {
+          const submitBtn = document.querySelector('button[type="submit"], input[type="submit"]') ||
+                           document.querySelector('form button:not([type="button"])');
+          if (submitBtn) {
+            console.log('[GSX CrossOrigin] Clicking submit:', submitBtn.textContent);
+            submitBtn.click();
+          } else {
+            const buttons = document.querySelectorAll('button');
+            for (const btn of buttons) {
+              const text = (btn.textContent || '').toLowerCase();
+              if (text.includes('sign in') || text.includes('log in') || text.includes('login') || text.includes('continue')) {
+                console.log('[GSX CrossOrigin] Clicking button by text:', btn.textContent);
+                btn.click();
+                break;
+              }
+            }
+          }
+        }, 500);
+        
+        return { success: true };
+      })()
+    `;
+    
+    const result = await authFrame.executeJavaScript(loginScript);
+    console.log('[GSX CrossOrigin] Login result:', result);
+    
+    if (result && result.success) {
+      console.log('[GSX CrossOrigin] Successfully filled login form, setting up 2FA monitoring...');
+      
+      // Mark login as in progress (not complete until 2FA done)
+      gsxAutoLoginState.set(windowId, {
+        ...(gsxAutoLoginState.get(windowId) || {}),
+        loginFilled: true
+      });
+      
+      // Monitor for 2FA
+      setTimeout(() => {
+        attemptGSXCrossOrigin2FA(gsxWindow, windowId, 0);
+      }, 2000);
+    }
+    
+  } catch (error) {
+    console.error('[GSX CrossOrigin] Login error:', error);
+  }
+}
+
+/**
+ * Attempt 2FA in cross-origin GSX window
+ */
+async function attemptGSXCrossOrigin2FA(gsxWindow, windowId, attempt) {
+  const maxAttempts = 5;
+  const retryDelay = 1500;
+  
+  // Check if already complete
+  const state = gsxAutoLoginState.get(windowId);
+  if (state && state.twoFAComplete) {
+    console.log(`[GSX 2FA] Skipping window ${windowId} - 2FA already complete`);
+    return;
+  }
+  
+  try {
+    console.log(`[GSX 2FA] Attempt ${attempt + 1}/${maxAttempts} for window ${windowId}`);
+    
+    // Get auth frame
+    const mainFrame = gsxWindow.webContents.mainFrame;
+    const allFrames = [mainFrame, ...mainFrame.framesInSubtree];
+    
+    let authFrame = null;
+    for (const frame of allFrames) {
+      if (frame.url && frame.url.includes('auth.') && frame.url.includes('onereach.ai')) {
+        authFrame = frame;
+        break;
+      }
+    }
+    
+    if (!authFrame) {
+      console.log('[GSX 2FA] No auth frame found');
+      if (attempt < maxAttempts - 1) {
+        setTimeout(() => attemptGSXCrossOrigin2FA(gsxWindow, windowId, attempt + 1), retryDelay);
+      }
+      return;
+    }
+    
+    // Check if on 2FA page
+    const detection = await authFrame.executeJavaScript(`
+      (function() {
+        const passwordField = document.querySelector('input[type="password"]');
+        const totpInput = document.querySelector(
+          'input[name="totp"], input[name="code"], input[name="otp"], ' +
+          'input[autocomplete="one-time-code"], input[maxlength="6"]:not([type="password"])'
+        );
+        
+        if (totpInput) return { is2FAPage: true };
+        if (passwordField) return { is2FAPage: false, reason: 'still_login' };
+        return { is2FAPage: false, reason: 'unknown' };
+      })()
+    `);
+    
+    console.log('[GSX 2FA] Detection:', detection);
+    
+    if (!detection.is2FAPage) {
+      if (attempt < maxAttempts - 1) {
+        console.log(`[GSX 2FA] Not on 2FA page yet, retrying in ${retryDelay}ms...`);
+        setTimeout(() => attemptGSXCrossOrigin2FA(gsxWindow, windowId, attempt + 1), retryDelay);
+      } else {
+        console.log('[GSX 2FA] Not on 2FA page after max attempts (may have succeeded without 2FA)');
+        gsxAutoLoginState.set(windowId, {
+          ...(gsxAutoLoginState.get(windowId) || {}),
+          loginComplete: true
+        });
+      }
+      return;
+    }
+    
+    // Get TOTP code
+    if (!totpManager) {
+      const { getTOTPManager } = require('./lib/totp-manager');
+      totpManager = getTOTPManager();
+    }
+    
+    if (!credentialManager) {
+      credentialManager = require('./credential-manager');
+    }
+    
+    const totpSecret = await credentialManager.getTOTPSecret();
+    if (!totpSecret) {
+      console.log('[GSX 2FA] No TOTP secret configured');
+      return;
+    }
+    
+    const code = totpManager.generateCode(totpSecret);
+    console.log('[GSX 2FA] Generated TOTP code, filling form...');
+    
+    // Fill 2FA code
+    const fillResult = await authFrame.executeJavaScript(`
+      (function() {
+        const code = ${JSON.stringify(code)};
+        
+        function fillInput(input, value) {
+          if (!input) return false;
+          input.focus();
+          const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+            window.HTMLInputElement.prototype, 'value'
+          ).set;
+          if (nativeInputValueSetter) {
+            nativeInputValueSetter.call(input, value);
+          } else {
+            input.value = value;
+          }
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
+        }
+        
+        const totpInput = document.querySelector(
+          'input[name="totp"], input[name="code"], input[name="otp"], ' +
+          'input[autocomplete="one-time-code"], input[maxlength="6"]:not([type="password"])'
+        ) || document.querySelector('input[type="text"]:not([name*="email"]):not([name*="user"])');
+        
+        if (totpInput) {
+          fillInput(totpInput, code);
+          
+          setTimeout(() => {
+            const submitBtn = document.querySelector('button[type="submit"]') ||
+                             document.querySelector('form button');
+            if (submitBtn) {
+              console.log('[GSX 2FA] Clicking submit');
+              submitBtn.click();
+            }
+          }, 500);
+          
+          return { success: true };
+        }
+        
+        return { success: false };
+      })()
+    `);
+    
+    console.log('[GSX 2FA] Fill result:', fillResult);
+    
+    if (fillResult && fillResult.success) {
+      console.log('[GSX 2FA] Successfully filled 2FA code!');
+      gsxAutoLoginState.set(windowId, {
+        ...(gsxAutoLoginState.get(windowId) || {}),
+        twoFAComplete: true,
+        loginComplete: true
+      });
+    }
+    
+  } catch (error) {
+    console.error('[GSX 2FA] Error:', error);
+  }
+}
+
+/**
+ * Attempt auto-login for GSX windows
+ * @param {BrowserWindow} gsxWindow - The GSX window
+ * @param {string} url - Current URL
+ */
+async function attemptGSXAutoLogin(gsxWindow, url) {
+  try {
+    // Lazy load credential manager
+    if (!credentialManager) {
+      credentialManager = require('./credential-manager');
+    }
+    
+    // Check if we have credentials
+    const credentials = await credentialManager.getOneReachCredentials();
+    if (!credentials || !credentials.email || !credentials.password) {
+      console.log('[GSX AutoLogin] No credentials configured');
+      return;
+    }
+    
+    // Get settings to check if auto-login is enabled
+    const settingsManager = global.settingsManager;
+    const settings = settingsManager ? settingsManager.getAll() : {};
+    const autoLoginSettings = settings.autoLoginSettings || {};
+    
+    if (autoLoginSettings.enabled === false) {
+      console.log('[GSX AutoLogin] Auto-login disabled');
+      return;
+    }
+    
+    // Detect page type with detailed logging
+    const pageType = await gsxWindow.webContents.executeJavaScript(`
+      (function() {
+        // Log all inputs for debugging
+        const allInputs = document.querySelectorAll('input');
+        console.log('[GSX AutoLogin] Found ' + allInputs.length + ' input fields on page');
+        allInputs.forEach((inp, i) => {
+          if (inp.type !== 'hidden') {
+            console.log('[GSX AutoLogin] Input ' + i + ': type=' + inp.type + ', name=' + inp.name + ', placeholder=' + inp.placeholder);
+          }
+        });
+        
+        const pageContent = document.body ? document.body.innerText.toLowerCase() : '';
+        
+        // Check for 2FA page indicators
+        const has2FAField = document.querySelector(
+          'input[name="code"], input[name="otp"], input[name="totp"], ' +
+          'input[placeholder*="code" i], input[placeholder*="2fa" i], ' +
+          'input[placeholder*="authenticator" i], input[maxlength="6"][inputmode="numeric"]'
+        );
+        const has2FAText = pageContent.includes('two-factor') || pageContent.includes('2fa') || 
+                          pageContent.includes('verification code') || pageContent.includes('authenticator') ||
+                          pageContent.includes('enter the code') || pageContent.includes('6-digit');
+        
+        if (has2FAField || (has2FAText && !document.querySelector('input[type="password"]'))) {
+          console.log('[GSX AutoLogin] 2FA page detected');
+          return '2fa';
+        }
+        
+        // Check for login page indicators (broader search)
+        const hasEmailField = document.querySelector(
+          'input[type="email"], input[type="text"][name*="email" i], ' +
+          'input[type="text"][name*="user" i], input[name="email"], input[name="username"], ' +
+          'input[autocomplete="email"], input[autocomplete="username"], ' +
+          'input[placeholder*="email" i], input[placeholder*="user" i]'
+        );
+        const hasPasswordField = document.querySelector('input[type="password"]');
+        
+        console.log('[GSX AutoLogin] Email field:', !!hasEmailField, 'Password field:', !!hasPasswordField);
+        
+        if (hasEmailField && hasPasswordField) {
+          console.log('[GSX AutoLogin] Login form detected');
+          return 'login';
+        }
+        
+        if (hasPasswordField) {
+          console.log('[GSX AutoLogin] Password-only page');
+          return 'password-only';
+        }
+        
+        return 'other';
+      })()
+    `);
+    
+    console.log('[GSX AutoLogin] Page type:', pageType);
+    
+    if (pageType === 'other') {
+      return; // Not a login page
+    }
+    
+    if (pageType === 'login' || pageType === 'password-only') {
+      console.log('[GSX AutoLogin] Filling', pageType, 'form for', credentials.email);
+      
+      await gsxWindow.webContents.executeJavaScript(`
+        (function() {
+          const email = ${JSON.stringify(credentials.email)};
+          const password = ${JSON.stringify(credentials.password)};
+          
+          function fillInput(input, value) {
+            if (!input) return false;
+            input.focus();
+            
+            // React compatibility - set native value
+            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+              window.HTMLInputElement.prototype, 'value'
+            ).set;
+            nativeInputValueSetter.call(input, value);
+            
+            // Dispatch events
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+            input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+            
+            console.log('[GSX AutoLogin] Filled field:', input.name || input.type);
+            return true;
+          }
+          
+          // Find and fill email field (broader search)
+          const emailField = document.querySelector(
+            'input[type="email"], input[type="text"][name*="email" i], ' +
+            'input[type="text"][name*="user" i], input[name="email"], input[name="username"], ' +
+            'input[autocomplete="email"], input[autocomplete="username"], ' +
+            'input[placeholder*="email" i], input[placeholder*="user" i]'
+          );
+          if (emailField) {
+            fillInput(emailField, email);
+          }
+          
+          // Find and fill password field
+          const passwordField = document.querySelector('input[type="password"]');
+          if (passwordField) {
+            fillInput(passwordField, password);
+          }
+          
+          // Find and click submit button after a short delay
+          setTimeout(() => {
+            const submitBtn = document.querySelector(
+              'button[type="submit"], input[type="submit"], button.submit, button.login'
+            ) || document.querySelector('form button:not([type="button"])');
+            
+            if (submitBtn) {
+              console.log('[GSX AutoLogin] Clicking submit:', submitBtn.textContent || submitBtn.type);
+              submitBtn.click();
+            } else {
+              // Try finding by text content
+              const buttons = document.querySelectorAll('button');
+              for (const btn of buttons) {
+                const text = (btn.textContent || '').toLowerCase();
+                if (text.includes('sign in') || text.includes('log in') || text.includes('login') || text.includes('submit') || text.includes('continue')) {
+                  console.log('[GSX AutoLogin] Clicking button by text:', btn.textContent);
+                  btn.click();
+                  break;
+                }
+              }
+            }
+          }, 500);
+          
+          return true;
+        })()
+      `);
+      
+    } else if (pageType === '2fa') {
+      if (!credentials.totpSecret) {
+        console.log('[GSX AutoLogin] No TOTP secret configured');
+        return;
+      }
+      
+      // Lazy load TOTP manager
+      if (!totpManager) {
+        const { getTOTPManager } = require('./lib/totp-manager');
+        totpManager = getTOTPManager();
+      }
+      
+      // Generate TOTP code
+      const code = totpManager.generateCode(credentials.totpSecret);
+      console.log('[GSX AutoLogin] Filling 2FA code');
+      
+      await gsxWindow.webContents.executeJavaScript(`
+        (function() {
+          const code = ${JSON.stringify(code)};
+          
+          // Find 2FA input field
+          const codeField = document.querySelector('input[name="code"], input[name="otp"], input[name="totp"], input[placeholder*="code" i], input[placeholder*="2fa" i], input[maxlength="6"]');
+          if (codeField) {
+            codeField.value = code;
+            codeField.dispatchEvent(new Event('input', { bubbles: true }));
+            codeField.dispatchEvent(new Event('change', { bubbles: true }));
+            
+            // Auto-submit after a short delay
+            setTimeout(() => {
+              const submitBtn = document.querySelector('button[type="submit"], input[type="submit"]');
+              if (submitBtn) {
+                submitBtn.click();
+              } else {
+                const buttons = document.querySelectorAll('button');
+                for (const btn of buttons) {
+                  const text = btn.textContent.toLowerCase();
+                  if (text.includes('verify') || text.includes('submit') || text.includes('continue') || text.includes('confirm')) {
+                    btn.click();
+                    break;
+                  }
+                }
+              }
+            }, 500);
+          }
+          
+          return true;
+        })()
+      `);
+    }
+    
+  } catch (error) {
+    console.error('[GSX AutoLogin] Error:', error.message);
+  }
+}
+
 /**
  * Creates the main application window
  * @param {Object} app - The Electron app instance
@@ -1146,7 +1766,7 @@ function getMainWindow() {
  * @param {string} idwEnvironment - Optional environment name to create environment-specific sessions
  * @returns {BrowserWindow} The created GSX window
  */
-function openGSXWindow(url, title, idwEnvironment) {
+async function openGSXWindow(url, title, idwEnvironment) {
   console.log(`Opening GSX window for ${title}: ${url}`);
   
   if (!logger) {
@@ -1177,8 +1797,62 @@ function openGSXWindow(url, title, idwEnvironment) {
   // This allows all GSX windows in the same IDW group to share cookies
   // while keeping different IDW groups sandboxed from each other
   const partitionName = `gsx-${idwEnvironment}`;
+  const fullPartition = `persist:${partitionName}`;
   
   console.log(`Using shared session partition for IDW group: ${partitionName}`);
+  
+  // Multi-tenant token injection - inject BEFORE creating window
+  // This ensures the token is available when the window first loads
+  const multiTenantStore = require('./multi-tenant-store');
+  
+  if (multiTenantStore.hasValidToken(idwEnvironment)) {
+    const token = multiTenantStore.getToken(idwEnvironment);
+    const ses = session.fromPartition(fullPartition);
+    
+    // Use broader domain to cover all subdomains (auth, idw, chat, api)
+    const broaderDomain = multiTenantStore.getBroaderDomain(idwEnvironment);
+    
+    try {
+      // Check if token already exists in this partition (check broader domain)
+      const existing = await ses.cookies.get({ domain: broaderDomain, name: 'mult' });
+      if (existing.length === 0) {
+        // Inject token with broader domain so it's sent to all subdomains
+        await ses.cookies.set({
+          url: `https://auth${broaderDomain}`,
+          name: 'mult',
+          value: token.value,
+          domain: broaderDomain,
+          path: '/',
+          secure: true,
+          httpOnly: true,
+          sameSite: 'no_restriction',
+          expirationDate: token.expiresAt
+        });
+        
+        // CRITICAL: Flush to ensure cookie is persisted before window loads
+        await ses.cookies.flushStore();
+        
+        // Verify cookie was set
+        const cookies = await ses.cookies.get({ name: 'mult' });
+        console.log(`[GSX] Injected ${idwEnvironment} token into ${partitionName} - ${cookies.length} mult cookies:`,
+          cookies.map(c => ({ domain: c.domain, sameSite: c.sameSite })));
+      } else {
+        console.log(`[GSX] Token already exists in ${partitionName}:`, existing.map(c => ({ domain: c.domain })));
+      }
+    } catch (err) {
+      console.error(`[GSX] Failed to inject token:`, err.message);
+      // Continue anyway - user can still login manually
+    }
+  } else {
+    console.log(`[GSX] No valid ${idwEnvironment} token available`);
+  }
+  
+  // ALWAYS register the GSX partition for token propagation (even if no token yet)
+  // This ensures that when user logs in via auto-login, tokens are propagated here
+  multiTenantStore.registerPartition(idwEnvironment, fullPartition);
+  
+  // Attach cookie listener (idempotent - only attaches once per partition)
+  multiTenantStore.attachCookieListener(fullPartition);
   
   // Create a window with proper security settings for GSX content
   const gsxWindow = new BrowserWindow({
@@ -1193,7 +1867,7 @@ function openGSXWindow(url, title, idwEnvironment) {
       // Screen-sharing removed – use standard preload
       preload: path.join(__dirname, 'preload.js'),
       // Use a persistent partition specific to this GSX service and environment
-      partition: `persist:${partitionName}`,
+      partition: fullPartition,
       // Enable media access for screen sharing
       enableRemoteModule: false,
       allowRunningInsecureContent: false
@@ -1355,7 +2029,11 @@ function openGSXWindow(url, title, idwEnvironment) {
   });
   
   // Add custom scrollbar CSS when content loads
-  gsxWindow.webContents.on('did-finish-load', () => {
+  gsxWindow.webContents.on('did-finish-load', async () => {
+    const currentUrl = gsxWindow.webContents.getURL();
+    console.log(`[GSX Window] Loaded: ${currentUrl}`);
+    
+    // Inject scrollbar CSS
     gsxWindow.webContents.insertCSS(`
       ::-webkit-scrollbar {
         width: 6px;
@@ -1376,6 +2054,56 @@ function openGSXWindow(url, title, idwEnvironment) {
         background: rgba(255, 255, 255, 0.2);
       }
     `).catch(err => console.error('Failed to inject scrollbar CSS in GSX window:', err));
+    
+    // Auto-login for OneReach pages (with retry for async-loaded forms)
+    if (currentUrl && currentUrl.includes('onereach.ai')) {
+      // Check state before attempting
+      if (!shouldAttemptGSXAutoLogin(gsxWindow.id)) {
+        console.log('[GSX AutoLogin] Skipping - already in progress or complete');
+      } else {
+        console.log('[GSX AutoLogin] OneReach page detected, starting auto-login...');
+        setTimeout(() => {
+          attemptGSXAutoLoginWithRetry(gsxWindow, currentUrl, 0);
+        }, 1000);
+      }
+    }
+  });
+  
+  // Handle full page navigation (for auth redirects)
+  gsxWindow.webContents.on('did-navigate', async (event, url) => {
+    console.log(`[GSX Window] Full navigation: ${url}`);
+    
+    // Auto-login for auth pages (when GSX redirects to auth.*.onereach.ai)
+    if (url && url.includes('auth.') && url.includes('onereach.ai')) {
+      // Check state before attempting
+      if (!shouldAttemptGSXAutoLogin(gsxWindow.id)) {
+        console.log('[GSX AutoLogin] Skipping - already in progress or complete');
+        return;
+      }
+      console.log('[GSX AutoLogin] Auth page detected via redirect, starting auto-login...');
+      // Wait for form to render
+      setTimeout(() => {
+        attemptGSXAutoLoginWithRetry(gsxWindow, url, 0);
+      }, 1500);
+    }
+  });
+  
+  // Handle SPA navigation (for auth page internal navigation)
+  gsxWindow.webContents.on('did-navigate-in-page', async (event, url) => {
+    console.log(`[GSX Window] In-page navigation: ${url}`);
+    
+    // Auto-login for auth pages
+    if (url && url.includes('onereach.ai') && url.includes('/login')) {
+      // Check state before attempting
+      if (!shouldAttemptGSXAutoLogin(gsxWindow.id)) {
+        return;
+      }
+      console.log('[GSX AutoLogin] Auth login page detected via SPA navigation');
+      // Wait for form to render then retry
+      setTimeout(() => {
+        attemptGSXAutoLoginWithRetry(gsxWindow, url, 0);
+      }, 1000);
+    }
   });
   
   return gsxWindow;

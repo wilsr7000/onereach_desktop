@@ -9,7 +9,7 @@
  */
 
 const { decomposeTasks } = require('./task-decomposer');
-const { getBidsForTask, selectWinner } = require('./agent-bidder');
+const { getBidsFromAgents, selectWinner } = require('./unified-bidder');
 
 // Import actual agent implementations
 const timeAgent = require('./time-agent');
@@ -27,6 +27,102 @@ const AGENT_IMPLEMENTATIONS = {
   'smalltalk-agent': smalltalkAgent,
   'search-agent': searchAgent
 };
+
+// Built-in agents in unified format for LLM bidding
+const BUILTIN_AGENTS = [
+  {
+    id: 'time-agent',
+    name: 'Time Agent',
+    keywords: ['time', 'date', 'clock', 'day', 'today', 'hour', 'minute'],
+    capabilities: ['Get current time', 'Get current date', 'Get day of week'],
+    prompt: 'Answers questions about the current time and date',
+    executionType: 'builtin'
+  },
+  {
+    id: 'media-agent',
+    name: 'Media Agent',
+    keywords: ['play', 'pause', 'stop', 'skip', 'next', 'previous', 'volume', 'music', 'song', 'mute'],
+    capabilities: ['Play music', 'Pause playback', 'Skip track', 'Volume control'],
+    prompt: 'Controls music playback on the system - play, pause, skip, volume up/down',
+    executionType: 'builtin'
+  },
+  {
+    id: 'help-agent',
+    name: 'Help Agent',
+    keywords: ['help', 'capabilities', 'commands', 'what can you do'],
+    capabilities: ['List available commands', 'Explain capabilities'],
+    prompt: 'Explains what the assistant can do and how to use it',
+    executionType: 'builtin'
+  },
+  {
+    id: 'search-agent',
+    name: 'Search Agent',
+    keywords: ['weather', 'search', 'find', 'look up', 'what is', 'who is', 'where is', 'how', 'why', 'define'],
+    capabilities: ['Search the web', 'Get weather', 'Answer factual questions', 'Look up definitions'],
+    prompt: 'Searches the web for information, gets weather forecasts, answers factual questions',
+    executionType: 'builtin'
+  },
+  {
+    id: 'smalltalk-agent',
+    name: 'Small Talk Agent',
+    keywords: ['hi', 'hello', 'hey', 'bye', 'goodbye', 'thanks', 'thank you', 'how are you'],
+    capabilities: ['Respond to greetings', 'Handle goodbyes', 'Accept thanks'],
+    prompt: 'Handles social pleasantries like greetings, goodbyes, thanks, and casual conversation',
+    executionType: 'builtin'
+  }
+];
+
+/**
+ * Get enabled built-in agents
+ */
+function getEnabledBuiltinAgents() {
+  let states = {};
+  if (global.settingsManager) {
+    states = global.settingsManager.get('builtinAgentStates') || {};
+  }
+  return BUILTIN_AGENTS.filter(agent => states[agent.id] !== false);
+}
+
+/**
+ * Get custom agents from agent-store
+ */
+function getCustomAgents() {
+  try {
+    const { getAgentStore } = require('../../src/voice-task-sdk/agent-store');
+    const agentStore = getAgentStore();
+    if (agentStore && agentStore.initialized) {
+      const customAgents = agentStore.getEnabledLocalAgents();
+      console.log(`[TaskQueueManager] Found ${customAgents.length} custom agents for bidding`);
+      return customAgents;
+    }
+  } catch (e) {
+    // Agent store may not be initialized yet
+    console.log('[TaskQueueManager] Agent store not available:', e.message);
+  }
+  return [];
+}
+
+/**
+ * Get bids from ALL agents (built-in + custom) using unified LLM bidder
+ */
+async function getBidsForTask(task) {
+  // Combine built-in and custom agents
+  const builtinAgents = getEnabledBuiltinAgents();
+  const customAgents = getCustomAgents();
+  const allAgents = [...builtinAgents, ...customAgents];
+  
+  console.log(`[TaskQueueManager] Evaluating ${allAgents.length} agents (${builtinAgents.length} built-in, ${customAgents.length} custom)`);
+  
+  const bids = await getBidsFromAgents(allAgents, task);
+  
+  // Convert to legacy format expected by rest of code
+  return bids.map(bid => ({
+    agentId: bid.agentId,
+    confidence: bid.confidence,
+    plan: bid.plan,
+    missingData: []
+  }));
+}
 
 /**
  * Process a user phrase through the full pipeline
@@ -213,12 +309,6 @@ async function executeTask(task, winner, onProgress = () => {}) {
     return handleSystemCommand(task);
   }
   
-  // Get agent implementation
-  const agent = AGENT_IMPLEMENTATIONS[winner.agentId];
-  if (!agent) {
-    throw new Error(`Unknown agent: ${winner.agentId}`);
-  }
-  
   // Check for missing data
   if (winner.missingData && winner.missingData.length > 0) {
     return {
@@ -230,8 +320,140 @@ async function executeTask(task, winner, onProgress = () => {}) {
     };
   }
   
-  // Execute with progress callback in context
-  return agent.execute(task, { onProgress });
+  // Try built-in agent first
+  const builtinAgent = AGENT_IMPLEMENTATIONS[winner.agentId];
+  if (builtinAgent) {
+    return builtinAgent.execute(task, { onProgress });
+  }
+  
+  // Try custom agent from agent-store
+  const customAgent = getCustomAgentById(winner.agentId);
+  if (customAgent) {
+    return executeCustomAgent(customAgent, task, onProgress);
+  }
+  
+  throw new Error(`Unknown agent: ${winner.agentId}`);
+}
+
+/**
+ * Get a custom agent by ID
+ */
+function getCustomAgentById(agentId) {
+  try {
+    const { getAgentStore } = require('../../src/voice-task-sdk/agent-store');
+    const agentStore = getAgentStore();
+    if (agentStore && agentStore.initialized) {
+      return agentStore.getAgent(agentId);
+    }
+  } catch (e) {
+    // Agent store may not be available
+  }
+  return null;
+}
+
+/**
+ * Execute a custom agent based on its execution type
+ */
+async function executeCustomAgent(agent, task, onProgress = () => {}) {
+  const executionType = agent.executionType || 'llm';
+  const content = task.content || '';
+  
+  console.log(`[TaskQueueManager] Executing custom agent ${agent.name} (${executionType})`);
+  onProgress(`${agent.name} processing...`);
+  
+  try {
+    if (executionType === 'applescript') {
+      return await executeAppleScriptAgent(agent, content, onProgress);
+    } else if (executionType === 'nodejs') {
+      return await executeNodeJSAgent(agent, content, onProgress);
+    } else {
+      // Default to LLM execution
+      return await executeLLMAgent(agent, content, onProgress);
+    }
+  } catch (error) {
+    console.error(`[TaskQueueManager] Custom agent ${agent.name} failed:`, error.message);
+    return {
+      success: false,
+      message: `${agent.name} encountered an error: ${error.message}`
+    };
+  }
+}
+
+/**
+ * Execute an AppleScript-type agent
+ */
+async function executeAppleScriptAgent(agent, content, onProgress) {
+  const claudeCode = require('../../lib/claude-code-runner');
+  
+  onProgress('Generating AppleScript...');
+  
+  const prompt = `${agent.prompt}\n\nUser command: "${content}"\n\nGenerate and return ONLY the AppleScript code to execute. No explanation, just the code.`;
+  
+  const response = await claudeCode.complete(prompt);
+  
+  // Extract AppleScript from response
+  let script = response;
+  const codeMatch = response.match(/```(?:applescript)?\n?([\s\S]*?)```/);
+  if (codeMatch) {
+    script = codeMatch[1].trim();
+  }
+  
+  onProgress('Running AppleScript...');
+  
+  // Execute the AppleScript
+  const { exec } = require('child_process');
+  const { promisify } = require('util');
+  const execAsync = promisify(exec);
+  
+  const escapedScript = script.replace(/'/g, "'\"'\"'");
+  const { stdout, stderr } = await execAsync(`osascript -e '${escapedScript}'`, { timeout: 30000 });
+  
+  if (stderr && !stdout) {
+    return { success: false, message: stderr };
+  }
+  
+  return {
+    success: true,
+    message: stdout.trim() || 'Done'
+  };
+}
+
+/**
+ * Execute a Node.js-type agent  
+ */
+async function executeNodeJSAgent(agent, content, onProgress) {
+  const claudeCode = require('../../lib/claude-code-runner');
+  
+  onProgress('Generating code...');
+  
+  const prompt = `${agent.prompt}\n\nUser command: "${content}"\n\nGenerate Node.js code to accomplish this. Return ONLY executable code.`;
+  
+  const result = await claudeCode.executeWithTools(prompt, {
+    allowedTools: ['Bash'],
+    cwd: process.cwd()
+  });
+  
+  return {
+    success: result.success,
+    message: result.output || result.error || 'Completed'
+  };
+}
+
+/**
+ * Execute an LLM-type agent (conversational)
+ */
+async function executeLLMAgent(agent, content, onProgress) {
+  const claudeCode = require('../../lib/claude-code-runner');
+  
+  onProgress('Thinking...');
+  
+  const prompt = `${agent.prompt}\n\nUser: ${content}`;
+  const response = await claudeCode.complete(prompt);
+  
+  return {
+    success: true,
+    message: response.trim()
+  };
 }
 
 /**

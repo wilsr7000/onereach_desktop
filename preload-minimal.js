@@ -2,6 +2,14 @@
 // This script provides only the necessary APIs for external content
 const { contextBridge, ipcRenderer } = require('electron');
 
+// ========================================
+// SSO: localStorage injection DISABLED
+// The 'or' cookie/localStorage data is account-specific and doesn't help with SSO.
+// The 'mult' cookie (injected via main process) is sufficient to enable SSO -
+// it proves the user is authenticated to OneReach, so they only need to
+// confirm/select their account instead of re-entering credentials.
+// ========================================
+
 // Expose a minimal API to the external content
 contextBridge.exposeInMainWorld(
   'electronAPI', {

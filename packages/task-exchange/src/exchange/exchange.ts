@@ -49,6 +49,7 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
   private tasks: Map<string, Task> = new Map();
   private activeAuctions: Map<string, { task: Task; orderBook: OrderBook }> = new Map();
   private isShuttingDown = false;
+  private isProcessing = false;  // Guard against concurrent processQueue calls
   private processingLoop: NodeJS.Timeout | null = null;
   private healthCheckLoop: NodeJS.Timeout | null = null;
 
@@ -97,6 +98,12 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
    * Start the exchange
    */
   async start(): Promise<void> {
+    // Guard against multiple starts
+    if (this.processingLoop) {
+      console.warn('[Exchange] Already started, ignoring duplicate start call');
+      return;
+    }
+    
     // Start processing loop
     this.processingLoop = setInterval(() => this.processQueue(), 100);
 
@@ -263,6 +270,8 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
   // === Internal Methods ===
 
   private async processQueue(): Promise<void> {
+    // Guard against concurrent processing (setInterval doesn't wait for async)
+    if (this.isProcessing) return;
     if (this.isShuttingDown) return;
     if (this.taskQueue.isEmpty()) return;
 
@@ -272,6 +281,9 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
 
     const task = this.taskQueue.dequeue();
     if (!task) return;
+
+    // Mark as processing to prevent re-entry
+    this.isProcessing = true;
 
     // Run auction
     try {
@@ -285,6 +297,8 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
         reason: 'Auction error',
         totalAttempts: task.auctionAttempt,
       });
+    } finally {
+      this.isProcessing = false;
     }
   }
 
@@ -310,6 +324,9 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
     // Get candidate agents
     const agentIds = this.categoryIndex.getAgentsForTask(task);
     const matchedCategories = this.categoryIndex.findCategories(task);
+    
+    console.log(`[Exchange] Task "${task.content?.slice(0, 40)}..." matched categories:`, matchedCategories);
+    console.log(`[Exchange] Candidate agents (${agentIds.size}):`, Array.from(agentIds));
 
     task.metadata.matchedCategories = matchedCategories;
     task.metadata.candidateAgents = Array.from(agentIds);
@@ -382,13 +399,24 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
     };
 
     // Request bids from all agents in parallel
+    console.log(`[Exchange] Requesting bids from ${agentIds.size} agents:`, Array.from(agentIds));
+    
     const bidPromises = Array.from(agentIds).map(async (agentId) => {
       try {
-        if (abortController.signal.aborted) return;
-        if (!this.agentRegistry.isHealthy(agentId)) return;
+        if (abortController.signal.aborted) {
+          console.log(`[Exchange] Skipping ${agentId}: auction aborted`);
+          return;
+        }
+        if (!this.agentRegistry.isHealthy(agentId)) {
+          console.log(`[Exchange] Skipping ${agentId}: marked unhealthy`);
+          return;
+        }
 
         const ws = this.agentRegistry.getSocket(agentId);
-        if (!ws) return;
+        if (!ws) {
+          console.log(`[Exchange] Skipping ${agentId}: no WebSocket connection`);
+          return;
+        }
 
         // Send bid request
         const request: BidRequest = {
@@ -399,6 +427,7 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
           deadline,
         };
 
+        console.log(`[Exchange] Sending bid_request to ${agentId}`);
         ws.send(JSON.stringify(request));
       } catch (error) {
         console.warn(`[Exchange] Failed to request bid from ${agentId}:`, error);

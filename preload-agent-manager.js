@@ -50,6 +50,44 @@ contextBridge.exposeInMainWorld('agentManagerAPI', {
   
   // Set enabled state for a builtin agent
   setBuiltinAgentEnabled: (agentId, enabled) => ipcRenderer.invoke('agents:set-builtin-enabled', agentId, enabled),
+  
+  // ==================== TESTING ====================
+  
+  // Test a single agent with a phrase
+  testPhrase: (agentId, phrase) => ipcRenderer.invoke('agents:test-phrase', agentId, phrase),
+  
+  // Test all enabled agents with a phrase
+  testPhraseAllAgents: (phrase) => ipcRenderer.invoke('agents:test-phrase-all', phrase),
+  
+  // ==================== VERSION HISTORY ====================
+  
+  // Get version history for an agent
+  getVersionHistory: (agentId) => ipcRenderer.invoke('agents:get-version-history', agentId),
+  
+  // Get a specific version
+  getVersion: (agentId, versionNumber) => ipcRenderer.invoke('agents:get-version', agentId, versionNumber),
+  
+  // Revert to a specific version
+  revertToVersion: (agentId, versionNumber) => ipcRenderer.invoke('agents:revert-to-version', agentId, versionNumber),
+  
+  // ==================== ENHANCE AGENT ====================
+  
+  // Open Agent Composer in enhance mode
+  enhanceAgent: (agentId) => ipcRenderer.invoke('agents:enhance', agentId),
+  
+  // ==================== STATISTICS ====================
+  
+  // Get stats for a single agent
+  getStats: (agentId) => ipcRenderer.invoke('agents:get-stats', agentId),
+  
+  // Get stats for all agents
+  getAllStats: () => ipcRenderer.invoke('agents:get-all-stats'),
+  
+  // Get recent bid history
+  getBidHistory: (limit) => ipcRenderer.invoke('agents:get-bid-history', limit),
+  
+  // Get bid history for a specific agent
+  getAgentBidHistory: (agentId, limit) => ipcRenderer.invoke('agents:get-agent-bid-history', agentId, limit),
 });
 
 console.log('[PreloadAgentManager] Agent Manager API exposed');

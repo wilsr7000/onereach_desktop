@@ -43,9 +43,10 @@ try {
 const mediaAgent = {
   id: 'media-agent',
   name: 'Media Agent',
-  description: 'Controls Music and Spotify via AppleScript',
+  description: 'Controls Music and Spotify via AppleScript with AirPlay support',
   categories: ['media', 'music'],
-  keywords: ['play', 'pause', 'stop', 'skip', 'next', 'previous', 'volume', 'music', 'song', 'track'],
+  keywords: ['play', 'pause', 'stop', 'skip', 'next', 'previous', 'volume', 'music', 'song', 'track', 
+             'airplay', 'speaker', 'speakers', 'homepod', 'apple tv', 'output', 'living room', 'bedroom', 'kitchen'],
   
   /**
    * Bid on a task
@@ -57,6 +58,12 @@ const mediaAgent = {
     
     const lower = task.content.toLowerCase();
     const mediaKeywords = ['play', 'pause', 'stop', 'skip', 'next', 'previous', 'volume', 'music', 'song', 'track', 'mute', 'unmute'];
+    const airplayKeywords = ['airplay', 'speaker', 'speakers', 'homepod', 'apple tv', 'output to', 'play on', 'switch to', 'living room', 'bedroom', 'kitchen', 'office'];
+    
+    // High confidence for AirPlay commands
+    if (airplayKeywords.some(k => lower.includes(k))) {
+      return { confidence: 0.95 };
+    }
     
     if (mediaKeywords.some(k => lower.includes(k))) {
       return { confidence: 0.9 };
@@ -80,6 +87,13 @@ const mediaAgent = {
     }
     
     try {
+      // ==================== AIRPLAY COMMANDS ====================
+      // Check for AirPlay output commands first
+      const airplayResult = await this.handleAirPlayCommand(lower, task.content);
+      if (airplayResult) {
+        return airplayResult;
+      }
+      
       // Pause command
       if (lower.includes('pause') || (lower.includes('stop') && !lower.includes('stop playing'))) {
         const result = await smartPause(app);
@@ -579,6 +593,343 @@ const mediaAgent = {
       return parseInt(stdout.trim()) || 50;
     } catch (e) {
       return 50; // Default
+    }
+  },
+  
+  // ==================== AIRPLAY METHODS ====================
+  
+  /**
+   * Handle AirPlay-related commands
+   * @param {string} lower - Lowercase command text
+   * @param {string} original - Original command text
+   * @returns {Object|null} - Result or null if not an AirPlay command
+   */
+  async handleAirPlayCommand(lower, original) {
+    // Detect AirPlay intent
+    const isAirPlayCommand = 
+      lower.includes('airplay') ||
+      lower.includes('homepod') ||
+      lower.includes('apple tv') ||
+      lower.includes('speaker') ||
+      (lower.includes('play') && lower.includes(' on ')) ||
+      (lower.includes('switch') && (lower.includes('to ') || lower.includes('output'))) ||
+      lower.includes('output to') ||
+      lower.includes('play to');
+    
+    if (!isAirPlayCommand) {
+      return null;
+    }
+    
+    console.log('[MediaAgent] Detected AirPlay command:', original);
+    
+    // List speakers command
+    if (lower.includes('list') || lower.includes('what') || lower.includes('available') || lower.includes('show')) {
+      return this.listAirPlayDevices();
+    }
+    
+    // Turn off AirPlay / play locally
+    if (lower.includes('computer') || lower.includes('mac') || lower.includes('local') || 
+        lower.includes('this device') || lower.includes('turn off airplay') || lower.includes('stop airplay')) {
+      return this.setAirPlayDevice('Computer');
+    }
+    
+    // Extract target device name from command
+    const targetDevice = this.extractAirPlayTarget(lower, original);
+    
+    if (targetDevice) {
+      // Check if this is "play X on Y" (play music AND set output)
+      const playMatch = original.match(/play\s+(.+?)\s+(?:on|to)\s+/i);
+      if (playMatch && !lower.includes('switch') && !lower.includes('output')) {
+        // This is "play jazz on living room" - need to set output AND play music
+        const musicQuery = playMatch[1].trim();
+        return this.playOnDevice(musicQuery, targetDevice);
+      }
+      
+      // Just switch output
+      return this.setAirPlayDevice(targetDevice);
+    }
+    
+    // Couldn't determine target - list available devices
+    return this.listAirPlayDevices();
+  },
+  
+  /**
+   * Extract the target AirPlay device name from a command
+   * @param {string} lower - Lowercase command
+   * @param {string} original - Original command (for case preservation)
+   * @returns {string|null} - Device name or null
+   */
+  extractAirPlayTarget(lower, original) {
+    // Common room names that might be speaker names
+    const roomPatterns = [
+      'living room', 'bedroom', 'kitchen', 'office', 'bathroom', 'dining room',
+      'basement', 'garage', 'den', 'study', 'nursery', 'playroom', 'guest room',
+      'master bedroom', 'kids room', 'family room', 'media room', 'home office'
+    ];
+    
+    // Device type patterns
+    const devicePatterns = ['homepod', 'apple tv', 'airplay', 'sonos', 'speaker'];
+    
+    // Try to extract from common patterns
+    // "play on [device]", "switch to [device]", "output to [device]"
+    const patterns = [
+      /(?:play|switch|output|send|stream)\s+(?:music\s+)?(?:on|to)\s+(?:the\s+)?(.+?)(?:\s+speaker)?$/i,
+      /(?:on|to)\s+(?:the\s+)?(.+?)(?:\s+speaker)?$/i,
+      /(?:use|set)\s+(?:the\s+)?(.+?)(?:\s+as\s+output)?$/i,
+    ];
+    
+    for (const pattern of patterns) {
+      const match = original.match(pattern);
+      if (match) {
+        let device = match[1].trim();
+        // Remove trailing words like "please", "now"
+        device = device.replace(/\s+(please|now|thanks)$/i, '').trim();
+        if (device.length > 0 && device.length < 50) {
+          return device;
+        }
+      }
+    }
+    
+    // Check for room names in the command
+    for (const room of roomPatterns) {
+      if (lower.includes(room)) {
+        // Return with proper capitalization
+        return room.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+      }
+    }
+    
+    // Check for device types
+    if (lower.includes('homepod')) {
+      // Try to get specific HomePod name
+      const homepodMatch = original.match(/homepod\s+(.+?)(?:\s|$)/i);
+      if (homepodMatch) {
+        return 'HomePod ' + homepodMatch[1].trim();
+      }
+      return 'HomePod'; // Generic - will match first HomePod
+    }
+    
+    if (lower.includes('apple tv')) {
+      const atvMatch = original.match(/apple\s+tv\s+(.+?)(?:\s|$)/i);
+      if (atvMatch) {
+        return 'Apple TV ' + atvMatch[1].trim();
+      }
+      return 'Apple TV';
+    }
+    
+    return null;
+  },
+  
+  /**
+   * Get list of available AirPlay devices
+   * @returns {Promise<Object>} - { success, message, devices }
+   */
+  async listAirPlayDevices() {
+    try {
+      const script = `
+        tell application "Music"
+          set deviceList to {}
+          set airplayDevices to AirPlay devices
+          repeat with aDevice in airplayDevices
+            set deviceName to name of aDevice
+            set deviceSelected to selected of aDevice
+            set deviceKind to kind of aDevice as string
+            set end of deviceList to deviceName & "|" & deviceSelected & "|" & deviceKind
+          end repeat
+          return deviceList as string
+        end tell
+      `;
+      
+      const result = await runScript(script);
+      // runScript returns {success, output, error} - pass only the output string
+      const devices = this.parseAirPlayDevices(result.output || '');
+      
+      if (devices.length === 0) {
+        return {
+          success: true,
+          message: "No AirPlay devices found. Make sure your speakers are on and on the same network."
+        };
+      }
+      
+      // Format for voice
+      const selectedDevice = devices.find(d => d.selected);
+      const deviceNames = devices.map(d => d.name).join(', ');
+      
+      let message = `Available speakers: ${deviceNames}.`;
+      if (selectedDevice) {
+        message += ` Currently playing on ${selectedDevice.name}.`;
+      }
+      
+      return {
+        success: true,
+        message,
+        devices
+      };
+    } catch (error) {
+      console.error('[MediaAgent] Error listing AirPlay devices:', error);
+      return {
+        success: false,
+        message: "I couldn't get the list of AirPlay devices. Make sure Music is running."
+      };
+    }
+  },
+  
+  /**
+   * Parse AirPlay device list from AppleScript output
+   * @param {string} output - Raw AppleScript output
+   * @returns {Array<{name: string, selected: boolean, kind: string}>}
+   */
+  parseAirPlayDevices(output) {
+    if (!output || output.trim() === '') return [];
+    
+    const devices = [];
+    const entries = output.split(', ');
+    
+    for (const entry of entries) {
+      const parts = entry.split('|');
+      if (parts.length >= 2) {
+        devices.push({
+          name: parts[0].trim(),
+          selected: parts[1].trim().toLowerCase() === 'true',
+          kind: parts[2]?.trim() || 'unknown'
+        });
+      }
+    }
+    
+    return devices;
+  },
+  
+  /**
+   * Set the AirPlay output device
+   * @param {string} targetDevice - Name of device to switch to
+   * @returns {Promise<Object>} - { success, message }
+   */
+  async setAirPlayDevice(targetDevice) {
+    console.log('[MediaAgent] Setting AirPlay device to:', targetDevice);
+    
+    try {
+      // First, get available devices
+      const { devices } = await this.listAirPlayDevices();
+      
+      if (!devices || devices.length === 0) {
+        return {
+          success: false,
+          message: "No AirPlay devices available. Make sure your speakers are on."
+        };
+      }
+      
+      // Find matching device (fuzzy match)
+      const normalizedTarget = targetDevice.toLowerCase();
+      let matchedDevice = devices.find(d => d.name.toLowerCase() === normalizedTarget);
+      
+      // Try partial match if exact match fails
+      if (!matchedDevice) {
+        matchedDevice = devices.find(d => 
+          d.name.toLowerCase().includes(normalizedTarget) ||
+          normalizedTarget.includes(d.name.toLowerCase())
+        );
+      }
+      
+      // Try word-by-word match
+      if (!matchedDevice) {
+        const targetWords = normalizedTarget.split(/\s+/);
+        matchedDevice = devices.find(d => {
+          const deviceWords = d.name.toLowerCase().split(/\s+/);
+          return targetWords.some(tw => deviceWords.some(dw => dw.includes(tw) || tw.includes(dw)));
+        });
+      }
+      
+      if (!matchedDevice) {
+        const availableNames = devices.map(d => d.name).join(', ');
+        return {
+          success: false,
+          message: `I couldn't find "${targetDevice}". Available speakers are: ${availableNames}`
+        };
+      }
+      
+      // Check if already selected
+      if (matchedDevice.selected) {
+        return {
+          success: true,
+          message: `Already playing on ${matchedDevice.name}`
+        };
+      }
+      
+      // Select the device
+      const selectScript = `
+        tell application "Music"
+          set airplayDevices to AirPlay devices
+          repeat with aDevice in airplayDevices
+            if name of aDevice is "${matchedDevice.name}" then
+              set selected of aDevice to true
+            else
+              set selected of aDevice to false
+            end if
+          end repeat
+        end tell
+      `;
+      
+      await runScript(selectScript);
+      
+      // Small delay to let it switch
+      await new Promise(r => setTimeout(r, 500));
+      
+      return {
+        success: true,
+        message: `Now playing on ${matchedDevice.name}`
+      };
+      
+    } catch (error) {
+      console.error('[MediaAgent] Error setting AirPlay device:', error);
+      return {
+        success: false,
+        message: `Couldn't switch to ${targetDevice}. ${error.message || ''}`
+      };
+    }
+  },
+  
+  /**
+   * Play music on a specific AirPlay device
+   * @param {string} musicQuery - What to play (genre, artist, etc.)
+   * @param {string} targetDevice - Device to play on
+   * @returns {Promise<Object>} - { success, message }
+   */
+  async playOnDevice(musicQuery, targetDevice) {
+    console.log('[MediaAgent] Playing', musicQuery, 'on', targetDevice);
+    
+    // First, set the output device
+    const deviceResult = await this.setAirPlayDevice(targetDevice);
+    if (!deviceResult.success) {
+      return deviceResult;
+    }
+    
+    // Then play the music
+    const playResult = await smartPlay('Music', musicQuery);
+    
+    if (playResult.success) {
+      return {
+        success: true,
+        message: `Playing ${musicQuery} on ${targetDevice}`
+      };
+    }
+    
+    // Music search failed but output was set
+    return {
+      success: true,
+      message: `Switched to ${targetDevice}. ${playResult.message || "Couldn't find that music."}`
+    };
+  },
+  
+  /**
+   * Get currently selected AirPlay device
+   * @returns {Promise<string|null>} - Device name or null
+   */
+  async getCurrentAirPlayDevice() {
+    try {
+      const { devices } = await this.listAirPlayDevices();
+      const selected = devices?.find(d => d.selected);
+      return selected?.name || null;
+    } catch (e) {
+      return null;
     }
   }
 };

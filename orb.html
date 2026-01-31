@@ -706,7 +706,7 @@
         let isListening = false;
         let isConnected = false;
         let isSessionReady = false;
-        let pendingSpeak = null; // Text to speak when session is ready
+        // NOTE: pendingSpeak removed - all TTS handled by backend
         let removeEventListener = null;
         let audioContext = null;
         let mediaStream = null;
@@ -724,14 +724,142 @@
         const DEDUP_WINDOW_MS = 2000; // Ignore same transcript within 2 seconds
         let ttsEndTime = 0;
         
+        // Common noise/filler words to ignore (background noise often produces these)
+        const NOISE_WORDS = new Set([
+            'hmm', 'hm', 'um', 'uh', 'ah', 'oh', 'eh', 'er', 'mm',
+            'yeah', 'yep', 'yes', 'no', 'nope', 'ok', 'okay', 'mhm', 'uh-huh',
+            'the', 'a', 'i', 'it', 'is', 'and', 'but', 'so', 'like',
+            'bye', 'hi', 'hey', 'hello', 'thanks', 'thank you',
+            'right', 'alright', 'sure', 'well', 'now', 'just',
+            // Common misheard noise
+            'you', 'me', 'we', 'he', 'she', 'they', 'that', 'this',
+            'what', 'huh', 'wow', 'ooh', 'aah', 'ugh'
+        ]);
+        
+        // Check if transcript is likely just noise
+        function isLikelyNoise(text) {
+            if (!text) return true;
+            
+            const normalized = text.toLowerCase().trim();
+            
+            // Too short
+            if (normalized.length <= 3) return true;
+            
+            // Single noise word
+            if (NOISE_WORDS.has(normalized)) return true;
+            
+            // Remove punctuation and check again
+            const stripped = normalized.replace(/[.,!?;:'"]/g, '').trim();
+            if (NOISE_WORDS.has(stripped)) return true;
+            
+            // Check if it's just repeated characters (like "aaaah" or "mmmm")
+            if (/^(.)\1{2,}$/.test(stripped)) return true;
+            
+            // Very short after stripping (like "I." or "A!")
+            if (stripped.length <= 2) return true;
+            
+            // Two-word combos that are likely noise (e.g., "oh yeah", "uh huh")
+            const words = stripped.split(/\s+/);
+            if (words.length <= 2 && words.every(w => NOISE_WORDS.has(w) || w.length <= 2)) {
+                return true;
+            }
+            
+            return false;
+        }
+        
         // Track function call transcripts to avoid double-processing
         // When using function calling, we get the transcript via function_call_transcript
         // AND via the regular transcript event - we must skip the duplicate
         let lastFunctionCallTranscript = '';
         let lastFunctionCallTime = 0;
         const FUNCTION_CALL_DEDUP_MS = 5000; // Skip regular transcript if function call handled it within 5s
-        const TTS_COOLDOWN_MS = 3000; // Ignore transcripts for 3s after TTS ends (prevent echo/ambient pickup)
-        let pendingSpeakQueue = []; // Queue TTS requests to avoid collision
+        const TTS_COOLDOWN_MS = 4000; // Ignore transcripts for 4s after TTS ends (prevent echo/ambient pickup)
+        // NOTE: pendingSpeakQueue removed - all TTS handled by backend speechQueue
+        
+        // Store pending function call ID for multi-turn conversations
+        // When agent returns needsInput, we use this to respond via the proper TTS channel
+        let pendingFunctionCallId = null;
+        
+        // Multi-turn conversation state - when true, keep mic active after TTS
+        // Set when agent returns needsInput, cleared when follow-up is processed
+        let isWaitingForUserInput = false;
+        
+        // Speech detection and silence timeout
+        // The idea: detect when user STARTS speaking, then wait for silence AFTER speech
+        let lastSpeechTime = 0;           // When we last detected user speaking (interim transcript)
+        let hasSpokenThisSession = false; // Has the user said anything meaningful?
+        let silenceTimeoutId = null;
+        let noSpeechTimeoutId = null;
+        
+        const SILENCE_AFTER_SPEECH_MS = 5000;  // 5 seconds of silence after speech = done
+        const NO_SPEECH_TIMEOUT_MS = 60000;    // 60 seconds with no speech at all = auto-stop
+        
+        // Called when we detect the user is actively speaking (interim transcripts)
+        function onSpeechDetected() {
+            lastSpeechTime = Date.now();
+            hasSpokenThisSession = true;
+            
+            // Clear the silence timeout while they're speaking
+            clearSilenceTimeout();
+            
+            // Clear the no-speech timeout since they are speaking
+            clearNoSpeechTimeout();
+        }
+        
+        // Called when speech appears to have ended (final transcript received or silence)
+        function onSpeechEnded() {
+            // Start silence timeout - if no more speech, consider them done
+            clearSilenceTimeout();
+            silenceTimeoutId = setTimeout(() => {
+                // CRITICAL: Don't auto-stop if we're waiting for user input (multi-turn conversation)
+                if (isWaitingForUserInput) {
+                    console.log('[Orb] Silence timeout but waiting for user input - keeping mic active');
+                    return;
+                }
+                if (isListening && !isSpeaking && hasSpokenThisSession) {
+                    const timeSinceSpeech = Date.now() - lastSpeechTime;
+                    if (timeSinceSpeech >= SILENCE_AFTER_SPEECH_MS) {
+                        console.log('[Orb] Silence after speech - auto-stopping');
+                        stopListening();
+                    }
+                }
+            }, SILENCE_AFTER_SPEECH_MS);
+        }
+        
+        function clearSilenceTimeout() {
+            if (silenceTimeoutId) {
+                clearTimeout(silenceTimeoutId);
+                silenceTimeoutId = null;
+            }
+        }
+        
+        // No speech at all timeout - in case user activates but never speaks
+        function startNoSpeechTimeout() {
+            clearNoSpeechTimeout();
+            noSpeechTimeoutId = setTimeout(() => {
+                // CRITICAL: Don't auto-stop if we're waiting for user input (multi-turn conversation)
+                if (isWaitingForUserInput) {
+                    console.log('[Orb] No-speech timeout but waiting for user input - keeping mic active');
+                    return;
+                }
+                if (isListening && !isSpeaking && !hasSpokenThisSession) {
+                    console.log('[Orb] No speech detected - auto-stopping');
+                    stopListening();
+                }
+            }, NO_SPEECH_TIMEOUT_MS);
+        }
+        
+        function clearNoSpeechTimeout() {
+            if (noSpeechTimeoutId) {
+                clearTimeout(noSpeechTimeoutId);
+                noSpeechTimeoutId = null;
+            }
+        }
+        
+        function clearAllSpeechTimers() {
+            clearSilenceTimeout();
+            clearNoSpeechTimeout();
+        }
         
         // Initialize audio context for TTS playback
         function initTTSAudio() {
@@ -833,50 +961,41 @@
             ttsAudioChunks = [];
         }
         
-        // Play TTS audio feedback using OpenAI Realtime
-        // Queued to prevent "active response in progress" errors
-        async function speakFeedback(text) {
-            // Add to queue
-            pendingSpeakQueue.push(text);
-            
-            // If already speaking, the queue will be processed when current TTS finishes
-            if (isSpeaking) {
-                console.log('[Orb] TTS queued:', text);
-                return;
+        // ==================== PERSISTENT AUDIO LISTENER ====================
+        // CRITICAL: This listener receives audio even when orb has "disconnected"
+        // Handles the case where backend speaks after orb stopped listening
+        (function initPersistentAudioListener() {
+            if (window.orbAPI?.onEvent) {
+                window.orbAPI.onEvent((event) => {
+                    // Only handle audio events in this persistent listener
+                    if (event.type === 'audio_delta' && event.audio) {
+                        console.log('[Orb] Persistent: audio_delta received');
+                        const float32 = base64ToFloat32(event.audio);
+                        ttsAudioChunks.push(float32);
+                        isSpeaking = true;
+                    } else if (event.type === 'audio_done') {
+                        console.log('[Orb] Persistent: audio_done, playing', ttsAudioChunks.length, 'chunks');
+                        if (ttsAudioChunks.length > 0) {
+                            playTTSAudio();
+                        }
+                        isSpeaking = false;
+                        ttsEndTime = Date.now();
+                    } else if (event.type === 'clear_audio_buffer') {
+                        console.log('[Orb] Persistent: clearing audio buffer');
+                        ttsAudioChunks = [];
+                        isSpeaking = false;
+                    }
+                });
+                console.log('[Orb] Persistent audio listener registered');
             }
-            
-            // Process the queue
-            await processSpeakQueue();
-        }
+        })();
+        // ============================================================
         
-        async function processSpeakQueue() {
-            if (isSpeaking || pendingSpeakQueue.length === 0) return;
-            
-            const text = pendingSpeakQueue.shift();
-            
-            try {
-                isSpeaking = true;
-                ttsAudioChunks = [];
-                
-                // Use OpenAI Realtime to speak
-                const result = await window.orbAPI.speak(text);
-                
-                if (!result.success) {
-                    console.error('[Orb] TTS failed:', result.error);
-                    isSpeaking = false;
-                    ttsEndTime = Date.now();
-                    // Try next in queue
-                    setTimeout(() => processSpeakQueue(), 100);
-                }
-                // Audio will come via events (audio_delta, audio_done)
-            } catch (error) {
-                console.error('[Orb] TTS error:', error);
-                isSpeaking = false;
-                ttsEndTime = Date.now();
-                // Try next in queue
-                setTimeout(() => processSpeakQueue(), 100);
-            }
-        }
+        // ==================== FRONTEND TTS REMOVED ====================
+        // ALL TTS is now handled by the backend via exchange-bridge.js -> realtimeSpeech.speak()
+        // The frontend only tracks TTS state for UI purposes (cooldown, etc.)
+        // This eliminates duplicate TTS paths and race conditions.
+        // ============================================================
         
         // ==================== DISAMBIGUATION STATE ====================
         let pendingDisambiguation = null;
@@ -902,8 +1021,8 @@
             
             pendingDisambiguation = disambiguationState;
             
-            // Speak the clarifying question
-            speakFeedback(disambiguationState.question);
+            // NOTE: Backend speaks via exchange-bridge.js
+            console.log('[Orb] Disambiguation question (backend speaks):', disambiguationState.question);
             
             // Show disambiguation in HUD
             if (window.orbAPI.showDisambiguation) {
@@ -944,7 +1063,7 @@
                 if (pendingDisambiguation) {
                     console.log('[Orb] Disambiguation timed out');
                     cancelDisambiguation();
-                    speakFeedback('No response received');
+                    // NOTE: Backend handles timeout feedback
                 }
             }, 30000);
         }
@@ -972,7 +1091,7 @@
             
             // If we got a selected option with action, submit it directly
             if (selection.option && selection.option.action) {
-                speakFeedback('Got it');
+                console.log('[Orb] Disambiguation selected - backend handles response');
                 
                 // Submit the selected action directly
                 try {
@@ -984,17 +1103,14 @@
                     });
                     
                     console.log('[Orb] Disambiguation action submitted:', result);
-                    
-                    if (result.queued) {
-                        speakFeedback('One moment');
-                    }
+                    // NOTE: Backend speaks result via exchange-bridge.js
                 } catch (err) {
                     console.error('[Orb] Error submitting disambiguation action:', err);
-                    speakFeedback('Sorry, something went wrong');
+                    // NOTE: Backend handles error feedback
                 }
             } else if (selection.mergedTranscript) {
                 // Re-classify with merged transcript
-                speakFeedback('Let me try again');
+                console.log('[Orb] Re-trying with merged transcript');
                 await processVoiceCommand(selection.mergedTranscript);
             }
         }
@@ -1125,10 +1241,10 @@
                     return;
                 }
                 
-                // If backend handled it but didn't suppress, speak the message
+                // If backend handled it but didn't suppress, backend already spoke
                 if (result.handled && result.message && result.suppressAIResponse === false) {
-                    console.log('[Orb] Backend handled, speaking message:', result.message);
-                    speakFeedback(result.message);
+                    console.log('[Orb] Backend handled with message:', result.message);
+                    // NOTE: Backend speaks via exchange-bridge.js - don't duplicate
                     hideTranscript();
                     return;
                 }
@@ -1141,10 +1257,33 @@
                 
                 if (result.queued && result.task) {
                     // Task was successfully queued
-                    // Voice feedback - confirm and acknowledge
-                    speakFeedback('One moment');
-                    
+                    // NOTE: Backend speaks acknowledgment via exchange-bridge.js
                     console.log('[Orb] Task queued:', result.task.id, 'action:', result.action);
+                    
+                } else if (result.handled) {
+                    // Agent already handled this (follow-up conversation, etc.)
+                    // Don't speak - the agent already spoke via direct TTS
+                    console.log('[Orb] Task handled by agent, action:', result.action, 'needsInput:', result.needsInput);
+                    
+                    // Just update HUD if needed
+                    if (result.needsInput) {
+                        // Agent needs more input - keep waiting
+                        isWaitingForUserInput = true;
+                        console.log('[Orb] Multi-turn continues: still waiting for input');
+                        try {
+                            await window.orbAPI.sendHUDResult({
+                                success: true,
+                                message: result.message,
+                                needsInput: true,
+                            });
+                        } catch (e) {
+                            console.warn('[Orb] Could not update HUD:', e);
+                        }
+                    } else {
+                        // Follow-up completed - clear multi-turn state
+                        isWaitingForUserInput = false;
+                        console.log('[Orb] Multi-turn complete: follow-up handled');
+                    }
                     
                 } else if (result.classified && result.action) {
                     // Classified but not queued (SDK not fully running?)
@@ -1165,9 +1304,11 @@
                         console.warn('[Orb] Could not show HUD:', e);
                     }
                     
-                    speakFeedback('Working on it');
+                    // NOTE: This is a fallback path - backend should handle TTS
+                    // If we reach here, the exchange may not be running
+                    console.log('[Orb] Fallback path - classified but not queued:', result.action);
                     
-                    // Simulate completion
+                    // Just update HUD after delay
                     setTimeout(async () => {
                         try {
                             await window.orbAPI.sendHUDResult({
@@ -1177,7 +1318,6 @@
                         } catch (e) {
                             console.warn('[Orb] Could not send HUD result:', e);
                         }
-                        speakFeedback('Done');
                     }, 1000);
                     
                 } else {
@@ -1200,7 +1340,8 @@
                         console.warn('[Orb] Could not update HUD:', e);
                     }
                     
-                    speakFeedback('Got it');
+                    // NOTE: Backend handles acknowledgments - transcript was recorded
+                    console.log('[Orb] No action recognized, transcript recorded');
                 }
                 
             } catch (err) {
@@ -1216,7 +1357,12 @@
                     console.warn('[Orb] Could not send HUD error:', e);
                 }
                 
-                speakFeedback('Sorry, something went wrong');
+                // NOTE: For errors, we should speak - use backend API
+                try {
+                    await window.orbAPI.speak('Sorry, something went wrong');
+                } catch (speakErr) {
+                    console.warn('[Orb] Could not speak error:', speakErr);
+                }
             }
         }
         
@@ -1226,6 +1372,46 @@
                 console.log('[Orb] Retry requested for:', task.transcript);
                 if (task.transcript) {
                     processVoiceCommand(task.transcript);
+                }
+            });
+        }
+        
+        // Listen for task events (needs-input, completed, failed)
+        // NOTE: exchange-bridge now speaks directly via realtimeSpeech.speak()
+        // so we DON'T speak here to avoid duplicates
+        if (window.orbAPI.onTaskEvent) {
+            window.orbAPI.onTaskEvent(async (event) => {
+                // Handle multi-turn conversation prompts
+                if (event.type === 'needs-input') {
+                    console.log('[Orb] Agent needs input, prompt:', event.prompt);
+                    // DON'T speak here - exchange-bridge already speaks directly via realtimeSpeech
+                    
+                    // CRITICAL: Mark that we're waiting for user input
+                    // This prevents disconnection after TTS completes
+                    isWaitingForUserInput = true;
+                    console.log('[Orb] Multi-turn: waiting for user input, keeping mic active');
+                    
+                    // If we're not listening, start listening again for the follow-up
+                    if (!isListening && !isSpeaking) {
+                        console.log('[Orb] Restarting listening for multi-turn conversation');
+                        startListening();
+                    }
+                }
+                // Handle task completion (from async exchange path)
+                else if (event.type === 'completed') {
+                    console.log('[Orb] Task completed, result:', event.result);
+                    // DON'T speak here - exchange-bridge already speaks directly via realtimeSpeech
+                    
+                    // Clear multi-turn state
+                    isWaitingForUserInput = false;
+                }
+                // Handle task failure
+                else if (event.type === 'failed') {
+                    console.log('[Orb] Task failed:', event.reason || event.error);
+                    // DON'T speak here - exchange-bridge already speaks directly via realtimeSpeech
+                    
+                    // Clear multi-turn state
+                    isWaitingForUserInput = false;
                 }
             });
         }
@@ -1702,7 +1888,7 @@
             lastProcessedTranscript = '';
             lastProcessedTime = 0;
             ttsEndTime = 0;
-            pendingSpeakQueue = [];
+            // NOTE: pendingSpeakQueue removed - all TTS handled by backend speechQueue
             
             try {
                 // Request mic permission
@@ -1718,16 +1904,13 @@
                 // Set up event listener for transcripts and audio
                 removeEventListener = window.orbAPI.onEvent(async (event) => {
                     if (event.type === 'session_updated') {
-                        // Session is ready - now we can speak
+                        // Session is ready
                         isSessionReady = true;
                         console.log('[Orb] Session ready');
-                        
-                        if (pendingSpeak) {
-                            console.log('[Orb] Speaking pending text:', pendingSpeak);
-                            speakFeedback(pendingSpeak);
-                            pendingSpeak = null;
-                        }
+                        // NOTE: pendingSpeak removed - all TTS handled by backend
                     } else if (event.type === 'transcript_delta') {
+                        // User is actively speaking - reset speech detection
+                        onSpeechDetected();
                         showTranscript(event.text, true);
                     } else if (event.type === 'function_call_transcript') {
                         // FUNCTION CALLING: AI called our function with the transcript
@@ -1735,6 +1918,16 @@
                         const transcript = event.transcript;
                         const callId = event.callId;
                         const now = Date.now();
+                        
+                        // NOISE CHECK: Ignore background noise that triggered function call
+                        if (isLikelyNoise(transcript)) {
+                            console.log('[Orb] Ignoring noise in function call:', transcript);
+                            // Respond with empty to acknowledge but not speak
+                            try {
+                                await window.orbAPI.respondToFunction(callId, "");
+                            } catch (e) { /* ignore */ }
+                            return;
+                        }
                         
                         // COOLDOWN CHECK: Ignore function calls right after TTS
                         // This prevents the microphone from picking up echo/ambient noise
@@ -1752,7 +1945,13 @@
                         lastFunctionCallTranscript = transcript?.toLowerCase() || '';
                         lastFunctionCallTime = now;
                         
+                        // Mark that speech ended (final transcript received)
+                        onSpeechEnded();
+                        
                         console.log('[Orb] Function call received:', transcript, 'callId:', callId);
+                        
+                        // Store callId for potential multi-turn conversation (needsInput)
+                        pendingFunctionCallId = callId;
                         
                         // Show the transcript
                         showTranscript(transcript, false);
@@ -1762,15 +1961,39 @@
                             const result = await window.orbAPI.submit(transcript);
                             console.log('[Orb] Agent result:', result);
                             
-                            // Get the response message
-                            let responseText = result.message || "I'm not sure how to help with that.";
+                            // Check if we should suppress the response (async exchange handling)
+                            // When suppressAIResponse is true, events (needs-input, completed) will handle TTS
+                            if (result.suppressAIResponse && result.queued) {
+                                console.log('[Orb] Async exchange path - responding with brief ack, events will speak result');
+                                // Respond with brief acknowledgment to complete the function call
+                                // The actual result (or needs-input prompt) will be spoken by backend
+                                await window.orbAPI.respondToFunction(callId, "");
+                                // Keep pendingFunctionCallId null since we already responded
+                                // Backend speaks via exchange-bridge.js -> realtimeSpeech.speak()
+                                pendingFunctionCallId = null;
+                                return;
+                            }
                             
-                            // Respond to the function call so AI speaks the result
-                            await window.orbAPI.respondToFunction(callId, responseText);
+                            // Check if agent needs input (multi-turn conversation, synchronous path)
+                            if (result.needsInput) {
+                                console.log('[Orb] Agent needs input (sync)');
+                                // Respond with the prompt
+                                const prompt = result.message || result.needsInput.prompt || "What would you like?";
+                                await window.orbAPI.respondToFunction(callId, prompt);
+                                pendingFunctionCallId = null;
+                            } else {
+                                // Get the response message
+                                let responseText = result.message || "I'm not sure how to help with that.";
+                                
+                                // Respond to the function call so AI speaks the result
+                                await window.orbAPI.respondToFunction(callId, responseText);
+                                pendingFunctionCallId = null;
+                            }
                         } catch (err) {
                             console.error('[Orb] Error processing function call:', err);
                             // Respond with error message
                             await window.orbAPI.respondToFunction(callId, "Sorry, something went wrong.");
+                            pendingFunctionCallId = null;
                         }
                         
                         // Hide transcript after a delay
@@ -1780,9 +2003,9 @@
                         const text = event.text?.trim();
                         const now = Date.now();
                         
-                        // Skip if empty or too short
-                        if (!text || text.length <= 3) {
-                            console.log('[Orb] Ignoring short transcript:', text);
+                        // Skip if empty or likely background noise
+                        if (isLikelyNoise(text)) {
+                            console.log('[Orb] Ignoring noise/filler:', text);
                             return;
                         }
                         
@@ -1817,6 +2040,9 @@
                         lastProcessedTranscript = text;
                         lastProcessedTime = now;
                         
+                        // Mark that speech ended (final transcript received)
+                        onSpeechEnded();
+                        
                         showTranscript(text, false);
                         // Submit for classification and show HUD
                         processVoiceCommand(text);
@@ -1827,6 +2053,35 @@
                         // clear any accumulated audio chunks to prevent mixing responses
                         console.log('[Orb] Clearing audio buffer, reason:', event.type);
                         ttsAudioChunks = [];
+                        
+                        // Clear safety timeout
+                        if (speakingTimeoutId) {
+                            clearTimeout(speakingTimeoutId);
+                            speakingTimeoutId = null;
+                        }
+                        
+                        // FIX: Also reset speaking state when response is cancelled
+                        // This prevents getting stuck in speaking state
+                        if (isSpeaking) {
+                            console.log('[Orb] Resetting speaking state after cancellation');
+                            isSpeaking = false;
+                            ttsEndTime = Date.now();
+                            
+                            // NOTE: Backend speech queue handles queuing - no frontend queue
+                            
+                            // If listening was stopped, now disconnect
+                            // BUT if we're in a multi-turn conversation, keep listening instead
+                            if (!isListening && isConnected) {
+                                if (isWaitingForUserInput) {
+                                    console.log('[Orb] Response cancelled but waiting for user input - restarting listening');
+                                    startListening();
+                                } else {
+                                    console.log('[Orb] Response cancelled, now disconnecting...');
+                                    finishAndDisconnect();
+                                    updateUI('idle');
+                                }
+                            }
+                        }
                     } else if (event.type === 'audio_delta') {
                         // TTS audio chunk from OpenAI
                         // FIX: Always collect audio chunks (backend may speak without frontend knowing)
@@ -1838,18 +2093,32 @@
                         // TTS audio complete, play it
                         if (ttsAudioChunks.length > 0) {
                             playTTSAudio();
-                            
-                            // FIX: With function calling, ALL our TTS is intentional
-                            // (via respondToFunctionCall). Always set cooldown when audio plays.
+                        }
+                        
+                        // ALWAYS update ttsEndTime when audio finishes
+                        // This handles speech from backend (exchange-bridge) via realtimeSpeech.speak()
+                        ttsEndTime = Date.now();
+                        console.log('[Orb] TTS ended, cooldown active until:', ttsEndTime + TTS_COOLDOWN_MS);
+                        
+                        // Reset speaking state
+                        if (isSpeaking) {
                             isSpeaking = false;
-                            ttsEndTime = Date.now(); // Mark when TTS ended for cooldown
-                            console.log('[Orb] TTS ended, cooldown active until:', ttsEndTime + TTS_COOLDOWN_MS);
                             
-                            // Process next item in speak queue
-                            setTimeout(() => processSpeakQueue(), 200);
+                            // After TTS, start listening for user's next speech
+                            // Reset hasSpokenThisSession so we wait for new speech
+                            hasSpokenThisSession = false;
+                            startNoSpeechTimeout();
                             
-                            // If listening was stopped while TTS was playing, now disconnect
-                            if (!isListening && isConnected) {
+                            // NOTE: Backend speech queue handles queuing - no frontend queue
+                        }
+                        
+                        // If listening was stopped while TTS was playing, now disconnect
+                        // BUT if we're in a multi-turn conversation, keep listening instead
+                        if (!isListening && isConnected) {
+                            if (isWaitingForUserInput) {
+                                console.log('[Orb] TTS complete but waiting for user input - restarting listening');
+                                startListening();
+                            } else {
                                 console.log('[Orb] TTS complete, now disconnecting...');
                                 finishAndDisconnect();
                                 updateUI('idle');
@@ -1889,6 +2158,13 @@
                 updateUI('listening');
                 console.log('[Orb] Started listening');
                 
+                // Reset speech tracking for this session
+                lastSpeechTime = 0;
+                hasSpokenThisSession = false;
+                
+                // Start no-speech timeout (in case user never speaks)
+                startNoSpeechTimeout();
+                
                 // Play ready chime - a short tone that won't trigger function calling
                 // (unlike spoken "Ready" which caused feedback loops)
                 playReadyChime();
@@ -1926,8 +2202,10 @@
             if (!isListening && !isConnected) return;
             
             isListening = false;
-            pendingSpeak = null;
-            pendingSpeakQueue = []; // Clear any queued TTS
+            // NOTE: pendingSpeak and pendingSpeakQueue removed - all TTS handled by backend
+            
+            // Clear all timers
+            clearAllSpeechTimers();
             
             // Clean up audio input (microphone)
             if (processor) {
@@ -1944,10 +2222,12 @@
             }
             
             // If TTS is in progress, delay disconnect until it's done
+            // But still update UI immediately to show we're not listening anymore
             if (isSpeaking) {
                 console.log('[Orb] TTS in progress, delaying disconnect...');
                 // Event listener stays active to receive audio_done
                 // Disconnect will happen via finishAndDisconnect()
+                updateUI('processing'); // Show processing state while TTS finishes
                 return;
             }
             
@@ -2029,9 +2309,10 @@
             }
         });
         
-        // Right-click to show context menu
-        orb.addEventListener('contextmenu', (e) => {
-            console.log('[Orb] Right-click detected at', e.clientX, e.clientY);
+        // Right-click to show context menu (only on the orb or its container)
+        const orbContainer = document.querySelector('.orb-container');
+        orbContainer.addEventListener('contextmenu', (e) => {
+            console.log('[Orb] Right-click on orb container at', e.clientX, e.clientY);
             // #region agent log
             fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'orb.html:contextmenu',message:'Right-click event on orb',data:{clientX:e.clientX,clientY:e.clientY,screenX:e.screenX,screenY:e.screenY,target:e.target?.id||e.target?.className},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'E'})}).catch(()=>{});
             // #endregion
@@ -2040,11 +2321,9 @@
             showContextMenu(e.clientX, e.clientY);
         });
         
-        // Also listen on document in case orb doesn't catch it
+        // Prevent default context menu on the rest of the document (but don't show our menu)
         document.addEventListener('contextmenu', (e) => {
-            console.log('[Orb] Document right-click at', e.clientX, e.clientY);
             e.preventDefault();
-            showContextMenu(e.clientX, e.clientY);
         });
         
         // Double-click as alternative to open text chat directly
@@ -2065,11 +2344,19 @@
                 console.log('[Orb] Received plan summary:', data.type);
                 
                 if (data.type === 'plan-ready' && data.summary) {
-                    // Speak the plan summary via TTS
-                    await speakFeedback(data.summary);
+                    // Speak the plan summary via TTS (using backend)
+                    try {
+                        await window.orbAPI.speak(data.summary);
+                    } catch (e) {
+                        console.warn('[Orb] Could not speak plan summary:', e);
+                    }
                 } else if (data.type === 'creation-complete' && data.agentName) {
                     // Announce agent creation complete - conversational
-                    await speakFeedback(`All set! ${data.agentName} is ready to use.`);
+                    try {
+                        await window.orbAPI.speak(`All set! ${data.agentName} is ready to use.`);
+                    } catch (e) {
+                        console.warn('[Orb] Could not speak completion:', e);
+                    }
                 }
             });
             console.log('[Orb] Agent Composer plan listener registered');
