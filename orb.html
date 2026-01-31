@@ -862,12 +862,45 @@
         }
         
         // Initialize audio context for TTS playback
+        let ttsAudioInitialized = false;
+        
         function initTTSAudio() {
             if (!ttsAudioContext) {
+                console.log('[Orb] Creating TTS AudioContext');
                 ttsAudioContext = new AudioContext({ sampleRate: 24000 });
             }
             return ttsAudioContext;
         }
+        
+        // Pre-warm audio context on user interaction (required by browser autoplay policy)
+        async function ensureTTSAudioReady() {
+            if (ttsAudioInitialized) return true;
+            
+            try {
+                const ctx = initTTSAudio();
+                if (ctx.state === 'suspended') {
+                    console.log('[Orb] Resuming suspended TTS AudioContext...');
+                    await ctx.resume();
+                }
+                
+                if (ctx.state === 'running') {
+                    ttsAudioInitialized = true;
+                    console.log('[Orb] TTS AudioContext ready');
+                    return true;
+                }
+                
+                console.warn('[Orb] TTS AudioContext state:', ctx.state);
+                return false;
+            } catch (e) {
+                console.error('[Orb] Failed to initialize TTS AudioContext:', e);
+                return false;
+            }
+        }
+        
+        // Initialize audio on first user interaction
+        document.addEventListener('click', () => ensureTTSAudioReady(), { once: true });
+        document.addEventListener('touchstart', () => ensureTTSAudioReady(), { once: true });
+        document.addEventListener('keydown', () => ensureTTSAudioReady(), { once: true });
         
         // Convert base64 PCM16 to Float32 for playback
         function base64ToFloat32(base64) {
@@ -932,33 +965,64 @@
         
         // Play accumulated audio chunks
         async function playTTSAudio() {
-            if (ttsAudioChunks.length === 0) return;
-            
-            const ctx = initTTSAudio();
-            if (ctx.state === 'suspended') {
-                await ctx.resume();
+            if (ttsAudioChunks.length === 0) {
+                console.log('[Orb] playTTSAudio called but no chunks');
+                return;
             }
-            
-            // Combine all chunks
-            const totalLength = ttsAudioChunks.reduce((sum, chunk) => sum + chunk.length, 0);
-            const combined = new Float32Array(totalLength);
-            let offset = 0;
-            for (const chunk of ttsAudioChunks) {
-                combined.set(chunk, offset);
-                offset += chunk.length;
+
+            console.log('[Orb] playTTSAudio called with', ttsAudioChunks.length, 'chunks');
+
+            try {
+                const ctx = initTTSAudio();
+                
+                // Always try to resume - this is critical for audio to play
+                if (ctx.state === 'suspended') {
+                    console.log('[Orb] Attempting to resume AudioContext...');
+                    try {
+                        await ctx.resume();
+                        console.log('[Orb] AudioContext resumed, state:', ctx.state);
+                    } catch (resumeError) {
+                        console.error('[Orb] Failed to resume AudioContext:', resumeError);
+                        // Try creating a new context
+                        ttsAudioContext = null;
+                        ttsAudioInitialized = false;
+                        const newCtx = initTTSAudio();
+                        await newCtx.resume();
+                    }
+                }
+                
+                const currentCtx = ttsAudioContext;
+                if (!currentCtx || currentCtx.state !== 'running') {
+                    console.error('[Orb] AudioContext not running, state:', currentCtx?.state);
+                    // Store chunks for later retry
+                    return;
+                }
+
+                // Combine all chunks
+                const totalLength = ttsAudioChunks.reduce((sum, chunk) => sum + chunk.length, 0);
+                const combined = new Float32Array(totalLength);
+                let offset = 0;
+                for (const chunk of ttsAudioChunks) {
+                    combined.set(chunk, offset);
+                    offset += chunk.length;
+                }
+
+                // Create buffer and play
+                const buffer = currentCtx.createBuffer(1, combined.length, 24000);
+                buffer.copyToChannel(combined, 0);
+
+                const source = currentCtx.createBufferSource();
+                source.buffer = buffer;
+                source.connect(currentCtx.destination);
+                source.start();
+
+                console.log('[Orb] Playing TTS audio, samples:', combined.length, 'duration:', (combined.length / 24000).toFixed(2) + 's');
+                ttsAudioChunks = [];
+                
+            } catch (e) {
+                console.error('[Orb] Error playing TTS audio:', e);
+                ttsAudioChunks = []; // Clear to prevent memory buildup
             }
-            
-            // Create buffer and play
-            const buffer = ctx.createBuffer(1, combined.length, 24000);
-            buffer.copyToChannel(combined, 0);
-            
-            const source = ctx.createBufferSource();
-            source.buffer = buffer;
-            source.connect(ctx.destination);
-            source.start();
-            
-            console.log('[Orb] Playing TTS audio, samples:', combined.length);
-            ttsAudioChunks = [];
         }
         
         // ==================== PERSISTENT AUDIO LISTENER ====================
@@ -966,10 +1030,19 @@
         // Handles the case where backend speaks after orb stopped listening
         (function initPersistentAudioListener() {
             if (window.orbAPI?.onEvent) {
+                let firstAudioReceived = false;
+                
                 window.orbAPI.onEvent((event) => {
                     // Only handle audio events in this persistent listener
                     if (event.type === 'audio_delta' && event.audio) {
-                        console.log('[Orb] Persistent: audio_delta received');
+                        // Pre-warm audio context on first audio chunk
+                        if (!firstAudioReceived) {
+                            firstAudioReceived = true;
+                            console.log('[Orb] Persistent: First audio received, ensuring AudioContext ready');
+                            ensureTTSAudioReady();
+                        }
+                        
+                        console.log('[Orb] Persistent: audio_delta received, chunk size:', event.audio.length);
                         const float32 = base64ToFloat32(event.audio);
                         ttsAudioChunks.push(float32);
                         isSpeaking = true;
@@ -987,6 +1060,8 @@
                     }
                 });
                 console.log('[Orb] Persistent audio listener registered');
+            } else {
+                console.error('[Orb] orbAPI.onEvent not available - audio will not work!');
             }
         })();
         // ============================================================
@@ -2083,22 +2158,17 @@
                             }
                         }
                     } else if (event.type === 'audio_delta') {
-                        // TTS audio chunk from OpenAI
-                        // FIX: Always collect audio chunks (backend may speak without frontend knowing)
-                        if (event.audio) {
-                            const float32 = base64ToFloat32(event.audio);
-                            ttsAudioChunks.push(float32);
-                        }
+                        // AUDIO IS HANDLED BY PERSISTENT LISTENER (initPersistentAudioListener)
+                        // Skip here to avoid duplicate audio chunks
+                        // The persistent listener handles all audio_delta events
                     } else if (event.type === 'audio_done') {
-                        // TTS audio complete, play it
-                        if (ttsAudioChunks.length > 0) {
-                            playTTSAudio();
-                        }
+                        // AUDIO PLAYBACK handled by persistent listener
+                        // But we still need to update state here
                         
                         // ALWAYS update ttsEndTime when audio finishes
                         // This handles speech from backend (exchange-bridge) via realtimeSpeech.speak()
                         ttsEndTime = Date.now();
-                        console.log('[Orb] TTS ended, cooldown active until:', ttsEndTime + TTS_COOLDOWN_MS);
+                        console.log('[Orb] TTS ended (state update), cooldown active until:', ttsEndTime + TTS_COOLDOWN_MS);
                         
                         // Reset speaking state
                         if (isSpeaking) {
