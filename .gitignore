@@ -78,6 +78,9 @@ _scripts/
 electron-builder.yml
 app/dist/
 
+# Claude Code binaries (downloaded at build time)
+resources/claude-code/
+
 # Debug files
 debug-*.html
 debug-*.js
