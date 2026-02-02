@@ -35,7 +35,8 @@ class EventLogger {
         this.rotateLogFile();
         
         // Set up periodic flush
-        this.flushInterval = setInterval(() => this.flush(), 5000); // Flush every 5 seconds
+        // PERFORMANCE: Increased from 5s to 30s to reduce I/O overhead
+        this.flushInterval = setInterval(() => this.flush(), 30000); // Flush every 30 seconds
         
         // Set up daily rotation check (every hour to catch date changes)
         this.dailyRotationInterval = setInterval(() => this.checkDailyRotation(), 60 * 60 * 1000);
@@ -576,6 +577,13 @@ class EventLogger {
     destroy() {
         if (this.flushInterval) {
             clearInterval(this.flushInterval);
+            this.flushInterval = null;
+        }
+        
+        // Fix: Also clear the daily rotation interval (memory leak fix)
+        if (this.dailyRotationInterval) {
+            clearInterval(this.dailyRotationInterval);
+            this.dailyRotationInterval = null;
         }
         
         this.flush();

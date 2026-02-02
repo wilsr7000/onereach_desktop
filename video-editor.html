@@ -1,0 +1,2461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' http://127.0.0.1:7242 http://localhost:7242; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; media-src 'self' file: blob:; img-src 'self' file: blob: data:;">
+  <title>Video Editor - GSX Power User</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="video-editor.css">
+  <link rel="stylesheet" href="src/video-editor/linescript/production-script.css">
+</head>
+<body>
+  <!-- Header -->
+  <!-- DaVinci-Style Header -->
+  <header class="header">
+    <div class="header-left">
+      <button class="header-icon-btn" onclick="app.openFile()" title="Open">
+        <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" fill="none" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+      </button>
+      <button class="header-icon-btn" onclick="app.openRecorder()" title="Open Recorder">
+        <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" fill="none" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg>
+      </button>
+      <button class="header-icon-btn mode-edit-only" id="saveToSpaceBtn" onclick="app.saveToSpace()" style="display: none;" title="Save">
+        <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" fill="none" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+      </button>
+      <span class="file-name" id="fileName">No file loaded</span>
+      
+      <!-- Version Selector Dropdown -->
+      <div class="version-selector" id="versionSelector" style="display: none;">
+        <button class="version-selector-btn" onclick="app.toggleVersionDropdown()" id="versionSelectorBtn">
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="6" y1="3" x2="6" y2="15"></line>
+            <circle cx="18" cy="6" r="3"></circle>
+            <circle cx="6" cy="18" r="3"></circle>
+            <path d="M18 9a9 9 0 0 1-9 9"></path>
+          </svg>
+          <span id="currentVersionName">Main</span>
+          <svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
+        </button>
+        <div class="version-dropdown" id="versionDropdown">
+          <div class="version-dropdown-header">
+            <span>Versions</span>
+            <button class="btn btn-ghost btn-sm" onclick="app.showVersionTreeModal()" title="View Tree">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="18" cy="18" r="3"></circle>
+                <circle cx="6" cy="6" r="3"></circle>
+                <path d="M6 21V9a9 9 0 0 0 9 9"></path>
+              </svg>
+            </button>
+          </div>
+          <div class="version-dropdown-list" id="versionDropdownList">
+            <!-- Populated by JS -->
+          </div>
+          <div class="version-dropdown-actions">
+            <button class="btn btn-ghost btn-sm" onclick="app.createNewVersion()">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+              New Version
+            </button>
+            <button class="btn btn-ghost btn-sm" onclick="app.branchFromCurrent()">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="6" y1="3" x2="6" y2="15"></line>
+                <circle cx="18" cy="6" r="3"></circle>
+                <circle cx="6" cy="18" r="3"></circle>
+                <path d="M18 9a9 9 0 0 1-9 9"></path>
+              </svg>
+              Branch
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="header-center">
+      <!-- Layout Navigation -->
+      <div class="layout-nav">
+        <button class="layout-nav-btn active" id="layoutEditBtn" onclick="app.switchLayout('edit')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/>
+          </svg>
+          Edit
+        </button>
+        <span class="layout-nav-arrow">→</span>
+        <button class="layout-nav-btn" id="layoutLineScriptBtn" onclick="app.switchLayout('linescript')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
+          </svg>
+          Line Script
+        </button>
+        <span class="layout-nav-arrow">→</span>
+        <button class="layout-nav-btn" id="layoutBeatsBtn" onclick="app.switchLayout('beats')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+          </svg>
+          Story Beats
+        </button>
+      </div>
+    </div>
+    <div class="header-actions">
+      <!-- Edit Mode Actions -->
+      <button class="header-icon-btn mode-edit-only" title="Undo" onclick="app.undo()">
+        <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" fill="none" stroke-width="2"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
+      </button>
+      <button class="header-icon-btn mode-edit-only" title="Redo" onclick="app.redo()">
+        <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" fill="none" stroke-width="2"><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7"/></svg>
+      </button>
+      <button class="btn btn-primary mode-edit-only" id="exportBtn" onclick="app.showExportOptions()" disabled>
+        Export
+      </button>
+      <button class="btn btn-secondary mode-edit-only" id="releaseBtn" onclick="app.showReleaseOptions()" disabled title="Release to Space, YouTube, or Vimeo">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;">
+          <path d="M22 2L11 13"></path>
+          <path d="M22 2l-7 20-4-9-9-4 20-7z"></path>
+        </svg>
+        Release
+      </button>
+      <!-- Annotate Mode Actions -->
+      <button class="btn btn-secondary mode-annotate-only" onclick="app.exportToAgenticPlayer()" id="exportAnnotationsBtn">
+        Export Annotations
+      </button>
+      <!-- Story Beats Mode Actions -->
+      <button class="btn btn-ghost layout-beats-only hidden" onclick="app.clearStoryBeatsEdits()" id="clearEditsBtn">
+        Clear Edits
+      </button>
+      <button class="btn btn-primary layout-beats-only hidden" onclick="app.applyStoryBeatsEdits()" id="applyEditsBtn">
+        Apply Changes
+      </button>
+      <!-- Planning Panel Toggle -->
+      <button class="header-icon-btn" id="planningToggleBtn" onclick="app.togglePlanningPanel()" title="Toggle Planning Panel">
+        <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" fill="none" stroke-width="2">
+          <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>
+          <rect x="9" y="3" width="6" height="4" rx="1"/>
+          <line x1="9" y1="12" x2="15" y2="12"/>
+          <line x1="9" y1="16" x2="15" y2="16"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <div class="main-container">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <!-- Tabs -->
+      <div class="sidebar-tabs">
+        <!-- Edit Mode Tabs -->
+        <button class="sidebar-tab mode-edit-only active" data-tab="edit" onclick="app.switchTab('edit')">Tools</button>
+        <button class="sidebar-tab mode-edit-only" data-tab="sources" onclick="app.switchTab('sources')">Sources</button>
+        
+        <!-- Annotate Mode Tabs -->
+        <button class="sidebar-tab mode-annotate-only" data-tab="scenes" onclick="app.switchTab('scenes')">Annotations</button>
+        
+        <!-- Shared Tabs -->
+        <button class="sidebar-tab" data-tab="spaces" onclick="app.switchTab('spaces')">Media</button>
+        <button class="sidebar-tab" data-tab="budget" onclick="app.switchTab('budget')">Budget</button>
+        <button class="sidebar-tab" data-tab="exports" onclick="app.switchTab('exports')">Exports</button>
+      </div>
+
+      <!-- Edit Tab (Tools) - Edit Mode Only -->
+      <div class="sidebar-content mode-edit-only" id="editTab">
+        <!-- Edit Mode Header -->
+        <div class="mode-header edit-mode-header">
+          <div class="mode-header-icon">
+            <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" stroke-width="1.5">
+              <circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/>
+            </svg>
+          </div>
+          <div class="mode-header-text">
+            <span class="mode-header-title">Edit Tools</span>
+            <span class="mode-header-subtitle">Trim, splice, convert & adjust</span>
+          </div>
+        </div>
+
+        <!-- Trim Section -->
+        <div class="sidebar-section" id="trimSection">
+          <div class="sidebar-section-title" onclick="app.toggleSection('trimSection')">
+            <span><svg class="section-icon-svg" viewBox="0 0 24 24" width="14" height="14"><path d="M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM20 4L8.12 15.88M14.47 14.48L20 20M8.12 8.12L12 12"/></svg>Trim</span>
+            <span class="section-toggle">▼</span>
+          </div>
+          <div class="sidebar-section-content">
+            <div class="form-row" style="margin-bottom: 12px;">
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label">Start</label>
+                <input type="text" class="form-input" id="trimStart" value="00:00:00" placeholder="00:00:00">
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label">End</label>
+                <input type="text" class="form-input" id="trimEnd" value="00:00:00" placeholder="00:00:00">
+              </div>
+            </div>
+            <button class="btn btn-secondary" style="width: 100%;" onclick="app.trimVideo()" id="trimBtn" disabled>
+              Trim Video
+            </button>
+          </div>
+        </div>
+
+        <!-- Splice Section -->
+        <div class="sidebar-section collapsed" id="spliceSection">
+          <div class="sidebar-section-title" onclick="app.toggleSection('spliceSection')">
+            <span><svg class="section-icon-svg" viewBox="0 0 24 24" width="14" height="14"><path d="M4 12h16M12 4v16"/><path d="M8 8l-4 4 4 4M16 8l4 4-4 4"/></svg>Splice</span>
+            <span class="section-toggle">▼</span>
+          </div>
+          <div class="sidebar-section-content">
+            <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 12px;">
+              Remove a portion from the middle
+            </p>
+            <div class="form-row" style="margin-bottom: 8px;">
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label">Cut Start</label>
+                <input type="text" class="form-input" id="spliceStart" value="00:00:00">
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label">Cut End</label>
+                <input type="text" class="form-input" id="spliceEnd" value="00:00:00">
+              </div>
+            </div>
+            <div class="splice-preview" id="splicePreview" style="display: none; padding: 8px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 6px; margin-bottom: 12px; font-size: 11px;">
+              <div style="color: var(--error);">Will remove: <span id="spliceRemoveTime">0:00</span></div>
+              <div style="color: var(--text-secondary);">Result: <span id="spliceResultTime">0:00</span></div>
+            </div>
+            <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+              <button class="btn btn-ghost" style="flex: 1; font-size: 11px;" onclick="app.setSpliceStart()" id="setSpliceStartBtn" disabled>
+                Set In
+              </button>
+              <button class="btn btn-ghost" style="flex: 1; font-size: 11px;" onclick="app.setSpliceEnd()" id="setSpliceEndBtn" disabled>
+                Set Out
+              </button>
+            </div>
+            <button class="btn btn-secondary" style="width: 100%; background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); border: none;" onclick="app.spliceVideo()" id="spliceBtn" disabled>
+              Remove Section
+            </button>
+          </div>
+        </div>
+
+        <!-- Convert Section -->
+        <div class="sidebar-section collapsed" id="convertSection">
+          <div class="sidebar-section-title" onclick="app.toggleSection('convertSection')">
+            <span><svg class="section-icon-svg" viewBox="0 0 24 24" width="14" height="14"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>Convert</span>
+            <span class="section-toggle">▼</span>
+          </div>
+          <div class="sidebar-section-content">
+            <div class="form-row" style="margin-bottom: 12px;">
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label">Format</label>
+                <select class="form-select" id="outputFormat">
+                  <option value="mp4">MP4</option>
+                  <option value="webm">WebM</option>
+                  <option value="mov">MOV</option>
+                  <option value="avi">AVI</option>
+                  <option value="mkv">MKV</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label">Resolution</label>
+                <select class="form-select" id="resolution">
+                  <option value="">Original</option>
+                  <option value="3840x2160">4K</option>
+                  <option value="1920x1080">1080p</option>
+                  <option value="1280x720">720p</option>
+                  <option value="854x480">480p</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Quality</label>
+              <div class="preset-grid">
+                <button class="preset-btn" data-quality="high">High</button>
+                <button class="preset-btn active" data-quality="medium">Medium</button>
+                <button class="preset-btn" data-quality="low">Low</button>
+                <button class="preset-btn" data-quality="custom">Custom</button>
+              </div>
+            </div>
+            <button class="btn btn-secondary" style="width: 100%;" onclick="app.transcodeVideo()" id="transcodeBtn" disabled>
+              Convert Video
+            </button>
+          </div>
+        </div>
+
+        <!-- Tools Section -->
+        <div class="sidebar-section collapsed" id="toolsSection">
+          <div class="sidebar-section-title" onclick="app.toggleSection('toolsSection')">
+            <span><svg class="section-icon-svg" viewBox="0 0 24 24" width="14" height="14"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>Quick Tools</span>
+            <span class="section-toggle">▼</span>
+          </div>
+          <div class="sidebar-section-content">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+              <button class="btn btn-ghost" onclick="app.extractAudio()" id="extractAudioBtn" disabled>
+                🎵 Audio
+              </button>
+              <button class="btn btn-ghost" onclick="app.compressVideo()" id="compressBtn" disabled>
+                📦 Compress
+              </button>
+              <button class="btn btn-ghost" onclick="app.generateThumbnails()" id="thumbnailBtn" disabled>
+                🖼️ Thumbs
+              </button>
+              <button class="btn btn-ghost" onclick="app.transcribeForWaveform()" id="transcribeBtn" disabled>
+                🎤 Transcribe
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Markers Section -->
+        <div class="sidebar-section" id="markersSection">
+          <div class="sidebar-section-title" onclick="app.toggleSection('markersSection')">
+            <span><svg class="section-icon-svg" viewBox="0 0 24 24" width="14" height="14"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>Markers</span>
+            <span class="section-toggle">▼</span>
+          </div>
+          <div class="sidebar-section-content">
+            <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+              <button class="btn btn-secondary" style="flex: 2;" onclick="app.addMarkerAtPlayhead()" id="addMarkerBtn" disabled>
+                + Add Scene
+              </button>
+              <button class="btn btn-ghost" style="flex: 1;" onclick="app.markRangeIn()" id="markInBtn" disabled title="Mark IN">
+                In
+              </button>
+              <button class="btn btn-ghost" style="flex: 1;" onclick="app.markRangeOut()" id="markOutBtn" disabled title="Mark OUT">
+                Out
+              </button>
+            </div>
+            <div class="markers-panel" id="markersPanel" style="margin-top: 0; background: transparent; padding: 0;">
+              <div class="markers-panel-header" style="margin-bottom: 8px;">
+                <div class="markers-panel-title" style="font-size: 11px;">
+                  <span class="markers-count" id="markersCount">0</span> story beats
+                </div>
+                <div style="display: flex; gap: 4px;">
+                  <button class="btn btn-ghost" style="padding: 4px 8px; font-size: 10px;" onclick="app.goToPrevMarker()" id="prevMarkerBtn" disabled>◀</button>
+                  <button class="btn btn-ghost" style="padding: 4px 8px; font-size: 10px;" onclick="app.goToNextMarker()" id="nextMarkerBtn" disabled>▶</button>
+                  <button class="btn btn-ghost" onclick="app.clearAllMarkers()" title="Clear All" style="padding: 4px 8px; font-size: 10px;">🗑️</button>
+                </div>
+              </div>
+              <div class="markers-list" id="markersList" style="max-height: 150px;">
+                <div class="markers-empty" style="padding: 12px;">No story beats yet</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Video Info -->
+        <div class="sidebar-section collapsed" id="videoInfoSection" style="display: none;">
+          <div class="sidebar-section-title" onclick="app.toggleSection('videoInfoSection')">
+            <span><svg class="section-icon-svg" viewBox="0 0 24 24" width="14" height="14"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>Video Info</span>
+            <span class="section-toggle">▼</span>
+          </div>
+          <div class="sidebar-section-content">
+            <div class="info-grid" id="videoInfo"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Annotations Tab (Annotate Mode) -->
+      <div class="sidebar-content mode-annotate-only hidden" id="scenesTab">
+        <!-- Annotate Mode Header -->
+        <div class="mode-header annotate-mode-header">
+          <div class="mode-header-icon">
+            <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" stroke-width="1.5">
+              <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+            </svg>
+          </div>
+          <div class="mode-header-text">
+            <span class="mode-header-title">Annotations</span>
+            <span class="mode-header-subtitle">Mark scenes & create story beats</span>
+          </div>
+        </div>
+
+        <div class="scenes-header">
+          <div class="scenes-title">
+            <span>Story Beats</span>
+            <span class="scenes-count" id="scenesCount">0</span>
+          </div>
+          <div class="scenes-actions">
+            <button class="btn btn-sm btn-ghost annotation-action-btn" onclick="app.addMarkerAtPlayhead()" title="Add Marker">
+              <svg viewBox="0 0 24 24" width="14" height="14"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+            </button>
+            <button class="btn btn-sm btn-ghost annotation-action-btn" onclick="app.markRangeIn()" title="Mark In">
+              <svg viewBox="0 0 24 24" width="14" height="14"><path d="M5 3l14 9-14 9V3z"/></svg>
+            </button>
+            <button class="btn btn-sm btn-ghost annotation-action-btn" onclick="app.generateAllSceneThumbnails()" title="Refresh">
+              <svg viewBox="0 0 24 24" width="14" height="14"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            </button>
+            <button class="btn btn-sm btn-ghost annotation-action-btn" onclick="app.exportToAgenticPlayer()" title="Export">
+              <svg viewBox="0 0 24 24" width="14" height="14"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            </button>
+          </div>
+        </div>
+        
+        <div class="scenes-list" id="scenesList">
+          <div class="scenes-empty">
+            <div class="scenes-empty-icon">
+              <svg viewBox="0 0 24 24" width="40" height="40" stroke="currentColor" fill="none" stroke-width="1">
+                <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+              </svg>
+            </div>
+            <div class="scenes-empty-text">No annotations yet</div>
+            <div class="scenes-empty-hint">Add markers to create story beats</div>
+            <button class="btn btn-secondary" style="margin-top: 12px;" onclick="app.addMarkerAtPlayhead()" id="addFirstSceneBtn" disabled>
+              + Add First Scene
+            </button>
+          </div>
+        </div>
+
+        <!-- Playlist Panel -->
+        <div class="playlist-panel" id="playlistPanel"
+             ondragover="app.onPlaylistDragOverFromScene(event)"
+             ondragleave="app.onPlaylistDragLeave(event)"
+             ondrop="app.onPlaylistDropFromScene(event)">
+          <div class="playlist-header">
+            <div class="playlist-title">
+              Playlist <span class="playlist-count" id="playlistCount">0</span>
+            </div>
+            <span class="playlist-duration" id="playlistDuration">0:00</span>
+          </div>
+          <div class="playlist-controls">
+            <button class="playlist-play-btn" id="playlistPlayBtn" onclick="app.togglePlaylistPlayback()" disabled>
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M5 3l14 9-14 9V3z"/></svg>
+              Play All
+            </button>
+            <button class="btn btn-ghost" onclick="app.exportPlaylist()" id="exportPlaylistBtn" disabled title="Export as single video">
+              <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" fill="none" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+            </button>
+          </div>
+          <div class="playlist-items" id="playlistItems">
+            <div class="playlist-empty">
+              Drag story beats here or right-click → "Add to Playlist"
+            </div>
+          </div>
+          <div class="playlist-footer">
+            <button class="btn btn-ghost btn-sm" onclick="app.clearPlaylist()" id="clearPlaylistBtn" disabled>
+              Clear
+            </button>
+            <button class="btn btn-ghost btn-sm" onclick="app.shufflePlaylist()" id="shufflePlaylistBtn" disabled>
+              Shuffle
+            </button>
+          </div>
+          
+          <!-- AI Playlist Builder -->
+          <div class="ai-playlist-builder">
+            <div class="ai-builder-header" onclick="app.toggleAIBuilder()">
+              <span>AI Playlist Builder</span>
+              <span class="ai-builder-toggle" id="aiBuilderToggle">▼</span>
+            </div>
+            <div class="ai-builder-content" id="aiBuilderContent">
+              <div class="form-group">
+                <textarea class="form-input form-textarea" id="aiPlaylistPrompt" rows="2" 
+                  placeholder="Describe the playlist you want...&#10;e.g., 'Create a 2-minute highlight reel' or 'Show story beats about the product demo'"></textarea>
+              </div>
+              <div class="ai-builder-options">
+                <label class="ai-option">
+                  <input type="checkbox" id="aiKeepOrder" checked> Keep chronological order
+                </label>
+                <label class="ai-option">
+                  <input type="checkbox" id="aiIncludeAll"> Include all story beats
+                </label>
+              </div>
+              <button class="btn btn-primary" style="width: 100%;" onclick="app.buildPlaylistWithAI()" id="aiBuilderBtn">
+                Build with AI
+              </button>
+              <div class="ai-builder-status hidden" id="aiBuilderStatus"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Story Beat Details Panel (shows below list when a story beat is selected) -->
+        <div class="scene-details hidden" id="sceneDetails">
+          <div class="scene-details-header">
+            <button class="scene-details-back" onclick="app.closeSceneDetails()">✕ Close</button>
+            <span class="scene-details-title" id="sceneDetailsTitle">Scene Details</span>
+          </div>
+          <div class="scene-details-content" id="sceneDetailsContent">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Video Sources Tab (Multi-Camera) -->
+      <div class="sidebar-content mode-edit-only hidden" id="sourcesTab">
+        <!-- Sources Header -->
+        <div class="mode-header">
+          <div class="mode-header-icon">
+            <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" stroke-width="1.5">
+              <rect x="2" y="7" width="20" height="15" rx="2"/><polyline points="17 2 12 7 7 2"/>
+            </svg>
+          </div>
+          <div class="mode-header-text">
+            <span class="mode-header-title">Video Sources</span>
+            <span class="mode-header-subtitle">Multi-camera & multi-take editing</span>
+          </div>
+        </div>
+
+        <!-- Video Sources List -->
+        <div class="sidebar-section">
+          <div class="sidebar-section-title" style="display: flex; justify-content: space-between; align-items: center;">
+            <span>📹 Sources</span>
+            <button class="btn btn-ghost btn-sm" onclick="app.addVideoSourceDialog()" title="Add Video">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+              Add
+            </button>
+          </div>
+          <div class="video-sources-list" id="videoSourcesList">
+            <div class="empty-state">No video sources. Click + to add.</div>
+          </div>
+        </div>
+
+        <!-- Export Section -->
+        <div class="sidebar-section collapsed">
+          <div class="sidebar-section-title" onclick="app.toggleSection(this.parentElement)">
+            <span>📤 Export</span>
+            <span class="section-toggle">▼</span>
+          </div>
+          <div class="sidebar-section-content">
+            <button class="btn btn-primary" style="width: 100%;" onclick="app.exportMultiSourceVideo()" id="exportMultiSourceBtn">
+              Export Stitched Video
+            </button>
+            <p style="font-size: 11px; color: var(--text-muted); margin-top: 8px; line-height: 1.5;">
+              Combines all clips on timeline into a single video file
+            </p>
+          </div>
+        </div>
+
+        <!-- Help Section -->
+        <div class="sidebar-section collapsed">
+          <div class="sidebar-section-title" onclick="app.toggleSection(this.parentElement)">
+            <span>ℹ️ Multi-Camera Workflow</span>
+            <span class="section-toggle">▼</span>
+          </div>
+          <div class="sidebar-section-content">
+            <p style="font-size: 11px; color: var(--text-muted); line-height: 1.5; margin-bottom: 8px;">
+              <strong>Add multiple videos:</strong><br>
+              1. Click + to add video sources<br>
+              2. Drag sources to timeline or click ➕<br>
+              3. Arrange clips in sequence<br>
+              4. Export to stitch together
+            </p>
+            <p style="font-size: 11px; color: var(--text-muted); line-height: 1.5;">
+              <strong>Use cases:</strong><br>
+              • Multi-camera angles<br>
+              • Different takes<br>
+              • B-roll insertion<br>
+              • Scene stitching
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Spaces Tab (Projects) -->
+      <div class="sidebar-content hidden" id="spacesTab">
+        <!-- Space Selection -->
+        <div class="sidebar-section">
+          <div class="sidebar-section-title">📁 Your Spaces</div>
+          <div class="spaces-list" id="spacesList">
+            <p style="color: var(--text-muted); font-size: 13px;">Loading spaces...</p>
+          </div>
+        </div>
+        
+        <!-- Projects in Space -->
+        <div class="sidebar-section" id="spaceProjectsSection" style="display: none;">
+          <div class="sidebar-section-title" style="display: flex; justify-content: space-between; align-items: center;">
+            <span>🎬 Projects</span>
+            <button class="btn btn-ghost btn-sm" onclick="app.showCreateProjectModal()" title="New Project">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            </button>
+          </div>
+          <div class="project-list" id="projectList">
+            <p style="color: var(--text-muted); font-size: 13px;">No projects yet</p>
+          </div>
+        </div>
+        
+        <!-- Project Details (shown when project is selected) -->
+        <div class="sidebar-section" id="projectDetailsSection" style="display: none;">
+          <div class="sidebar-section-title" style="display: flex; justify-content: space-between; align-items: center;">
+            <span id="projectDetailsTitle">Project Details</span>
+            <button class="btn btn-ghost btn-sm" onclick="app.closeProjectDetails()" title="Back">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+            </button>
+          </div>
+          
+          <!-- Versions -->
+          <div class="project-versions-section">
+            <div class="project-section-header">
+              <span>Versions</span>
+              <button class="btn btn-ghost btn-sm" onclick="app.createNewVersionInProject()" title="New Version">+</button>
+            </div>
+            <div class="project-versions-list" id="projectVersionsList">
+              <!-- Populated by JS -->
+            </div>
+          </div>
+          
+          <!-- Assets -->
+          <div class="project-assets-section" style="margin-top: 12px;">
+            <div class="project-section-header">
+              <span>Assets</span>
+              <button class="btn btn-ghost btn-sm" onclick="app.addAssetToProject()" title="Add Asset">+</button>
+            </div>
+            <div class="project-assets-list" id="projectAssetsList">
+              <!-- Populated by JS -->
+            </div>
+          </div>
+        </div>
+        
+        <!-- Legacy: Videos in Space (hidden by default, for backwards compatibility) -->
+        <div class="sidebar-section" id="spaceVideosSection" style="display: none;">
+          <div class="sidebar-section-title">🎥 Videos in Space</div>
+          <div class="video-list" id="spaceVideos"></div>
+        </div>
+      </div>
+
+      <!-- Budget Tab -->
+      <div class="sidebar-content hidden" id="budgetTab">
+        <div class="sidebar-section">
+          <div class="sidebar-section-title">💰 Project Budget</div>
+          
+          <!-- Budget Summary -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px;">
+            <div style="background: var(--bg-secondary); border-radius: 6px; padding: 12px; text-align: center;">
+              <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px;">Estimated</div>
+              <div style="font-size: 18px; font-weight: 600; color: var(--text-primary);" id="budgetEstimatedTotal">$0.00</div>
+            </div>
+            <div style="background: var(--bg-secondary); border-radius: 6px; padding: 12px; text-align: center;">
+              <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px;">Actual</div>
+              <div style="font-size: 18px; font-weight: 600; color: var(--accent);" id="budgetActualTotal">$0.00</div>
+            </div>
+          </div>
+          
+          <!-- Variance Bar -->
+          <div style="margin-bottom: 16px;">
+            <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">
+              <span>Variance</span>
+              <span id="budgetVarianceText">$0.00 under</span>
+            </div>
+            <div style="height: 6px; background: var(--bg-tertiary); border-radius: 3px; overflow: hidden;">
+              <div id="budgetVarianceBar" style="height: 100%; width: 0%; background: var(--success); border-radius: 3px; transition: width 0.3s;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Budget Line Items -->
+        <div class="sidebar-section">
+          <div class="sidebar-section-title" style="display: flex; justify-content: space-between; align-items: center;">
+            <span>📋 Line Items</span>
+            <button class="btn btn-ghost" style="padding: 2px 8px; font-size: 10px;" onclick="app.addBudgetLineItem()">+ Add</button>
+          </div>
+          
+          <div id="budgetLineItems" style="font-size: 12px;">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+
+        <!-- Recent Activity -->
+        <div class="sidebar-section">
+          <div class="sidebar-section-title">📊 Recent API Costs</div>
+          <div id="budgetRecentActivity" style="font-size: 11px; max-height: 150px; overflow-y: auto;">
+            <p style="color: var(--text-muted);">No activity yet</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Exports Tab -->
+      <div class="sidebar-content hidden" id="exportsTab">
+        <div class="sidebar-section">
+          <div class="sidebar-section-title">📤 Exported Files</div>
+          <button class="btn btn-ghost" style="width: 100%; margin-bottom: 12px;" onclick="app.openExportFolder()">
+            📂 Open Export Folder
+          </button>
+          <div class="export-list" id="exportsList">
+            <p style="color: var(--text-muted); font-size: 13px;">No exports yet</p>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Preview Area -->
+    <main class="preview-area">
+      <div class="video-container" id="videoContainer" style="position: relative;">
+        <!-- Detach/Attach Video Button - Click to pop video out to separate window, click again to bring it back -->
+        <button class="detach-video-btn" id="detachVideoBtn" onclick="app.toggleDetachVideo()" title="Detach video to separate window">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><polyline points="9 12 12 9 15 12"/><line x1="12" y1="9" x2="12" y2="16"/></svg>
+        </button>
+        
+        <!-- Placeholder when no video is loaded -->
+        <div class="video-placeholder" id="videoPlaceholder">
+          <div class="drop-zone" id="dropZone" onclick="app.openFile()"></div>
+          <img src="assets/or-logo.png" alt="OneReach.ai" class="video-placeholder-logo">
+          <span class="video-placeholder-hint">Drop video or click to open</span>
+        </div>
+        
+        <!-- Video Player (hidden until video is loaded) -->
+        <video class="video-player hidden" id="videoPlayer" controls>
+          Your browser doesn't support video playback.
+        </video>
+        
+        <!-- Teleprompter Overlay - Elegant horizontal scrolling transcript -->
+        <div class="teleprompter-container hidden" id="teleprompterContainer" style="position: absolute; bottom: 0; left: 0; right: 0; height: 48px; max-height: 48px; z-index: 10; background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(8px); pointer-events: auto;" oncontextmenu="event.preventDefault(); event.stopPropagation(); app.showTeleprompterContextMenu(event);">
+          <div class="teleprompter-track" style="height: 100%; display: flex; align-items: center; padding: 0 40px; overflow: hidden;">
+            <div class="teleprompter-fade teleprompter-fade-left" style="position: absolute; left: 0; top: 0; bottom: 0; width: 40px; background: linear-gradient(to right, rgba(0,0,0,0.85), transparent); pointer-events: none; z-index: 1;"></div>
+            <div class="teleprompter-content" id="teleprompterContent" style="flex: 1; overflow-x: auto; overflow-y: hidden; white-space: nowrap; scrollbar-width: none;">
+              <div class="teleprompter-words" id="teleprompterWords" style="display: inline-flex; gap: 6px; align-items: center; padding: 8px 0;">
+                <!-- Words will be rendered here -->
+              </div>
+            </div>
+            <div class="teleprompter-fade teleprompter-fade-right" style="position: absolute; right: 0; top: 0; bottom: 0; width: 40px; background: linear-gradient(to left, rgba(0,0,0,0.85), transparent); pointer-events: none; z-index: 1;"></div>
+          </div>
+
+          <button class="teleprompter-close" onclick="app.toggleTeleprompter()" title="Hide transcript (T)" style="position: absolute; top: 4px; right: 8px; background: transparent; border: none; color: #999; cursor: pointer; padding: 4px;">
+            <svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Video Controls -->
+      <div class="video-controls hidden" id="videoControls">
+        <button class="control-btn" onclick="app.skipBack()" title="Skip Back 10s">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
+        </button>
+        <button class="control-btn play-btn" onclick="app.togglePlay()" id="playBtn" title="Play/Pause">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        </button>
+        <button class="control-btn" onclick="app.skipForward()" title="Skip Forward 10s">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z"/></svg>
+        </button>
+
+        <div class="time-display">
+          <span class="time-current" id="currentTime">00:00:00</span>
+          <span> / </span>
+          <span id="duration">00:00:00</span>
+        </div>
+
+        <div class="volume-control">
+          <button class="control-btn" onclick="app.toggleMute()" id="muteBtn">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+          </button>
+          <input type="range" class="range-slider volume-slider" id="volumeSlider" min="0" max="1" step="0.1" value="1">
+        </div>
+
+        <!-- Annotate Mode Only: Add Marker -->
+        <button class="control-btn mode-annotate-only" onclick="app.addMarkerAtPlayhead()" title="Add Marker (M)" style="background: #8b5cf6;">
+          <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" fill="none" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+        </button>
+        
+        <!-- Teleprompter Toggle -->
+        <button class="control-btn teleprompter-toggle-btn" onclick="app.toggleTeleprompter()" oncontextmenu="event.preventDefault(); event.stopPropagation(); app.showTeleprompterContextMenu(event);" id="teleprompterToggleBtn" title="Toggle Transcript (T) - Right-click for options">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M14 17H4v2h10v-2zm6-8H4v2h16V9zM4 15h16v-2H4v2zM4 5v2h16V5H4z"/></svg>
+        </button>
+      </div>
+
+      <!-- Timeline -->
+      <div class="timeline hidden" id="timeline" style="height: auto; padding-bottom: 16px;">
+        <div class="timeline-header">
+          <span id="timelineStart">00:00:00</span>
+          
+          <!-- Zoom Controls -->
+          <div class="timeline-zoom-controls">
+            <button class="zoom-btn" onclick="app.zoomOut()" title="Zoom Out (-)">−</button>
+            <div class="zoom-slider-container">
+              <input type="range" class="zoom-slider" id="zoomSlider" 
+                     min="0.1" max="20" step="0.1" value="1"
+                     oninput="app.setZoom(parseFloat(this.value))"
+                     title="Timeline Zoom">
+            </div>
+            <button class="zoom-btn" onclick="app.zoomIn()" title="Zoom In (+)">+</button>
+            <span class="zoom-level" id="zoomLevel">Fit</span>
+            <div class="zoom-presets">
+              <button class="zoom-preset-btn active" onclick="app.setZoomToTime(0)" data-time="0">Fit</button>
+              <button class="zoom-preset-btn" onclick="app.setZoomToTime(30)" data-time="30">30s</button>
+              <button class="zoom-preset-btn" onclick="app.setZoomToTime(60)" data-time="60">1m</button>
+              <button class="zoom-preset-btn" onclick="app.setZoomToTime(120)" data-time="120">2m</button>
+              <button class="zoom-preset-btn" onclick="app.setZoomToTime(300)" data-time="300">5m</button>
+              <button class="zoom-preset-btn" onclick="app.setZoomToTime(600)" data-time="600">10m</button>
+            </div>
+          </div>
+          
+          <span id="timelineEnd">00:00:00</span>
+        </div>
+
+        <!-- Timeline Action Bar (shown when region selected) -->
+        <div id="timelineActionBar" class="layout-edit-only" style="display: none; padding: 8px 12px; background: var(--bg-elevated); border-radius: 6px; margin: 8px 0; gap: 8px; align-items: center;">
+          <div style="flex: 1; font-size: 11px; color: var(--text-secondary);">
+            <span id="regionDurationText">Region: 00:00 - 00:00</span>
+          </div>
+          <button class="btn btn-ghost" onclick="app.openTranslationForRegion()" title="Translate this region" style="font-size: 11px; padding: 6px 12px;">
+            🌐 Translate
+          </button>
+          <button class="btn btn-ghost" onclick="app.openAIVideoForRegion()" title="Replace with AI video" style="font-size: 11px; padding: 6px 12px;">
+            🎬 AI Video
+          </button>
+          <button class="btn btn-ghost" onclick="app.openAudioSweeteningPanel()" title="Add sound effects" style="font-size: 11px; padding: 6px 12px;">
+            🎵 Sweetening
+          </button>
+        </div>
+
+        <!-- Translation Segment Navigation -->
+        <div id="segmentNav" class="segment-nav layout-edit-only" style="display: none;">
+          <button class="btn btn-ghost" onclick="app.navigateToSegment('prev')" style="padding: 4px 8px; font-size: 11px;" title="Previous segment">
+            ← Prev
+          </button>
+          <div class="segment-nav-info">
+            <span id="segmentNavText">Segment 0 of 0</span>
+            <span style="margin-left: 8px; color: var(--text-muted);">
+              ✓ <span id="approvedSegmentsCount">0</span> approved
+            </span>
+          </div>
+          <button class="btn btn-ghost" onclick="app.navigateToSegment('next')" style="padding: 4px 8px; font-size: 11px;" title="Next segment">
+            Next →
+          </button>
+        </div>
+
+        <!-- Timeline Ruler -->
+        <div class="timeline-ruler" id="timelineRuler">
+          <div class="ruler-marks" id="rulerMarks"></div>
+        </div>
+
+        <!-- Markers Track (Story Beats) -->
+        <div class="markers-track-container">
+          <div class="markers-track-label mode-annotate-only">
+            <span class="markers-track-label-icon">📍</span>
+            <span class="markers-track-label-text">Story Beats</span>
+            <span class="markers-track-label-hint">Right-click to splice</span>
+          </div>
+          <div class="markers-track" id="markersTrack" 
+               onclick="app.handleMarkerTrackClick(event)"
+               oncontextmenu="app.handleMarkerTrackContextMenu(event)">
+          <!-- Markers will be rendered here -->
+          </div>
+        </div>
+
+        <!-- Scrollable Timeline Wrapper -->
+        <div class="timeline-scroll-wrapper" id="timelineScrollWrapper">
+          <div class="timeline-content" id="timelineContent">
+            <!-- Global Playhead (spans all tracks) -->
+            <div class="global-playhead" id="globalPlayhead"></div>
+            
+            <!-- Video Track 1 -->
+            <div class="timeline-row">
+              <div class="track-label">
+                <div class="track-label-header">
+                  <span class="track-badge video">V1</span>
+                  <div class="track-info">
+                    <span class="track-name">Video 1</span>
+                    <span class="track-clip-count">0 Clips</span>
+                  </div>
+                </div>
+              </div>
+              <div class="timeline-track" id="videoTrack" onclick="app.seekToPosition(event)"
+                   onmousemove="app.showTimelineTime(event)" onmouseleave="app.hideTimelineTime()">
+                <!-- Video clips will be rendered here by renderVideoClips() -->
+                
+                <!-- Legacy single clip (for backwards compatibility, hidden when using multi-source) -->
+                <div class="timeline-clip legacy-video-clip" id="videoClip" style="left: 0; width: 100%; display: none;" onclick="app.selectClip('video', event)">
+                    <div class="timeline-thumbnails" id="timelineThumbnails"></div>
+                    <span class="timeline-clip-name" id="videoClipName"></span>
+                    <!-- Marker Range Overlays -->
+                    <div class="marker-range-overlay-container" id="videoTrackOverlays"></div>
+                </div>
+                
+                <!-- Overlay Elements -->
+                <div class="trim-region" id="trimRegion"></div>
+                <div class="trim-marker start" id="trimMarkerStart"></div>
+                <div class="trim-marker end" id="trimMarkerEnd"></div>
+                <div class="timeline-progress" id="timelineProgress"></div>
+                <div class="timeline-playhead" id="playhead" style="display: none;"></div>
+              </div>
+            </div>
+
+            <!-- Audio Tracks Container - Guide and Master tracks rendered dynamically -->
+            <div id="audioTracksContainer">
+              <!-- Waveform Track (always visible for video audio visualization) -->
+              <div class="timeline-row audio" id="waveformTrackContainer" style="min-height: 70px;">
+                <div class="track-label">
+                  <div class="track-label-header">
+                    <span class="track-badge audio">🎵</span>
+                    <div class="track-info">
+                      <span class="track-name">Audio Waveform</span>
+                      <span class="track-clip-count">Video Audio</span>
+                    </div>
+                  </div>
+                  <div class="track-controls">
+                    <button class="track-action-btn" onclick="app.toggleAudioMute()" id="audioMuteBtn" title="Mute">M</button>
+                  </div>
+                </div>
+                <div class="timeline-track" id="audioTrack" onclick="app.seekToPosition(event)">
+                  <div class="timeline-clip audio" style="left: 0; width: 100%; min-height: 60px; position: relative;" 
+                       onmousemove="app.showWaveformTime(event)" 
+                       onmouseleave="app.hideWaveformTime()"
+                       onclick="app.seekFromWaveform(event)">
+                    <!-- Waveform Settings Button -->
+                    <button class="waveform-settings-btn" onclick="event.stopPropagation(); app.openWaveformSettings()" title="Waveform display settings">
+                      ⚙️
+                    </button>
+                    <!-- Transcribe Button -->
+                    <button class="waveform-transcribe-btn" id="waveformTranscribeBtn" onclick="event.stopPropagation(); app.transcribeForWaveform()" title="Auto-transcribe to see words">
+                      🎤 Transcribe
+                    </button>
+                    <canvas id="audioWaveform" class="audio-waveform" style="width: 100% !important; height: 60px !important; min-height: 60px !important; display: block !important;"></canvas>
+                    <!-- Marker Range Overlays -->
+                    <div class="marker-range-overlay-container" id="audioTrackOverlays"></div>
+                  </div>
+                  <div class="audio-playhead" id="audioPlayhead" style="display: none;"></div>
+                </div>
+              </div>
+              <!-- Dynamic Guide/Master/Additional tracks rendered here by JavaScript -->
+            </div><!-- end audioTracksContainer -->
+
+            <!-- Add Track Button -->
+            <div class="add-track-row" id="addTrackRow">
+              <button class="add-track-btn" onclick="app.toggleAddTrackMenu(event)">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 5v14M5 12h14"/>
+                </svg>
+                Add Audio Track
+              </button>
+              <div class="add-track-menu" id="addTrackMenu">
+                <button class="add-track-option" onclick="app.addAudioTrack('voice')">
+                  <span class="track-type-badge voice">Voice</span>
+                  Translation / Narration
+                </button>
+                <button class="add-track-option" onclick="app.addAudioTrack('dub')">
+                  <span class="track-type-badge dub">Dub</span>
+                  AI-Generated Dubbing
+                </button>
+                <button class="add-track-option" onclick="app.addAudioTrack('music')">
+                  <span class="track-type-badge music">Music</span>
+                  Background Music
+                </button>
+                <button class="add-track-option" onclick="app.addAudioTrack('sfx')">
+                  <span class="track-type-badge sfx">SFX</span>
+                  Sound Effects
+                </button>
+                <button class="add-track-option" onclick="app.addAudioTrack('ambience')">
+                  <span class="track-type-badge ambience">Ambience</span>
+                  Background Audio
+                </button>
+                <button class="add-track-option" onclick="app.addAudioTrack('blank')">
+                  <span class="track-type-badge blank">Blank</span>
+                  Empty Track
+                </button>
+              </div>
+            </div>
+          </div><!-- end timeline-content -->
+        </div><!-- end timeline-scroll-wrapper -->
+      </div><!-- end timeline -->
+    </main>
+
+    <!-- Planning Sidebar (Right Side) -->
+    <aside class="planning-sidebar hidden" id="planningSidebar">
+      <div class="planning-sidebar-header">
+        <div class="planning-sidebar-title">
+          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" fill="none" stroke-width="2">
+            <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>
+            <rect x="9" y="3" width="6" height="4" rx="1"/>
+            <line x1="9" y1="12" x2="15" y2="12"/>
+            <line x1="9" y1="16" x2="15" y2="16"/>
+          </svg>
+          <span>Planning</span>
+        </div>
+        <button class="planning-sidebar-close" onclick="app.togglePlanningPanel()" title="Close planning panel">
+          <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" fill="none" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Planning Tabs -->
+      <div class="planning-tabs">
+        <button class="planning-tab active" data-tab="characters" onclick="app.switchPlanningTab('characters')">
+          <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" fill="none" stroke-width="2">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+            <circle cx="12" cy="7" r="4"/>
+          </svg>
+          Characters
+        </button>
+        <button class="planning-tab" data-tab="scenes" onclick="app.switchPlanningTab('scenes')">
+          <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" fill="none" stroke-width="2">
+            <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/>
+            <line x1="7" y1="2" x2="7" y2="22"/>
+            <line x1="17" y1="2" x2="17" y2="22"/>
+            <line x1="2" y1="12" x2="22" y2="12"/>
+          </svg>
+          Scenes
+        </button>
+        <button class="planning-tab" data-tab="locations" onclick="app.switchPlanningTab('locations')">
+          <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" fill="none" stroke-width="2">
+            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
+            <circle cx="12" cy="10" r="3"/>
+          </svg>
+          Locations
+        </button>
+        <button class="planning-tab" data-tab="beats" onclick="app.switchPlanningTab('beats')">
+          <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" fill="none" stroke-width="2">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+          </svg>
+          Beats
+        </button>
+      </div>
+
+      <!-- Characters Tab Content -->
+      <div class="planning-tab-content active" id="planningCharactersTab">
+        <div class="planning-list" id="charactersList">
+          <!-- Characters rendered here -->
+        </div>
+        <button class="planning-add-btn" onclick="app.addPlanningCharacter()">
+          <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" fill="none" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+          Add Character
+        </button>
+      </div>
+
+      <!-- Scenes Tab Content -->
+      <div class="planning-tab-content" id="planningScenesTab">
+        <div class="planning-list" id="scenesList">
+          <!-- Scenes rendered here -->
+        </div>
+        <div class="planning-actions">
+          <button class="planning-add-btn" onclick="app.addPlanningScene()">
+            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" fill="none" stroke-width="2">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            Add Scene
+          </button>
+          <button class="btn btn-secondary btn-sm" onclick="app.generateMarkersFromScenes()" title="Create timeline markers from scenes">
+            <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" fill="none" stroke-width="2">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+            </svg>
+            Generate Markers
+          </button>
+        </div>
+      </div>
+
+      <!-- Locations Tab Content -->
+      <div class="planning-tab-content" id="planningLocationsTab">
+        <div class="planning-list" id="locationsList">
+          <!-- Locations rendered here -->
+        </div>
+        <button class="planning-add-btn" onclick="app.addPlanningLocation()">
+          <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" fill="none" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+          Add Location
+        </button>
+      </div>
+
+      <!-- Beats Tab Content -->
+      <div class="planning-tab-content" id="planningBeatsTab">
+        <div class="planning-list" id="storyBeatsList">
+          <!-- Story beats rendered here -->
+        </div>
+        <button class="planning-add-btn" onclick="app.addPlanningBeat()">
+          <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" fill="none" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+          Add Story Beat
+        </button>
+      </div>
+
+      <!-- Planning Footer -->
+      <div class="planning-sidebar-footer">
+        <button class="btn btn-ghost btn-sm" onclick="app.importPlanning()" title="Import planning from JSON">
+          <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" fill="none" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          Import
+        </button>
+        <button class="btn btn-ghost btn-sm" onclick="app.exportPlanning()" title="Export planning to JSON">
+          <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" fill="none" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Export
+        </button>
+      </div>
+    </aside>
+
+    <!-- Line Script Panel (shown in linescript layout) - AI-Enhanced Spotting System -->
+    <div class="linescript-panel layout-linescript-only hidden" id="lineScriptPanel">
+      <!-- Line Script Header -->
+      <div class="linescript-header">
+        <div class="header-top">
+          <!-- Template Selector -->
+          <div class="template-selector">
+            <span class="template-label">Template:</span>
+            <div class="template-buttons" id="lineScriptTemplateButtons">
+              <button class="template-btn active" data-template="podcast" style="--btn-color: #8b5cf6;">
+                <span class="template-icon">🎙️</span>
+                <span class="template-name">Podcast</span>
+              </button>
+              <button class="template-btn" data-template="product" style="--btn-color: #3b82f6;">
+                <span class="template-icon">📦</span>
+                <span class="template-name">Product</span>
+              </button>
+              <button class="template-btn" data-template="promo" style="--btn-color: #ef4444;">
+                <span class="template-icon">🎬</span>
+                <span class="template-name">Promo</span>
+              </button>
+              <button class="template-btn" data-template="learning" style="--btn-color: #22c55e;">
+                <span class="template-icon">🎓</span>
+                <span class="template-name">Learning</span>
+              </button>
+            </div>
+          </div>
+          
+          <!-- Mode Controls -->
+          <div class="mode-controls">
+            <div class="mode-indicator spotting" id="lineScriptModeIndicator">
+              <span>●</span> Spotting
+            </div>
+            <div class="mode-buttons">
+              <button class="mode-btn active" data-mode="spotting" onclick="app.setLineScriptMode('spotting')">Spot</button>
+              <button class="mode-btn" data-mode="edit" onclick="app.setLineScriptMode('edit')">Edit</button>
+              <button class="mode-btn" data-mode="review" onclick="app.setLineScriptMode('review')">Review</button>
+              <button class="mode-btn" data-mode="export" onclick="app.setLineScriptMode('export')">Export</button>
+            </div>
+            <button class="mode-lock-btn" id="lineScriptModeLockBtn" onclick="app.toggleLineScriptModeLock()" title="Lock/unlock adaptive mode">
+              🔓
+            </button>
+          </div>
+        </div>
+        
+        <!-- Header Stats -->
+        <div class="header-stats">
+          <div class="stat">
+            <span class="stat-icon">📍</span>
+            <span class="stat-value" id="lineScriptMarkerCount">0</span>
+            <span class="stat-label">markers</span>
+          </div>
+          <div class="stat">
+            <span class="stat-icon">🎬</span>
+            <span class="stat-value" id="lineScriptSceneCount">0</span>
+            <span class="stat-label">scenes</span>
+          </div>
+          <div class="stat">
+            <span class="stat-icon">⏱️</span>
+            <span class="stat-value" id="lineScriptDuration">00:00</span>
+            <span class="stat-label">duration</span>
+          </div>
+          <div class="stat">
+            <span class="stat-icon">🤖</span>
+            <span class="stat-value" id="lineScriptAICount">0</span>
+            <span class="stat-label">AI generated</span>
+          </div>
+        </div>
+        
+        <!-- Pending Range Indicator -->
+        <div class="pending-range-indicator hidden" id="lineScriptPendingRange">
+          📍 Range IN at <strong id="lineScriptInTime">00:00:00</strong> — Press <kbd>O</kbd> or click to set OUT
+        </div>
+      </div>
+      
+      <!-- Line Script Content Area (Dynamic based on mode) -->
+      <div class="linescript-content" id="lineScriptContent">
+        <!-- Spotting Mode: Default view with scrolling transcript -->
+        <div class="linescript-spotting-mode" id="lineScriptSpottingView">
+          <div class="spotting-timecode">
+            <span class="timecode-current" id="lineScriptCurrentTime">00:00:00:00</span>
+            <span class="timecode-total">/ <span id="lineScriptTotalTime">00:00:00:00</span></span>
+          </div>
+          
+          <div class="scrolling-transcript" id="lineScriptTranscript">
+            <!-- Words rendered here -->
+          </div>
+          
+          <!-- Mini Timeline -->
+          <div class="mini-timeline" id="lineScriptMiniTimeline">
+            <div class="timeline-track" id="lineScriptTimelineTrack">
+              <div class="timeline-playhead" id="lineScriptPlayhead"></div>
+              <!-- Markers rendered here -->
+            </div>
+          </div>
+          
+          <!-- Spotting Shortcuts Quick Reference -->
+          <div class="spotting-shortcuts">
+            <div class="shortcut-group">
+              <span class="shortcut-key"><kbd>Space</kbd></span>
+              <span>Play/Pause</span>
+            </div>
+            <div class="shortcut-group">
+              <span class="shortcut-key"><kbd>M</kbd></span>
+              <span>Mark Point</span>
+            </div>
+            <div class="shortcut-group">
+              <span class="shortcut-key"><kbd>I</kbd></span>
+              <span>Range In</span>
+            </div>
+            <div class="shortcut-group">
+              <span class="shortcut-key"><kbd>O</kbd></span>
+              <span>Range Out</span>
+            </div>
+            <div class="shortcut-group">
+              <span class="shortcut-key"><kbd>←</kbd> <kbd>→</kbd></span>
+              <span>Frame ±1s</span>
+            </div>
+            <div class="shortcut-group">
+              <span class="shortcut-key"><kbd>J</kbd> <kbd>K</kbd> <kbd>L</kbd></span>
+              <span>Shuttle</span>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Edit Mode: Two-column screenplay format -->
+        <div class="linescript-edit-mode hidden" id="lineScriptEditView">
+          <div class="edit-sidebar">
+            <div class="marker-types-panel">
+              <h3>Marker Types</h3>
+              <div class="marker-type-buttons" id="lineScriptMarkerTypes">
+                <!-- Populated by template -->
+              </div>
+            </div>
+            <div class="markers-list-panel">
+              <h3>Markers</h3>
+              <div class="markers-list" id="lineScriptMarkersList">
+                <!-- Populated dynamically -->
+              </div>
+            </div>
+          </div>
+          <div class="edit-main">
+            <div class="screenplay-content" id="lineScriptScreenplay">
+              <!-- Screenplay format content -->
+            </div>
+          </div>
+        </div>
+        
+        <!-- Review Mode: Card grid for markers -->
+        <div class="linescript-review-mode hidden" id="lineScriptReviewView">
+          <h3>Review Markers</h3>
+          <div class="review-grid" id="lineScriptReviewGrid">
+            <!-- Review cards populated here -->
+          </div>
+        </div>
+        
+        <!-- Export Mode: Export format selection -->
+        <div class="linescript-export-mode hidden" id="lineScriptExportView">
+          <h3>Export Options</h3>
+          <div class="export-formats" id="lineScriptExportFormats">
+            <!-- Export options populated by template -->
+          </div>
+          <div class="export-preview">
+            <h4>Preview</h4>
+            <div class="export-preview-content" id="lineScriptExportPreview">
+              Select an export format to preview...
+            </div>
+          </div>
+          <div class="export-actions">
+            <button class="btn btn-primary" onclick="app.exportLineScript()">Export</button>
+            <button class="btn btn-ghost" onclick="app.copyLineScriptToClipboard()">Copy to Clipboard</button>
+          </div>
+        </div>
+        
+        <!-- Empty State -->
+        <div class="linescript-empty hidden" id="lineScriptEmpty">
+          <div class="empty-icon">📜</div>
+          <div class="empty-title">No Transcript Available</div>
+          <div class="empty-text">
+            Load a video with a transcript or generate one to use the Line Script view for spotting, editing, and exporting.
+          </div>
+          <button class="btn btn-secondary" onclick="app.transcribeForWaveform()" style="margin-top: 16px;">
+            🎤 Generate Transcript
+          </button>
+        </div>
+      </div>
+      
+      <!-- Line Script Footer -->
+      <div class="linescript-footer">
+        <div class="footer-controls">
+          <label class="auto-scroll-toggle">
+            <input type="checkbox" id="lineScriptAutoScroll" checked>
+            Auto-scroll
+          </label>
+          <button class="btn btn-ghost btn-sm" onclick="app.toggleVoiceSpotting()" id="voiceSpottingBtn" title="Voice Commands">
+            🎤 Voice
+          </button>
+          <div class="voice-status hidden" id="voiceSpottingStatus">
+            <span class="status-dot">●</span>
+            <span class="status-text">Listening...</span>
+          </div>
+        </div>
+        <button class="ai-generate-btn" onclick="app.generateLineScriptAI()" id="lineScriptAIBtn">
+          ✨ AI Generate Metadata
+        </button>
+        <div class="footer-info">
+          <span id="lineScriptAIProgress"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Story Beats Full-Page Editor (shown in beats layout) - LINE SCRIPT FORMAT -->
+    <div class="storybeats-editor-container layout-beats-only hidden" id="storyBeatsEditorContainer">
+      <!-- Editor Header - Script Title Bar -->
+      <div class="storybeats-editor-header">
+        <div class="storybeats-editor-title">
+          <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" fill="none" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+          </svg>
+          <span>Line Script</span>
+          <span class="storybeats-word-count" id="storyBeatsWordCount">0 words</span>
+        </div>
+        <div class="storybeats-editor-actions">
+          <button class="btn btn-ghost btn-sm" onclick="app.refreshStoryBeatsEditor()" title="Refresh script">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+            </svg>
+          </button>
+          <button class="btn btn-ghost btn-sm" onclick="app.scrollToCurrentTime()" title="Scroll to playhead">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+            </svg>
+          </button>
+          <button class="btn btn-ghost btn-sm" onclick="app.exportStoryBeatsTranscript()" title="Export script">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      
+      <!-- Main Editor Content (scrollable line script) -->
+      <div class="storybeats-editor-content" id="storyBeatsEditorContent">
+        <!-- Lines and scenes rendered here by StoryBeatsEditor.js -->
+        <div class="storybeats-empty">
+          <div class="storybeats-empty-icon">
+            <svg viewBox="0 0 24 24" width="48" height="48" stroke="currentColor" fill="none" stroke-width="1">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <line x1="16" y1="13" x2="8" y2="13"/>
+              <line x1="16" y1="17" x2="8" y2="17"/>
+              <polyline points="10 9 9 9 8 9"/>
+            </svg>
+          </div>
+          <div class="storybeats-empty-title">No Script Available</div>
+          <div class="storybeats-empty-text">
+            Load a video with a transcript or click "Generate Script" to create an editable line script from the audio.
+          </div>
+          <button class="btn btn-secondary" onclick="app.transcribeForWaveform()" style="margin-top: 16px;">
+            🎤 Generate Script
+          </button>
+        </div>
+      </div>
+      
+      <!-- Mini Timeline Preview -->
+      <div class="storybeats-mini-timeline" id="storyBeatsMiniTimeline">
+        <!-- Rendered by MiniTimeline.js -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Progress Modal -->
+  <div class="modal-overlay" id="progressModal">
+    <div class="modal">
+      <h3 class="modal-title" id="progressTitle">Processing Video...</h3>
+      <p class="modal-subtitle" id="progressSubtitle">This may take a few minutes</p>
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+      </div>
+      <div class="progress-text">
+        <span id="progressStatus">Starting...</span>
+        <span class="progress-percent" id="progressPercent">0%</span>
+      </div>
+      <div style="margin-top: 20px; text-align: center;">
+        <button class="btn btn-ghost" onclick="app.cancelJob()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Pending Range Marker Indicator -->
+  <div class="pending-range-indicator hidden" id="pendingRangeIndicator">
+    <span>📍 Range IN set at <strong id="pendingInTime">00:00:00</strong></span>
+    <span>— Now set the OUT point</span>
+    <button onclick="app.markRangeOut()">Set OUT Here</button>
+    <button onclick="app.cancelPendingRange()">Cancel</button>
+  </div>
+
+  <!-- Dynamic Context Menu -->
+  <div class="context-menu" id="contextMenu">
+    <div class="context-menu-items" id="contextMenuItems">
+      <!-- Items populated dynamically -->
+    </div>
+  </div>
+
+  <!-- Keyboard Shortcuts Panel -->
+  <div class="shortcuts-panel" id="shortcutsPanel">
+    <div class="shortcuts-panel-header">
+      <span class="shortcuts-panel-title">⌨️ Keyboard Shortcuts</span>
+      <button class="shortcuts-panel-close" onclick="app.hideShortcutsPanel()">×</button>
+    </div>
+    <div class="shortcuts-panel-content" id="shortcutsPanelContent">
+      <!-- Populated by JS -->
+    </div>
+  </div>
+
+  <!-- Add/Edit Marker Modal -->
+  <div class="marker-modal-backdrop hidden" id="markerModalBackdrop" onclick="app.closeMarkerModal()"></div>
+  <div class="marker-modal hidden" id="markerModal" style="max-width: 500px; max-height: 90vh; overflow-y: auto;">
+    <div class="marker-modal-title" id="markerModalTitle">Add Marker</div>
+    
+    <!-- Marker Type Selection -->
+    <div class="form-group" id="markerTypeGroup">
+      <label class="form-label">Marker Type</label>
+      <div class="marker-type-selector">
+        <button class="marker-type-btn active" data-type="spot" onclick="app.setMarkerType('spot')">
+          <span class="marker-type-icon">📍</span>
+          <span class="marker-type-label">Spot</span>
+          <span class="marker-type-desc">Single point</span>
+        </button>
+        <button class="marker-type-btn" data-type="range" onclick="app.setMarkerType('range')">
+          <span class="marker-type-icon">↔️</span>
+          <span class="marker-type-label">Range</span>
+          <span class="marker-type-desc">In & Out points</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Scene Name *</label>
+      <input type="text" class="form-input" id="markerNameInput" placeholder="e.g., Intro, Chapter 1, Credits...">
+    </div>
+    
+    <!-- Spot marker time -->
+    <div class="form-group" id="spotTimeGroup">
+      <label class="form-label">Time: <span id="markerTimeDisplay">00:00:00</span></label>
+    </div>
+    
+    <!-- Range marker times -->
+    <div class="form-group hidden" id="rangeTimeGroup">
+      <div class="range-time-inputs">
+        <div class="range-time-input">
+          <label class="form-label">IN Point</label>
+          <div class="range-time-value" id="rangeInDisplay">00:00:00</div>
+          <button class="btn btn-ghost btn-sm" onclick="app.setRangeInNow()">Set to Now</button>
+        </div>
+        <div class="range-time-arrow">→</div>
+        <div class="range-time-input">
+          <label class="form-label">OUT Point</label>
+          <div class="range-time-value" id="rangeOutDisplay">00:00:00</div>
+          <button class="btn btn-ghost btn-sm" onclick="app.setRangeOutNow()">Set to Now</button>
+        </div>
+      </div>
+      <div class="range-duration" id="rangeDuration">Duration: 00:00:00</div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Color</label>
+      <div class="marker-color-picker" id="markerColorPicker">
+        <!-- Colors populated by JS -->
+      </div>
+    </div>
+
+    <!-- Extended Metadata Section -->
+    <div class="marker-metadata-section">
+      <div class="marker-metadata-header" onclick="app.toggleMetadataSection()">
+        <span>📝 Extended Metadata</span>
+        <span class="metadata-toggle" id="metadataToggle">▼</span>
+      </div>
+      <div class="marker-metadata-content" id="metadataContent">
+        <div class="form-group">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+            <label class="form-label" style="margin: 0;">Description</label>
+            <button class="btn btn-ghost btn-sm" onclick="app.generateMarkerDescriptionFromTranscript()" id="generateDescriptionBtn" style="font-size: 10px;">
+              ✨ Generate from Transcript
+            </button>
+          </div>
+          <textarea class="form-input form-textarea" id="markerDescription" rows="3" placeholder="Detailed description of this scene or moment..."></textarea>
+          <div class="description-status hidden" id="descriptionStatus" style="margin-top: 6px; font-size: 11px; color: var(--text-muted);"></div>
+        </div>
+        
+        <div class="form-group">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+            <label class="form-label" style="margin: 0;">Transcription / Dialogue</label>
+            <button class="btn btn-ghost btn-sm" onclick="app.transcribeMarkerRange()" id="transcribeRangeBtn" style="font-size: 10px;">
+              🎤 Auto-Transcribe
+            </button>
+          </div>
+          <textarea class="form-input form-textarea" id="markerTranscription" rows="4" placeholder="What is being said in this segment..."></textarea>
+          <div class="transcription-status hidden" id="transcriptionStatus" style="margin-top: 6px; font-size: 11px; color: var(--text-muted);"></div>
+          
+          <!-- ADR Actions (Range markers only) -->
+          <div class="adr-actions-section hidden" id="adrActionsSection" style="margin-top: 12px;">
+            <!-- Insert Silence -->
+            <div style="padding: 12px; background: rgba(249, 115, 22, 0.1); border: 1px solid rgba(249, 115, 22, 0.3); border-radius: 8px; margin-bottom: 10px;">
+              <button class="btn btn-secondary" onclick="app.insertSilence()" id="insertSilenceBtn" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                <span style="font-size: 16px;">🔇</span>
+                <span>Insert Silence</span>
+              </button>
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 8px; text-align: center;">
+                Mark this range as dead space on the Working track for ADR
+              </div>
+            </div>
+            
+            <!-- Re-record with AI (ADR Workflow) -->
+            <div class="adr-rerecord-section hidden" id="adrRerecordSection" style="padding: 12px; background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 8px; margin-bottom: 10px;">
+              <!-- Voice Selection -->
+              <div style="margin-bottom: 10px;">
+                <label class="form-label" style="font-size: 11px; margin-bottom: 6px; display: block;">AI Voice</label>
+                <select class="form-input" id="elevenLabsVoiceSelect" style="width: 100%; font-size: 12px;">
+                  <option value="Rachel">Rachel (Female, Calm)</option>
+                  <option value="Domi">Domi (Female, Strong)</option>
+                  <option value="Bella">Bella (Female, Soft)</option>
+                  <option value="Antoni">Antoni (Male, Well-Rounded)</option>
+                  <option value="Elli">Elli (Female, Emotional)</option>
+                  <option value="Josh">Josh (Male, Deep)</option>
+                  <option value="Arnold">Arnold (Male, Crisp)</option>
+                  <option value="Adam">Adam (Male, Narrative)</option>
+                  <option value="Sam">Sam (Male, Raspy)</option>
+                </select>
+              </div>
+              
+              <button class="btn btn-primary" onclick="app.rerecordWithAI()" id="rerecordBtn" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; background: linear-gradient(135deg, #8b5cf6, #7c3aed);">
+                <span style="font-size: 16px;">🎙️</span>
+                <span>Re-record with AI</span>
+              </button>
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 8px; text-align: center;">
+                Insert silence + generate AI voice + add to ADR track
+              </div>
+            </div>
+            
+            <!-- ElevenLabs Replace Audio Button (Legacy - kept for compatibility) -->
+            <div class="elevenlabs-section hidden" id="elevenLabsSection" style="padding: 12px; background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.3); border-radius: 8px;">
+              <button class="btn btn-ghost btn-sm" onclick="app.replaceAudioWithElevenLabsFromModal()" id="elevenLabsBtn" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                <span style="font-size: 14px;">🔄</span>
+                <span>Legacy Replace (Destructive)</span>
+              </button>
+              <div style="font-size: 10px; color: var(--text-muted); margin-top: 6px; text-align: center;">
+                Old method: replaces video audio directly (slower, destructive)
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="form-group">
+          <label class="form-label">Tags</label>
+          <input type="text" class="form-input" id="markerTags" placeholder="interview, intro, b-roll (comma separated)">
+        </div>
+        
+        <div class="form-group">
+          <label class="form-label">Notes</label>
+          <textarea class="form-input form-textarea" id="markerNotes" rows="2" placeholder="Internal notes, reminders..."></textarea>
+        </div>
+
+        <!-- Screen Grabs Section -->
+        <div class="form-group" id="screenGrabsSection">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+            <label class="form-label" style="margin: 0;">📸 Screen Grabs</label>
+          </div>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <input type="number" class="form-input" id="screenGrabCount" value="5" min="1" max="50" style="width: 70px;">
+            <span style="font-size: 12px; color: var(--text-secondary);">frames</span>
+            <button class="btn btn-secondary btn-sm" onclick="app.generateMarkerScreengrabs()" id="generateGrabsBtn" style="margin-left: auto;">
+              📸 Generate
+            </button>
+          </div>
+          <div class="screengrabs-preview hidden" id="screengrabsPreview">
+            <div class="screengrabs-grid" id="screengrabsGrid"></div>
+            <div class="screengrabs-actions">
+              <button class="btn btn-ghost btn-sm" onclick="app.openScreengrabsFolder()">📂 Open Folder</button>
+              <span class="screengrabs-count" id="screengrabsCount"></span>
+            </div>
+          </div>
+        </div>
+        
+        <div class="marker-metadata-grid">
+          <div class="metadata-stat">
+            <span class="metadata-stat-label">Created</span>
+            <span class="metadata-stat-value" id="markerCreated">-</span>
+          </div>
+          <div class="metadata-stat">
+            <span class="metadata-stat-label">Modified</span>
+            <span class="metadata-stat-value" id="markerModified">-</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="marker-modal-actions">
+      <button class="btn btn-ghost" onclick="app.closeMarkerModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="app.saveMarker()" id="saveMarkerBtn">Add Marker</button>
+    </div>
+  </div>
+
+  <!-- ADR Track Manager (must load before video-editor-app.js) -->
+  <script src="adr-track-manager.js"></script>
+  <!-- Preloader for checking/generating missing assets -->
+  <script src="video-editor-preloader.js"></script>
+  <!-- Version Tree for project/version management -->
+  <script src="version-tree.js"></script>
+  <!-- Story Beats Module (extracted from video-editor-app.js) -->
+  <script src="video-editor-beats.js"></script>
+  <script src="video-editor-app.js"></script>
+  <!-- Bridge: connect modular src/video-editor/* to legacy app -->
+  <script type="module" src="video-editor-modules-bridge.js"></script>
+
+  <!-- Translation Panel (Slide-in) -->
+  <div class="translation-panel" id="translationPanel">
+    <div class="translation-panel-header">
+      <div class="translation-panel-title">Translate Segment</div>
+      <button class="translation-panel-close" onclick="app.closeTranslationPanel()">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 6L6 18M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+    
+    <div class="translation-panel-content">
+      <!-- Segment Info -->
+      <div class="translation-step">
+        <div class="translation-step-header">
+          <div class="translation-step-number">1</div>
+          <div class="translation-step-title">Source Text</div>
+        </div>
+        <div class="translation-text-box" id="translationSourceText" contenteditable="true">
+          Select a region on the timeline to translate
+        </div>
+        <div style="display: flex; gap: 8px; margin-top: 8px;">
+          <select class="form-select" id="sourceLanguage" style="flex: 1;">
+            <option value="auto">Auto-detect</option>
+            <option value="uk">Ukrainian</option>
+            <option value="ru">Russian</option>
+            <option value="es">Spanish</option>
+            <option value="fr">French</option>
+            <option value="de">German</option>
+            <option value="zh">Chinese</option>
+            <option value="ja">Japanese</option>
+            <option value="ko">Korean</option>
+          </select>
+          <span style="padding: 8px; color: var(--text-muted);">→</span>
+          <select class="form-select" id="targetLanguage" style="flex: 1;">
+            <option value="en">English</option>
+            <option value="es">Spanish</option>
+            <option value="fr">French</option>
+            <option value="de">German</option>
+            <option value="pt">Portuguese</option>
+            <option value="it">Italian</option>
+            <option value="nl">Dutch</option>
+            <option value="pl">Polish</option>
+            <option value="ja">Japanese</option>
+            <option value="zh">Chinese</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Translation Output -->
+      <div class="translation-step">
+        <div class="translation-step-header">
+          <div class="translation-step-number">2</div>
+          <div class="translation-step-title">Translation</div>
+          <span id="translationIteration" style="margin-left: auto; font-size: 11px; color: var(--text-muted);">Iteration 0/5</span>
+        </div>
+        <div class="translation-text-box" id="translationOutput" contenteditable="true">
+          Click "Translate" to generate
+        </div>
+        <div style="display: flex; gap: 8px; margin-top: 8px;">
+          <button class="btn btn-secondary" onclick="app.startTranslation()" id="translateBtn" style="flex: 1;">
+            🌐 Translate
+          </button>
+          <button class="btn btn-ghost" onclick="app.retryTranslation()" id="retryTranslateBtn" style="flex: 1;" disabled>
+            🔄 Retry
+          </button>
+        </div>
+      </div>
+
+      <!-- Quality Scores -->
+      <div class="translation-step" id="qualitySection" style="display: none;">
+        <div class="translation-step-header">
+          <div class="translation-step-number">3</div>
+          <div class="translation-step-title">Quality Check</div>
+        </div>
+        <div class="translation-score-grid">
+          <div class="translation-score-item">
+            <span>Accuracy</span>
+            <div class="translation-score-bar"><div class="translation-score-fill" id="scoreAccuracy" style="width: 0%"></div></div>
+            <span class="translation-score-value" id="scoreAccuracyVal">-</span>
+          </div>
+          <div class="translation-score-item">
+            <span>Fluency</span>
+            <div class="translation-score-bar"><div class="translation-score-fill" id="scoreFluency" style="width: 0%"></div></div>
+            <span class="translation-score-value" id="scoreFluencyVal">-</span>
+          </div>
+          <div class="translation-score-item">
+            <span>Adequacy</span>
+            <div class="translation-score-bar"><div class="translation-score-fill" id="scoreAdequacy" style="width: 0%"></div></div>
+            <span class="translation-score-value" id="scoreAdequacyVal">-</span>
+          </div>
+          <div class="translation-score-item">
+            <span>Cultural</span>
+            <div class="translation-score-bar"><div class="translation-score-fill" id="scoreCultural" style="width: 0%"></div></div>
+            <span class="translation-score-value" id="scoreCulturalVal">-</span>
+          </div>
+          <div class="translation-score-item">
+            <span>Timing</span>
+            <div class="translation-score-bar"><div class="translation-score-fill" id="scoreTiming" style="width: 0%"></div></div>
+            <span class="translation-score-value" id="scoreTimingVal">-</span>
+          </div>
+        </div>
+        <div class="translation-composite-score">
+          <span class="translation-composite-value" id="compositeScore">-</span>
+          <span class="translation-composite-label">/ 10</span>
+        </div>
+        
+        <!-- Improvement Suggestions -->
+        <div id="improvementSuggestions" style="margin-top: 16px; display: none;">
+          <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;">💡 Suggestions:</div>
+          <div id="suggestionsList" style="font-size: 12px; color: var(--text-muted);"></div>
+          <div style="display: flex; gap: 8px; margin-top: 8px;">
+            <button class="btn btn-ghost" onclick="app.applyImprovements()" style="flex: 1;">Apply & Retry</button>
+            <button class="btn btn-ghost" onclick="app.skipImprovements()" style="flex: 1;">Keep As-Is</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Generate Audio -->
+      <div class="translation-step" id="audioSection" style="display: none;">
+        <div class="translation-step-header">
+          <div class="translation-step-number">4</div>
+          <div class="translation-step-title">Generate Voice</div>
+        </div>
+        <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+          <select class="form-select" id="voiceSelect" style="flex: 1;">
+            <option value="rachel">Rachel (Female)</option>
+            <option value="adam">Adam (Male)</option>
+            <option value="sarah">Sarah (Female)</option>
+            <option value="josh">Josh (Male)</option>
+            <option value="emily">Emily (Female)</option>
+          </select>
+          <select class="form-select" id="voiceSpeed" style="width: 80px;">
+            <option value="0.8">0.8x</option>
+            <option value="0.9">0.9x</option>
+            <option value="1.0" selected>1.0x</option>
+            <option value="1.1">1.1x</option>
+            <option value="1.2">1.2x</option>
+          </select>
+        </div>
+        <button class="btn btn-secondary" onclick="app.generateTranslationAudio()" style="width: 100%;">
+          🎙️ Generate Audio
+        </button>
+        
+        <!-- Audio Preview -->
+        <div id="audioPreviewSection" style="margin-top: 12px; display: none;">
+          <audio id="translationAudioPreview" controls style="width: 100%; height: 32px;"></audio>
+          <div style="display: flex; justify-content: space-between; margin-top: 8px; font-size: 11px; color: var(--text-muted);">
+            <span>Source: <span id="sourceDuration">0.0s</span></span>
+            <span>Generated: <span id="generatedDuration">0.0s</span></span>
+            <span>Δ: <span id="durationDelta">0.0s</span></span>
+          </div>
+          <div style="margin-top: 8px; font-size: 11px;">
+            <span style="color: var(--text-secondary);">Timing fix:</span>
+            <label style="margin-left: 8px;"><input type="radio" name="timingFix" value="none" checked> As-is</label>
+            <label style="margin-left: 8px;"><input type="radio" name="timingFix" value="stretch_audio"> Stretch audio</label>
+            <label style="margin-left: 8px;"><input type="radio" name="timingFix" value="speed_video"> Speed video</label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Apply to Timeline -->
+      <div class="translation-step" id="applySection" style="display: none;">
+        <button class="btn btn-primary" onclick="app.applyTranslationToTimeline()" style="width: 100%;">
+          ✓ Apply to Timeline
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Audio Sweetening Panel -->
+  <div class="translation-panel" id="audioSweeteningPanel" style="width: 400px;">
+    <div class="translation-panel-header">
+      <div class="translation-panel-title">🎵 Audio Sweetening</div>
+      <button class="translation-panel-close" onclick="app.closeAudioSweeteningPanel()">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 6L6 18M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+    
+    <div class="translation-panel-content">
+      <!-- ElevenLabs SFX Section -->
+      <div class="translation-step">
+        <div class="translation-step-header">
+          <div class="translation-step-title">ElevenLabs Sound Effects</div>
+        </div>
+        <input type="text" 
+               class="beat-field-input" 
+               id="sfxSearchInput" 
+               placeholder="Search sound effects..."
+               onkeyup="app.searchElevenLabsSFX(event)">
+        
+        <div id="sfxResults" style="margin-top: 12px; max-height: 200px; overflow-y: auto;">
+          <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
+            <button class="btn btn-ghost" onclick="app.addSFXToTrack('whoosh')" style="justify-content: flex-start;">
+              <span>💨 Whoosh</span>
+            </button>
+            <button class="btn btn-ghost" onclick="app.addSFXToTrack('click')" style="justify-content: flex-start;">
+              <span>🖱️ Click</span>
+            </button>
+            <button class="btn btn-ghost" onclick="app.addSFXToTrack('notification')" style="justify-content: flex-start;">
+              <span>🔔 Notification</span>
+            </button>
+            <button class="btn btn-ghost" onclick="app.addSFXToTrack('transition')" style="justify-content: flex-start;">
+              <span>✨ Transition</span>
+            </button>
+            <button class="btn btn-ghost" onclick="app.addSFXToTrack('applause')" style="justify-content: flex-start;">
+              <span>👏 Applause</span>
+            </button>
+            <button class="btn btn-ghost" onclick="app.addSFXToTrack('error')" style="justify-content: flex-start;">
+              <span>❌ Error</span>
+            </button>
+            <button class="btn btn-ghost" onclick="app.addSFXToTrack('success')" style="justify-content: flex-start;">
+              <span>✅ Success</span>
+            </button>
+            <button class="btn btn-ghost" onclick="app.addSFXToTrack('swoosh')" style="justify-content: flex-start;">
+              <span>🌊 Swoosh</span>
+            </button>
+          </div>
+        </div>
+
+        <div style="margin-top: 12px;">
+          <audio id="sfxPreviewAudio" controls style="width: 100%; height: 32px; display: none;"></audio>
+        </div>
+      </div>
+
+      <div style="margin: 16px 0; border-top: 1px solid var(--border-color);"></div>
+
+      <!-- Import Audio Section -->
+      <div class="translation-step">
+        <div class="translation-step-header">
+          <div class="translation-step-title">Import Audio Files</div>
+        </div>
+        
+        <div class="ai-video-upload-zone" 
+             onclick="document.getElementById('audioImportInput').click()"
+             ondragover="app.handleAudioDragOver(event)"
+             ondragleave="app.handleAudioDragLeave(event)"
+             ondrop="app.handleAudioDrop(event)"
+             style="padding: 24px; margin-bottom: 12px;">
+          <div style="font-size: 32px; margin-bottom: 8px;">🎵</div>
+          <div style="font-size: 12px; color: var(--text-secondary);">Drop audio here or click to browse</div>
+          <div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">MP3, WAV, M4A, OGG</div>
+        </div>
+        <input type="file" 
+               id="audioImportInput" 
+               accept="audio/*" 
+               multiple
+               style="display: none;"
+               onchange="app.handleAudioImport(event)">
+
+        <!-- Recent Files -->
+        <div id="recentAudioFiles" style="margin-top: 12px;">
+          <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 8px;">RECENT</div>
+          <div id="recentAudioList" style="display: flex; flex-direction: column; gap: 4px;">
+            <div style="font-size: 11px; color: var(--text-muted); padding: 8px; text-align: center;">
+              No recent audio files
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin: 16px 0; padding: 12px; background: var(--bg-surface); border-radius: 8px; font-size: 11px; color: var(--text-secondary);">
+        💡 Tip: Drop audio files directly on timeline tracks to add them at a specific position
+      </div>
+    </div>
+  </div>
+
+  <!-- AI Video Replacement Panel -->
+  <div class="ai-video-panel" id="aiVideoPanel">
+    <div class="ai-video-panel-header">
+      <div class="ai-video-panel-title">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+          <circle cx="12" cy="13" r="4"/>
+        </svg>
+        AI Video Replacement
+      </div>
+      <button class="ai-video-panel-close" onclick="app.closeAIVideoPanel()">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 6L6 18M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="ai-video-panel-content">
+      <!-- Segment Info -->
+      <div class="ai-video-info-bar">
+        <div class="ai-video-info-item">
+          <span class="ai-video-info-label">Region</span>
+          <span class="ai-video-info-value" id="aiVideoRegion">00:15.00 - 00:22.50</span>
+        </div>
+        <div class="ai-video-info-item">
+          <span class="ai-video-info-label">Duration</span>
+          <span class="ai-video-info-value" id="aiVideoDuration">7.5s</span>
+        </div>
+        <div class="ai-video-info-item">
+          <span class="ai-video-info-label">Resolution</span>
+          <span class="ai-video-info-value" id="aiVideoResolution">1920×1080</span>
+        </div>
+      </div>
+
+      <!-- Description Input -->
+      <div class="ai-video-section">
+        <div class="ai-video-section-title">What should this segment show?</div>
+        <textarea class="ai-video-description" id="aiVideoDescription" placeholder="Describe the video you want to generate...
+
+Example: A modern office with people collaborating around a digital whiteboard, bright natural lighting, camera slowly panning left to right"></textarea>
+      </div>
+
+      <!-- Generated Prompt -->
+      <div class="ai-video-section">
+        <div class="ai-video-section-title">Optimized Prompt</div>
+        <div class="ai-video-prompt-box" id="aiVideoPromptBox">
+          <span id="aiVideoPrompt">Enter a description above, then click "Generate Prompt"</span>
+        </div>
+        <div class="ai-video-prompt-actions">
+          <button class="btn btn-secondary" onclick="app.generateVideoPrompt()">
+            ✨ Generate Prompt
+          </button>
+          <button class="btn btn-ghost" onclick="app.copyVideoPrompt()">
+            📋 Copy
+          </button>
+        </div>
+      </div>
+
+      <!-- External Services -->
+      <div class="ai-video-section">
+        <div class="ai-video-section-title">Generate Video At</div>
+        <div class="ai-video-services">
+          <button class="ai-video-service-btn" onclick="app.openVideoService('kling')">
+            <span class="service-icon">🎬</span>
+            <span class="service-name">Kling.ai</span>
+          </button>
+          <button class="ai-video-service-btn" onclick="app.openVideoService('veo')">
+            <span class="service-icon">🎥</span>
+            <span class="service-name">Google Veo</span>
+          </button>
+          <button class="ai-video-service-btn" onclick="app.openVideoService('runway')">
+            <span class="service-icon">🎞️</span>
+            <span class="service-name">Runway</span>
+          </button>
+          <button class="ai-video-service-btn" onclick="app.openVideoService('pika')">
+            <span class="service-icon">🎭</span>
+            <span class="service-name">Pika Labs</span>
+          </button>
+          <button class="ai-video-service-btn" onclick="app.openVideoService('luma')">
+            <span class="service-icon">🌈</span>
+            <span class="service-name">Luma Dream</span>
+          </button>
+          <button class="ai-video-service-btn" onclick="app.openVideoService('sora')">
+            <span class="service-icon">🔮</span>
+            <span class="service-name">OpenAI Sora</span>
+          </button>
+        </div>
+        <p style="font-size: 11px; color: var(--text-muted); margin-top: 12px; text-align: center;">
+          Opens in browser with prompt copied to clipboard
+        </p>
+      </div>
+
+      <div class="ai-video-divider">or upload your video</div>
+
+      <!-- Upload Zone -->
+      <div class="ai-video-section">
+        <div class="ai-video-upload-zone" 
+             id="aiVideoUploadZone"
+             onclick="document.getElementById('aiVideoUploadInput').click()"
+             ondragover="app.handleAIVideoDragOver(event)"
+             ondragleave="app.handleAIVideoDragLeave(event)"
+             ondrop="app.handleAIVideoDrop(event)">
+          <div class="ai-video-upload-icon">📁</div>
+          <div class="ai-video-upload-text">Drop video here or click to browse</div>
+          <div class="ai-video-upload-hint">Accepts MP4, MOV, WebM • Max 500MB</div>
+        </div>
+        <input type="file" 
+               class="ai-video-upload-input" 
+               id="aiVideoUploadInput" 
+               accept="video/*"
+               onchange="app.handleAIVideoUpload(event)">
+      </div>
+
+      <!-- Preview Section (shown after upload) -->
+      <div class="ai-video-section" id="aiVideoPreviewSection" style="display: none;">
+        <div class="ai-video-section-title">Preview</div>
+        <video id="aiVideoPreview" controls style="width: 100%; border-radius: 8px; background: #000;"></video>
+        <div style="display: flex; gap: 8px; margin-top: 12px;">
+          <button class="btn btn-ghost" onclick="app.cancelAIVideoUpload()" style="flex: 1;">
+            Cancel
+          </button>
+          <button class="btn btn-primary" onclick="app.applyAIVideoToTimeline()" style="flex: 1;">
+            Apply to Timeline
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Global Floating Time Tooltip (not clipped by overflow:hidden) -->
+  <div id="floatingTimeTooltip" class="floating-time-tooltip" style="display: none;">
+    <span id="floatingTimeText">00:00:00</span>
+  </div>
+
+  <!-- Audio-Only File Modal -->
+  <div id="audioOnlyModal" class="modal-overlay" style="display: none;">
+    <div class="modal" style="max-width: 500px;">
+      <h3 class="modal-title">🎵 Audio-Only File Detected</h3>
+      <p class="modal-subtitle" style="margin-bottom: 20px;">
+        This file contains only audio (no video track). How would you like to proceed?
+      </p>
+      
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <!-- Audio-Only Mode Option -->
+        <div class="audio-only-option" onclick="app.useAudioOnlyMode()" style="
+          padding: 16px;
+          background: var(--bg-surface);
+          border: 2px solid var(--border-color);
+          border-radius: 12px;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        " onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border-color)'">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="font-size: 32px;">🎧</div>
+            <div>
+              <div style="font-weight: 600; font-size: 14px; color: var(--text-primary);">Continue as Audio</div>
+              <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
+                Work with waveform visualization only. Perfect for podcasts, music, or voice recordings.
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Add Video Channel Option -->
+        <div class="audio-only-option" onclick="app.showAddVideoOptions()" style="
+          padding: 16px;
+          background: var(--bg-surface);
+          border: 2px solid var(--border-color);
+          border-radius: 12px;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        " onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border-color)'">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="font-size: 32px;">🎬</div>
+            <div>
+              <div style="font-weight: 600; font-size: 14px; color: var(--text-primary);">Add Video Channel</div>
+              <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
+                Create a video by adding an image, color background, or slideshow to your audio.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Add Video Options (hidden initially) -->
+      <div id="addVideoOptions" style="display: none; margin-top: 20px;">
+        <div style="font-weight: 600; margin-bottom: 12px; color: var(--text-primary);">Choose video background:</div>
+        
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px;">
+          <button class="btn btn-ghost" onclick="app.addVideoFromImage()" style="flex-direction: column; padding: 16px; height: auto;">
+            <span style="font-size: 24px; margin-bottom: 8px;">🖼️</span>
+            <span style="font-size: 11px;">Image</span>
+          </button>
+          <button class="btn btn-ghost" onclick="app.addVideoFromColor()" style="flex-direction: column; padding: 16px; height: auto;">
+            <span style="font-size: 24px; margin-bottom: 8px;">🎨</span>
+            <span style="font-size: 11px;">Solid Color</span>
+          </button>
+          <button class="btn btn-ghost" onclick="app.addVideoFromSlideshow()" style="flex-direction: column; padding: 16px; height: auto;">
+            <span style="font-size: 24px; margin-bottom: 8px;">📸</span>
+            <span style="font-size: 11px;">Slideshow</span>
+          </button>
+        </div>
+        
+        <!-- Color Picker (hidden until color option selected) -->
+        <div id="colorPickerSection" style="display: none; margin-bottom: 16px;">
+          <label class="form-label">Background Color</label>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <div class="color-preset" data-color="#000000" onclick="app.selectVideoColor('#000000')" style="width: 32px; height: 32px; background: #000000; border-radius: 6px; cursor: pointer; border: 2px solid var(--border-color);"></div>
+            <div class="color-preset" data-color="#1a1a2e" onclick="app.selectVideoColor('#1a1a2e')" style="width: 32px; height: 32px; background: #1a1a2e; border-radius: 6px; cursor: pointer; border: 2px solid var(--border-color);"></div>
+            <div class="color-preset" data-color="#16213e" onclick="app.selectVideoColor('#16213e')" style="width: 32px; height: 32px; background: #16213e; border-radius: 6px; cursor: pointer; border: 2px solid var(--border-color);"></div>
+            <div class="color-preset" data-color="#0f3460" onclick="app.selectVideoColor('#0f3460')" style="width: 32px; height: 32px; background: #0f3460; border-radius: 6px; cursor: pointer; border: 2px solid var(--border-color);"></div>
+            <div class="color-preset" data-color="#533483" onclick="app.selectVideoColor('#533483')" style="width: 32px; height: 32px; background: #533483; border-radius: 6px; cursor: pointer; border: 2px solid var(--border-color);"></div>
+            <div class="color-preset" data-color="#e94560" onclick="app.selectVideoColor('#e94560')" style="width: 32px; height: 32px; background: #e94560; border-radius: 6px; cursor: pointer; border: 2px solid var(--border-color);"></div>
+            <input type="color" id="customColorPicker" value="#1a1a2e" onchange="app.selectVideoColor(this.value)" style="width: 32px; height: 32px; border: none; cursor: pointer; border-radius: 6px;">
+          </div>
+          <button class="btn btn-primary" style="width: 100%; margin-top: 12px;" onclick="app.createVideoFromColor()">
+            Create Video
+          </button>
+        </div>
+        
+        <button class="btn btn-ghost" onclick="app.hideAddVideoOptions()" style="width: 100%;">
+          ← Back
+        </button>
+      </div>
+      
+      <div style="margin-top: 20px; text-align: center;">
+        <button class="btn btn-ghost" onclick="app.closeAudioOnlyModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Preloader Modal -->
+  <div id="preloaderOverlay" class="preloader-overlay hidden">
+    <div class="preloader-modal">
+      <h2>Prepare Project Assets</h2>
+      <p class="preloader-subtitle">Pre-generate assets for better performance</p>
+      <div class="preloader-checklist">
+        <!-- Dynamically populated by video-editor-preloader.js -->
+      </div>
+      <div class="preloader-progress hidden">
+        <div class="progress-status"></div>
+        <div class="progress-bar"><div class="progress-fill"></div></div>
+        <div class="progress-detail"></div>
+      </div>
+      <div class="preloader-actions">
+        <button class="btn-skip">Skip All</button>
+        <button class="btn-generate">Generate Selected</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Waveform Settings Modal -->
+  <div id="waveformSettingsModal" class="modal-overlay" style="display: none;">
+    <div class="modal-content waveform-settings-modal">
+      <div class="modal-header">
+        <h3>Audio Waveform Settings</h3>
+        <button class="modal-close-btn" onclick="app.closeWaveformSettings()">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="setting-group">
+          <label class="setting-label">Visualization Style</label>
+          <div class="waveform-style-options">
+            <button class="waveform-option-btn" data-type="spectrogram" onclick="app.setWaveformType('spectrogram')">
+              <span class="option-icon">📊</span>
+              <span class="option-name">Spectrum</span>
+              <span class="option-desc">Heat map showing audio intensity</span>
+            </button>
+            <button class="waveform-option-btn" data-type="bars" onclick="app.setWaveformType('bars')">
+              <span class="option-icon">▮▯▮</span>
+              <span class="option-name">Bars</span>
+              <span class="option-desc">Vertical bars showing amplitude</span>
+            </button>
+            <button class="waveform-option-btn" data-type="mirror" onclick="app.setWaveformType('mirror')">
+              <span class="option-icon">〰️</span>
+              <span class="option-name">Mirror</span>
+              <span class="option-desc">Classic Pro Tools style waveform</span>
+            </button>
+            <button class="waveform-option-btn" data-type="line" onclick="app.setWaveformType('line')">
+              <span class="option-icon">📈</span>
+              <span class="option-name">Line</span>
+              <span class="option-desc">Single line oscillation</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Version Tree Modal -->
+  <div id="versionTreeModal" class="modal-overlay" style="display: none;">
+    <div class="modal" style="max-width: 500px; max-height: 80vh;">
+      <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h3 class="modal-title" style="margin: 0;">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 8px;">
+            <circle cx="18" cy="18" r="3"></circle>
+            <circle cx="6" cy="6" r="3"></circle>
+            <path d="M6 21V9a9 9 0 0 0 9 9"></path>
+          </svg>
+          Version Tree
+        </h3>
+        <button class="btn btn-ghost" onclick="app.closeVersionTreeModal()" style="padding: 4px 8px;">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+      <div class="modal-body" style="overflow-y: auto; max-height: calc(80vh - 140px);">
+        <div id="versionTreeContainer" class="version-tree-container">
+          <!-- Populated by JS -->
+          <p style="color: var(--text-muted); font-size: 13px;">Loading version tree...</p>
+        </div>
+      </div>
+      <div class="modal-footer" style="margin-top: 16px; display: flex; gap: 8px; justify-content: flex-end;">
+        <button class="btn btn-ghost" onclick="app.closeVersionTreeModal()">Close</button>
+        <button class="btn btn-secondary" onclick="app.createNewVersion()">
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          New Version
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create Project Modal -->
+  <div id="createProjectModal" class="modal-overlay" style="display: none;">
+    <div class="modal" style="max-width: 500px;">
+      <h3 class="modal-title">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 8px;">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+        </svg>
+        Create New Project
+      </h3>
+      <p class="modal-subtitle">Projects contain assets shared across all versions</p>
+      
+      <div class="form-group" style="margin-top: 16px;">
+        <label class="form-label">Project Name</label>
+        <input type="text" class="form-input" id="newProjectName" placeholder="My Documentary" autofocus>
+      </div>
+      
+      <div class="form-group" style="margin-top: 16px;">
+        <label class="form-label">Select Videos from Space</label>
+        <div id="spaceVideosList" style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; background: var(--bg-darker);">
+          <p style="color: var(--text-muted); font-size: 12px; margin: 0;">Loading videos...</p>
+        </div>
+        <p style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Select videos to include as project assets</p>
+      </div>
+      
+      <div style="margin-top: 20px; display: flex; gap: 8px; justify-content: flex-end;">
+        <button class="btn btn-ghost" onclick="app.closeCreateProjectModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="app.confirmCreateProject()">Create Project</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Branch Version Modal -->
+  <div id="branchVersionModal" class="modal-overlay" style="display: none;">
+    <div class="modal" style="max-width: 400px;">
+      <h3 class="modal-title">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 8px;">
+          <line x1="6" y1="3" x2="6" y2="15"></line>
+          <circle cx="18" cy="6" r="3"></circle>
+          <circle cx="6" cy="18" r="3"></circle>
+          <path d="M18 9a9 9 0 0 1-9 9"></path>
+        </svg>
+        Branch Version
+      </h3>
+      <p class="modal-subtitle" id="branchSourceInfo">Create a new branch from this version</p>
+      
+      <div class="form-group" style="margin-top: 16px;">
+        <label class="form-label">New Version Name</label>
+        <input type="text" class="form-input" id="branchVersionName" placeholder="Trailer v2" autofocus>
+      </div>
+      
+      <p style="font-size: 11px; color: var(--text-muted); margin-top: 8px;">
+        This will copy all markers, tracks, and edit data to the new version.
+      </p>
+      
+      <div style="margin-top: 20px; display: flex; gap: 8px; justify-content: flex-end;">
+        <button class="btn btn-ghost" onclick="app.closeBranchVersionModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="app.confirmBranchVersion()">Create Branch</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Rename Version Modal -->
+  <div id="renameVersionModal" class="modal-overlay" style="display: none;">
+    <div class="modal" style="max-width: 350px;">
+      <h3 class="modal-title">Rename Version</h3>
+      
+      <div class="form-group" style="margin-top: 16px;">
+        <label class="form-label">Version Name</label>
+        <input type="text" class="form-input" id="renameVersionName" placeholder="Version name" autofocus>
+      </div>
+      
+      <div style="margin-top: 20px; display: flex; gap: 8px; justify-content: flex-end;">
+        <button class="btn btn-ghost" onclick="app.closeRenameVersionModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="app.confirmRenameVersion()">Rename</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Release Modal -->
+  <div id="releaseModal" class="modal-overlay" style="display: none;">
+    <div class="modal" style="max-width: 550px; max-height: 85vh; overflow-y: auto;">
+      <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h3 class="modal-title" style="margin: 0;">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 8px;">
+            <path d="M22 2L11 13"></path>
+            <path d="M22 2l-7 20-4-9-9-4 20-7z"></path>
+          </svg>
+          Release Video
+        </h3>
+        <button class="btn btn-ghost" onclick="app.closeReleaseModal()" style="padding: 4px 8px;">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+      
+      <!-- Branch/Version Selection -->
+      <div class="release-section" style="background: var(--bg-surface); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+        <div style="font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 12px; text-transform: uppercase;">Select Version to Release</div>
+        <div id="releaseBranchList" class="release-branch-list">
+          <!-- Populated by JS -->
+          <div style="color: var(--text-muted); font-size: 13px; padding: 20px; text-align: center;">Loading branches...</div>
+        </div>
+      </div>
+
+      <!-- Destination Selection -->
+      <div class="release-section" style="background: var(--bg-surface); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+        <div style="font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 12px; text-transform: uppercase;">Release Destination</div>
+        <div class="release-destinations" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;">
+          <button class="release-dest-btn active" data-dest="space" onclick="app.selectReleaseDestination('space')" style="display: flex; flex-direction: column; align-items: center; padding: 16px 8px; background: var(--bg-elevated); border: 2px solid var(--accent); border-radius: 8px; cursor: pointer; transition: all 0.2s;">
+            <span style="font-size: 24px; margin-bottom: 6px;">📁</span>
+            <span style="font-size: 11px; font-weight: 500;">Space</span>
+          </button>
+          <button class="release-dest-btn" data-dest="youtube" onclick="app.selectReleaseDestination('youtube')" style="display: flex; flex-direction: column; align-items: center; padding: 16px 8px; background: var(--bg-elevated); border: 2px solid var(--border-color); border-radius: 8px; cursor: pointer; transition: all 0.2s;">
+            <span style="font-size: 24px; margin-bottom: 6px;">▶️</span>
+            <span style="font-size: 11px; font-weight: 500;">YouTube</span>
+          </button>
+          <button class="release-dest-btn" data-dest="vimeo" onclick="app.selectReleaseDestination('vimeo')" style="display: flex; flex-direction: column; align-items: center; padding: 16px 8px; background: var(--bg-elevated); border: 2px solid var(--border-color); border-radius: 8px; cursor: pointer; transition: all 0.2s;">
+            <span style="font-size: 24px; margin-bottom: 6px;">🎬</span>
+            <span style="font-size: 11px; font-weight: 500;">Vimeo</span>
+          </button>
+          <button class="release-dest-btn" data-dest="local" onclick="app.selectReleaseDestination('local')" style="display: flex; flex-direction: column; align-items: center; padding: 16px 8px; background: var(--bg-elevated); border: 2px solid var(--border-color); border-radius: 8px; cursor: pointer; transition: all 0.2s;">
+            <span style="font-size: 24px; margin-bottom: 6px;">💾</span>
+            <span style="font-size: 11px; font-weight: 500;">Local File</span>
+          </button>
+        </div>
+        <div id="releaseDestStatus" style="font-size: 11px; color: var(--text-muted); margin-top: 8px; text-align: center;"></div>
+      </div>
+
+      <!-- Release Metadata -->
+      <div class="release-section" id="releaseMetadataSection" style="background: var(--bg-surface); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+        <div style="font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 12px; text-transform: uppercase;">Video Details</div>
+        
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label class="form-label">Title</label>
+          <input type="text" class="form-input" id="releaseTitle" placeholder="Video title">
+        </div>
+        
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label class="form-label">Description</label>
+          <textarea class="form-input form-textarea" id="releaseDescription" rows="3" placeholder="Video description..."></textarea>
+        </div>
+        
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label class="form-label">Tags</label>
+          <input type="text" class="form-input" id="releaseTags" placeholder="tag1, tag2, tag3">
+        </div>
+        
+        <div class="form-group" id="releasePrivacyGroup">
+          <label class="form-label">Privacy</label>
+          <select class="form-select" id="releasePrivacy">
+            <option value="private">Private</option>
+            <option value="unlisted">Unlisted</option>
+            <option value="public">Public</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Release Progress (shown during release) -->
+      <div id="releaseProgressSection" style="display: none; background: var(--bg-surface); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+          <div class="release-spinner" style="width: 20px; height: 20px; border: 2px solid var(--border-color); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite;"></div>
+          <span id="releaseProgressStatus" style="font-size: 13px;">Preparing release...</span>
+        </div>
+        <div style="height: 6px; background: var(--bg-tertiary); border-radius: 3px; overflow: hidden;">
+          <div id="releaseProgressBar" style="height: 100%; width: 0%; background: var(--accent); border-radius: 3px; transition: width 0.3s;"></div>
+        </div>
+        <div id="releaseProgressPercent" style="font-size: 11px; color: var(--text-muted); margin-top: 6px; text-align: right;">0%</div>
+      </div>
+
+      <!-- Actions -->
+      <div style="display: flex; gap: 8px; justify-content: flex-end;">
+        <button class="btn btn-ghost" onclick="app.closeReleaseModal()">Cancel</button>
+        <button class="btn btn-primary" id="startReleaseBtn" onclick="app.startRelease()">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;">
+            <path d="M22 2L11 13"></path>
+            <path d="M22 2l-7 20-4-9-9-4 20-7z"></path>
+          </svg>
+          Release Now
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    /* Release Modal Styles */
+    .release-branch-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    
+    .release-branch-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+      background: var(--bg-elevated);
+      border: 2px solid var(--border-color);
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    .release-branch-item:hover {
+      border-color: var(--text-muted);
+    }
+    
+    .release-branch-item.selected {
+      border-color: var(--accent);
+      background: rgba(99, 102, 241, 0.1);
+    }
+    
+    .release-branch-icon {
+      font-size: 20px;
+    }
+    
+    .release-branch-info {
+      flex: 1;
+    }
+    
+    .release-branch-name {
+      font-weight: 600;
+      font-size: 13px;
+      color: var(--text-primary);
+    }
+    
+    .release-branch-meta {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+    
+    .release-branch-status {
+      font-size: 10px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-weight: 500;
+    }
+    
+    .release-branch-status.ready {
+      background: rgba(34, 197, 94, 0.2);
+      color: #22c55e;
+    }
+    
+    .release-branch-status.needs-render {
+      background: rgba(249, 115, 22, 0.2);
+      color: #f97316;
+    }
+    
+    .release-branch-status.unsaved {
+      background: rgba(239, 68, 68, 0.2);
+      color: #ef4444;
+    }
+    
+    .release-dest-btn.active {
+      border-color: var(--accent) !important;
+      background: rgba(99, 102, 241, 0.1) !important;
+    }
+    
+    .release-dest-btn:hover:not(.active) {
+      border-color: var(--text-muted) !important;
+    }
+    
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</body>
+</html>
+

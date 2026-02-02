@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self' * https://*.onereach.ai https://*.api.onereach.ai; style-src 'self' 'unsafe-inline' * https://*.onereach.ai; style-src-elem 'self' 'unsafe-inline' * https://*.onereach.ai; script-src 'self' 'unsafe-inline' 'unsafe-eval' * https://*.onereach.ai; connect-src 'self' * https://*.onereach.ai https://*.api.onereach.ai; img-src 'self' data: blob: * https://*.onereach.ai; font-src 'self' data: * https://*.onereach.ai; media-src 'self' * https://*.onereach.ai; object-src 'none'; base-uri 'self'">
-    <title>Manage Your Digital Workers & Agents - Onereach.ai</title>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' * https://*.onereach.ai https://*.api.onereach.ai; style-src 'self' 'unsafe-inline' * https://*.onereach.ai; style-src-elem 'self' 'unsafe-inline' * https://*.onereach.ai; script-src 'self' 'unsafe-inline' 'unsafe-eval' * https://*.onereach.ai; connect-src 'self' * https://*.onereach.ai https://*.api.onereach.ai; img-src 'self' data: blob: spaces: * https://*.onereach.ai; font-src 'self' data: * https://*.onereach.ai; media-src 'self' * https://*.onereach.ai; object-src 'none'; base-uri 'self'">
+    <title>Manage Your Digital Workers & Agents - GSX Power User</title>
     <style>
         body {
             background-color: #141414;
@@ -19,10 +19,10 @@
             max-width: 800px;
             margin: 0 auto;
             background-color: #1a1a1a;
-            border-radius: 16px;
-            padding: 24px;
-            box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5);
-            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 32px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.04);
             min-height: 500px;
             position: relative;
         }
@@ -42,16 +42,17 @@
         }
 
         h2 {
-            font-size: 24px;
+            font-size: 18px;
+            font-weight: 500;
             margin: 0 0 20px;
             color: #fff;
         }
 
         .progress-bar {
-            height: 4px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 2px;
-            margin-bottom: 30px;
+            height: 2px;
+            background: rgba(255, 255, 255, 0.06);
+            border-radius: 1px;
+            margin-bottom: 24px;
             overflow: hidden;
             position: relative;
         }
@@ -59,45 +60,45 @@
         .progress {
             height: 100%;
             background: #0099ff;
-            transition: width 0.3s ease;
+            transition: width 0.2s ease;
         }
 
         .input-group {
-            margin-bottom: 24px;
+            margin-bottom: 20px;
         }
 
         label {
             display: block;
-            margin-bottom: 8px;
-            color: rgba(255, 255, 255, 0.8);
+            margin-bottom: 6px;
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 13px;
         }
 
         input[type="text"], input[type="url"] {
             width: 100%;
-            padding: 12px;
-            border: 2px solid rgba(255, 255, 255, 0.08);
-            border-radius: 12px;
+            padding: 10px 12px;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 8px;
             background-color: rgba(255, 255, 255, 0.03);
             color: #ffffff;
             font-size: 14px;
             box-sizing: border-box;
-            transition: all 0.2s ease;
+            transition: border-color 0.15s ease;
         }
 
         input:focus {
             outline: none;
             border-color: #0099ff;
-            background-color: rgba(255, 255, 255, 0.05);
-            box-shadow: 0 0 0 4px rgba(0, 153, 255, 0.1);
+            background-color: rgba(255, 255, 255, 0.04);
         }
 
         .button-container {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-top: 30px;
-            padding-top: 20px;
-            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            margin-top: 24px;
+            padding-top: 16px;
+            border-top: 1px solid rgba(255, 255, 255, 0.04);
         }
 
         .button-container .right-buttons {
@@ -106,14 +107,14 @@
         }
 
         button {
-            padding: 12px 24px;
+            padding: 10px 20px;
             border: none;
-            border-radius: 12px;
+            border-radius: 8px;
             font-size: 14px;
             font-weight: 500;
             cursor: pointer;
-            transition: all 0.2s ease;
-            min-width: 100px;
+            transition: opacity 0.15s ease, background-color 0.15s ease;
+            min-width: 90px;
         }
 
         .next-btn {
@@ -122,20 +123,18 @@
         }
 
         .next-btn:hover {
-            background-color: #0088ee;
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(0, 153, 255, 0.3);
+            background-color: #0080dd;
         }
 
         .back-btn {
-            background-color: rgba(255, 255, 255, 0.06);
-            color: white;
-            border: 2px solid rgba(255, 255, 255, 0.08);
+            background-color: transparent;
+            color: rgba(255, 255, 255, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
         .back-btn:hover {
-            background-color: rgba(255, 255, 255, 0.08);
-            border-color: rgba(255, 255, 255, 0.12);
+            background-color: rgba(255, 255, 255, 0.05);
+            color: #fff;
         }
 
         .gsx-links, .rss-feeds {
@@ -171,34 +170,34 @@
         .link-item {
             display: flex;
             gap: 12px;
-            margin-bottom: 12px;
-            background: rgba(255, 255, 255, 0.03);
-            padding: 12px;
-            border-radius: 8px;
-            border: 1px solid rgba(255, 255, 255, 0.08);
+            margin-bottom: 8px;
+            background: transparent;
+            padding: 10px 0;
+            border-radius: 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
         }
 
         .add-btn {
             width: 100%;
-            padding: 12px;
+            padding: 10px;
             margin-top: 12px;
-            background-color: rgba(255, 255, 255, 0.06);
-            color: white;
-            border: 2px solid rgba(255, 255, 255, 0.08);
-            border-radius: 12px;
+            background-color: transparent;
+            color: rgba(255, 255, 255, 0.6);
+            border: 1px dashed rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: color 0.15s ease, border-color 0.15s ease;
         }
 
         .add-btn:hover {
-            background-color: rgba(255, 255, 255, 0.08);
-            border-color: rgba(255, 255, 255, 0.12);
+            color: #fff;
+            border-color: rgba(255, 255, 255, 0.2);
         }
 
         .validation-message {
-            color: #ff3b30;
-            font-size: 12px;
-            margin-top: 8px;
+            color: #ff6b6b;
+            font-size: 11px;
+            margin-top: 4px;
             display: none;
         }
 
@@ -207,18 +206,18 @@
         }
 
         .validation-message.success {
-            color: #34c759;
+            color: #51cf66;
         }
 
         .environment-info {
             margin-top: 16px;
-            padding: 12px;
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 8px;
-            border: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 12px 0;
+            background: transparent;
+            border-radius: 0;
+            border-top: 1px solid rgba(255, 255, 255, 0.04);
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            gap: 6px;
         }
 
         .environment-info label {
@@ -237,20 +236,20 @@
 
         .url-group {
             position: relative;
-            margin-bottom: 20px;
+            margin-bottom: 16px;
         }
 
         .url-label-container {
             display: flex;
             align-items: center;
-            gap: 8px;
-            margin-bottom: 4px;
+            gap: 6px;
+            margin-bottom: 6px;
         }
 
         .info-icon {
             cursor: help;
-            color: rgba(255, 255, 255, 0.6);
-            font-size: 16px;
+            color: rgba(255, 255, 255, 0.35);
+            font-size: 14px;
             position: relative;
             display: inline-flex;
             align-items: center;
@@ -260,83 +259,81 @@
         .info-icon:hover::after {
             content: attr(data-tooltip);
             position: absolute;
-            left: 24px;
+            left: 20px;
             top: 50%;
             transform: translateY(-50%);
-            background: rgba(0, 0, 0, 0.9);
-            color: white;
-            padding: 8px 12px;
-            border-radius: 6px;
-            font-size: 12px;
+            background: #222;
+            color: rgba(255, 255, 255, 0.9);
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 11px;
             white-space: nowrap;
             z-index: 1000;
-            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
         }
 
         .preferences-container {
             display: flex;
             flex-direction: column;
-            gap: 16px;
-            margin-top: 20px;
+            gap: 0;
+            margin-top: 16px;
         }
 
         .preference-group {
-            background: rgba(255, 255, 255, 0.03);
-            border-radius: 12px;
-            padding: 16px;
-            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: transparent;
+            border-radius: 0;
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
         }
 
         .checkbox-label {
             display: flex;
             align-items: flex-start;
-            gap: 12px;
+            gap: 10px;
             cursor: pointer;
         }
 
         .checkbox-label input[type="checkbox"] {
-            margin-top: 4px;
-            width: 18px;
-            height: 18px;
+            margin-top: 3px;
+            width: 16px;
+            height: 16px;
             border-radius: 4px;
-            border: 2px solid rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.2);
             appearance: none;
             -webkit-appearance: none;
             cursor: pointer;
             position: relative;
-            transition: all 0.2s ease;
+            transition: background-color 0.15s ease;
         }
 
         .checkbox-label input[type="checkbox"]:checked {
             background-color: #0099ff;
             border-color: #0099ff;
-            box-shadow: 0 0 0 2px rgba(0, 153, 255, 0.2);
         }
 
         .checkbox-label input[type="checkbox"]:checked::after {
             content: '✓';
             position: absolute;
             color: white;
-            font-size: 12px;
-            left: 3px;
+            font-size: 11px;
+            left: 2px;
             top: 0px;
         }
 
         .checkbox-label span {
             font-weight: 500;
-            font-size: 16px;
+            font-size: 14px;
             color: #ffffff;
         }
 
         .checkbox-label small {
             display: block;
-            color: rgba(255, 255, 255, 0.6);
-            font-size: 13px;
-            margin-top: 4px;
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 12px;
+            margin-top: 2px;
         }
 
         .checkbox-label:hover span {
-            color: #0099ff;
+            color: rgba(255, 255, 255, 0.9);
         }
 
         /* Apply same scrollbar style to the entire body */
@@ -364,24 +361,25 @@
         }
 
         .select-all-btn {
-            background: rgba(255, 255, 255, 0.06);
-            border: 2px solid rgba(255, 255, 255, 0.08);
-            color: white;
-            padding: 8px 16px;
-            border-radius: 8px;
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 0.7);
+            padding: 6px 14px;
+            border-radius: 6px;
             cursor: pointer;
-            font-size: 14px;
-            transition: all 0.2s ease;
+            font-size: 13px;
+            transition: background-color 0.15s ease;
         }
 
         .select-all-btn:hover {
-            background: rgba(255, 255, 255, 0.08);
-            border-color: rgba(255, 255, 255, 0.12);
+            background: rgba(255, 255, 255, 0.05);
+            color: #fff;
         }
 
         .select-all-btn.all-selected {
             background: #0099ff;
             border-color: #0099ff;
+            color: #fff;
         }
 
         .url-group .info-icon[data-tooltip] {
@@ -392,14 +390,12 @@
         }
 
         .url-group .info-icon[data-tooltip]::after {
-            width: 280px;
+            width: 240px;
             white-space: pre-wrap;
             line-height: 1.4;
-            padding: 10px;
-            border-radius: 6px;
-            background: rgba(0, 0, 0, 0.9);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+            padding: 8px 10px;
+            border-radius: 4px;
+            background: #222;
         }
 
         #gsx-account-id {
@@ -408,18 +404,61 @@
         }
 
         .gsx-info {
-            font-size: 12px;
-            color: rgba(255, 255, 255, 0.6);
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.4);
             margin-top: 4px;
-            padding-left: 4px;
+            padding-left: 0;
+        }
+
+        .credentials-section {
+            border-top: 1px solid rgba(255, 255, 255, 0.04);
+            padding-top: 16px;
+            margin-top: 16px;
+        }
+
+        .credentials-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .toggle-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .toggle-label input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+            accent-color: #0099ff;
+        }
+
+        .toggle-text {
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 14px;
+        }
+
+        #credentials-fields {
+            background: transparent;
+            border: none;
+            border-radius: 0;
+            padding: 16px 0 0 0;
+        }
+
+        #credentials-fields input {
+            background-color: rgba(255, 255, 255, 0.03);
         }
 
         .environment-selector {
-            margin-bottom: 24px;
-            padding: 16px;
-            background: rgba(255, 255, 255, 0.03);
-            border-radius: 12px;
-            border: 1px solid rgba(255, 255, 255, 0.08);
+            margin-bottom: 20px;
+            padding: 0;
+            background: transparent;
+            border-radius: 0;
+            border: none;
         }
         
         .select-wrapper {
@@ -439,50 +478,51 @@
         
         select {
             width: 100%;
-            padding: 12px;
-            border: 2px solid rgba(255, 255, 255, 0.08);
-            border-radius: 12px;
+            padding: 10px 12px;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 8px;
             background-color: rgba(255, 255, 255, 0.03);
             color: #ffffff;
             font-size: 14px;
             appearance: none;
             -webkit-appearance: none;
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: border-color 0.15s ease;
         }
         
         select:focus {
             outline: none;
             border-color: #0099ff;
-            background-color: rgba(255, 255, 255, 0.05);
-            box-shadow: 0 0 0 4px rgba(0, 153, 255, 0.1);
+            background-color: rgba(255, 255, 255, 0.04);
         }
 
         /* Custom GSX link styles */
         .custom-link {
-            background-color: rgba(0, 153, 255, 0.05);
-            border: 1px dashed rgba(0, 153, 255, 0.2);
+            background-color: transparent;
+            border: 1px dashed rgba(255, 255, 255, 0.1);
             display: flex;
             align-items: center;
             gap: 8px;
+            padding: 10px;
+            border-radius: 6px;
         }
 
         .custom-url, .custom-label {
             flex: 1;
             padding: 8px;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.06);
             border-radius: 6px;
             color: #ffffff;
         }
 
         .save-custom-btn, .remove-custom-btn {
-            padding: 8px 12px;
+            padding: 6px 10px;
             border: none;
             border-radius: 6px;
             cursor: pointer;
             font-size: 12px;
-            transition: all 0.2s ease;
+            transition: opacity 0.15s ease;
         }
 
         .save-custom-btn {
@@ -491,93 +531,86 @@
         }
 
         .save-custom-btn:hover {
-            background-color: #0088ee;
+            opacity: 0.9;
         }
 
         .remove-custom-btn {
-            background-color: rgba(255, 0, 0, 0.2);
+            background-color: transparent;
             color: #ff3b30;
-            padding: 8px;
-            font-size: 14px;
+            padding: 6px 10px;
+            font-size: 12px;
+            border: 1px solid rgba(255, 59, 48, 0.3);
         }
 
         .remove-custom-btn:hover {
-            background-color: rgba(255, 0, 0, 0.3);
+            background-color: rgba(255, 59, 48, 0.1);
         }
 
-        /* Choice card styles */
+        /* Choice card styles - Compact grid */
         .choice-container {
-            display: flex;
-            gap: 16px;
-            margin: 40px 0;
-            justify-content: center;
-            flex-wrap: wrap;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin: 24px 0;
         }
 
         .choice-card {
-            flex: 1;
-            max-width: 260px;
-            min-width: 240px;
-            padding: 24px;
-            background: rgba(255, 255, 255, 0.03);
-            border: 2px solid rgba(255, 255, 255, 0.08);
-            border-radius: 16px;
+            padding: 16px;
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 8px;
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: background-color 0.15s ease, border-color 0.15s ease;
             text-align: center;
         }
 
         .choice-card:hover {
-            background: rgba(255, 255, 255, 0.06);
-            border-color: #0099ff;
-            transform: translateY(-2px);
-            box-shadow: 0 8px 24px rgba(0, 153, 255, 0.2);
+            background: rgba(255, 255, 255, 0.03);
+            border-color: rgba(255, 255, 255, 0.12);
         }
 
         .choice-icon {
-            font-size: 42px;
-            margin-bottom: 14px;
+            font-size: 28px;
+            margin-bottom: 8px;
         }
 
         .choice-card h3 {
-            font-size: 18px;
-            margin: 0 0 10px;
+            font-size: 14px;
+            font-weight: 500;
+            margin: 0;
             color: #ffffff;
         }
 
         .choice-card p {
-            margin: 0;
-            color: rgba(255, 255, 255, 0.7);
-            font-size: 13px;
-            line-height: 1.5;
+            display: none;
         }
 
         /* External agent styles */
         .bot-type-selector {
-            margin-bottom: 24px;
+            margin-bottom: 20px;
         }
 
         .bot-type-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 12px;
-            margin-top: 12px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
         }
 
         .bot-type-btn {
-            padding: 12px;
-            background: rgba(255, 255, 255, 0.03);
-            border: 2px solid rgba(255, 255, 255, 0.08);
-            border-radius: 12px;
-            color: #ffffff;
+            padding: 8px 14px;
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 6px;
+            color: rgba(255, 255, 255, 0.7);
             cursor: pointer;
-            transition: all 0.2s ease;
-            font-size: 14px;
+            transition: background-color 0.15s ease, border-color 0.15s ease;
+            font-size: 13px;
         }
 
         .bot-type-btn:hover {
-            background: rgba(255, 255, 255, 0.06);
-            border-color: rgba(255, 255, 255, 0.12);
+            background: rgba(255, 255, 255, 0.04);
+            color: #fff;
         }
 
         .bot-type-btn.selected {
@@ -587,75 +620,209 @@
         }
 
         .external-bot-info {
-            margin-top: 20px;
-            padding: 16px;
-            background: rgba(0, 153, 255, 0.1);
-            border: 1px solid rgba(0, 153, 255, 0.2);
-            border-radius: 12px;
-            font-size: 14px;
+            margin-top: 16px;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.02);
+            border-left: 2px solid rgba(0, 153, 255, 0.4);
+            border-radius: 0;
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        /* Manager view styles - Two-column layout */
+        .agent-manager-layout {
+            display: flex;
+            gap: 24px;
+            height: calc(100vh - 320px);
+            min-height: 400px;
+            max-height: 600px;
+            margin: 16px 0;
+        }
+
+        /* Left Sidebar */
+        .agent-sidebar {
+            width: 160px;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            background: transparent;
+            border-radius: 0;
+            padding: 0;
+            border-right: 1px solid rgba(255, 255, 255, 0.04);
+            padding-right: 16px;
+        }
+
+        .agent-search {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            background: rgba(255, 255, 255, 0.02);
+            color: #ffffff;
+            border-radius: 6px;
+            font-size: 13px;
+            margin-bottom: 16px;
+            box-sizing: border-box;
+            transition: border-color 0.15s ease;
+        }
+
+        .agent-search:focus {
+            outline: none;
+            border-color: #0099ff;
+        }
+
+        .agent-search::placeholder {
+            color: rgba(255, 255, 255, 0.3);
+        }
+
+        .category-list {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .category-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: color 0.15s ease;
+            margin-bottom: 2px;
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        .category-item:hover {
             color: rgba(255, 255, 255, 0.8);
         }
 
-        /* Manager view styles */
-        .environments-list {
-            margin: 20px 0;
-            max-height: 400px;
+        .category-item.active {
+            color: #0099ff;
+            background: transparent;
+        }
+
+        .category-icon {
+            display: none;
+        }
+
+        .category-name {
+            flex: 1;
+            font-size: 13px;
+            font-weight: 400;
+        }
+
+        .category-count {
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.35);
+            padding: 0;
+            min-width: auto;
+            text-align: right;
+        }
+
+        .category-item.active .category-count {
+            color: rgba(0, 153, 255, 0.7);
+        }
+
+        /* Main Content Area */
+        .agent-main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+
+        .agent-list-header {
+            font-size: 12px;
+            font-weight: 500;
+            color: rgba(255, 255, 255, 0.4);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 0 0 8px 0;
+            margin-bottom: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            flex-shrink: 0;
+        }
+
+        .agent-list {
+            flex: 1;
             overflow-y: auto;
-            padding-right: 10px;
+            padding-right: 8px;
         }
 
-        .environments-list::-webkit-scrollbar {
-            width: 6px;
+        .agent-list::-webkit-scrollbar {
+            width: 4px;
         }
 
-        .environments-list::-webkit-scrollbar-track {
-            background: rgba(0, 0, 0, 0.2);
-            border-radius: 3px;
+        .agent-list::-webkit-scrollbar-track {
+            background: transparent;
         }
 
-        .environments-list::-webkit-scrollbar-thumb {
+        .agent-list::-webkit-scrollbar-thumb {
             background: rgba(255, 255, 255, 0.1);
-            border: 2px solid rgba(0, 0, 0, 0.2);
-            border-radius: 3px;
+            border-radius: 2px;
         }
 
-        .environments-list::-webkit-scrollbar-thumb:hover {
-            background: rgba(255, 255, 255, 0.2);
+        .agent-list::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        /* Empty state for filtered results */
+        .agent-empty-state {
+            text-align: center;
+            padding: 32px 16px;
+            color: rgba(255, 255, 255, 0.4);
+        }
+
+        .agent-empty-state .icon {
+            font-size: 32px;
+            margin-bottom: 8px;
+            opacity: 0.5;
+        }
+
+        .agent-empty-state .message {
+            font-size: 13px;
+        }
+
+        /* Legacy support - environments-list inside agent-list */
+        .environments-list {
+            margin: 0;
+            max-height: none;
+            overflow-y: visible;
+            padding-right: 0;
         }
 
         .environment-item {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 16px;
-            margin-bottom: 12px;
-            background: rgba(255, 255, 255, 0.03);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 12px;
-            transition: all 0.2s ease;
+            padding: 12px 0;
+            margin-bottom: 0;
+            background: transparent;
+            border: none;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            border-radius: 0;
+            transition: background-color 0.15s ease;
         }
 
         .environment-item:hover {
-            background: rgba(255, 255, 255, 0.05);
-            border-color: rgba(255, 255, 255, 0.12);
+            background: rgba(255, 255, 255, 0.02);
         }
 
         .environment-info {
             flex: 1;
             display: flex;
             flex-direction: column;
-            gap: 4px;
+            gap: 2px;
         }
 
         .environment-item-info {
             flex: 1;
             display: flex;
             flex-direction: column;
-            gap: 4px;
+            gap: 2px;
         }
 
         .environment-title {
-            font-size: 16px;
+            font-size: 14px;
             font-weight: 500;
             color: #ffffff;
             display: flex;
@@ -664,179 +831,173 @@
         }
 
         .environment-type {
-            font-size: 12px;
-            padding: 2px 8px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 12px;
-            color: rgba(255, 255, 255, 0.6);
+            font-size: 10px;
+            padding: 2px 6px;
+            background: transparent;
+            border-radius: 3px;
+            color: rgba(255, 255, 255, 0.5);
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
         }
 
         .environment-type.idw {
-            background: rgba(0, 153, 255, 0.2);
             color: #0099ff;
         }
 
         .environment-type.external {
-            background: rgba(52, 199, 89, 0.2);
             color: #34c759;
         }
 
         .environment-type.image {
-            background: rgba(255, 149, 0, 0.2);
             color: #ff9500;
         }
 
         .environment-type.video {
-            background: rgba(175, 82, 222, 0.2);
             color: #af52de;
         }
 
         .environment-type.audio {
-            background: rgba(255, 45, 85, 0.2);
             color: #ff2d55;
         }
 
         .environment-type.ui-design {
-            background: rgba(88, 86, 214, 0.2);
             color: #5856d6;
         }
 
         .environment-details {
-            font-size: 13px;
-            color: rgba(255, 255, 255, 0.6);
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.4);
         }
 
         .environment-shortcut {
-            font-size: 11px;
-            color: #0099ff;
-            margin-top: 4px;
+            font-size: 10px;
+            color: rgba(0, 153, 255, 0.8);
+            margin-top: 2px;
             font-family: monospace;
-            background: rgba(0, 153, 255, 0.1);
-            padding: 2px 6px;
-            border-radius: 4px;
+            background: transparent;
+            padding: 0;
             display: inline-block;
         }
 
         .environment-actions {
             display: flex;
-            gap: 8px;
+            gap: 6px;
+            opacity: 0;
+            transition: opacity 0.15s ease;
+        }
+
+        .environment-item:hover .environment-actions {
+            opacity: 1;
         }
 
         .action-btn {
-            padding: 8px 16px;
+            padding: 6px 12px;
             border: none;
-            border-radius: 8px;
-            font-size: 13px;
+            border-radius: 4px;
+            font-size: 12px;
             cursor: pointer;
-            transition: all 0.2s ease;
-            background: rgba(255, 255, 255, 0.06);
-            color: white;
-            border: 1px solid rgba(255, 255, 255, 0.08);
+            transition: opacity 0.15s ease;
+            background: transparent;
+            color: rgba(255, 255, 255, 0.6);
         }
 
         .action-btn:hover {
-            background: rgba(255, 255, 255, 0.08);
-            border-color: rgba(255, 255, 255, 0.12);
+            color: #fff;
         }
 
         .action-btn.edit {
-            background: rgba(0, 153, 255, 0.1);
-            border-color: rgba(0, 153, 255, 0.2);
             color: #0099ff;
         }
 
         .action-btn.edit:hover {
-            background: rgba(0, 153, 255, 0.2);
-            border-color: rgba(0, 153, 255, 0.3);
+            background: rgba(0, 153, 255, 0.1);
         }
 
         .action-btn.delete {
-            background: rgba(255, 59, 48, 0.1);
-            border-color: rgba(255, 59, 48, 0.2);
             color: #ff3b30;
         }
 
         .action-btn.delete:hover {
-            background: rgba(255, 59, 48, 0.2);
-            border-color: rgba(255, 59, 48, 0.3);
+            background: rgba(255, 59, 48, 0.1);
         }
 
         .empty-state {
             text-align: center;
-            padding: 60px 20px;
-            color: rgba(255, 255, 255, 0.5);
+            padding: 48px 20px;
+            color: rgba(255, 255, 255, 0.4);
         }
 
         .empty-state h3 {
-            font-size: 18px;
-            margin: 0 0 8px;
-            color: rgba(255, 255, 255, 0.7);
+            font-size: 16px;
+            margin: 0 0 6px;
+            color: rgba(255, 255, 255, 0.6);
+            font-weight: 500;
         }
 
         .empty-state p {
-            margin: 0 0 20px;
-            font-size: 14px;
+            margin: 0 0 16px;
+            font-size: 13px;
         }
 
         .add-button-container {
             display: flex;
             justify-content: center;
-            margin-bottom: 20px;
+            margin-bottom: 16px;
         }
 
         .primary-add-btn {
             background-color: #0099ff;
             color: white;
             border: none;
-            border-radius: 12px;
-            padding: 12px 24px;
-            font-size: 16px;
+            border-radius: 8px;
+            padding: 10px 20px;
+            font-size: 14px;
             font-weight: 500;
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: opacity 0.15s ease;
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
         }
 
         .primary-add-btn:hover {
-            background-color: #0088ee;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0, 153, 255, 0.3);
+            opacity: 0.9;
         }
 
         /* Audio category tabs */
         .audio-category-tabs {
             display: flex;
-            gap: 8px;
-            margin-top: 12px;
-            margin-bottom: 24px;
-            background: rgba(0, 0, 0, 0.3);
-            padding: 4px;
-            border-radius: 12px;
+            gap: 4px;
+            margin-top: 10px;
+            margin-bottom: 20px;
+            background: transparent;
+            padding: 0;
+            border-radius: 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
         }
 
         .category-tab {
-            flex: 1;
-            padding: 10px 16px;
+            padding: 8px 14px;
             background: transparent;
             border: none;
-            border-radius: 8px;
-            color: rgba(255, 255, 255, 0.6);
+            border-radius: 0;
+            border-bottom: 2px solid transparent;
+            color: rgba(255, 255, 255, 0.5);
             cursor: pointer;
-            transition: all 0.2s ease;
-            font-size: 14px;
+            transition: color 0.15s ease;
+            font-size: 13px;
             white-space: nowrap;
+            margin-bottom: -1px;
         }
 
         .category-tab:hover {
-            background: rgba(255, 255, 255, 0.05);
             color: rgba(255, 255, 255, 0.8);
         }
 
         .category-tab.active {
-            background: #0099ff;
-            color: white;
+            background: transparent;
+            color: #0099ff;
+            border-bottom-color: #0099ff;
             font-weight: 500;
         }
 
@@ -844,19 +1005,248 @@
             display: flex;
             gap: 8px;
         }
+
+        /* Agent Explorer Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.6);
+            z-index: 10000;
+            padding: 24px;
+            box-sizing: border-box;
+        }
+
+        .modal-content {
+            background: #1a1a1a;
+            border-radius: 12px;
+            max-width: 800px;
+            width: 100%;
+            max-height: calc(100vh - 48px);
+            margin: 0 auto;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.04);
+        }
+
+        .modal-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .modal-header h2 {
+            margin: 0;
+            color: white;
+            font-size: 18px;
+            font-weight: 500;
+        }
+
+        .modal-close-btn {
+            background: none;
+            border: none;
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 24px;
+            cursor: pointer;
+            padding: 0;
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            transition: color 0.15s ease;
+        }
+
+        .modal-close-btn:hover {
+            color: #fff;
+        }
+
+        .modal-body {
+            padding: 20px 24px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            overflow: hidden;
+        }
+
+        .search-filter-bar {
+            margin-bottom: 16px;
+            display: flex;
+            gap: 12px;
+            flex-shrink: 0;
+        }
+
+        .search-filter-bar input,
+        .search-filter-bar select {
+            padding: 8px 12px;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            background: rgba(255, 255, 255, 0.03);
+            color: white;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+
+        .search-filter-bar input {
+            flex: 1;
+        }
+
+        .search-filter-bar select {
+            cursor: pointer;
+        }
+
+        .modal-loading-state {
+            display: none;
+            text-align: center;
+            padding: 32px;
+            color: rgba(255, 255, 255, 0.5);
+            flex-shrink: 0;
+        }
+
+        .modal-loading-state .icon {
+            font-size: 32px;
+            margin-bottom: 8px;
+            opacity: 0.5;
+        }
+
+        .agents-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 12px;
+            flex: 1;
+            overflow-y: auto;
+            padding: 4px;
+            min-height: 200px;
+        }
+
+        .agents-grid::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .agents-grid::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .agents-grid::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+        }
+
+        .modal-empty-state {
+            display: none;
+            text-align: center;
+            padding: 32px;
+            color: rgba(255, 255, 255, 0.4);
+        }
+
+        .modal-empty-state .icon {
+            font-size: 28px;
+            margin-bottom: 8px;
+            opacity: 0.5;
+        }
+
+        .modal-empty-state .message {
+            font-size: 13px;
+        }
+
+        /* Browse button */
+        .browse-btn {
+            width: 100%;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.04);
+            color: rgba(255, 255, 255, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            transition: background-color 0.15s ease, color 0.15s ease;
+        }
+
+        .browse-btn:hover {
+            background: rgba(255, 255, 255, 0.06);
+            color: #fff;
+        }
+
+        .or-divider {
+            text-align: center;
+            margin: 16px 0;
+            color: rgba(255, 255, 255, 0.3);
+            font-size: 12px;
+        }
     </style>
 </head>
 <body>
     <div class="wizard-container">
         <div class="progress-bar">
-            <div class="progress" style="width: 33%"></div>
+            <div class="progress" style="width: 0%"></div>
         </div>
 
         <div class="step active" id="step0">
             <h2>Manage Your Digital Workers & Agents</h2>
             
-            <div class="environments-list" id="environments-list">
-                <!-- Will be populated with existing environments and agents -->
+            <!-- Two-column layout for sidebar + main list -->
+            <div class="agent-manager-layout">
+                <!-- Left Sidebar with Categories -->
+                <div class="agent-sidebar">
+                    <input type="text" class="agent-search" id="agentSearchInput" placeholder="Search agents..." oninput="handleAgentSearch(this.value)">
+                    <div class="category-list">
+                        <div class="category-item active" data-type="all" onclick="filterByCategory('all')">
+                            <span class="category-icon">📋</span>
+                            <span class="category-name">All</span>
+                            <span class="category-count" id="count-all">0</span>
+                        </div>
+                        <div class="category-item" data-type="idw" onclick="filterByCategory('idw')">
+                            <span class="category-icon">🏢</span>
+                            <span class="category-name">IDW</span>
+                            <span class="category-count" id="count-idw">0</span>
+                        </div>
+                        <div class="category-item" data-type="external" onclick="filterByCategory('external')">
+                            <span class="category-icon">🤖</span>
+                            <span class="category-name">Agents</span>
+                            <span class="category-count" id="count-external">0</span>
+                        </div>
+                        <div class="category-item" data-type="image" onclick="filterByCategory('image')">
+                            <span class="category-icon">🖼️</span>
+                            <span class="category-name">Image</span>
+                            <span class="category-count" id="count-image">0</span>
+                        </div>
+                        <div class="category-item" data-type="video" onclick="filterByCategory('video')">
+                            <span class="category-icon">🎬</span>
+                            <span class="category-name">Video</span>
+                            <span class="category-count" id="count-video">0</span>
+                        </div>
+                        <div class="category-item" data-type="audio" onclick="filterByCategory('audio')">
+                            <span class="category-icon">🔊</span>
+                            <span class="category-name">Audio</span>
+                            <span class="category-count" id="count-audio">0</span>
+                        </div>
+                        <div class="category-item" data-type="ui-design" onclick="filterByCategory('ui-design')">
+                            <span class="category-icon">🎨</span>
+                            <span class="category-name">UI Design</span>
+                            <span class="category-count" id="count-ui-design">0</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Main Content Area -->
+                <div class="agent-main">
+                    <div class="agent-list-header" id="agent-list-header">All Agents</div>
+                    <div class="agent-list" id="environments-list">
+                        <!-- Will be populated with existing environments and agents -->
+                    </div>
+                </div>
             </div>
             
             <div class="add-button-container">
@@ -914,30 +1304,11 @@
             <h2>Setup Your Digital Worker</h2>
             
             <!-- Browse Available Agents Button -->
-            <div class="browse-agents-container" style="margin-bottom: 25px;">
-                <button class="browse-btn" onclick="openAgentExplorer()" style="
-                    width: 100%;
-                    padding: 12px;
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    color: white;
-                    border: none;
-                    border-radius: 8px;
-                    cursor: pointer;
-                    font-size: 15px;
-                    font-weight: 500;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    gap: 8px;
-                    transition: transform 0.2s, box-shadow 0.2s;
-                " onmouseover="this.style.transform='scale(1.02)'; this.style.boxShadow='0 4px 12px rgba(102, 126, 234, 0.4)'" 
-                   onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='none'">
-                    <span>🔍</span>
+            <div class="browse-agents-container">
+                <button class="browse-btn" onclick="openAgentExplorer()">
                     Browse Available Agents
                 </button>
-                <div style="text-align: center; margin: 15px 0; color: rgba(255, 255, 255, 0.5);">
-                    — OR —
-                </div>
+                <div class="or-divider">or enter manually</div>
             </div>
             
             <div class="url-group">
@@ -974,6 +1345,30 @@
                 <input type="text" id="idw-global-shortcut" placeholder="e.g., CmdOrCtrl+Shift+1" oninput="validateIDWShortcut()">
                 <div class="validation-message" id="idw-shortcut-validation-message"></div>
                 <div class="gsx-info">Set a keyboard shortcut to quickly open this IDW from anywhere</div>
+            </div>
+
+            <!-- Login Credentials Section -->
+            <div class="input-group credentials-section">
+                <div class="credentials-toggle">
+                    <label class="toggle-label">
+                        <input type="checkbox" id="save-credentials-toggle" onchange="toggleCredentialsFields()">
+                        <span class="toggle-text">💾 Save login credentials (optional)</span>
+                    </label>
+                    <span class="info-icon" data-tooltip="Securely save your login for this IDW. Credentials are stored in your system's secure keychain.">ⓘ</span>
+                </div>
+                <div id="credentials-fields" style="display: none; margin-top: 12px;">
+                    <div class="url-group" style="margin-bottom: 12px;">
+                        <label for="idw-username">Username / Email</label>
+                        <input type="text" id="idw-username" placeholder="Enter your username or email" autocomplete="username">
+                    </div>
+                    <div class="url-group">
+                        <label for="idw-password">Password</label>
+                        <input type="password" id="idw-password" placeholder="Enter your password" autocomplete="current-password">
+                    </div>
+                    <div class="gsx-info" style="margin-top: 8px;">
+                        <span style="color: #667eea;">🔒</span> Credentials are stored securely in your system's keychain
+                    </div>
+                </div>
             </div>
 
             <div class="environment-info" id="environment-info" style="display: none;">
@@ -1018,6 +1413,7 @@
                     <button class="bot-type-btn" onclick="selectBotType('claude')">Claude</button>
                     <button class="bot-type-btn" onclick="selectBotType('perplexity')">Perplexity</button>
                     <button class="bot-type-btn" onclick="selectBotType('gemini')">Google Gemini</button>
+                    <button class="bot-type-btn" onclick="selectBotType('grok')">Grok</button>
                     <button class="bot-type-btn" onclick="selectBotType('custom')">Custom Agent</button>
                 </div>
             </div>
@@ -1326,114 +1722,43 @@
     </div>
 
     <!-- Agent Explorer Modal -->
-    <div id="agentExplorerModal" class="modal-overlay" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.7); z-index: 10000; overflow-y: auto;">
-        <div class="modal-content" style="
-            background: linear-gradient(135deg, #2c2c3e 0%, #1a1a2e 100%);
-            border-radius: 12px;
-            max-width: 900px;
-            margin: 40px auto;
-            padding: 0;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-        ">
-            <div class="modal-header" style="
-                padding: 20px 30px;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-            ">
-                <h2 style="margin: 0; color: white; font-size: 24px;">🔍 Explore Available Agents</h2>
-                <button onclick="closeAgentExplorer()" style="
-                    background: none;
-                    border: none;
-                    color: white;
-                    font-size: 28px;
-                    cursor: pointer;
-                    padding: 0;
-                    width: 32px;
-                    height: 32px;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    border-radius: 4px;
-                    transition: background 0.2s;
-                " onmouseover="this.style.background='rgba(255, 255, 255, 0.1)'" 
-                   onmouseout="this.style.background='none'">×</button>
+    <div id="agentExplorerModal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Explore Available Agents</h2>
+                <button class="modal-close-btn" onclick="closeAgentExplorer()">×</button>
             </div>
             
-            <div class="modal-body" style="padding: 20px 30px;">
+            <div class="modal-body">
                 <!-- Search and Filter Bar -->
-                <div class="search-filter-bar" style="margin-bottom: 20px; display: flex; gap: 15px;">
-                    <input type="text" id="agentSearchInput" placeholder="Search agents..." style="
-                        flex: 1;
-                        padding: 10px 15px;
-                        border: 1px solid rgba(255, 255, 255, 0.2);
-                        background: rgba(255, 255, 255, 0.05);
-                        color: white;
-                        border-radius: 8px;
-                        font-size: 14px;
-                    " oninput="filterAgents()">
-                    
-                    <select id="environmentFilter" onchange="filterAgents()" style="
-                        padding: 10px 15px;
-                        border: 1px solid rgba(255, 255, 255, 0.2);
-                        background: rgba(255, 255, 255, 0.05);
-                        color: white;
-                        border-radius: 8px;
-                        font-size: 14px;
-                        cursor: pointer;
-                    ">
+                <div class="search-filter-bar">
+                    <input type="text" id="agentSearchInput" placeholder="Search agents..." oninput="filterAgents()">
+                    <select id="environmentFilter" onchange="filterAgents()">
                         <option value="">All Environments</option>
                         <option value="production">Production</option>
                         <option value="staging">Staging</option>
                         <option value="edison">Edison</option>
                     </select>
-                    
-                    <select id="categoryFilter" onchange="filterAgents()" style="
-                        padding: 10px 15px;
-                        border: 1px solid rgba(255, 255, 255, 0.2);
-                        background: rgba(255, 255, 255, 0.05);
-                        color: white;
-                        border-radius: 8px;
-                        font-size: 14px;
-                        cursor: pointer;
-                    ">
+                    <select id="categoryFilter" onchange="filterAgents()">
                         <option value="">All Categories</option>
                     </select>
                 </div>
                 
                 <!-- Loading State -->
-                <div id="agentLoadingState" style="
-                    display: none;
-                    text-align: center;
-                    padding: 40px;
-                    color: rgba(255, 255, 255, 0.7);
-                ">
-                    <div style="font-size: 48px; margin-bottom: 10px;">⏳</div>
+                <div id="agentLoadingState" class="modal-loading-state">
+                    <div class="icon">⏳</div>
                     <div>Loading available agents...</div>
                 </div>
                 
                 <!-- Agents Grid -->
-                <div id="agentsGrid" style="
-                    display: grid;
-                    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-                    gap: 15px;
-                    max-height: 500px;
-                    overflow-y: auto;
-                    padding: 5px;
-                ">
+                <div id="agentsGrid" class="agents-grid">
                     <!-- Agent cards will be populated here -->
                 </div>
                 
                 <!-- Empty State -->
-                <div id="agentEmptyState" style="
-                    display: none;
-                    text-align: center;
-                    padding: 40px;
-                    color: rgba(255, 255, 255, 0.5);
-                ">
-                    <div style="font-size: 48px; margin-bottom: 10px;">🔍</div>
-                    <div>No agents found matching your criteria</div>
+                <div id="agentEmptyState" class="modal-empty-state">
+                    <div class="icon">🔍</div>
+                    <div class="message">No agents found matching your criteria</div>
                 </div>
             </div>
         </div>
@@ -1461,6 +1786,293 @@
         let selectedAudioGeneratorType = null;
         let selectedUIDesignType = null;
 
+        // Progress bar update function
+        function updateProgressBar() {
+            const progressBar = document.querySelector('.progress');
+            if (!progressBar) return;
+            
+            const currentStep = document.querySelector('.step.active');
+            if (!currentStep) return;
+            
+            const stepId = currentStep.id;
+            let progress = 0;
+            
+            // Calculate progress based on current step and workflow
+            switch(stepId) {
+                case 'step0':
+                    // Manager view - no progress shown
+                    progress = 0;
+                    break;
+                case 'step-choice':
+                    // Choice screen - early in the flow
+                    progress = 25;
+                    break;
+                case 'step1':
+                    // IDW flow step 1
+                    progress = 50;
+                    break;
+                case 'step2':
+                    // IDW flow step 2 (final)
+                    progress = 90;
+                    break;
+                case 'step-external':
+                case 'step-image':
+                case 'step-video':
+                case 'step-audio':
+                case 'step-ui-design':
+                    // Single-step flows - at the final step
+                    progress = 75;
+                    break;
+                default:
+                    progress = 0;
+            }
+            
+            progressBar.style.width = progress + '%';
+            
+            // Also save wizard state when progress updates
+            saveWizardState();
+        }
+
+        // Wizard state persistence functions
+        function saveWizardState() {
+            const currentStep = document.querySelector('.step.active');
+            if (!currentStep) return;
+            
+            const state = {
+                currentStepId: currentStep.id,
+                addType: addType,
+                selectedBotType: selectedBotType,
+                selectedImageCreatorType: selectedImageCreatorType,
+                selectedVideoCreatorType: selectedVideoCreatorType,
+                selectedAudioCategory: selectedAudioCategory,
+                selectedAudioGeneratorType: selectedAudioGeneratorType,
+                selectedUIDesignType: selectedUIDesignType,
+                formData: getFormData(),
+                timestamp: Date.now()
+            };
+            
+            localStorage.setItem('wizardState', JSON.stringify(state));
+        }
+
+        function getFormData() {
+            const formData = {};
+            
+            // IDW form data (step1)
+            const idwHomeUrl = document.getElementById('idw-home-url');
+            const idwChatUrl = document.getElementById('idw-chat-url');
+            const gsxAccountId = document.getElementById('gsx-account-id');
+            
+            if (idwHomeUrl) formData.idwHomeUrl = idwHomeUrl.value;
+            if (idwChatUrl) formData.idwChatUrl = idwChatUrl.value;
+            if (gsxAccountId) formData.gsxAccountId = gsxAccountId.value;
+            
+            // External bot form data
+            const botName = document.getElementById('bot-name');
+            const botChatUrl = document.getElementById('bot-chat-url');
+            const botApiUrl = document.getElementById('bot-api-url');
+            
+            if (botName) formData.botName = botName.value;
+            if (botChatUrl) formData.botChatUrl = botChatUrl.value;
+            if (botApiUrl) formData.botApiUrl = botApiUrl.value;
+            
+            // Image creator form data
+            const imageCreatorName = document.getElementById('image-creator-name');
+            const imageCreatorUrl = document.getElementById('image-creator-url');
+            const imageCreatorApiUrl = document.getElementById('image-creator-api-url');
+            
+            if (imageCreatorName) formData.imageCreatorName = imageCreatorName.value;
+            if (imageCreatorUrl) formData.imageCreatorUrl = imageCreatorUrl.value;
+            if (imageCreatorApiUrl) formData.imageCreatorApiUrl = imageCreatorApiUrl.value;
+            
+            // Video creator form data
+            const videoCreatorName = document.getElementById('video-creator-name');
+            const videoCreatorUrl = document.getElementById('video-creator-url');
+            const videoCreatorApiUrl = document.getElementById('video-creator-api-url');
+            
+            if (videoCreatorName) formData.videoCreatorName = videoCreatorName.value;
+            if (videoCreatorUrl) formData.videoCreatorUrl = videoCreatorUrl.value;
+            if (videoCreatorApiUrl) formData.videoCreatorApiUrl = videoCreatorApiUrl.value;
+            
+            // Audio generator form data
+            const audioGeneratorName = document.getElementById('audio-generator-name');
+            const audioGeneratorUrl = document.getElementById('audio-generator-url');
+            const audioGeneratorApiUrl = document.getElementById('audio-generator-api-url');
+            
+            if (audioGeneratorName) formData.audioGeneratorName = audioGeneratorName.value;
+            if (audioGeneratorUrl) formData.audioGeneratorUrl = audioGeneratorUrl.value;
+            if (audioGeneratorApiUrl) formData.audioGeneratorApiUrl = audioGeneratorApiUrl.value;
+            
+            // UI Design tool form data
+            const uiDesignName = document.getElementById('ui-design-name');
+            const uiDesignUrl = document.getElementById('ui-design-url');
+            const uiDesignApiUrl = document.getElementById('ui-design-api-url');
+            
+            if (uiDesignName) formData.uiDesignName = uiDesignName.value;
+            if (uiDesignUrl) formData.uiDesignUrl = uiDesignUrl.value;
+            if (uiDesignApiUrl) formData.uiDesignApiUrl = uiDesignApiUrl.value;
+            
+            return formData;
+        }
+
+        function restoreWizardState() {
+            const stateJson = localStorage.getItem('wizardState');
+            if (!stateJson) return false;
+            
+            try {
+                const state = JSON.parse(stateJson);
+                
+                // Check if state is stale (older than 24 hours)
+                const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+                if (Date.now() - state.timestamp > maxAge) {
+                    localStorage.removeItem('wizardState');
+                    return false;
+                }
+                
+                // Only restore if we're not on the manager step (step0)
+                // and the saved step is not step0
+                if (state.currentStepId && state.currentStepId !== 'step0') {
+                    // Restore selection states
+                    addType = state.addType || 'idw';
+                    selectedBotType = state.selectedBotType;
+                    selectedImageCreatorType = state.selectedImageCreatorType;
+                    selectedVideoCreatorType = state.selectedVideoCreatorType;
+                    selectedAudioCategory = state.selectedAudioCategory;
+                    selectedAudioGeneratorType = state.selectedAudioGeneratorType;
+                    selectedUIDesignType = state.selectedUIDesignType;
+                    
+                    // Switch to the saved step
+                    document.querySelectorAll('.step').forEach(step => {
+                        step.classList.remove('active');
+                    });
+                    
+                    const targetStep = document.getElementById(state.currentStepId);
+                    if (targetStep) {
+                        targetStep.classList.add('active');
+                        
+                        // Restore form data
+                        if (state.formData) {
+                            restoreFormData(state.formData);
+                        }
+                        
+                        // Update progress bar without saving (to avoid overwriting)
+                        const progressBar = document.querySelector('.progress');
+                        if (progressBar) {
+                            let progress = 0;
+                            switch(state.currentStepId) {
+                                case 'step-choice': progress = 25; break;
+                                case 'step1': progress = 50; break;
+                                case 'step2': progress = 90; break;
+                                case 'step-external':
+                                case 'step-image':
+                                case 'step-video':
+                                case 'step-audio':
+                                case 'step-ui-design':
+                                    progress = 75; break;
+                            }
+                            progressBar.style.width = progress + '%';
+                        }
+                        
+                        return true;
+                    }
+                }
+            } catch (e) {
+                console.error('Error restoring wizard state:', e);
+                localStorage.removeItem('wizardState');
+            }
+            
+            return false;
+        }
+
+        function restoreFormData(formData) {
+            // IDW form data
+            if (formData.idwHomeUrl) {
+                const el = document.getElementById('idw-home-url');
+                if (el) el.value = formData.idwHomeUrl;
+            }
+            if (formData.idwChatUrl) {
+                const el = document.getElementById('idw-chat-url');
+                if (el) el.value = formData.idwChatUrl;
+            }
+            if (formData.gsxAccountId) {
+                const el = document.getElementById('gsx-account-id');
+                if (el) el.value = formData.gsxAccountId;
+            }
+            
+            // External bot form data
+            if (formData.botName) {
+                const el = document.getElementById('bot-name');
+                if (el) el.value = formData.botName;
+            }
+            if (formData.botChatUrl) {
+                const el = document.getElementById('bot-chat-url');
+                if (el) el.value = formData.botChatUrl;
+            }
+            if (formData.botApiUrl) {
+                const el = document.getElementById('bot-api-url');
+                if (el) el.value = formData.botApiUrl;
+            }
+            
+            // Image creator form data
+            if (formData.imageCreatorName) {
+                const el = document.getElementById('image-creator-name');
+                if (el) el.value = formData.imageCreatorName;
+            }
+            if (formData.imageCreatorUrl) {
+                const el = document.getElementById('image-creator-url');
+                if (el) el.value = formData.imageCreatorUrl;
+            }
+            if (formData.imageCreatorApiUrl) {
+                const el = document.getElementById('image-creator-api-url');
+                if (el) el.value = formData.imageCreatorApiUrl;
+            }
+            
+            // Video creator form data
+            if (formData.videoCreatorName) {
+                const el = document.getElementById('video-creator-name');
+                if (el) el.value = formData.videoCreatorName;
+            }
+            if (formData.videoCreatorUrl) {
+                const el = document.getElementById('video-creator-url');
+                if (el) el.value = formData.videoCreatorUrl;
+            }
+            if (formData.videoCreatorApiUrl) {
+                const el = document.getElementById('video-creator-api-url');
+                if (el) el.value = formData.videoCreatorApiUrl;
+            }
+            
+            // Audio generator form data
+            if (formData.audioGeneratorName) {
+                const el = document.getElementById('audio-generator-name');
+                if (el) el.value = formData.audioGeneratorName;
+            }
+            if (formData.audioGeneratorUrl) {
+                const el = document.getElementById('audio-generator-url');
+                if (el) el.value = formData.audioGeneratorUrl;
+            }
+            if (formData.audioGeneratorApiUrl) {
+                const el = document.getElementById('audio-generator-api-url');
+                if (el) el.value = formData.audioGeneratorApiUrl;
+            }
+            
+            // UI Design tool form data
+            if (formData.uiDesignName) {
+                const el = document.getElementById('ui-design-name');
+                if (el) el.value = formData.uiDesignName;
+            }
+            if (formData.uiDesignUrl) {
+                const el = document.getElementById('ui-design-url');
+                if (el) el.value = formData.uiDesignUrl;
+            }
+            if (formData.uiDesignApiUrl) {
+                const el = document.getElementById('ui-design-api-url');
+                if (el) el.value = formData.uiDesignApiUrl;
+            }
+        }
+
+        function clearWizardState() {
+            localStorage.removeItem('wizardState');
+        }
+
         // Predefined bot configurations
         // Agent type configurations
         const botConfigs = {
@@ -1487,6 +2099,12 @@
                 chatUrl: 'https://gemini.google.com/',
                 apiUrl: 'https://ai.google.dev/docs',
                 info: 'Google\'s Gemini - Multimodal AI model with advanced reasoning'
+            },
+            grok: {
+                name: 'Grok',
+                chatUrl: 'https://x.ai/grok',
+                apiUrl: 'https://docs.x.ai/',
+                info: 'xAI\'s Grok - Advanced AI with real-time knowledge and a unique personality'
             }
         };
 
@@ -1705,6 +2323,7 @@
                     document.getElementById('step-ui-design').classList.add('active');
                     break;
             }
+            updateProgressBar();
         }
 
         // Function to go back to choice screen
@@ -1715,6 +2334,7 @@
             });
             // Show choice step
             document.getElementById('step-choice').classList.add('active');
+            updateProgressBar();
         }
 
         // Function to select bot type
@@ -2518,12 +3138,13 @@
             return isValid;
         }
 
-        // Function to populate environments list
-        function populateEnvironmentsList() {
-            const listContainer = document.getElementById('environments-list');
-            listContainer.innerHTML = '';
-            
-            // Load all types of environments and bots
+        // State for filtering and search
+        let currentCategoryFilter = 'all';
+        let currentSearchQuery = '';
+        let searchDebounceTimer = null;
+
+        // Get all agent items from localStorage
+        function getAllAgentItems() {
             const idwEnvironments = JSON.parse(localStorage.getItem('idwEnvironments') || '[]');
             const externalBots = JSON.parse(localStorage.getItem('externalBots') || '[]');
             const imageCreators = JSON.parse(localStorage.getItem('imageCreators') || '[]');
@@ -2531,26 +3152,150 @@
             const audioGenerators = JSON.parse(localStorage.getItem('audioGenerators') || '[]');
             const uiDesignTools = JSON.parse(localStorage.getItem('uiDesignTools') || '[]');
             
-            const allItems = [
-                ...idwEnvironments.map(env => ({ ...env, type: 'idw' })),
-                ...externalBots.map(bot => ({ ...bot, type: 'external' })),
-                ...imageCreators.map(creator => ({ ...creator, type: 'image' })),
-                ...videoCreators.map(creator => ({ ...creator, type: 'video' })),
-                ...audioGenerators.map(gen => ({ ...gen, type: 'audio' })),
-                ...uiDesignTools.map(tool => ({ ...tool, type: 'ui-design' }))
-            ];
+            return {
+                all: [
+                    ...idwEnvironments.map(env => ({ ...env, type: 'idw' })),
+                    ...externalBots.map(bot => ({ ...bot, type: 'external' })),
+                    ...imageCreators.map(creator => ({ ...creator, type: 'image' })),
+                    ...videoCreators.map(creator => ({ ...creator, type: 'video' })),
+                    ...audioGenerators.map(gen => ({ ...gen, type: 'audio' })),
+                    ...uiDesignTools.map(tool => ({ ...tool, type: 'ui-design' }))
+                ],
+                counts: {
+                    all: idwEnvironments.length + externalBots.length + imageCreators.length + videoCreators.length + audioGenerators.length + uiDesignTools.length,
+                    idw: idwEnvironments.length,
+                    external: externalBots.length,
+                    image: imageCreators.length,
+                    video: videoCreators.length,
+                    audio: audioGenerators.length,
+                    'ui-design': uiDesignTools.length
+                }
+            };
+        }
+
+        // Update category counts in sidebar
+        function updateCategoryCounts() {
+            const { counts } = getAllAgentItems();
+            
+            document.getElementById('count-all').textContent = counts.all;
+            document.getElementById('count-idw').textContent = counts.idw;
+            document.getElementById('count-external').textContent = counts.external;
+            document.getElementById('count-image').textContent = counts.image;
+            document.getElementById('count-video').textContent = counts.video;
+            document.getElementById('count-audio').textContent = counts.audio;
+            document.getElementById('count-ui-design').textContent = counts['ui-design'];
+        }
+
+        // Filter by category
+        function filterByCategory(type) {
+            currentCategoryFilter = type;
+            
+            // Update active state in sidebar
+            document.querySelectorAll('.category-item').forEach(item => {
+                item.classList.remove('active');
+                if (item.dataset.type === type) {
+                    item.classList.add('active');
+                }
+            });
+            
+            // Update header
+            const headerMap = {
+                'all': 'All Agents',
+                'idw': 'IDW Environments',
+                'external': 'External Agents',
+                'image': 'Image Creators',
+                'video': 'Video Creators',
+                'audio': 'Audio Generators',
+                'ui-design': 'UI Design Tools'
+            };
+            document.getElementById('agent-list-header').textContent = headerMap[type] || 'All Agents';
+            
+            // Re-render list
+            populateEnvironmentsList();
+        }
+
+        // Handle search input with debounce
+        function handleAgentSearch(query) {
+            clearTimeout(searchDebounceTimer);
+            searchDebounceTimer = setTimeout(() => {
+                currentSearchQuery = query.toLowerCase().trim();
+                populateEnvironmentsList();
+            }, 300);
+        }
+
+        // Get item name based on type
+        function getItemName(item) {
+            switch(item.type) {
+                case 'idw': return item.label || '';
+                case 'external': return item.name || '';
+                case 'image': return item.name || '';
+                case 'video': return item.name || '';
+                case 'audio': return item.name || '';
+                case 'ui-design': return item.name || '';
+                default: return '';
+            }
+        }
+
+        // Function to populate environments list with filtering
+        function populateEnvironmentsList() {
+            const listContainer = document.getElementById('environments-list');
+            listContainer.innerHTML = '';
+            
+            const { all: allItems } = getAllAgentItems();
+            
+            // Update counts
+            updateCategoryCounts();
+            
+            console.log('[SetupWizard] populateEnvironmentsList:', {
+                total: allItems.length,
+                filter: currentCategoryFilter,
+                search: currentSearchQuery
+            });
+            
+            // Filter by category
+            let filteredItems = allItems;
+            if (currentCategoryFilter !== 'all') {
+                filteredItems = filteredItems.filter(item => item.type === currentCategoryFilter);
+            }
+            
+            // Filter by search query
+            if (currentSearchQuery) {
+                filteredItems = filteredItems.filter(item => {
+                    const name = getItemName(item).toLowerCase();
+                    return name.includes(currentSearchQuery);
+                });
+            }
             
             if (allItems.length === 0) {
                 listContainer.innerHTML = `
-                                    <div class="empty-state">
-                    <h3>No digital workers or agents configured</h3>
-                    <p>Click the button below to add your first digital worker or agent</p>
-                </div>
+                    <div class="agent-empty-state">
+                        <div class="icon">📋</div>
+                        <div class="message">No digital workers or agents configured</div>
+                        <div style="margin-top: 8px; font-size: 12px;">Click the button below to add your first one</div>
+                    </div>
                 `;
                 return;
             }
             
-            allItems.forEach(item => {
+            if (filteredItems.length === 0) {
+                listContainer.innerHTML = `
+                    <div class="agent-empty-state">
+                        <div class="icon">🔍</div>
+                        <div class="message">No agents found</div>
+                        <div style="margin-top: 8px; font-size: 12px;">Try a different search or category</div>
+                    </div>
+                `;
+                return;
+            }
+            
+            // Sort alphabetically by name
+            filteredItems.sort((a, b) => {
+                const nameA = getItemName(a).toLowerCase();
+                const nameB = getItemName(b).toLowerCase();
+                return nameA.localeCompare(nameB);
+            });
+            
+            filteredItems.forEach(item => {
                 const itemDiv = document.createElement('div');
                 itemDiv.className = 'environment-item';
                 
@@ -2708,6 +3453,7 @@
             
             // Validate
             validateAudioGenerator();
+            updateProgressBar();
         }
 
         // Function to delete audio generator from list
@@ -2747,6 +3493,7 @@
             // Listen for responses
             if (window.api && window.api.on) {
                 window.api.on('get-idw-environments', (environments) => {
+                    console.log('[SetupWizard] Received IDW environments:', environments?.length || 0);
                     localStorage.setItem('idwEnvironments', JSON.stringify(environments));
                     populateEnvironmentsList();
                 });
@@ -2782,6 +3529,28 @@
             
             // Initialize audio category to music
             selectedAudioCategory = 'music';
+            
+            // Restore wizard state if available (do this after initial data load)
+            setTimeout(() => {
+                const wasRestored = restoreWizardState();
+                if (wasRestored) {
+                    console.log('[SetupWizard] Restored previous wizard state');
+                }
+                // Update progress bar based on current state
+                updateProgressBar();
+            }, 100);
+            
+            // Add input listeners to save state on form changes
+            const formInputs = document.querySelectorAll('input[type="text"], input[type="url"]');
+            formInputs.forEach(input => {
+                input.addEventListener('input', () => {
+                    // Debounce the save to avoid too many writes
+                    clearTimeout(input._saveTimeout);
+                    input._saveTimeout = setTimeout(() => {
+                        saveWizardState();
+                    }, 500);
+                });
+            });
         });
 
         // Add missing helper functions
@@ -2821,6 +3590,7 @@
 
             // Validate URLs to ensure form is ready
             validateIDWUrls();
+            updateProgressBar();
         }
 
         function editExternalBot(id) {
@@ -2853,6 +3623,7 @@
             
             // Validate
             validateExternalBot();
+            updateProgressBar();
         }
 
         function editImageCreator(id) {
@@ -2884,6 +3655,7 @@
             
             // Validate
             validateImageCreator();
+            updateProgressBar();
         }
 
         function editVideoCreator(id) {
@@ -2915,6 +3687,7 @@
             
             // Validate
             validateVideoCreator();
+            updateProgressBar();
         }
 
         function deleteIDWEnvironment(id) {
@@ -3011,6 +3784,7 @@
         function showAddChoice() {
             document.getElementById('step0').classList.remove('active');
             document.getElementById('step-choice').classList.add('active');
+            updateProgressBar();
         }
 
         function backToManager() {
@@ -3024,6 +3798,9 @@
             populateEnvironmentsList();
             // Reset all forms
             resetAllForms();
+            // Clear wizard state since we're back at the manager
+            clearWizardState();
+            updateProgressBar();
         }
 
         function resetAllForms(preserveEditingId = false) {
@@ -3031,6 +3808,9 @@
             document.getElementById('idw-home-url').value = '';
             document.getElementById('idw-chat-url').value = '';
             document.getElementById('gsx-account-id').value = '';
+            
+            // Reset credentials fields
+            resetCredentialsFields();
             
             // Reset external agent form
             document.getElementById('bot-name').value = '';
@@ -3101,6 +3881,7 @@
                 currentStep.classList.remove('active');
                 document.getElementById('step2').classList.add('active');
                 populateGSXLinks();
+                updateProgressBar();
             } else if (currentId === 'step2') {
                 finish(); // Call finish at the end of step2
             }
@@ -3113,6 +3894,7 @@
             if (currentId === 'step2') {
                 currentStep.classList.remove('active');
                 document.getElementById('step1').classList.add('active');
+                updateProgressBar();
             }
         }
 
@@ -3191,7 +3973,7 @@
             alert('Custom GSX link functionality coming soon');
         }
 
-        function finish() {
+        async function finish() {
             console.log('[finish] Starting finish function...');
             const environmentId = sessionStorage.getItem('editingEnvironmentId');
             console.log('[finish] editingEnvironmentId:', environmentId);
@@ -3303,6 +4085,13 @@
             } else {
                 console.error('[finish] window.api.send not available!');
             }
+
+            // Save credentials if provided
+            console.log('[finish] Checking for credentials to save...');
+            await saveIDWCredentials(environmentData.homeUrl, environmentData.label);
+            
+            // Reset credentials fields for next use
+            resetCredentialsFields();
 
             alert(`Environment has been ${environmentId ? 'updated' : 'added'} successfully!`);
             console.log(`[finish] Environment has been ${environmentId ? 'updated' : 'added'} successfully!`);
@@ -3657,6 +4446,55 @@
             return uuidRegex.test(str);
         }
 
+        // Toggle credential fields visibility
+        function toggleCredentialsFields() {
+            const toggle = document.getElementById('save-credentials-toggle');
+            const fields = document.getElementById('credentials-fields');
+            if (toggle && fields) {
+                fields.style.display = toggle.checked ? 'block' : 'none';
+                // Clear fields when hiding
+                if (!toggle.checked) {
+                    document.getElementById('idw-username').value = '';
+                    document.getElementById('idw-password').value = '';
+                }
+            }
+        }
+
+        // Save credentials to secure keychain
+        async function saveIDWCredentials(homeUrl, label) {
+            const toggle = document.getElementById('save-credentials-toggle');
+            if (!toggle || !toggle.checked) return;
+
+            const username = document.getElementById('idw-username').value.trim();
+            const password = document.getElementById('idw-password').value;
+
+            if (username && password && window.api && window.api.credentialsSaveManual) {
+                try {
+                    const result = await window.api.credentialsSaveManual(homeUrl, username, password, label);
+                    if (result.success) {
+                        console.log('[Setup Wizard] Credentials saved for:', label);
+                    } else {
+                        console.error('[Setup Wizard] Failed to save credentials');
+                    }
+                } catch (e) {
+                    console.error('[Setup Wizard] Error saving credentials:', e);
+                }
+            }
+        }
+
+        // Reset credentials fields
+        function resetCredentialsFields() {
+            const toggle = document.getElementById('save-credentials-toggle');
+            const fields = document.getElementById('credentials-fields');
+            const username = document.getElementById('idw-username');
+            const password = document.getElementById('idw-password');
+            
+            if (toggle) toggle.checked = false;
+            if (fields) fields.style.display = 'none';
+            if (username) username.value = '';
+            if (password) password.value = '';
+        }
+
         function validateIDWShortcut() {
             const shortcut = document.getElementById('idw-global-shortcut').value.trim();
             const validation = document.getElementById('idw-shortcut-validation-message');
@@ -3996,6 +4834,7 @@
             
             // Validate
             validateUIDesign();
+            updateProgressBar();
         }
 
         // Function to delete UI design tool from list

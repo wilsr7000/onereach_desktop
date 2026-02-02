@@ -1,0 +1,461 @@
+/**
+ * Production Script Styling
+ * CSS for camera angles, shots, and technical directions in Line Script
+ */
+
+/* Production Mode Layout */
+.linescript-production-mode {
+  display: flex;
+  height: 100%;
+  gap: 1rem;
+}
+
+.production-sidebar-container {
+  width: 320px;
+  flex-shrink: 0;
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 1rem;
+  overflow-y: auto;
+}
+
+.production-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  overflow: hidden;
+}
+
+/* Production Sidebar */
+.production-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.production-category-tabs {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.category-tab {
+  padding: 0.5rem 1rem;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  transition: all 0.2s;
+}
+
+.category-tab:hover {
+  background: #f0f0f0;
+}
+
+.category-tab.active {
+  background: #0066ff;
+  color: white;
+  border-color: #0066ff;
+}
+
+/* Production Buttons Grid */
+.production-buttons h4 {
+  font-size: 0.875rem;
+  margin-bottom: 0.5rem;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.production-button-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.5rem;
+}
+
+.production-btn {
+  padding: 0.75rem 0.5rem;
+  background: #fff;
+  border: 2px solid #e0e0e0;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  transition: all 0.2s;
+  font-size: 0.75rem;
+}
+
+.production-btn:hover {
+  border-color: #0066ff;
+  background: #f0f7ff;
+  transform: translateY(-2px);
+}
+
+.production-btn.selected {
+  border-color: #0066ff;
+  background: #e6f2ff;
+  box-shadow: 0 0 0 2px rgba(0, 102, 255, 0.2);
+}
+
+.production-btn .btn-icon {
+  font-size: 1.5rem;
+}
+
+.production-btn .btn-abbr {
+  font-weight: 700;
+  color: #333;
+  font-size: 0.875rem;
+}
+
+.production-btn .btn-name {
+  color: #666;
+  font-size: 0.75rem;
+  text-align: center;
+  line-height: 1.2;
+}
+
+/* Quick Add Section */
+.production-quick-add {
+  background: #fff;
+  padding: 1rem;
+  border-radius: 6px;
+  border: 1px solid #e0e0e0;
+}
+
+.production-quick-add h4 {
+  font-size: 0.875rem;
+  margin-bottom: 0.75rem;
+  color: #333;
+}
+
+.current-timecode {
+  font-family: 'Courier New', monospace;
+  font-size: 1.25rem;
+  font-weight: 700;
+  text-align: center;
+  padding: 0.5rem;
+  background: #000;
+  color: #0f0;
+  border-radius: 4px;
+  margin-bottom: 0.75rem;
+}
+
+.direction-description {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  margin-bottom: 0.75rem;
+}
+
+.direction-description:focus {
+  outline: none;
+  border-color: #0066ff;
+}
+
+/* Direction List */
+.production-list h4 {
+  font-size: 0.875rem;
+  margin-bottom: 0.5rem;
+  color: #666;
+  text-transform: uppercase;
+}
+
+.direction-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.direction-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  font-size: 0.75rem;
+}
+
+.direction-item:hover {
+  background: #f8f9fa;
+}
+
+.direction-icon {
+  font-size: 1.25rem;
+  flex-shrink: 0;
+}
+
+.direction-time {
+  font-family: 'Courier New', monospace;
+  font-weight: 700;
+  color: #0066ff;
+  flex-shrink: 0;
+  min-width: 60px;
+}
+
+.direction-text {
+  flex: 1;
+  color: #333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.direction-goto-btn,
+.direction-delete-btn {
+  padding: 0.25rem 0.5rem;
+  border: none;
+  background: #f0f0f0;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
+
+.direction-goto-btn:hover {
+  background: #0066ff;
+  color: white;
+}
+
+.direction-delete-btn:hover {
+  background: #ff4444;
+  color: white;
+}
+
+/* Production Toolbar */
+.production-toolbar {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background: #f8f9fa;
+  border-radius: 6px;
+}
+
+.production-toolbar button {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+/* Production Script Display */
+.production-script-display {
+  flex: 1;
+  background: white;
+  border-radius: 6px;
+  padding: 2rem;
+  overflow-y: auto;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.production-script-content {
+  max-width: 900px;
+  margin: 0 auto;
+  font-family: 'Courier New', 'Courier', monospace;
+  font-size: 12pt;
+  line-height: 1.8;
+}
+
+/* Camera Direction Lines */
+.camera-direction {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 0.75rem 0;
+  margin: 0.5rem 0;
+  border-left: 4px solid #0066ff;
+  padding-left: 1rem;
+  background: #f0f7ff;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.camera-direction:hover {
+  background: #e6f2ff;
+  border-left-width: 6px;
+}
+
+.camera-direction.emphasis {
+  background: #fff3cd;
+  border-left-color: #ff9800;
+  font-weight: 700;
+}
+
+.camera-direction .line-number {
+  min-width: 40px;
+  text-align: right;
+  color: #999;
+  font-size: 10pt;
+}
+
+.camera-direction .line-timecode {
+  font-family: 'Courier New', monospace;
+  font-weight: 700;
+  color: #0066ff;
+  min-width: 70px;
+}
+
+.camera-direction .camera-icon {
+  font-size: 1.25rem;
+}
+
+.camera-direction .camera-text {
+  flex: 1;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #333;
+}
+
+/* Scene Headers in Production Script */
+.production-script-content .scene-header {
+  margin: 2rem 0 1rem 0;
+  padding: 1rem;
+  background: linear-gradient(135deg, var(--scene-color, #333) 0%, rgba(0, 0, 0, 0.8) 100%);
+  color: white;
+  border-radius: 6px;
+}
+
+.production-script-content .scene-slugline {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  font-weight: 700;
+  font-size: 14pt;
+  margin-bottom: 0.5rem;
+}
+
+.production-script-content .scene-number {
+  background: white;
+  color: var(--scene-color, #333);
+  padding: 0.25rem 0.75rem;
+  border-radius: 4px;
+  font-weight: 700;
+}
+
+/* Speaker Cues in Production Script */
+.production-script-content .speaker-cue {
+  text-align: center;
+  margin: 1.5rem 0 0.5rem 0;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+/* Dialogue Lines in Production Script */
+.production-script-content .dialogue-line {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  margin: 0.25rem 0;
+  padding: 0.25rem 0;
+}
+
+.production-script-content .dialogue-line:hover {
+  background: #f8f9fa;
+  cursor: pointer;
+}
+
+.production-script-content .dialogue-line .line-number {
+  min-width: 40px;
+  text-align: right;
+  color: #999;
+  font-size: 10pt;
+}
+
+.production-script-content .dialogue-line .line-timecode {
+  font-family: 'Courier New', monospace;
+  color: #666;
+  min-width: 70px;
+  font-size: 10pt;
+}
+
+.production-script-content .dialogue-line .line-text {
+  flex: 1;
+  padding-left: 2rem;
+  max-width: 500px;
+}
+
+/* Empty State */
+.production-script-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #999;
+  font-style: italic;
+}
+
+/* Responsive */
+@media (max-width: 1024px) {
+  .production-sidebar-container {
+    width: 280px;
+  }
+  
+  .production-button-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .linescript-production-mode {
+    flex-direction: column;
+  }
+  
+  .production-sidebar-container {
+    width: 100%;
+    max-height: 300px;
+  }
+}
+
+/* Dark Mode Support */
+@media (prefers-color-scheme: dark) {
+  .production-sidebar-container {
+    background: #2a2a2a;
+  }
+  
+  .production-btn,
+  .direction-item,
+  .production-quick-add {
+    background: #333;
+    border-color: #444;
+    color: #e0e0e0;
+  }
+  
+  .production-btn .btn-abbr {
+    color: #e0e0e0;
+  }
+  
+  .production-btn .btn-name {
+    color: #999;
+  }
+  
+  .category-tab {
+    background: #333;
+    border-color: #444;
+    color: #e0e0e0;
+  }
+  
+  .production-script-display {
+    background: #1e1e1e;
+    color: #e0e0e0;
+  }
+  
+  .camera-direction {
+    background: #2a3a4a;
+  }
+  
+  .camera-direction:hover {
+    background: #344454;
+  }
+  
+  .production-script-content .dialogue-line:hover {
+    background: #2a2a2a;
+  }
+}

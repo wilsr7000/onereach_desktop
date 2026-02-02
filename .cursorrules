@@ -1,0 +1,205 @@
+# Onereach.ai Project Rules
+
+## Constitutional Documents
+
+These documents are the source of truth for project planning and must be kept current:
+
+### PUNCH-LIST.md
+- **Purpose**: Master list of bugs, fixes, and small features
+- **When to update**: 
+  - After fixing any bug (mark complete, move to "Recently Completed")
+  - When discovering new issues (add to appropriate priority section)
+  - When completing features (mark complete with version number)
+- **Before starting work**: Check if the task is already tracked here
+
+### ROADMAP.md  
+- **Purpose**: Strategic product roadmap for all app products
+- **When to update**:
+  - After completing major features (update status)
+  - When product direction changes (update roadmap items)
+  - Quarterly review of timeline accuracy
+- **Products covered**: GSX Create, Video Editor, Spaces, Clipboard Manager, Smart Export, IDW Hub, AI Agents, Budget Manager, App Health
+
+## Development Workflow
+
+### Before Making Changes (REQUIRED)
+**For any non-trivial task, ALWAYS:**
+1. Check PUNCH-LIST.md - Is this task tracked?
+2. Check ROADMAP.md - Is this on the roadmap?
+3. **If NOT tracked**: Inform the user before proceeding
+   - "This task isn't on the punch list or roadmap. Should I add it before proceeding?"
+   - Suggest which section/priority it belongs to
+4. **Exception**: Simple bug fixes can proceed without tracking check
+
+### What Counts as "Simple Bug Fix" (no check needed)
+- Typos, syntax errors
+- Broken imports/references
+- CSS/styling tweaks
+- Console error fixes
+- Configuration corrections
+
+### What Requires Tracking Check
+- New features (any size)
+- Refactoring
+- Architecture changes
+- UI/UX changes
+- Integration work
+- Performance improvements
+
+### After Completing Work
+1. Update PUNCH-LIST.md:
+   - Mark completed items with [x]
+   - Move to "Recently Completed" section with version
+   - Add any new issues discovered during work
+2. Update ROADMAP.md if:
+   - Major feature completed
+   - Timeline needs adjustment
+   - New capability added
+
+### Versioning
+- Current version tracked in package.json
+- Use semantic versioning: MAJOR.MINOR.PATCH
+- Reference version in PUNCH-LIST.md completions
+
+## Code Conventions
+
+### File Organization
+- Main products: Individual HTML files (aider-ui.html, video-editor.html, etc.)
+- Backend logic: Corresponding JS files
+- Preload scripts: preload-*.js for IPC bridges
+- Documentation: Markdown files in root
+
+### Key Files by Product
+- **GSX Create**: aider-ui.html, aider-bridge-client.js, app-manager-agent.js
+- **Video Editor**: video-editor.html, video-editor.js, video-editor-app.js
+- **Spaces**: spaces-api.js, clipboard-storage-v2.js
+- **Release**: scripts/release-master.sh (hardened with checksum verification)
+
+### State Persistence
+- Use localStorage for UI state (positions, preferences)
+- Use Spaces API for content storage
+- Save state on beforeunload for graceful shutdown
+
+## UI Design Standards
+
+### No Emojis Policy (MANDATORY)
+**Never use emojis in UI elements.** This applies to:
+- Buttons and controls
+- Labels and headers
+- Status indicators
+- Menu items
+- Toast notifications
+- Error/warning messages
+- Tooltips
+- Any user-facing text
+
+### Use the Icon Library
+Always use `lib/icon-library.js` for icons. This library provides:
+- Tufte-inspired minimalist SVG icons
+- Consistent 1.5px stroke weight
+- 24x24 viewport
+- Outline-only design (no fills)
+- Geometric primitives
+
+**Usage:**
+```javascript
+import { ICONS, getIcon, getTypeIcon } from './lib/icon-library.js';
+
+// Get icon by name
+const html = `<span class="icon">${getIcon('file')}</span>`;
+
+// Get icon for content type
+const typeIcon = getTypeIcon('video');
+```
+
+**Available Icons:**
+- Content types: `file`, `image`, `text`, `code`, `html`, `video`, `audio`, `pdf`, `url`
+- Containers: `space`, `folder`, `box`
+- States: `empty`, `warning`, `error`, `success`, `info`
+- Actions: `search`, `plus`, `minus`, `check`, `x`, `edit`, `trash`, `download`, `upload`
+- Navigation: `chevronLeft`, `chevronRight`, `chevronUp`, `chevronDown`
+- UI: `settings`, `more`, `moreVertical`, `filter`
+
+### Design Principles
+1. **Minimalism**: Less is more. Remove decorative elements.
+2. **Clarity**: Icons should communicate meaning instantly.
+3. **Consistency**: Use the same icon for the same action everywhere.
+4. **Elegance**: Follow Tufte's data-ink ratio principle - maximize data, minimize ink.
+
+### When You Need a New Icon
+If the icon library doesn't have what you need:
+1. Add it to `lib/icon-library.js` following the existing pattern
+2. Use 1.5px stroke, 24x24 viewport, outline-only
+3. Keep it geometrically simple
+4. Document the icon name in the appropriate category
+
+### Examples of What NOT to Do
+```javascript
+// BAD - emoji in button
+button.innerHTML = '📁 Open Folder';
+
+// GOOD - icon from library  
+button.innerHTML = `${getIcon('folder')} Open Folder`;
+
+// BAD - emoji in status
+status.textContent = '✅ Success!';
+
+// GOOD - icon from library
+status.innerHTML = `${getIcon('success')} Success`;
+
+// BAD - emoji in menu
+menuItem.textContent = '⚙️ Settings';
+
+// GOOD - icon from library
+menuItem.innerHTML = `${getIcon('settings')} Settings`;
+```
+
+## Release Process
+
+Use `npm run release` which runs `scripts/release-master.sh`:
+1. Prompts for version bump
+2. Builds for ARM64 and x64
+3. Generates verified checksums from actual files
+4. Creates latest-mac.yml with correct checksums
+5. Publishes to GitHub releases
+
+**Never use electron-builder's generated checksums directly** - always regenerate from built files.
+
+## Known Constraints
+
+- Notarization not yet implemented (users must bypass Gatekeeper)
+- Windows signing not implemented
+- TypeScript migration incomplete (only aider-bridge-client.ts)
+- 12+ preload scripts (consolidation needed)
+
+## Communication
+
+- Don't ask about GitHub token - it's configured and working
+- Reference file paths when discussing changes
+- Update constitutional documents as part of completing work
+
+## Classification Approach (MANDATORY)
+
+**Never use regex or keyword-based classification** unless the user explicitly asks for it. This applies to:
+- Intent detection
+- Content categorization
+- Task routing
+- Message parsing
+- Any classification task
+
+Instead, use semantic understanding and context. Regex/keyword approaches are fragile and miss nuance.
+
+## Email Capability
+
+**To send an email, run this shell command directly - don't just give the user a link:**
+```bash
+open "mailto:recipient@email.com?subject=URL%20Encoded%20Subject&body=URL%20Encoded%20Body"
+```
+
+This opens the user's default email client with everything pre-filled. Use `%20` for spaces, `%0A` for newlines, `%3A` for colons in the body.
+
+Example - sending app download instructions:
+```bash
+open "mailto:?subject=Download%20GSX%20Power%20User&body=Download%20link%3A%0Ahttps%3A%2F%2Fgithub.com%2F..."
+```
+

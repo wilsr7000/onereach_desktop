@@ -1,9 +1,118 @@
 const { app, net } = require('electron');
+const getLogger = require('./event-logger');
+const { getBudgetManager } = require('./budget-manager');
+const { getLLMUsageTracker } = require('./llm-usage-tracker');
+const { calculateCost } = require('./pricing-config');
 
 class ClaudeAPI {
   constructor() {
     this.baseURL = 'https://api.anthropic.com/v1';
-    this.defaultModel = 'claude-3-haiku-20240307'; // Fast and cost-effective, supports vision
+    this.defaultModel = 'claude-opus-4-5-20251101'; // Claude Opus 4.5 - most capable model
+    this.maxTokens = 1000; // Default max tokens for responses
+  }
+
+  /**
+   * Check budget before making an API call and emit warning if exceeded
+   * Uses unified pricing from pricing-config.js
+   * @param {string} operation - Operation name for tracking
+   * @param {number} estimatedInputTokens - Estimated input tokens
+   * @param {number} estimatedOutputTokens - Estimated output tokens
+   * @param {string} projectId - Optional project ID
+   */
+  checkBudgetBeforeCall(operation, estimatedInputTokens, estimatedOutputTokens, projectId = null) {
+    const logger = getLogger();
+    try {
+      const budgetManager = getBudgetManager();
+      
+      // Use unified pricing from pricing-config.js
+      const costResult = calculateCost(this.defaultModel, estimatedInputTokens, estimatedOutputTokens);
+      
+      const budgetCheck = budgetManager.preCheckBudget(
+        'anthropic', 
+        this.defaultModel, 
+        estimatedInputTokens, 
+        estimatedOutputTokens, 
+        projectId
+      );
+      
+      if (budgetCheck.blocked) {
+        logger.warn('Claude API call blocked by hard budget limit', {
+          event: 'budget:blocked',
+          provider: 'anthropic',
+          operation,
+          estimatedCost: costResult.totalCost
+        });
+        return { exceeded: true, blocked: true, warning: budgetCheck.warnings };
+      }
+      
+      if (budgetCheck.warnings?.length > 0) {
+        logger.warn('Claude API call proceeding with budget warning', {
+          event: 'budget:warning',
+          provider: 'anthropic',
+          operation,
+          estimatedCost: costResult.totalCost,
+          warnings: budgetCheck.warnings
+        });
+      }
+      
+      return budgetCheck;
+    } catch (budgetError) {
+      logger.warn('Claude budget check failed, proceeding with call', {
+        error: budgetError.message
+      });
+      return { exceeded: false, blocked: false, warning: null };
+    }
+  }
+
+  /**
+   * Track usage after a successful API call
+   * Delegates to LLMUsageTracker which handles BudgetManager integration
+   * @param {string} operation - Operation name
+   * @param {Object} usage - Usage data from API response
+   * @param {string} projectId - Optional project ID
+   */
+  trackUsage(operation, usage, projectId = null) {
+    const logger = getLogger();
+    try {
+      // Use LLMUsageTracker as the single entry point
+      // It will delegate to BudgetManager for centralized storage
+      const llmTracker = getLLMUsageTracker();
+      llmTracker.trackClaudeCall({
+        model: usage.model || this.defaultModel,
+        inputTokens: usage.input_tokens || 0,
+        outputTokens: usage.output_tokens || 0,
+        feature: this._getFeatureFromOperation(operation),
+        purpose: operation,
+        projectId,
+        success: true
+      });
+      
+      logger.info('Claude API usage tracked', {
+        event: 'api:usage',
+        provider: 'anthropic',
+        inputTokens: usage.input_tokens,
+        outputTokens: usage.output_tokens,
+        operation
+      });
+    } catch (trackingError) {
+      logger.warn('Claude API usage tracking failed', {
+        error: trackingError.message,
+        operation
+      });
+    }
+  }
+  
+  /**
+   * Map operation name to feature category for dashboard
+   */
+  _getFeatureFromOperation(operation) {
+    if (!operation) return 'other';
+    const op = operation.toLowerCase();
+    if (op.includes('metadata')) return 'metadata-generation';
+    if (op.includes('gsx') || op.includes('create')) return 'gsx-create';
+    if (op.includes('agent') || op.includes('diagnos')) return 'agent-diagnosis';
+    if (op.includes('vision') || op.includes('image')) return 'vision-analysis';
+    return 'other';
   }
 
   /**
@@ -28,9 +137,17 @@ class ClaudeAPI {
     // Build the message content based on whether we have an image
     let messageContent;
     
+    const logger = getLogger();
+    
     if (imageData && contentType === 'image') {
       // For images, use Claude's vision capabilities
-      console.log('[Claude API] Using vision model to analyze image');
+      logger.info('Claude API vision request', {
+        event: 'api:request',
+        provider: 'anthropic',
+        model: this.defaultModel,
+        contentType: 'image',
+        hasCustomPrompt: !!customPrompt
+      });
       
       // Validate image data
       if (!imageData || imageData.length < 100) {
@@ -56,7 +173,10 @@ class ClaudeAPI {
         throw new Error('Image data appears to be too small or corrupted');
       }
       
-      console.log(`[Claude API] Image format: ${mediaType}, Base64 length: ${base64Data.length}`);
+      logger.debug('Claude API image data', {
+        mediaType,
+        base64Length: base64Data.length
+      });
       
       messageContent = [
         {
@@ -92,7 +212,13 @@ Respond with valid JSON only, no markdown formatting.`
       ];
     } else {
       // For non-image content, use text-only prompt
-      console.log('[Claude API] Using text-only analysis (no vision)');
+      logger.info('Claude API text request', {
+        event: 'api:request',
+        provider: 'anthropic',
+        model: this.defaultModel,
+        contentType,
+        hasCustomPrompt: !!customPrompt
+      });
       
       // Special handling for HTML content
       let analysisPrompt;
@@ -233,14 +359,28 @@ Respond with valid JSON only, no markdown formatting.`;
     try {
       // Log the message type being sent
       if (imageData) {
-        console.log('[Claude API] Sending vision request with image data length:', imageData.length);
-        console.log('[Claude API] Image data preview:', imageData.substring(0, 100));
+        logger.debug('Claude API sending vision request', {
+          imageDataLength: imageData.length
+        });
       }
+      
+      // Estimate tokens and check budget before making the call
+      const messageContentStr = typeof messageContent === 'string' 
+        ? messageContent 
+        : JSON.stringify(messageContent);
+      const estimatedInputTokens = Math.ceil(messageContentStr.length / 4);
+      const estimatedOutputTokens = this.maxTokens;
+      
+      this.checkBudgetBeforeCall(
+        `generateMetadata:${contentType}`, 
+        estimatedInputTokens, 
+        estimatedOutputTokens
+      );
       
       // Use Electron's net module for the request
       const requestData = JSON.stringify({
         model: this.defaultModel,
-        max_tokens: 1000,
+        max_tokens: this.maxTokens,
         temperature: 0.3, // Lower temperature for more consistent metadata
         messages: [{
           role: 'user',
@@ -257,11 +397,18 @@ Respond with valid JSON only, no markdown formatting.`;
         }
       }, requestData);
       
+      // Track usage from response
+      if (data.usage) {
+        this.trackUsage(`generateMetadata:${contentType}`, data.usage);
+      }
+      
       // Extract JSON from Claude's response
       const content = data.content[0].text;
       
       // Debug log the raw response
-      console.log('[Claude API] Raw response:', content.substring(0, 500) + (content.length > 500 ? '...' : ''));
+      logger.debug('Claude API response received', {
+        responseLength: content.length
+      });
       
       // Try to parse JSON from the response
       let metadata;
@@ -270,9 +417,16 @@ Respond with valid JSON only, no markdown formatting.`;
         const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) || content.match(/{[\s\S]*}/);
         const jsonStr = jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : content;
         metadata = JSON.parse(jsonStr);
-        console.log('[Claude API] Parsed metadata:', metadata);
+        logger.info('Claude API metadata parsed successfully', {
+          event: 'api:success',
+          provider: 'anthropic',
+          contentType
+        });
       } catch (parseError) {
-        console.error('Failed to parse Claude response as JSON:', content);
+        logger.warn('Claude API JSON parse failed, using fallback', {
+          error: parseError.message,
+          contentType
+        });
         // Fallback to basic extraction
         metadata = this.extractBasicMetadata(content, contentType);
       }
@@ -286,7 +440,7 @@ Respond with valid JSON only, no markdown formatting.`;
         source: metadata.source || 'unknown',
         ai_generated: metadata.ai_detected || false,
         ai_assisted: false,
-        ai_model: 'claude-3-haiku',
+        ai_model: 'claude-opus-4-5',
         ai_provider: 'Anthropic',
         category: metadata.category || 'other'
       };
@@ -298,7 +452,11 @@ Respond with valid JSON only, no markdown formatting.`;
       
       return result;
     } catch (error) {
-      console.error('Claude API error:', error);
+      logger.logAPIError('/v1/messages', error, {
+        provider: 'anthropic',
+        contentType,
+        model: this.defaultModel
+      });
       throw error;
     }
   }
@@ -381,9 +539,195 @@ Respond with valid JSON only, no markdown formatting.`;
   }
 
   /**
+   * Generic chat method for conversation-style interactions
+   * Used by the App Manager Agent for complex diagnosis
+   * @param {Array} messages - Array of message objects with role and content
+   * @param {string} apiKey - API key (or null to use settings)
+   * @param {Object} options - Options including maxTokens, temperature, model
+   * @returns {Promise<Object>} Response object with content
+   */
+  async chat(messages, apiKey = null, options = {}) {
+    const logger = getLogger();
+    
+    // Get API key from settings if not provided
+    if (!apiKey) {
+      const { getSettingsManager } = require('./settings-manager');
+      const settingsManager = getSettingsManager();
+      
+      // Try to find an Anthropic key - prioritize dedicated anthropicApiKey
+      const anthropicApiKey = settingsManager.get('anthropicApiKey');
+      const nestedKey = settingsManager.get('llmConfig.anthropic.apiKey');
+      const llmApiKey = settingsManager.get('llmApiKey');
+      const provider = settingsManager.get('llmProvider');
+      
+      // Helper to extract valid Anthropic key from a string (handles copy-paste errors)
+      const extractAnthropicKey = (str) => {
+        if (!str) return null;
+        // Look for sk-ant- pattern anywhere in the string
+        const match = str.match(/sk-ant-[A-Za-z0-9_-]+/);
+        return match ? match[0] : null;
+      };
+      
+      // Priority: dedicated anthropic key > nested config > llmApiKey (only if it's an Anthropic key)
+      const cleanAnthropicKey = extractAnthropicKey(anthropicApiKey);
+      const cleanNestedKey = extractAnthropicKey(nestedKey);
+      const cleanLlmKey = extractAnthropicKey(llmApiKey);
+      
+      if (cleanAnthropicKey) {
+        apiKey = cleanAnthropicKey;
+      } else if (cleanNestedKey) {
+        apiKey = cleanNestedKey;
+      } else if (cleanLlmKey) {
+        apiKey = cleanLlmKey;
+      } else if (llmApiKey && provider === 'anthropic') {
+        // User has llmApiKey set with anthropic provider, but key doesn't look like Anthropic format
+        // Still try it in case they have a valid key with different format
+        apiKey = llmApiKey;
+      }
+      
+      console.log('[ClaudeAPI] Key lookup:', {
+        hasAnthropicApiKey: !!anthropicApiKey,
+        cleanedAnthropicKey: !!cleanAnthropicKey,
+        hasNestedKey: !!nestedKey,
+        hasLlmApiKey: !!llmApiKey,
+        provider,
+        selectedKeyPrefix: apiKey?.substring(0, 12)
+      });
+    }
+    
+    if (!apiKey) {
+      throw new Error('Anthropic API key not found. Please add your Anthropic API key (starts with sk-ant-) in Settings > API Keys.');
+    }
+    
+    // Validate key format and give helpful error
+    if (!apiKey.startsWith('sk-ant-')) {
+      const keyType = apiKey.startsWith('sk-proj-') ? 'OpenAI' : 
+                      apiKey.startsWith('sk-') ? 'OpenAI' : 'unknown';
+      throw new Error(`Invalid API key format for Claude. You provided a ${keyType} key (${apiKey.substring(0, 10)}...), but Claude requires an Anthropic API key that starts with "sk-ant-". Please add your Anthropic key in Settings.`);
+    }
+
+    const {
+      maxTokens = this.maxTokens,
+      temperature = 0.3,
+      model = this.defaultModel,
+      system = null
+    } = options;
+
+    // Estimate tokens for budget check
+    const totalContentLength = messages.reduce((sum, m) => sum + (m.content?.length || 0), 0);
+    const estimatedInputTokens = Math.ceil(totalContentLength / 4);
+    
+    try {
+      this.checkBudgetBeforeCall('chat', estimatedInputTokens, maxTokens);
+    } catch (budgetError) {
+      logger.warn('Chat budget warning', { error: budgetError.message });
+      // Continue anyway - budget is advisory
+    }
+
+    try {
+      const requestBody = {
+        model: model,
+        max_tokens: maxTokens,
+        temperature: temperature,
+        messages: messages
+      };
+      
+      // Add system prompt if provided
+      if (system) {
+        requestBody.system = system;
+      }
+
+      const requestData = JSON.stringify(requestBody);
+
+      logger.debug('Claude chat request', {
+        model,
+        maxTokens,
+        messageCount: messages.length,
+        estimatedInputTokens
+      });
+
+      const data = await this.makeRequest(`${this.baseURL}/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': apiKey,
+          'anthropic-version': '2023-06-01'
+        }
+      }, requestData);
+
+      // Track usage
+      if (data.usage) {
+        this.trackUsage('chat', data.usage);
+        
+        // Track in LLM usage tracker
+        try {
+          const llmTracker = getLLMUsageTracker();
+          llmTracker.trackClaudeCall({
+            model: model,
+            inputTokens: data.usage.input_tokens || 0,
+            outputTokens: data.usage.output_tokens || 0,
+            feature: 'agent-diagnosis',
+            purpose: 'App Manager Agent chat'
+          });
+        } catch (trackerError) {
+          // Tracker might not be available
+        }
+      }
+
+      if (data.content && data.content.length > 0) {
+        return {
+          content: data.content[0].text,
+          usage: data.usage,
+          model: data.model,
+          stopReason: data.stop_reason
+        };
+      } else {
+        throw new Error('No content in Claude response');
+      }
+    } catch (error) {
+      logger.logAPIError('/v1/messages (chat)', error, {
+        provider: 'anthropic',
+        model
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Simple text completion - convenience wrapper around chat
+   * @param {string} prompt - The prompt to complete
+   * @param {Object} options - Options including systemPrompt, maxTokens, temperature, model
+   * @returns {Promise<string>} The completion text
+   */
+  async complete(prompt, options = {}) {
+    const {
+      systemPrompt = null,
+      maxTokens = this.maxTokens,
+      temperature = 0.3,
+      model = this.defaultModel
+    } = options;
+
+    const messages = [{ role: 'user', content: prompt }];
+    
+    const chatOptions = {
+      maxTokens,
+      temperature,
+      model
+    };
+    
+    if (systemPrompt) {
+      chatOptions.system = systemPrompt;
+    }
+
+    const response = await this.chat(messages, null, chatOptions);
+    return response?.content || null;
+  }
+
+  /**
    * Test the API connection with a simple request
    */
   async testConnection(apiKey) {
+    const logger = getLogger();
     try {
       const requestData = JSON.stringify({
         model: this.defaultModel,
@@ -403,9 +747,17 @@ Respond with valid JSON only, no markdown formatting.`;
         }
       }, requestData);
 
+      logger.info('Claude API connection test successful', {
+        event: 'api:test',
+        provider: 'anthropic',
+        success: true
+      });
       return true;
     } catch (error) {
-      console.error('Claude API test failed:', error);
+      logger.logAPIError('/v1/messages', error, {
+        provider: 'anthropic',
+        operation: 'testConnection'
+      });
       return false;
     }
   }
@@ -427,12 +779,17 @@ Respond with valid JSON only, no markdown formatting.`;
 
     const {
       maxTokens = 4000,
-      temperature = 0.3
+      temperature = 0.3,
+      projectId = null
     } = options;
+
+    // Check budget before making the call
+    const estimatedInputTokens = Math.ceil(prompt.length / 4);
+    this.checkBudgetBeforeCall('analyze', estimatedInputTokens, maxTokens, projectId);
 
     try {
       const requestData = JSON.stringify({
-        model: settings.model || 'claude-3-sonnet-20240229',
+        model: settings.model || 'claude-sonnet-4-5-20250929',
         max_tokens: maxTokens,
         temperature: temperature,
         system: "You are a technical log analyzer. Analyze the provided logs and return a structured JSON response with the following fields: summary (string), issues (array of objects with title, severity, component, impact, description, fix, and optional codeChanges fields), patterns (array of strings), recommendations (array of strings), and fixes (object with immediate and longTerm arrays). Ensure the response is valid JSON that can be parsed.",
@@ -450,6 +807,11 @@ Respond with valid JSON only, no markdown formatting.`;
           'anthropic-version': '2023-06-01'
         }
       }, requestData);
+
+      // Track usage from response
+      if (data.usage) {
+        this.trackUsage('analyze', data.usage, projectId);
+      }
 
       if (data.content && data.content.length > 0) {
         const responseText = data.content[0].text;
@@ -472,7 +834,11 @@ Respond with valid JSON only, no markdown formatting.`;
             fixes: analysis.fixes || { immediate: [], longTerm: [] }
           };
         } catch (parseError) {
-          console.error('Failed to parse Claude response as JSON:', parseError);
+          const logger = getLogger();
+          logger.warn('Claude API analyze parse failed', {
+            error: parseError.message,
+            operation: 'analyze'
+          });
           // Return a structured response even if parsing fails
           return {
             summary: responseText,
@@ -486,8 +852,314 @@ Respond with valid JSON only, no markdown formatting.`;
         throw new Error('No content in Claude response');
       }
     } catch (error) {
-      console.error('Claude API error:', error);
+      const logger = getLogger();
+      logger.logAPIError('/v1/messages', error, {
+        provider: 'anthropic',
+        operation: 'analyze'
+      });
       throw error;
+    }
+  }
+
+  // ==================== AGENT PLANNING ====================
+
+  /**
+   * Plan an agent - analyze what the user wants and determine the best approach
+   * @param {string} description - User's description of what they want
+   * @param {Object} availableTemplates - Available execution types and their capabilities
+   * @returns {Promise<Object>} Planning result with recommended approach
+   */
+  async planAgent(description, availableTemplates = {}) {
+    const templateInfo = Object.entries(availableTemplates).map(([id, t]) => 
+      `- ${id}: ${t.name} - ${t.description} (capabilities: ${t.capabilities?.join(', ')})`
+    ).join('\n');
+
+    const prompt = `Analyze this user request and plan the best approach for building a voice-activated agent:
+
+USER REQUEST: "${description}"
+
+AVAILABLE EXECUTION TYPES:
+${templateInfo || `
+- shell: Terminal commands, file operations, system tasks
+- applescript: macOS app control, UI automation, system features
+- nodejs: JavaScript code, API calls, data processing
+- llm: Conversational AI, Q&A, text generation (no system access)
+- browser: Web automation, scraping, form filling
+`}
+
+Analyze the request and identify ALL possible features this agent could have. For each feature, determine if it's feasible.
+
+Respond in JSON format:
+{
+  "understanding": "What the user is trying to accomplish in one sentence",
+  "executionType": "The best execution type for this task",
+  "reasoning": "Why this execution type is best (2-3 sentences)",
+  "features": [
+    {
+      "id": "feature_id",
+      "name": "Feature Name",
+      "description": "What this feature does",
+      "enabled": true,
+      "feasible": true,
+      "feasibilityReason": "Why it can or can't be done",
+      "priority": "core|recommended|optional",
+      "requiresPermission": false
+    }
+  ],
+  "approach": {
+    "steps": ["Step 1", "Step 2", ...],
+    "requirements": ["What's needed - apps, permissions, etc"],
+    "challenges": ["Potential issues to handle"]
+  },
+  "suggestedName": "Short agent name (2-4 words)",
+  "suggestedKeywords": ["keyword1", "keyword2", ...],
+  "verification": {
+    "canAutoVerify": true/false,
+    "verificationMethod": "How to check if it worked",
+    "expectedOutcome": "What success looks like"
+  },
+  "testPlan": {
+    "tests": [
+      {
+        "id": "test_id",
+        "name": "Test Name",
+        "description": "What this test verifies",
+        "testPrompt": "The voice command to test with",
+        "expectedBehavior": "What should happen",
+        "verificationMethod": "auto-app-state | auto-file-check | auto-process-check | manual",
+        "verificationDetails": {
+          "appName": "App name if checking app state",
+          "checkType": "running | frontmost | player-state | file-exists",
+          "expectedValue": "The expected result"
+        },
+        "priority": "critical | important | nice-to-have"
+      }
+    ],
+    "setupSteps": ["Any setup needed before testing"],
+    "cleanupSteps": ["Cleanup after testing"]
+  },
+  "confidence": 0.0-1.0
+}
+
+TEST PLAN GUIDELINES:
+- Include 2-5 tests covering core functionality
+- "critical" tests must pass for agent to be considered working
+- "important" tests should pass but aren't blockers
+- "nice-to-have" tests are optional
+- Use "auto-*" verification methods when possible (auto-app-state for apps, auto-file-check for files)
+- Use "manual" only when automatic verification isn't possible
+
+FEATURE GUIDELINES:
+- "core" features are essential to the agent's purpose (always enabled by default)
+- "recommended" features enhance the agent (enabled by default)
+- "optional" features are nice-to-have (disabled by default)
+- Set feasible=false for features that cannot be implemented (e.g., require APIs we don't have, need hardware we can't access)
+- Include 4-8 features total, covering the main functionality and potential enhancements`;
+
+    try {
+      const response = await this.complete(prompt, {
+        maxTokens: 8000,  // Large buffer for complex plans with many features and test cases
+        temperature: 0.2
+      });
+      
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        try {
+          const plan = JSON.parse(jsonMatch[0]);
+          return {
+            success: true,
+            plan,
+            raw: response
+          };
+        } catch (parseError) {
+          console.error('[ClaudeAPI] Plan JSON parse error:', parseError.message);
+          console.error('[ClaudeAPI] Attempted to parse:', jsonMatch[0].substring(0, 500) + '...');
+          
+          // Try to salvage a partial plan
+          return {
+            success: false,
+            error: `JSON parse error: ${parseError.message}. The response may have been truncated.`,
+            raw: response,
+            partialJson: jsonMatch[0].substring(0, 1000)
+          };
+        }
+      }
+      
+      return {
+        success: false,
+        error: 'Could not parse planning response',
+        raw: response
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  // ==================== AGENT DIAGNOSTIC METHODS ====================
+
+  /**
+   * Diagnose why an agent action failed
+   * @param {Object} agent - The agent configuration
+   * @param {string} testPrompt - What was being tested
+   * @param {Object} result - The verification result
+   * @returns {Promise<Object>} Diagnosis with rootCause, category, and suggestedFix
+   */
+  async diagnoseAgentFailure(agent, testPrompt, result) {
+    const prompt = `Analyze this agent test failure and identify the root cause:
+
+AGENT:
+- Name: ${agent.name}
+- Type: ${agent.executionType}
+- Prompt: ${agent.prompt?.substring(0, 500)}
+
+TEST INPUT: ${testPrompt}
+
+FAILURE RESULT:
+- Verification Method: ${result.method}
+- Details: ${result.details}
+${result.script ? `- Script Used: ${result.script}` : ''}
+${result.error ? '- Execution Error: true' : ''}
+
+Analyze the failure and respond in this JSON format:
+{
+  "summary": "One-line description of what went wrong",
+  "rootCause": "Technical explanation of why it failed",
+  "category": "one of: command-syntax | missing-prerequisite | wrong-approach | permission-denied | app-state-issue | timing-issue | other",
+  "confidence": 0.0-1.0,
+  "suggestedFix": "Specific change to make"
+}`;
+
+    try {
+      const response = await this.complete(prompt, {
+        maxTokens: 500,
+        temperature: 0.1
+      });
+      
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0]);
+      }
+      
+      return {
+        summary: 'Diagnosis parsing failed',
+        rootCause: response,
+        category: 'other',
+        confidence: 0.3,
+        suggestedFix: 'Manual review required'
+      };
+    } catch (error) {
+      return {
+        summary: 'Diagnosis error',
+        rootCause: error.message,
+        category: 'other',
+        confidence: 0,
+        suggestedFix: 'Unable to diagnose - check logs manually'
+      };
+    }
+  }
+
+  /**
+   * Generate a fix for a failed agent based on diagnosis
+   * @param {Object} agent - The agent configuration
+   * @param {string} testPrompt - What was being tested
+   * @param {Object} diagnosis - The failure diagnosis
+   * @returns {Promise<Object>} Fix with canFix, description, and changes
+   */
+  async generateAgentFix(agent, testPrompt, diagnosis) {
+    const prompt = `Generate a fix for this agent failure:
+
+AGENT:
+${JSON.stringify(agent, null, 2)}
+
+DIAGNOSIS:
+${JSON.stringify(diagnosis, null, 2)}
+
+TEST PROMPT: ${testPrompt}
+
+Based on the diagnosis, generate a specific fix. Respond in JSON format:
+{
+  "canFix": true or false,
+  "reason": "Why the fix will work (or why it can't be fixed)",
+  "description": "Human-readable description of the fix",
+  "fixType": "script-change | prompt-change | approach-change | add-prerequisite",
+  "changes": {
+    "newScript": "The corrected script/command if applicable (or null)",
+    "newPrompt": "Updated agent prompt if needed (or null)",
+    "preCommands": ["Commands to run before the main action"],
+    "postCommands": ["Commands to run after for verification"],
+    "executionType": "Changed execution type if needed (or null)"
+  }
+}`;
+
+    try {
+      const response = await this.complete(prompt, {
+        maxTokens: 800,
+        temperature: 0.1
+      });
+      
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0]);
+      }
+      
+      return {
+        canFix: false,
+        reason: 'Could not generate structured fix',
+        description: response
+      };
+    } catch (error) {
+      return {
+        canFix: false,
+        reason: error.message,
+        description: 'Fix generation failed'
+      };
+    }
+  }
+
+  /**
+   * Generate an optimized script for an agent action
+   * @param {Object} agent - The agent configuration
+   * @param {string} testPrompt - What to do
+   * @param {string} scriptType - 'applescript' or 'shell'
+   * @param {Array} previousAttempts - History of failed attempts
+   * @returns {Promise<string>} The generated script
+   */
+  async generateOptimizedScript(agent, testPrompt, scriptType, previousAttempts = []) {
+    const failureContext = previousAttempts.length > 0
+      ? `\n\nPREVIOUS FAILURES (avoid these mistakes):\n${previousAttempts.map((a, i) => 
+          `${i + 1}. ${a.script || 'N/A'} -> Failed: ${a.details}`
+        ).join('\n')}`
+      : '';
+
+    const typeInstructions = scriptType === 'applescript'
+      ? `Generate AppleScript code. Use proper "tell application" syntax. For Music app, remember to select a track before playing.`
+      : `Generate a shell command. Use safe commands, no sudo or rm -rf.`;
+
+    const prompt = `${typeInstructions}
+
+AGENT: ${agent.name}
+TASK: ${testPrompt}
+${failureContext}
+
+Generate ONLY the ${scriptType} code, no explanations or markdown:`;
+
+    try {
+      const response = await this.complete(prompt, {
+        maxTokens: 300,
+        temperature: 0.1
+      });
+      
+      // Clean up response
+      let script = response.trim();
+      script = script.replace(/^```(applescript|bash|sh|shell)?\n?/i, '');
+      script = script.replace(/\n?```$/i, '');
+      
+      return script;
+    } catch (error) {
+      throw new Error(`Script generation failed: ${error.message}`);
     }
   }
 }

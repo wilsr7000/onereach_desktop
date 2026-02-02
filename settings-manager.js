@@ -2,34 +2,126 @@ const { app, safeStorage } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
+// Skip Keychain encryption in dev mode to avoid password prompts
+// Use function to defer check until app is ready
+function isDev() {
+  try {
+    return !app.isPackaged;
+  } catch (e) {
+    return true; // Assume dev mode if can't determine
+  }
+}
+
 class SettingsManager {
   constructor() {
-    this.settingsPath = path.join(app.getPath('userData'), 'app-settings.json');
-    this.encryptedSettingsPath = path.join(app.getPath('userData'), 'app-settings-encrypted.json');
-    this.settings = this.loadSettings();
+    // Lazy initialize paths - will be set on first access
+    this._settingsPath = null;
+    this._encryptedSettingsPath = null;
+    this._settings = null;
+  }
+
+  get settingsPath() {
+    if (!this._settingsPath) {
+      this._settingsPath = path.join(app.getPath('userData'), 'app-settings.json');
+    }
+    return this._settingsPath;
+  }
+
+  get encryptedSettingsPath() {
+    if (!this._encryptedSettingsPath) {
+      this._encryptedSettingsPath = path.join(app.getPath('userData'), 'app-settings-encrypted.json');
+    }
+    return this._encryptedSettingsPath;
+  }
+
+  get settings() {
+    if (!this._settings) {
+      this._settings = this.loadSettings();
+    }
+    return this._settings;
+  }
+
+  set settings(value) {
+    this._settings = value;
   }
 
   loadSettings() {
     try {
       // Try to load encrypted settings first
       if (fs.existsSync(this.encryptedSettingsPath)) {
-        const encryptedData = JSON.parse(fs.readFileSync(this.encryptedSettingsPath, 'utf8'));
+        let encryptedData;
+        try {
+          encryptedData = JSON.parse(fs.readFileSync(this.encryptedSettingsPath, 'utf8'));
+        } catch (parseError) {
+          console.error('[Settings] Settings file corrupted, trying backup...');
+          // Try to restore from backup
+          const backupPath = this.encryptedSettingsPath + '.backup';
+          if (fs.existsSync(backupPath)) {
+            try {
+              encryptedData = JSON.parse(fs.readFileSync(backupPath, 'utf8'));
+              // Restore the backup
+              fs.copyFileSync(backupPath, this.encryptedSettingsPath);
+              console.log('[Settings] Restored settings from backup');
+            } catch (backupError) {
+              console.error('[Settings] Backup also corrupted:', backupError.message);
+              return {};
+            }
+          } else {
+            console.error('[Settings] No backup available');
+            return {};
+          }
+        }
         const settings = {};
         
         // Decrypt sensitive fields
         for (const [key, value] of Object.entries(encryptedData)) {
           if (key.includes('apiKey') || key.includes('secret') || key.includes('Token')) {
             // Decrypt sensitive data
-            if (safeStorage.isEncryptionAvailable() && value.encrypted) {
+            // Try to decrypt if encryption is available (even in dev mode)
+            if (safeStorage.isEncryptionAvailable() && value && value.encrypted) {
               try {
                 const decrypted = safeStorage.decryptString(Buffer.from(value.data, 'base64'));
                 settings[key] = decrypted;
+                console.log(`[Settings] Successfully decrypted ${key} (${decrypted.length} chars)`);
               } catch (error) {
-                console.error(`Error decrypting ${key}:`, error);
+                console.error(`[Settings] Error decrypting ${key}:`, error);
+                // Fallback: check if there's a plain value in the regular settings file
+                try {
+                  if (fs.existsSync(this.settingsPath)) {
+                    const plainSettings = JSON.parse(fs.readFileSync(this.settingsPath, 'utf8'));
+                    if (plainSettings[key]) {
+                      settings[key] = plainSettings[key];
+                      console.log(`[Settings] Using fallback plain value for ${key}`);
+                    } else {
+                      settings[key] = '';
+                    }
+                  } else {
+                    settings[key] = '';
+                  }
+                } catch (e) {
+                  settings[key] = '';
+                }
+              }
+            } else if (value && value.encrypted) {
+              // Encryption not available but value is encrypted - try plain fallback
+              console.warn(`[Settings] Encryption not available for ${key}, trying fallback`);
+              try {
+                if (fs.existsSync(this.settingsPath)) {
+                  const plainSettings = JSON.parse(fs.readFileSync(this.settingsPath, 'utf8'));
+                  if (plainSettings[key]) {
+                    settings[key] = plainSettings[key];
+                    console.log(`[Settings] Using fallback plain value for ${key}`);
+                  } else {
+                    settings[key] = '';
+                  }
+                } else {
+                  settings[key] = '';
+                }
+              } catch (e) {
                 settings[key] = '';
               }
             } else {
-              settings[key] = value;
+              settings[key] = value || '';
             }
           } else {
             settings[key] = value;
@@ -47,19 +139,52 @@ class SettingsManager {
     
     // Return default settings
     return {
-      llmApiKey: '',
       llmProvider: 'anthropic',
-      llmModel: 'claude-opus-4-20250514',
+      llmModel: 'claude-opus-4-5-20251101',
       theme: 'dark',
       autoSave: true,
       claude4ThinkingMode: 'enabled',
       claude4ThinkingLevel: 'default',
+      autoAIMetadata: true, // Auto-generate AI metadata for all clipboard items
+      autoAIMetadataTypes: ['all'], // Types to auto-generate metadata for (default: all)
+      elevenLabsApiKey: '', // ElevenLabs API key for AI voice generation
+      // Video release - YouTube integration
+      youtubeClientId: '',
+      youtubeClientSecret: '',
+      // Video release - Vimeo integration
+      vimeoClientId: '',
+      vimeoClientSecret: '',
       gsxToken: '',
-      gsxEnvironment: 'production',
+      gsxRefreshUrl: '', // URL to call to get/refresh GSX token automatically
+      gsxEnvironment: 'edison',
       gsxAccountId: '',
       gsxAutoSync: false,
       gsxSyncInterval: 'daily',
-      gsxSyncPaths: null
+      gsxSyncPaths: null,
+      // Budget settings
+      budgetEnabled: true, // Enable budget tracking and warnings
+      budgetShowEstimates: true, // Show cost estimates before AI operations
+      budgetConfirmThreshold: 0.05, // Ask confirmation for costs above this amount ($)
+      // Spaces upload integration
+      spacesUploadIntegration: true, // Show "Choose from Spaces" option in file pickers
+      // AI Conversation Capture settings
+      aiConversationCapture: {
+        enabled: true,
+        captureImages: true,
+        captureFiles: true,
+        captureCode: true,
+        autoCreateSpaces: true,
+        conversationTimeoutMinutes: 30,
+        showRecordingIndicator: true,
+        enableUndoWindow: true,
+        undoWindowMinutes: 5,
+        clearPauseOnRestart: true,
+        privateModeBySefault: false
+      },
+      // Unified Claude Service settings (headless-first, API-fallback)
+      claudePreferHeadless: true,      // Try headless Claude first (uses web login, free)
+      claudeHeadlessTimeout: 60000,    // Timeout for headless method (60s default)
+      claudeApiFallback: true          // Fall back to API if headless fails
     };
   }
 
@@ -67,19 +192,23 @@ class SettingsManager {
     try {
       const dataToSave = {};
       
-      // Encrypt sensitive fields
+      // Encrypt sensitive fields (skip in dev mode to avoid Keychain prompts)
       for (const [key, value] of Object.entries(this.settings)) {
         if ((key.includes('apiKey') || key.includes('secret') || key.includes('Token')) && value && typeof value === 'string') {
-          // Encrypt sensitive data
-          if (safeStorage.isEncryptionAvailable()) {
+          // Encrypt sensitive data (only in production)
+          if (!isDev() && safeStorage.isEncryptionAvailable()) {
             const encrypted = safeStorage.encryptString(value);
             dataToSave[key] = {
               encrypted: true,
               data: encrypted.toString('base64')
             };
           } else {
-            // If encryption not available, store as plain text (not recommended)
-            console.warn('Encryption not available, storing API key in plain text');
+            // In dev mode or if encryption not available, store as plain text
+            if (isDev()) {
+              console.log('[Settings] Dev mode: storing API key without encryption');
+            } else {
+              console.warn('Encryption not available, storing API key in plain text');
+            }
             dataToSave[key] = value;
           }
         } else {
@@ -87,8 +216,30 @@ class SettingsManager {
         }
       }
       
-      // Save encrypted settings
-      fs.writeFileSync(this.encryptedSettingsPath, JSON.stringify(dataToSave, null, 2));
+      // Create backup before saving (in case of corruption)
+      const backupPath = this.encryptedSettingsPath + '.backup';
+      if (fs.existsSync(this.encryptedSettingsPath)) {
+        try {
+          fs.copyFileSync(this.encryptedSettingsPath, backupPath);
+        } catch (backupError) {
+          console.warn('[Settings] Could not create backup:', backupError.message);
+        }
+      }
+      
+      // Use atomic write: write to temp file, then rename
+      const tempPath = this.encryptedSettingsPath + '.tmp';
+      const jsonData = JSON.stringify(dataToSave, null, 2);
+      fs.writeFileSync(tempPath, jsonData);
+      
+      // Verify the temp file is valid JSON before renaming
+      try {
+        JSON.parse(fs.readFileSync(tempPath, 'utf8'));
+        fs.renameSync(tempPath, this.encryptedSettingsPath);
+      } catch (verifyError) {
+        console.error('[Settings] Verification failed, keeping original file:', verifyError.message);
+        fs.unlinkSync(tempPath);
+        return false;
+      }
       
       // Remove old plain settings file if it exists
       if (fs.existsSync(this.settingsPath)) {
@@ -103,7 +254,61 @@ class SettingsManager {
   }
 
   get(key) {
-    return this.settings[key];
+    // llmApiKey is now computed from dedicated provider keys for backwards compatibility
+    if (key === 'llmApiKey') {
+      return this._getComputedLLMApiKey();
+    }
+    
+    // If the setting exists, return it
+    if (this.settings[key] !== undefined) {
+      return this.settings[key];
+    }
+    
+    // Otherwise, return the default value
+    const defaults = {
+      llmProvider: 'anthropic',
+      llmModel: 'claude-opus-4-5-20251101',
+      theme: 'dark',
+      autoSave: true,
+      claude4ThinkingMode: 'enabled',
+      claude4ThinkingLevel: 'default',
+      autoAIMetadata: true,
+      autoAIMetadataTypes: ['all'],
+      gsxToken: '',
+      gsxRefreshUrl: '',
+      gsxEnvironment: 'edison',
+      gsxAccountId: '',
+      gsxAutoSync: false,
+      gsxSyncInterval: 'daily',
+      gsxSyncPaths: null,
+      openaiApiKey: '',
+      anthropicApiKey: '',
+      elevenLabsApiKey: '',
+      // Budget settings
+      budgetEnabled: true,
+      budgetShowEstimates: true,
+      budgetConfirmThreshold: 0.05,
+      // AI Conversation Capture settings
+      aiConversationCapture: {
+        enabled: true,
+        captureImages: true,
+        captureFiles: true,
+        captureCode: true,
+        autoCreateSpaces: true,
+        conversationTimeoutMinutes: 30,
+        showRecordingIndicator: true,
+        enableUndoWindow: true,
+        undoWindowMinutes: 5,
+        clearPauseOnRestart: true,
+        privateModeBySefault: false
+      },
+      // Unified Claude Service settings
+      claudePreferHeadless: true,
+      claudeHeadlessTimeout: 60000,
+      claudeApiFallback: true
+    };
+    
+    return defaults[key];
   }
 
   set(key, value) {
@@ -121,13 +326,34 @@ class SettingsManager {
     return this.saveSettings();
   }
 
+  // Compute the LLM API key based on the selected provider
+  _getComputedLLMApiKey() {
+    const provider = this.settings.llmProvider || 'anthropic';
+    
+    // Return the appropriate dedicated key based on provider
+    if (provider === 'anthropic') {
+      return this.settings.anthropicApiKey || '';
+    } else if (provider === 'openai') {
+      return this.settings.openaiApiKey || '';
+    }
+    
+    // For other providers, check if we have a matching key or fall back to anthropic
+    return this.settings.anthropicApiKey || this.settings.openaiApiKey || '';
+  }
+
   // LLM-specific methods
   getLLMApiKey() {
-    return this.get('llmApiKey') || '';
+    return this._getComputedLLMApiKey();
   }
 
   setLLMApiKey(apiKey) {
-    return this.set('llmApiKey', apiKey);
+    // Route to the appropriate dedicated key based on provider
+    const provider = this.settings.llmProvider || 'anthropic';
+    if (provider === 'anthropic' || apiKey.startsWith('sk-ant-')) {
+      return this.set('anthropicApiKey', apiKey);
+    } else {
+      return this.set('openaiApiKey', apiKey);
+    }
   }
 
   getLLMProvider() {
@@ -139,7 +365,7 @@ class SettingsManager {
   }
 
   getLLMModel() {
-    return this.get('llmModel') || 'claude-opus-4-20250514';
+    return this.get('llmModel') || 'claude-opus-4-5-20251101';
   }
 
   setLLMModel(model) {
@@ -167,7 +393,7 @@ class SettingsManager {
   getClaude4Headers() {
     const headers = {};
     
-    if (this.getLLMModel() === 'claude-opus-4-20250514' && 
+    if (this.getLLMModel() === 'claude-opus-4-5-20251101' && 
         this.getClaude4ThinkingMode() === 'enabled') {
       headers['interleaved-thinking-2025-05-14'] = 'true';
     }
@@ -206,6 +432,86 @@ class SettingsManager {
   
   setGSXSyncInterval(interval) {
     return this.set('gsxSyncInterval', interval);
+  }
+
+  // Budget settings methods
+  isBudgetEnabled() {
+    return this.get('budgetEnabled') !== false;
+  }
+  
+  setBudgetEnabled(enabled) {
+    return this.set('budgetEnabled', enabled);
+  }
+  
+  shouldShowBudgetEstimates() {
+    return this.get('budgetShowEstimates') !== false;
+  }
+  
+  setShowBudgetEstimates(show) {
+    return this.set('budgetShowEstimates', show);
+  }
+  
+  getBudgetConfirmThreshold() {
+    return this.get('budgetConfirmThreshold') || 0.05;
+  }
+  
+  setBudgetConfirmThreshold(threshold) {
+    return this.set('budgetConfirmThreshold', threshold);
+  }
+  
+  // Spaces upload integration methods
+  getSpacesUploadEnabled() {
+    return this.get('spacesUploadIntegration') !== false; // Default true
+  }
+  
+  setSpacesUploadEnabled(enabled) {
+    return this.set('spacesUploadIntegration', enabled);
+  }
+  
+  // Intro wizard / version tracking methods
+  getLastSeenVersion() {
+    return this.get('lastSeenVersion') || null;
+  }
+  
+  setLastSeenVersion(version) {
+    return this.set('lastSeenVersion', version);
+  }
+  
+  isFirstRun() {
+    return !this.getLastSeenVersion();
+  }
+  
+  /**
+   * Check if intro wizard should be shown
+   * @param {string} currentVersion - Current app version from package.json
+   * @returns {boolean} True if wizard should be shown
+   */
+  shouldShowIntroWizard(currentVersion) {
+    const lastSeen = this.getLastSeenVersion();
+    
+    // First run - show intro
+    if (!lastSeen) {
+      return true;
+    }
+    
+    // Compare versions - show updates if current version is newer
+    return this.compareVersions(currentVersion, lastSeen) > 0;
+  }
+  
+  /**
+   * Compare semantic versions
+   * @returns 1 if a > b, -1 if a < b, 0 if equal
+   */
+  compareVersions(a, b) {
+    const partsA = a.split('.').map(Number);
+    const partsB = b.split('.').map(Number);
+    for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
+      const numA = partsA[i] || 0;
+      const numB = partsB[i] || 0;
+      if (numA > numB) return 1;
+      if (numA < numB) return -1;
+    }
+    return 0;
   }
 }
 

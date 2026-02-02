@@ -83,6 +83,68 @@ The Onereach.ai clipboard/spaces system stores copied items in a structured file
 }
 ```
 
+### Video Metadata with Scenes (for Agentic Player)
+Videos can have scene lists stored in their metadata for use with the Agentic Player:
+
+```json
+{
+  "id": "video-item-123",
+  "type": "file",
+  "dateCreated": "2024-11-16T...",
+  "author": "username",
+  "source": "drag-drop",
+  "tags": ["demo", "product"],
+  "scenes": [
+    {
+      "id": 1,
+      "name": "Introduction",
+      "inTime": 0,
+      "outTime": 30,
+      "description": "Welcome and overview",
+      "tags": ["intro", "overview"]
+    },
+    {
+      "id": 2,
+      "name": "Key Features",
+      "inTime": 30,
+      "outTime": 90,
+      "description": "Main product features demo",
+      "tags": ["features", "demo"]
+    }
+  ],
+  "scenesUpdatedAt": "2024-11-16T..."
+}
+```
+
+#### Scene Properties
+| Property | Required | Description |
+|----------|----------|-------------|
+| `id` | Yes | Unique identifier within the video |
+| `name` | Yes | Scene title |
+| `inTime` | Yes | Start time in seconds |
+| `outTime` | Yes | End time in seconds |
+| `description` | No | Scene description |
+| `tags` | No | Keywords for AI selection |
+| `transcription` | No | What's said in the scene |
+
+#### Video Scene APIs
+```javascript
+// Get scenes for a video
+await window.clipboard.getVideoScenes(itemId);
+
+// Update all scenes
+await window.clipboard.updateVideoScenes(itemId, scenesArray);
+
+// Add a single scene
+await window.clipboard.addVideoScene(itemId, { name: "Scene", inTime: 0, outTime: 30 });
+
+// Delete a scene
+await window.clipboard.deleteVideoScene(itemId, sceneId);
+
+// Get all videos with scenes
+await window.clipboard.getVideosWithScenes(spaceId);
+```
+
 ## Reliability Features
 
 ### 1. **File Validation**

@@ -1,0 +1,173 @@
+{
+  "config": {
+    "title": "Product Demo",
+    "defaultVideo": "videos/main.mp4"
+  },
+  "scenes": [
+    {
+      "id": 1,
+      "name": "Introduction",
+      "type": "range",
+      "inTime": 0,
+      "outTime": 15,
+      "videoSrc": "videos/main.mp4",
+      "color": "#6366f1",
+      "description": "Welcome and overview of what the product does",
+      "transcription": "Welcome to our product demo. Today I'll show you how our solution can transform your workflow.",
+      "tags": ["intro", "overview", "welcome"]
+    },
+    {
+      "id": 2,
+      "name": "Key Features Overview",
+      "type": "range",
+      "inTime": 15,
+      "outTime": 45,
+      "videoSrc": "videos/main.mp4",
+      "color": "#8b5cf6",
+      "description": "High-level overview of the main features",
+      "transcription": "Our product has three main features: automation, analytics, and integrations. Let me walk you through each one.",
+      "tags": ["features", "overview", "highlights"]
+    },
+    {
+      "id": 3,
+      "name": "Automation Demo",
+      "type": "range",
+      "inTime": 45,
+      "outTime": 90,
+      "videoSrc": "videos/main.mp4",
+      "color": "#22c55e",
+      "description": "Demonstration of the automation capabilities",
+      "transcription": "The automation feature lets you create workflows that run automatically. Here's how you set it up...",
+      "tags": ["automation", "demo", "workflow", "technical"]
+    },
+    {
+      "id": 4,
+      "name": "Analytics Dashboard",
+      "type": "range",
+      "inTime": 90,
+      "outTime": 130,
+      "videoSrc": "videos/main.mp4",
+      "color": "#f97316",
+      "description": "Tour of the analytics and reporting features",
+      "transcription": "Our analytics dashboard gives you real-time insights into your data. You can see metrics, create reports, and export everything.",
+      "tags": ["analytics", "dashboard", "reporting", "data"]
+    },
+    {
+      "id": 5,
+      "name": "Integration Setup",
+      "type": "range",
+      "inTime": 130,
+      "outTime": 170,
+      "videoSrc": "videos/main.mp4",
+      "color": "#06b6d4",
+      "description": "How to connect with other tools and services",
+      "transcription": "We integrate with over 100 tools. Let me show you how easy it is to connect your existing tools.",
+      "tags": ["integrations", "setup", "technical", "api"]
+    },
+    {
+      "id": 6,
+      "name": "Pricing Plans",
+      "type": "range",
+      "inTime": 170,
+      "outTime": 200,
+      "videoSrc": "videos/main.mp4",
+      "color": "#eab308",
+      "description": "Overview of pricing tiers and what's included",
+      "transcription": "We offer three pricing tiers: Starter, Professional, and Enterprise. Each tier includes different features...",
+      "tags": ["pricing", "plans", "cost", "enterprise"]
+    },
+    {
+      "id": 7,
+      "name": "Customer Success Story",
+      "type": "range",
+      "inTime": 200,
+      "outTime": 240,
+      "videoSrc": "videos/main.mp4",
+      "color": "#ec4899",
+      "description": "Real customer testimonial and results",
+      "transcription": "One of our customers, Acme Corp, increased their productivity by 40% after implementing our solution.",
+      "tags": ["testimonial", "customer", "results", "case-study"]
+    },
+    {
+      "id": 8,
+      "name": "Getting Started",
+      "type": "range",
+      "inTime": 240,
+      "outTime": 280,
+      "videoSrc": "videos/main.mp4",
+      "color": "#14b8a6",
+      "description": "Quick start guide for new users",
+      "transcription": "Getting started is easy. Just sign up, connect your first integration, and you're ready to go in minutes.",
+      "tags": ["getting-started", "onboarding", "tutorial", "quick-start"]
+    },
+    {
+      "id": 9,
+      "name": "Advanced Features",
+      "type": "range",
+      "inTime": 280,
+      "outTime": 330,
+      "videoSrc": "videos/main.mp4",
+      "color": "#a855f7",
+      "description": "Deep dive into advanced capabilities",
+      "transcription": "For power users, we offer advanced features like custom scripting, API access, and white-labeling options.",
+      "tags": ["advanced", "power-users", "api", "technical", "customization"]
+    },
+    {
+      "id": 10,
+      "name": "Summary & Next Steps",
+      "type": "range",
+      "inTime": 330,
+      "outTime": 360,
+      "videoSrc": "videos/main.mp4",
+      "color": "#f43f5e",
+      "description": "Wrap up and call to action",
+      "transcription": "That's our product in a nutshell. Ready to get started? Sign up for a free trial or schedule a demo with our team.",
+      "tags": ["summary", "conclusion", "cta", "next-steps"]
+    }
+  ]
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

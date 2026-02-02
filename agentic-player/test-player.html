@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agentic Player - Test Mode</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0d0d0d;
+      color: #e4e4e4;
+      margin: 0;
+      padding: 20px;
+    }
+    
+    .test-controls {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      background: rgba(30, 30, 30, 0.95);
+      border: 1px solid #2a2a2a;
+      border-radius: 12px;
+      padding: 16px;
+      width: 300px;
+      z-index: 1000;
+    }
+    
+    .test-title {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: #e84c3d;
+    }
+    
+    .test-section {
+      margin-bottom: 16px;
+    }
+    
+    .test-label {
+      font-size: 11px;
+      color: #909090;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    
+    .test-input,
+    .test-select {
+      width: 100%;
+      padding: 8px;
+      background: #181818;
+      border: 1px solid #2a2a2a;
+      border-radius: 6px;
+      color: #e4e4e4;
+      font-size: 12px;
+    }
+    
+    .test-btn {
+      width: 100%;
+      padding: 10px;
+      background: #22c55e;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 8px;
+    }
+    
+    .test-btn:hover {
+      filter: brightness(1.1);
+    }
+    
+    .test-btn.secondary {
+      background: #4a9eff;
+    }
+    
+    .test-btn.danger {
+      background: #ef4444;
+    }
+    
+    .test-log {
+      max-height: 200px;
+      overflow-y: auto;
+      background: #0d0d0d;
+      border: 1px solid #2a2a2a;
+      border-radius: 6px;
+      padding: 8px;
+      font-size: 11px;
+      font-family: 'Monaco', monospace;
+    }
+    
+    .test-log-entry {
+      margin-bottom: 4px;
+      color: #909090;
+    }
+    
+    .test-log-entry.success {
+      color: #22c55e;
+    }
+    
+    .test-log-entry.error {
+      color: #ef4444;
+    }
+    
+    .test-stats {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+      margin-top: 8px;
+    }
+    
+    .test-stat {
+      background: #181818;
+      padding: 8px;
+      border-radius: 6px;
+      text-align: center;
+    }
+    
+    .test-stat-value {
+      font-size: 18px;
+      font-weight: 700;
+      color: #e84c3d;
+    }
+    
+    .test-stat-label {
+      font-size: 10px;
+      color: #5c5c5c;
+      text-transform: uppercase;
+    }
+  </style>
+</head>
+<body>
+  <div class="test-controls">
+    <div class="test-title">🧪 Player Test Controls</div>
+    
+    <div class="test-section">
+      <div class="test-label">Batch Size</div>
+      <select class="test-select" id="batchSize">
+        <option value="1">1 clip per batch</option>
+        <option value="2">2 clips per batch</option>
+        <option value="3" selected>3 clips per batch</option>
+        <option value="5">5 clips per batch</option>
+      </select>
+    </div>
+    
+    <div class="test-section">
+      <div class="test-label">Total Clips</div>
+      <input type="number" class="test-input" id="totalClips" value="10" min="1" max="100">
+    </div>
+    
+    <div class="test-section">
+      <div class="test-label">API Delay (ms)</div>
+      <input type="number" class="test-input" id="apiDelay" value="500" min="0" max="5000">
+    </div>
+    
+    <div class="test-section">
+      <div class="test-label">Clip Duration (s)</div>
+      <input type="number" class="test-input" id="clipDuration" value="10" min="1" max="60">
+    </div>
+    
+    <div class="test-section">
+      <label style="display: flex; align-items: center; gap: 8px; font-size: 12px;">
+        <input type="checkbox" id="simulateErrors">
+        Simulate random errors (20%)
+      </label>
+    </div>
+    
+    <button class="test-btn" onclick="testAPI.startTest()">Start Test</button>
+    <button class="test-btn secondary" onclick="testAPI.stopTest()">Stop Test</button>
+    <button class="test-btn danger" onclick="testAPI.clearLog()">Clear Log</button>
+    
+    <div class="test-stats">
+      <div class="test-stat">
+        <div class="test-stat-value" id="requestCount">0</div>
+        <div class="test-stat-label">Requests</div>
+      </div>
+      <div class="test-stat">
+        <div class="test-stat-value" id="clipsSent">0</div>
+        <div class="test-stat-label">Clips Sent</div>
+      </div>
+    </div>
+    
+    <div class="test-section" style="margin-top: 12px;">
+      <div class="test-label">API Log</div>
+      <div class="test-log" id="testLog">
+        <div class="test-log-entry">Waiting for test to start...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Include the main player page -->
+  <iframe src="index.html" style="position: fixed; top: 0; left: 340px; right: 0; bottom: 0; border: none; width: calc(100% - 340px); height: 100vh;"></iframe>
+
+  <script>
+    const testAPI = {
+      server: null,
+      requestCount: 0,
+      clipsSent: 0,
+      allClips: [],
+
+      startTest() {
+        const totalClips = parseInt(document.getElementById('totalClips').value);
+        const clipDuration = parseInt(document.getElementById('clipDuration').value);
+        
+        // Generate mock clips
+        this.allClips = [];
+        for (let i = 1; i <= totalClips; i++) {
+          this.allClips.push({
+            id: `clip-${i}`,
+            name: `Test Clip ${i}`,
+            videoUrl: `https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4`,
+            videoSrc: `https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4`,
+            inTime: 0,
+            outTime: clipDuration,
+            description: `This is test clip number ${i} of ${totalClips}`
+          });
+        }
+        
+        // Reset counters
+        this.requestCount = 0;
+        this.clipsSent = 0;
+        this.updateStats();
+        
+        this.log('Test started', 'success');
+        this.log(`Generated ${totalClips} clips`, 'success');
+        
+        // Start mock server
+        this.startMockServer();
+      },
+
+      stopTest() {
+        if (this.server) {
+          this.server.close();
+          this.server = null;
+        }
+        this.log('Test stopped', 'error');
+      },
+
+      startMockServer() {
+        // Create a simple mock API endpoint
+        this.log('Mock API ready at /test-api', 'success');
+        
+        // Override fetch for the mock endpoint
+        const originalFetch = window.fetch;
+        window.fetch = async (url, options) => {
+          // If it's our mock endpoint, handle it
+          if (url.includes('/test-api') || url.includes('mock-api')) {
+            return this.handleMockRequest(options);
+          }
+          // Otherwise, use original fetch
+          return originalFetch(url, options);
+        };
+        
+        // Also inject into iframe
+        setTimeout(() => {
+          const iframe = document.querySelector('iframe');
+          if (iframe && iframe.contentWindow) {
+            iframe.contentWindow.fetch = async (url, options) => {
+              if (url.includes('/test-api') || url.includes('mock-api')) {
+                return this.handleMockRequest(options);
+              }
+              return originalFetch(url, options);
+            };
+            
+            // Set API endpoint in iframe
+            iframe.contentWindow.AGENTIC_PLAYER_CONFIG = {
+              apiEndpoint: '/test-api',
+              prefetchWhenRemaining: 2,
+              prefetchThreshold: 5
+            };
+            
+            this.log('Mock API injected into player', 'success');
+          }
+        }, 1000);
+      },
+
+      async handleMockRequest(options) {
+        this.requestCount++;
+        this.updateStats();
+        
+        const body = JSON.parse(options.body);
+        this.log(`API Request #${this.requestCount}: queue=${body.queueLength}, watched=${body.watchedIds.length}`, 'success');
+        
+        // Simulate API delay
+        const delay = parseInt(document.getElementById('apiDelay').value);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        
+        // Simulate random errors
+        if (document.getElementById('simulateErrors').checked && Math.random() < 0.2) {
+          this.log('Simulated API error', 'error');
+          return new Response(JSON.stringify({ error: 'Simulated error' }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+        
+        // Determine batch size
+        const batchSize = parseInt(document.getElementById('batchSize').value);
+        
+        // Get clips to send
+        const remainingClips = this.allClips.slice(this.clipsSent);
+        const clipsToSend = remainingClips.slice(0, batchSize);
+        
+        this.clipsSent += clipsToSend.length;
+        this.updateStats();
+        
+        const isDone = this.clipsSent >= this.allClips.length;
+        
+        const response = {
+          scenes: clipsToSend,
+          done: isDone,
+          reasoning: clipsToSend.length > 0 
+            ? `Sending clips ${this.clipsSent - clipsToSend.length + 1}-${this.clipsSent}` 
+            : 'All clips delivered'
+        };
+        
+        if (clipsToSend.length > 0) {
+          this.log(`Sent ${clipsToSend.length} clips (${this.clipsSent}/${this.allClips.length})`, 'success');
+        }
+        
+        if (isDone) {
+          this.log('Sent done=true signal', 'success');
+        }
+        
+        return new Response(JSON.stringify(response), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      },
+
+      updateStats() {
+        document.getElementById('requestCount').textContent = this.requestCount;
+        document.getElementById('clipsSent').textContent = this.clipsSent;
+      },
+
+      log(message, type = '') {
+        const logEl = document.getElementById('testLog');
+        const entry = document.createElement('div');
+        entry.className = `test-log-entry ${type}`;
+        entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+        logEl.insertBefore(entry, logEl.firstChild);
+        
+        // Keep only last 50 entries
+        while (logEl.children.length > 50) {
+          logEl.removeChild(logEl.lastChild);
+        }
+      },
+
+      clearLog() {
+        document.getElementById('testLog').innerHTML = '<div class="test-log-entry">Log cleared</div>';
+      }
+    };
+
+    // Auto-start instructions
+    window.addEventListener('load', () => {
+      setTimeout(() => {
+        testAPI.log('Test page loaded', 'success');
+        testAPI.log('Configure settings and click "Start Test"', '');
+        testAPI.log('Then start a session in the player', '');
+      }, 500);
+    });
+  </script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

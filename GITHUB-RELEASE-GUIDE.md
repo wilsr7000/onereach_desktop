@@ -32,9 +32,12 @@ git push origin main
 ### Step 3: Build Release Files
 
 ```bash
-# Build for both Intel and Apple Silicon Macs
-npm run package:mac        # ARM64 build
-npx electron-builder build --mac --x64 --publish never  # Intel build
+# Recommended: Build universal binary (works on all Macs)
+npm run package:mac:universal
+
+# Or build for separate architectures:
+npm run package:mac        # ARM64 build only
+npx electron-builder build --mac --x64 --publish never  # Intel build only
 ```
 
 ### Step 4: Create GitHub Release

@@ -1,0 +1,97 @@
+{
+  "name": "@onereach/voice-sdk",
+  "version": "1.0.0",
+  "description": "Voice-enabled task management SDK with firefly-animated orb UI, real-time speech transcription, AI classification, and RAG knowledge system",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./react": {
+      "import": "./dist/react/index.mjs",
+      "require": "./dist/react/index.js",
+      "types": "./dist/react/index.d.ts"
+    },
+    "./electron": {
+      "import": "./dist/electron/index.mjs",
+      "require": "./dist/electron/index.js",
+      "types": "./dist/electron/index.d.ts"
+    }
+  },
+  "files": [
+    "assets",
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest",
+    "test:coverage": "vitest --coverage",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "voice",
+    "speech",
+    "transcription",
+    "openai",
+    "realtime",
+    "whisper",
+    "task-management",
+    "ai",
+    "classification",
+    "rag",
+    "knowledge",
+    "electron",
+    "react",
+    "orb",
+    "firefly"
+  ],
+  "author": "OneReach.ai",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wilsr7000/voice-sdk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/wilsr7000/voice-sdk/issues"
+  },
+  "homepage": "https://github.com/wilsr7000/voice-sdk#readme",
+  "peerDependencies": {
+    "electron": ">=20.0.0",
+    "react": ">=17.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "electron": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/react": "^18.2.0",
+    "@types/ws": "^8.5.10",
+    "electron": "^28.0.0",
+    "eslint": "^8.55.0",
+    "react": "^18.2.0",
+    "tsup": "^8.0.1",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0"
+  },
+  "dependencies": {
+    "ws": "^8.14.0",
+    "zustand": "^5.0.10"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

@@ -3,6 +3,12 @@
 /**
  * Command-line tool to validate and clean OR-Spaces storage
  * Can be run directly: node validate-storage.js
+ * 
+ * NOTE: With DuckDB transactional storage (v2.0+), orphans should rarely occur.
+ * If you're seeing frequent orphans, consider:
+ * 1. Running the DuckDB rebuild: POST /api/database/rebuild
+ * 2. Checking for app crashes during write operations
+ * 3. Verifying disk health
  */
 
 const fs = require('fs');

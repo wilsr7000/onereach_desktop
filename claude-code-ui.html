@@ -1,0 +1,3367 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GSX Agent Composer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        html, body {
+            width: 100%;
+            height: 100%;
+            background: #1a1a24;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            color: #e0e0e0;
+            overflow: hidden;
+        }
+        
+        /* Dark scrollbars */
+        * {
+            scrollbar-width: thin;
+            scrollbar-color: #3a3a4a #1a1a24;
+        }
+        
+        ::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: #1a1a24;
+            border-radius: 5px;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: #3a3a4a;
+            border-radius: 5px;
+            border: 2px solid #1a1a24;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: #4a4a5a;
+        }
+        
+        ::-webkit-scrollbar-corner {
+            background: #1a1a24;
+        }
+        
+        .window-container {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+        
+        /* Titlebar */
+        .titlebar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 16px;
+            background: rgba(255, 255, 255, 0.03);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            -webkit-app-region: drag;
+            flex-shrink: 0;
+        }
+        
+        .titlebar-title {
+            font-weight: 600;
+            font-size: 14px;
+            color: #fff;
+        }
+        
+        .titlebar-close {
+            -webkit-app-region: no-drag;
+            width: 28px;
+            height: 28px;
+            border: none;
+            background: transparent;
+            color: #888;
+            font-size: 18px;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: all 0.2s;
+        }
+        
+        .titlebar-close:hover {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+        }
+        
+        /* Main Content - Side by Side */
+        .main-content {
+            display: flex;
+            flex: 1;
+            min-height: 0;
+            overflow: hidden;
+        }
+        
+        /* ==================== LEFT PANEL - CHAT ==================== */
+        .chat-panel {
+            width: 55%;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid rgba(255, 255, 255, 0.08);
+            min-width: 0;
+        }
+        
+        /* Agent Type Selector (compact) */
+        .agent-type-selector {
+            padding: 12px 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            flex-shrink: 0;
+        }
+        
+        .type-selector-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        
+        .type-chip {
+            padding: 6px 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            font-size: 11px;
+            color: #aaa;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .type-chip:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+        
+        .type-chip.selected {
+            background: rgba(139, 92, 246, 0.2);
+            border-color: rgba(139, 92, 246, 0.4);
+            color: #c4b5fd;
+        }
+        
+        /* Auto-matched templates (detected from input) */
+        .type-chip.auto-matched {
+            background: rgba(34, 197, 94, 0.15);
+            border-color: rgba(34, 197, 94, 0.4);
+            color: #86efac;
+            position: relative;
+        }
+        
+        .type-chip.auto-matched::after {
+            content: '';
+            position: absolute;
+            top: -2px;
+            right: -2px;
+            width: 8px;
+            height: 8px;
+            background: #22c55e;
+            border-radius: 50%;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.6; transform: scale(1.2); }
+        }
+        
+        /* Both selected and auto-matched */
+        .type-chip.selected.auto-matched {
+            background: rgba(139, 92, 246, 0.25);
+            border-color: rgba(139, 92, 246, 0.5);
+            color: #c4b5fd;
+        }
+        
+        .type-chip-icon {
+            font-weight: 600;
+            margin-right: 4px;
+        }
+        
+        .type-chip-score {
+            font-size: 9px;
+            opacity: 0.7;
+            margin-left: 4px;
+        }
+        
+        .selector-label {
+            font-size: 10px;
+            color: #666;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .matched-hint {
+            font-size: 10px;
+            color: #86efac;
+            margin-top: 6px;
+            display: none;
+        }
+        
+        .matched-hint.visible {
+            display: block;
+        }
+        
+        /* Chat Messages Area */
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        
+        .chat-message {
+            display: flex;
+            gap: 10px;
+            max-width: 90%;
+            animation: fadeIn 0.2s ease;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .chat-message.user {
+            align-self: flex-end;
+            flex-direction: row-reverse;
+        }
+        
+        .chat-message.assistant {
+            align-self: flex-start;
+        }
+        
+        .message-avatar {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+        
+        .chat-message.user .message-avatar {
+            background: rgba(139, 92, 246, 0.3);
+            color: #c4b5fd;
+        }
+        
+        .chat-message.assistant .message-avatar {
+            background: rgba(34, 197, 94, 0.3);
+            color: #86efac;
+        }
+        
+        .message-content {
+            padding: 10px 14px;
+            border-radius: 12px;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        
+        .chat-message.user .message-content {
+            background: rgba(139, 92, 246, 0.15);
+            border: 1px solid rgba(139, 92, 246, 0.25);
+            color: #e0e0e0;
+        }
+        
+        .chat-message.assistant .message-content {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #e0e0e0;
+        }
+        
+        .message-content p {
+            margin-bottom: 8px;
+        }
+        
+        .message-content p:last-child {
+            margin-bottom: 0;
+        }
+        
+        /* Welcome Message */
+        .welcome-message {
+            text-align: center;
+            padding: 40px 20px;
+            color: #888;
+        }
+        
+        .welcome-message h3 {
+            font-size: 16px;
+            color: #c4b5fd;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+        
+        .welcome-message p {
+            font-size: 13px;
+            line-height: 1.5;
+            margin-bottom: 16px;
+        }
+        
+        .welcome-suggestions {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-width: 320px;
+            margin: 0 auto;
+        }
+        
+        .suggestion-chip {
+            padding: 10px 14px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 8px;
+            font-size: 12px;
+            color: #aaa;
+            cursor: pointer;
+            text-align: left;
+            transition: all 0.2s;
+        }
+        
+        .suggestion-chip:hover {
+            background: rgba(139, 92, 246, 0.1);
+            border-color: rgba(139, 92, 246, 0.3);
+            color: #c4b5fd;
+        }
+        
+        /* Typing Indicator */
+        .typing-indicator {
+            display: flex;
+            gap: 4px;
+            padding: 12px 16px;
+        }
+        
+        .typing-indicator span {
+            width: 6px;
+            height: 6px;
+            background: #888;
+            border-radius: 50%;
+            animation: bounce 1.4s infinite ease-in-out both;
+        }
+        
+        .typing-indicator span:nth-child(1) { animation-delay: -0.32s; }
+        .typing-indicator span:nth-child(2) { animation-delay: -0.16s; }
+        
+        @keyframes bounce {
+            0%, 80%, 100% { transform: scale(0); }
+            40% { transform: scale(1); }
+        }
+        
+        /* Chat Input Area */
+        .chat-input-area {
+            padding: 12px 16px;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(0, 0, 0, 0.2);
+            flex-shrink: 0;
+        }
+        
+        .chat-input-row {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .chat-input {
+            flex: 1;
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            color: #e0e0e0;
+            font-size: 13px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        
+        .chat-input:focus {
+            border-color: rgba(139, 92, 246, 0.5);
+        }
+        
+        .chat-input::placeholder {
+            color: #666;
+        }
+        
+        .send-btn {
+            width: 40px;
+            height: 40px;
+            border: none;
+            border-radius: 50%;
+            background: rgba(139, 92, 246, 0.3);
+            color: #c4b5fd;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .send-btn:hover:not(:disabled) {
+            background: rgba(139, 92, 246, 0.5);
+        }
+        
+        .send-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        /* ==================== RIGHT PANEL - PREVIEW ==================== */
+        .preview-panel {
+            width: 45%;
+            display: flex;
+            flex-direction: column;
+            background: rgba(0, 0, 0, 0.15);
+            min-width: 0;
+        }
+        
+        .preview-header {
+            padding: 12px 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+        }
+        
+        .preview-title {
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: #888;
+            letter-spacing: 0.5px;
+        }
+        
+        .preview-status {
+            font-size: 10px;
+            padding: 3px 8px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.05);
+            color: #888;
+        }
+        
+        .preview-status.has-draft {
+            background: rgba(34, 197, 94, 0.15);
+            color: #86efac;
+        }
+        
+        /* Agent Preview Card */
+        .preview-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+        }
+        
+        .agent-card {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        
+        .agent-card-header {
+            padding: 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        }
+        
+        .agent-name {
+            font-size: 16px;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 6px;
+        }
+        
+        .agent-type-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            background: rgba(139, 92, 246, 0.2);
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 600;
+            color: #c4b5fd;
+            text-transform: uppercase;
+        }
+        
+        .agent-card-body {
+            padding: 16px;
+        }
+        
+        .agent-section {
+            margin-bottom: 16px;
+        }
+        
+        .agent-section:last-child {
+            margin-bottom: 0;
+        }
+        
+        .agent-section-label {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: #888;
+            margin-bottom: 6px;
+            letter-spacing: 0.5px;
+        }
+        
+        .agent-prompt-preview {
+            font-size: 12px;
+            color: #aaa;
+            line-height: 1.5;
+            max-height: 80px;
+            overflow: hidden;
+            position: relative;
+        }
+        
+        .agent-prompt-preview::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 30px;
+            background: linear-gradient(transparent, rgba(26, 26, 36, 0.9));
+        }
+        
+        .keywords-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+        
+        .keyword-tag {
+            padding: 4px 8px;
+            background: rgba(59, 130, 246, 0.15);
+            border-radius: 4px;
+            font-size: 11px;
+            color: #93c5fd;
+        }
+        
+        .capabilities-list {
+            font-size: 12px;
+            color: #aaa;
+            line-height: 1.6;
+        }
+        
+        /* Empty State */
+        .preview-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            text-align: center;
+            color: #666;
+            padding: 20px;
+        }
+        
+        .preview-empty-icon {
+            font-size: 40px;
+            margin-bottom: 12px;
+            opacity: 0.5;
+        }
+        
+        .preview-empty-text {
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        
+        /* Version History */
+        .version-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: rgba(139, 92, 246, 0.08);
+            border-top: 1px solid rgba(255, 255, 255, 0.06);
+            font-size: 11px;
+            color: #888;
+        }
+        
+        .version-badge {
+            padding: 2px 8px;
+            background: rgba(139, 92, 246, 0.2);
+            border-radius: 10px;
+            font-size: 10px;
+            color: #a78bfa;
+            font-weight: 600;
+        }
+        
+        .version-history-btn {
+            margin-left: auto;
+            padding: 4px 8px;
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            color: #888;
+            font-size: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .version-history-btn:hover {
+            background: rgba(255, 255, 255, 0.05);
+            color: #fff;
+        }
+        
+        .btn-undo {
+            padding: 8px 16px;
+            background: rgba(251, 191, 36, 0.1);
+            border: 1px solid rgba(251, 191, 36, 0.3);
+            border-radius: 6px;
+            color: #fbbf24;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .btn-undo:hover:not(:disabled) {
+            background: rgba(251, 191, 36, 0.2);
+        }
+        
+        .btn-undo:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        /* Version History Modal */
+        .version-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        
+        .version-modal-content {
+            background: #1a1a24;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            width: 500px;
+            max-height: 80vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .version-modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        
+        .version-modal-header h3 {
+            font-size: 14px;
+            font-weight: 600;
+        }
+        
+        .version-modal-close {
+            background: none;
+            border: none;
+            color: #888;
+            font-size: 18px;
+            cursor: pointer;
+        }
+        
+        .version-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+        }
+        
+        .version-item {
+            display: flex;
+            align-items: center;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .version-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+        
+        .version-item.current {
+            background: rgba(139, 92, 246, 0.15);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+        }
+        
+        .version-number {
+            font-weight: 600;
+            color: #a78bfa;
+            width: 40px;
+        }
+        
+        .version-details {
+            flex: 1;
+        }
+        
+        .version-reason {
+            font-size: 12px;
+            color: #e0e0e0;
+        }
+        
+        .version-timestamp {
+            font-size: 10px;
+            color: #666;
+            margin-top: 2px;
+        }
+        
+        .version-revert-btn {
+            padding: 4px 10px;
+            background: rgba(74, 222, 128, 0.1);
+            border: 1px solid rgba(74, 222, 128, 0.3);
+            border-radius: 4px;
+            color: #4ade80;
+            font-size: 10px;
+            cursor: pointer;
+            opacity: 0;
+            transition: all 0.2s;
+        }
+        
+        .version-item:hover .version-revert-btn {
+            opacity: 1;
+        }
+        
+        .version-revert-btn:hover {
+            background: rgba(74, 222, 128, 0.2);
+        }
+        
+        /* Preview Actions */
+        .preview-actions {
+            padding: 16px;
+            border-top: 1px solid rgba(255, 255, 255, 0.06);
+            display: flex;
+            gap: 10px;
+            flex-shrink: 0;
+        }
+        
+        .btn {
+            padding: 10px 16px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            color: #ccc;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .btn:hover:not(:disabled) {
+            background: rgba(255, 255, 255, 0.1);
+        }
+        
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .btn.primary {
+            flex: 1;
+            background: rgba(34, 197, 94, 0.2);
+            border-color: rgba(34, 197, 94, 0.3);
+            color: #86efac;
+        }
+        
+        .btn.primary:hover:not(:disabled) {
+            background: rgba(34, 197, 94, 0.3);
+        }
+        
+        .btn.secondary {
+            background: transparent;
+            border-color: rgba(255, 255, 255, 0.1);
+            color: #888;
+        }
+        
+        /* Test Section in Preview */
+        .test-section {
+            margin-top: 16px;
+            padding: 12px;
+            background: rgba(59, 130, 246, 0.08);
+            border: 1px solid rgba(59, 130, 246, 0.2);
+            border-radius: 8px;
+        }
+        
+        .test-section-header {
+            font-size: 11px;
+            font-weight: 600;
+            color: #93c5fd;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+        }
+        
+        .test-input-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        
+        .test-input {
+            flex: 1;
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            color: #e0e0e0;
+            font-size: 12px;
+            outline: none;
+        }
+        
+        .test-input:focus {
+            border-color: rgba(59, 130, 246, 0.5);
+        }
+        
+        .btn-test {
+            padding: 8px 12px;
+            background: rgba(59, 130, 246, 0.2);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            border-radius: 6px;
+            color: #93c5fd;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        
+        .btn-test:hover:not(:disabled) {
+            background: rgba(59, 130, 246, 0.3);
+        }
+        
+        .btn-test:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .test-response {
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 6px;
+            font-size: 12px;
+            color: #aaa;
+            max-height: 100px;
+            overflow-y: auto;
+            line-height: 1.5;
+        }
+        
+        .test-response.loading {
+            color: #666;
+            font-style: italic;
+        }
+        
+        .test-response.error {
+            color: #f87171;
+        }
+        
+        .test-response.success {
+            color: #4ade80;
+        }
+        
+        /* Autonomous Test Progress */
+        .auto-test-mode {
+            background: rgba(139, 92, 246, 0.08);
+            border-color: rgba(139, 92, 246, 0.2);
+        }
+        
+        .auto-test-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+        
+        .auto-test-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            color: #a78bfa;
+            cursor: pointer;
+        }
+        
+        .auto-test-toggle input {
+            width: 14px;
+            height: 14px;
+        }
+        
+        .auto-test-progress {
+            margin-top: 12px;
+            padding: 12px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 6px;
+            font-size: 11px;
+        }
+        
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        
+        .progress-status {
+            font-weight: 600;
+            color: #a78bfa;
+        }
+        
+        .progress-attempts {
+            color: #888;
+        }
+        
+        .progress-bar-container {
+            height: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+            margin-bottom: 12px;
+            overflow: hidden;
+        }
+        
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #8b5cf6, #a78bfa);
+            border-radius: 2px;
+            transition: width 0.3s ease;
+        }
+        
+        .progress-log {
+            max-height: 120px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 10px;
+            line-height: 1.6;
+        }
+        
+        .log-entry {
+            padding: 2px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        
+        .log-entry.attempt {
+            color: #93c5fd;
+        }
+        
+        .log-entry.diagnosing {
+            color: #fbbf24;
+        }
+        
+        .log-entry.fixing {
+            color: #a78bfa;
+        }
+        
+        .log-entry.success {
+            color: #4ade80;
+            font-weight: 600;
+        }
+        
+        .log-entry.error {
+            color: #f87171;
+        }
+        
+        .verification-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 10px;
+            font-weight: 600;
+        }
+        
+        .verification-badge.verified {
+            background: rgba(74, 222, 128, 0.15);
+            color: #4ade80;
+        }
+        
+        .verification-badge.failed {
+            background: rgba(248, 113, 113, 0.15);
+            color: #f87171;
+        }
+        
+        .verification-badge.pending {
+            background: rgba(251, 191, 36, 0.15);
+            color: #fbbf24;
+        }
+        
+        /* Plan Display */
+        .plan-card {
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 8px;
+            padding: 16px;
+            margin: 8px 0;
+        }
+        
+        .plan-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        
+        .plan-icon {
+            width: 24px;
+            height: 24px;
+            background: rgba(139, 92, 246, 0.3);
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+        }
+        
+        .plan-title {
+            font-weight: 600;
+            color: #a78bfa;
+            font-size: 14px;
+        }
+        
+        .plan-confidence {
+            margin-left: auto;
+            font-size: 10px;
+            padding: 2px 8px;
+            background: rgba(74, 222, 128, 0.15);
+            color: #4ade80;
+            border-radius: 10px;
+        }
+        
+        .plan-section {
+            margin-bottom: 12px;
+        }
+        
+        .plan-section-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            color: #666;
+            margin-bottom: 4px;
+        }
+        
+        .plan-section-content {
+            font-size: 12px;
+            color: #e0e0e0;
+            line-height: 1.5;
+        }
+        
+        .plan-type-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            background: rgba(59, 130, 246, 0.15);
+            color: #93c5fd;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        
+        .plan-steps {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        
+        .plan-steps li {
+            padding: 4px 0 4px 20px;
+            position: relative;
+            font-size: 12px;
+        }
+        
+        .plan-steps li::before {
+            content: counter(step);
+            counter-increment: step;
+            position: absolute;
+            left: 0;
+            width: 16px;
+            height: 16px;
+            background: rgba(139, 92, 246, 0.3);
+            border-radius: 50%;
+            font-size: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #a78bfa;
+        }
+        
+        .plan-steps {
+            counter-reset: step;
+        }
+        
+        /* Features Checklist */
+        .plan-features {
+            margin: 12px 0;
+            padding: 12px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+        }
+        
+        .plan-features-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+        
+        .plan-features-title {
+            font-size: 11px;
+            text-transform: uppercase;
+            color: #888;
+        }
+        
+        .plan-features-count {
+            font-size: 10px;
+            color: #666;
+        }
+        
+        .feature-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 8px;
+            margin: 4px 0;
+            border-radius: 6px;
+            transition: background 0.2s;
+        }
+        
+        .feature-item:hover {
+            background: rgba(255, 255, 255, 0.03);
+        }
+        
+        .feature-item.not-feasible {
+            opacity: 0.5;
+        }
+        
+        .feature-checkbox {
+            flex-shrink: 0;
+            width: 18px;
+            height: 18px;
+            margin-top: 2px;
+            cursor: pointer;
+            accent-color: #a78bfa;
+        }
+        
+        .feature-checkbox:disabled {
+            cursor: not-allowed;
+        }
+        
+        .feature-content {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .feature-name {
+            font-size: 12px;
+            color: #e0e0e0;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .feature-priority {
+            font-size: 9px;
+            padding: 1px 6px;
+            border-radius: 8px;
+            text-transform: uppercase;
+        }
+        
+        .feature-priority.core {
+            background: rgba(139, 92, 246, 0.2);
+            color: #a78bfa;
+        }
+        
+        .feature-priority.recommended {
+            background: rgba(59, 130, 246, 0.2);
+            color: #93c5fd;
+        }
+        
+        .feature-priority.optional {
+            background: rgba(255, 255, 255, 0.1);
+            color: #888;
+        }
+        
+        .feature-description {
+            font-size: 11px;
+            color: #666;
+            margin-top: 2px;
+        }
+        
+        .feature-not-feasible {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 10px;
+            color: #f87171;
+            margin-top: 4px;
+        }
+        
+        .feature-not-feasible-icon {
+            width: 14px;
+            height: 14px;
+            background: rgba(248, 113, 113, 0.2);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+        }
+        
+        .plan-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .plan-btn {
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s;
+        }
+        
+        .plan-btn.approve {
+            background: rgba(74, 222, 128, 0.2);
+            color: #4ade80;
+        }
+        
+        .plan-btn.approve:hover {
+            background: rgba(74, 222, 128, 0.3);
+        }
+        
+        .plan-btn.modify {
+            background: rgba(251, 191, 36, 0.15);
+            color: #fbbf24;
+        }
+        
+        .plan-btn.modify:hover {
+            background: rgba(251, 191, 36, 0.25);
+        }
+        
+        /* Test Plan Styles */
+        .plan-tests {
+            margin: 12px 0;
+            padding: 12px;
+            background: rgba(59, 130, 246, 0.08);
+            border: 1px solid rgba(59, 130, 246, 0.2);
+            border-radius: 8px;
+        }
+        
+        .plan-tests-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+        
+        .plan-tests-title {
+            font-size: 11px;
+            text-transform: uppercase;
+            color: #93c5fd;
+            font-weight: 600;
+        }
+        
+        .test-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 8px;
+            margin: 4px 0;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 6px;
+        }
+        
+        .test-status {
+            flex-shrink: 0;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            margin-top: 2px;
+        }
+        
+        .test-status.pending {
+            background: rgba(255, 255, 255, 0.1);
+            color: #666;
+        }
+        
+        .test-status.running {
+            background: rgba(59, 130, 246, 0.3);
+            color: #93c5fd;
+            animation: pulse 1s infinite;
+        }
+        
+        .test-status.passed {
+            background: rgba(74, 222, 128, 0.2);
+            color: #4ade80;
+        }
+        
+        .test-status.failed {
+            background: rgba(248, 113, 113, 0.2);
+            color: #f87171;
+        }
+        
+        .test-status.fixed {
+            background: rgba(251, 191, 36, 0.2);
+            color: #fbbf24;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .test-content {
+            flex: 1;
+        }
+        
+        .test-name {
+            font-size: 12px;
+            color: #e0e0e0;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .test-priority {
+            font-size: 9px;
+            padding: 1px 6px;
+            border-radius: 8px;
+            text-transform: uppercase;
+        }
+        
+        .test-priority.critical {
+            background: rgba(248, 113, 113, 0.2);
+            color: #f87171;
+        }
+        
+        .test-priority.important {
+            background: rgba(251, 191, 36, 0.2);
+            color: #fbbf24;
+        }
+        
+        .test-priority.nice-to-have {
+            background: rgba(255, 255, 255, 0.1);
+            color: #888;
+        }
+        
+        .test-prompt {
+            font-size: 11px;
+            color: #93c5fd;
+            font-family: monospace;
+            margin-top: 4px;
+        }
+        
+        .test-expected {
+            font-size: 10px;
+            color: #666;
+            margin-top: 2px;
+        }
+        
+        .test-result {
+            font-size: 10px;
+            margin-top: 4px;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+        
+        .test-result.success {
+            background: rgba(74, 222, 128, 0.1);
+            color: #4ade80;
+        }
+        
+        .test-result.failure {
+            background: rgba(248, 113, 113, 0.1);
+            color: #f87171;
+        }
+        
+        .test-result.fixing {
+            background: rgba(251, 191, 36, 0.1);
+            color: #fbbf24;
+        }
+        
+        /* Expandable Test Details */
+        .test-details-toggle {
+            background: none;
+            border: none;
+            color: #888;
+            font-size: 10px;
+            cursor: pointer;
+            padding: 2px 6px;
+            margin-left: 8px;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+        
+        .test-details-toggle:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+        }
+        
+        .test-details-expanded {
+            margin-top: 8px;
+            padding: 12px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 10px;
+            line-height: 1.6;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .test-details-section {
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .test-details-section:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+        }
+        
+        .test-details-section-title {
+            font-weight: 600;
+            color: #93c5fd;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            font-size: 9px;
+            letter-spacing: 0.5px;
+        }
+        
+        /* State Diff View */
+        .state-comparison {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        
+        .state-column {
+            padding: 8px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 4px;
+        }
+        
+        .state-column-title {
+            font-size: 9px;
+            font-weight: 600;
+            margin-bottom: 6px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .state-column.before .state-column-title {
+            color: #fbbf24;
+        }
+        
+        .state-column.after .state-column-title {
+            color: #93c5fd;
+        }
+        
+        .state-line {
+            padding: 2px 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        
+        .state-line.changed {
+            color: #f87171;
+            background: rgba(248, 113, 113, 0.1);
+            padding: 2px 4px;
+            margin: 2px -4px;
+            border-radius: 2px;
+        }
+        
+        .state-line.unchanged {
+            color: #666;
+        }
+        
+        /* Verification Results */
+        .verification-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        
+        .verification-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            padding: 4px 0;
+        }
+        
+        .verification-icon {
+            flex-shrink: 0;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+        }
+        
+        .verification-icon.pass {
+            background: rgba(74, 222, 128, 0.2);
+            color: #4ade80;
+        }
+        
+        .verification-icon.fail {
+            background: rgba(248, 113, 113, 0.2);
+            color: #f87171;
+        }
+        
+        .verification-text {
+            flex: 1;
+        }
+        
+        .verification-name {
+            color: #e0e0e0;
+        }
+        
+        .verification-detail {
+            color: #888;
+            font-size: 9px;
+        }
+        
+        /* Timeline View */
+        .timeline-container {
+            position: relative;
+            padding-left: 16px;
+        }
+        
+        .timeline-container::before {
+            content: '';
+            position: absolute;
+            left: 5px;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: rgba(255, 255, 255, 0.1);
+        }
+        
+        .timeline-event {
+            position: relative;
+            padding: 4px 0 4px 12px;
+        }
+        
+        .timeline-event::before {
+            content: '';
+            position: absolute;
+            left: -11px;
+            top: 8px;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #3a3a4a;
+            border: 2px solid #666;
+        }
+        
+        .timeline-event.success::before {
+            background: #4ade80;
+            border-color: #4ade80;
+        }
+        
+        .timeline-event.error::before {
+            background: #f87171;
+            border-color: #f87171;
+        }
+        
+        .timeline-event.action::before {
+            background: #93c5fd;
+            border-color: #93c5fd;
+        }
+        
+        .timeline-time {
+            font-size: 9px;
+            color: #666;
+            margin-right: 8px;
+        }
+        
+        .timeline-text {
+            color: #e0e0e0;
+        }
+        
+        /* Diff Highlight */
+        .diff-add {
+            background: rgba(74, 222, 128, 0.15);
+            color: #4ade80;
+        }
+        
+        .diff-remove {
+            background: rgba(248, 113, 113, 0.15);
+            color: #f87171;
+        }
+        
+        .diff-unchanged {
+            color: #666;
+        }
+        
+        /* Copy Button */
+        .copy-debug-btn {
+            float: right;
+            padding: 4px 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            border-radius: 4px;
+            color: #888;
+            font-size: 9px;
+            cursor: pointer;
+        }
+        
+        .copy-debug-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            color: #fff;
+        }
+        
+        .test-run-all {
+            margin-top: 12px;
+            padding: 8px 16px;
+            width: 100%;
+            background: rgba(59, 130, 246, 0.2);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            border-radius: 6px;
+            color: #93c5fd;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .test-run-all:hover:not(:disabled) {
+            background: rgba(59, 130, 246, 0.3);
+        }
+        
+        .test-run-all:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .test-summary {
+            display: flex;
+            gap: 12px;
+            margin-top: 8px;
+            font-size: 11px;
+        }
+        
+        .test-summary-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        
+        .test-summary-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+        
+        .test-summary-dot.passed { background: #4ade80; }
+        .test-summary-dot.failed { background: #f87171; }
+        .test-summary-dot.pending { background: #666; }
+        
+        .planning-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: rgba(139, 92, 246, 0.1);
+            border-radius: 6px;
+            font-size: 12px;
+            color: #a78bfa;
+        }
+        
+        .planning-spinner {
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(139, 92, 246, 0.3);
+            border-top-color: #a78bfa;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="window-container">
+        <div class="titlebar">
+            <span class="titlebar-title">GSX Agent Composer</span>
+            <button class="titlebar-close" id="closeBtn">&times;</button>
+        </div>
+        
+        <div class="main-content">
+            <!-- Left Panel - Chat -->
+            <div class="chat-panel">
+                <!-- Agent Type Selector -->
+                <div class="agent-type-selector">
+                    <div class="selector-label">Agent Type (auto-detected)</div>
+                    <div class="type-selector-row" id="typeSelector">
+                        <!-- Type chips will be rendered here -->
+                    </div>
+                    <div class="matched-hint" id="matchedHint">
+                        Detected from your prompt. Click to change.
+                    </div>
+                </div>
+                
+                <!-- Chat Messages -->
+                <div class="chat-messages" id="chatMessages">
+                    <div class="welcome-message" id="welcomeMessage">
+                        <h3>Create an Agent</h3>
+                        <p>Describe what you want your agent to do. I'll help you build it step by step.</p>
+                        <div class="welcome-suggestions" id="welcomeSuggestions">
+                            <div class="suggestion-chip">An agent that summarizes emails into bullet points</div>
+                            <div class="suggestion-chip">A terminal helper that explains commands</div>
+                            <div class="suggestion-chip">An assistant that helps with meeting notes</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Chat Input -->
+                <div class="chat-input-area">
+                    <div class="chat-input-row">
+                        <input type="text" class="chat-input" id="chatInput" 
+                               placeholder="Describe your agent or ask for changes..." />
+                        <button class="send-btn" id="sendBtn" title="Send">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M22 2L11 13M22 2L15 22L11 13M22 2L2 9L11 13"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Right Panel - Preview -->
+            <div class="preview-panel">
+                <div class="preview-header">
+                    <span class="preview-title">Agent Preview</span>
+                    <span class="preview-status" id="previewStatus">No draft</span>
+                </div>
+                
+                <div class="preview-content" id="previewContent">
+                    <!-- Empty state -->
+                    <div class="preview-empty" id="previewEmpty">
+                        <div class="preview-empty-icon">{ }</div>
+                        <div class="preview-empty-text">
+                            Start a conversation to create your agent.<br>
+                            The preview will update as we refine it.
+                        </div>
+                    </div>
+                    
+                    <!-- Agent card (hidden initially) -->
+                    <div class="agent-card" id="agentCard" style="display: none;">
+                        <div class="agent-card-header">
+                            <div class="agent-name" id="agentName">Agent Name</div>
+                            <span class="agent-type-badge" id="agentTypeBadge">Type</span>
+                        </div>
+                        <div class="agent-card-body">
+                            <div class="agent-section">
+                                <div class="agent-section-label">System Prompt</div>
+                                <div class="agent-prompt-preview" id="agentPrompt">
+                                    System prompt will appear here...
+                                </div>
+                            </div>
+                            <div class="agent-section">
+                                <div class="agent-section-label">Keywords</div>
+                                <div class="keywords-list" id="agentKeywords">
+                                    <!-- Keywords rendered here -->
+                                </div>
+                            </div>
+                            <div class="agent-section">
+                                <div class="agent-section-label">Capabilities</div>
+                                <div class="capabilities-list" id="agentCapabilities">
+                                    Capabilities will appear here...
+                                </div>
+                            </div>
+                            
+                            <!-- Test Section -->
+                            <div class="test-section" id="testSection">
+                                <div class="auto-test-header">
+                                    <div class="test-section-header">Test Agent</div>
+                                    <label class="auto-test-toggle">
+                                        <input type="checkbox" id="autoTestToggle" checked />
+                                        Auto-fix if fails
+                                    </label>
+                                </div>
+                                <div class="test-input-row">
+                                    <input type="text" class="test-input" id="testInput" 
+                                           placeholder="Test your agent..." />
+                                    <button class="btn-test" id="testBtn">Test</button>
+                                </div>
+                                <div class="test-response" id="testResponse">
+                                    Enter a test message to see how your agent responds.
+                                </div>
+                                <!-- Autonomous Test Progress -->
+                                <div class="auto-test-progress" id="autoTestProgress" style="display: none;">
+                                    <div class="progress-header">
+                                        <span class="progress-status" id="progressStatus">Testing...</span>
+                                        <span class="progress-attempts" id="progressAttempts">Attempt 1/5</span>
+                                    </div>
+                                    <div class="progress-bar-container">
+                                        <div class="progress-bar" id="progressBar" style="width: 0%"></div>
+                                    </div>
+                                    <div class="progress-log" id="progressLog"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Version Info -->
+                <div class="version-info" id="versionInfo" style="display: none;">
+                    <span class="version-badge" id="versionBadge">v1</span>
+                    <span id="versionText">Version 1</span>
+                    <button class="version-history-btn" id="versionHistoryBtn">View History</button>
+                </div>
+                
+                <div class="preview-actions">
+                    <button class="btn secondary" id="startOverBtn">Start Over</button>
+                    <button class="btn-undo" id="undoBtn" disabled title="Undo last change">Undo</button>
+                    <button class="btn primary" id="saveBtn" disabled>Save Agent</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Version History Modal -->
+    <div class="version-modal" id="versionModal" style="display: none;">
+        <div class="version-modal-content">
+            <div class="version-modal-header">
+                <h3>Version History</h3>
+                <button class="version-modal-close" id="closeVersionModal">&times;</button>
+            </div>
+            <div class="version-list" id="versionList">
+                <!-- Versions rendered here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==================== STATE ====================
+        let agentTypes = [];
+        let selectedAgentTypes = new Set(); // Support multi-selection
+        let autoMatchedTypes = new Map(); // id -> { score, matchedKeywords }
+        let chatMessages = [];
+        let currentAgentDraft = null;
+        let currentPlan = null; // LLM-generated plan
+        let isProcessing = false;
+        let isPlanning = false;
+        let isTesting = false;
+        let scoreDebounceTimer = null;
+        
+        // Agent type icons
+        const TYPE_ICONS = {
+            'terminal': '>_',
+            'applescript': 'AS',
+            'nodejs': 'JS',
+            'conversational': 'Aa',
+            'automation': '>>',
+            'browser': 'WW',
+            'system': 'SY',
+        };
+        
+        // ==================== DOM ELEMENTS ====================
+        const closeBtn = document.getElementById('closeBtn');
+        const typeSelector = document.getElementById('typeSelector');
+        const chatMessagesEl = document.getElementById('chatMessages');
+        const welcomeMessage = document.getElementById('welcomeMessage');
+        const welcomeSuggestions = document.getElementById('welcomeSuggestions');
+        const chatInput = document.getElementById('chatInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const previewStatus = document.getElementById('previewStatus');
+        const previewEmpty = document.getElementById('previewEmpty');
+        const agentCard = document.getElementById('agentCard');
+        const agentName = document.getElementById('agentName');
+        const agentTypeBadge = document.getElementById('agentTypeBadge');
+        const agentPrompt = document.getElementById('agentPrompt');
+        const agentKeywords = document.getElementById('agentKeywords');
+        const agentCapabilities = document.getElementById('agentCapabilities');
+        const testSection = document.getElementById('testSection');
+        const testInput = document.getElementById('testInput');
+        const testBtn = document.getElementById('testBtn');
+        const testResponse = document.getElementById('testResponse');
+        const startOverBtn = document.getElementById('startOverBtn');
+        const saveBtn = document.getElementById('saveBtn');
+        const undoBtn = document.getElementById('undoBtn');
+        const versionInfo = document.getElementById('versionInfo');
+        const versionBadge = document.getElementById('versionBadge');
+        const versionText = document.getElementById('versionText');
+        const versionHistoryBtn = document.getElementById('versionHistoryBtn');
+        const versionModal = document.getElementById('versionModal');
+        const versionList = document.getElementById('versionList');
+        const closeVersionModal = document.getElementById('closeVersionModal');
+        
+        // ==================== EVENT HANDLERS ====================
+        
+        // Close window
+        closeBtn.addEventListener('click', () => {
+            if (window.claudeCodeAPI) {
+                window.claudeCodeAPI.close();
+            }
+        });
+        
+        // Send message
+        sendBtn.addEventListener('click', sendMessage);
+        chatInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey && !isProcessing) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+        
+        // Disabled: Auto-score templates as user types
+        // We now use LLM-based planning instead of keyword matching
+        // chatInput.addEventListener('input', (e) => {
+        //     scoreTemplatesDebounced(e.target.value);
+        // });
+        
+        // Suggestion chips
+        welcomeSuggestions.addEventListener('click', (e) => {
+            if (e.target.classList.contains('suggestion-chip')) {
+                chatInput.value = e.target.textContent;
+                // LLM planning will determine the best template when message is sent
+                sendMessage();
+            }
+        });
+        
+        // Start over
+        startOverBtn.addEventListener('click', startOver);
+        
+        // Save agent
+        saveBtn.addEventListener('click', saveAgent);
+        
+        // Undo
+        undoBtn.addEventListener('click', undoLastChange);
+        
+        // Version history
+        versionHistoryBtn.addEventListener('click', showVersionHistory);
+        closeVersionModal.addEventListener('click', () => versionModal.style.display = 'none');
+        versionModal.addEventListener('click', (e) => {
+            if (e.target === versionModal) versionModal.style.display = 'none';
+        });
+        
+        // Test agent
+        testBtn.addEventListener('click', testAgent);
+        testInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !isTesting) {
+                testAgent();
+            }
+        });
+        
+        // ==================== FUNCTIONS ====================
+        
+        // Render agent type chips with auto-match highlighting
+        function renderTypeSelector() {
+            const matchedHint = document.getElementById('matchedHint');
+            
+            typeSelector.innerHTML = agentTypes.map(type => {
+                const isSelected = selectedAgentTypes.has(type.id);
+                const autoMatch = autoMatchedTypes.get(type.id);
+                const isAutoMatched = autoMatch && autoMatch.score > 0;
+                
+                let classes = 'type-chip';
+                if (isSelected) classes += ' selected';
+                if (isAutoMatched) classes += ' auto-matched';
+                
+                let scoreDisplay = '';
+                if (isAutoMatched && autoMatch.score > 0) {
+                    scoreDisplay = `<span class="type-chip-score">${autoMatch.score}</span>`;
+                }
+                
+                return `
+                    <div class="${classes}" data-id="${type.id}" title="${type.description}">
+                        <span class="type-chip-icon">${TYPE_ICONS[type.id] || '?'}</span>
+                        ${type.name}${scoreDisplay}
+                    </div>
+                `;
+            }).join('');
+            
+            // Show/hide matched hint
+            const hasAutoMatches = Array.from(autoMatchedTypes.values()).some(m => m.score > 0);
+            if (matchedHint) {
+                matchedHint.classList.toggle('visible', hasAutoMatches);
+            }
+            
+            // Add click handlers
+            typeSelector.querySelectorAll('.type-chip').forEach(chip => {
+                chip.addEventListener('click', () => {
+                    const id = chip.dataset.id;
+                    // Toggle selection
+                    if (selectedAgentTypes.has(id)) {
+                        selectedAgentTypes.delete(id);
+                    } else {
+                        selectedAgentTypes.add(id);
+                    }
+                    renderTypeSelector();
+                });
+            });
+        }
+        
+        // Score templates against input text (debounced)
+        function scoreTemplatesDebounced(text) {
+            clearTimeout(scoreDebounceTimer);
+            scoreDebounceTimer = setTimeout(async () => {
+                await scoreTemplates(text);
+            }, 300);
+        }
+        
+        // Score templates and update UI
+        async function scoreTemplates(text) {
+            if (!text || text.length < 3) {
+                autoMatchedTypes.clear();
+                renderTypeSelector();
+                return;
+            }
+            
+            try {
+                const scores = await window.claudeCodeAPI.scoreTemplates(text);
+                
+                autoMatchedTypes.clear();
+                
+                // Only show templates with score > 0
+                for (const item of scores) {
+                    if (item.score > 0) {
+                        autoMatchedTypes.set(item.template.id, {
+                            score: item.score,
+                            matchedKeywords: item.matchedKeywords,
+                        });
+                        
+                        // Auto-select top match if nothing selected yet
+                        if (selectedAgentTypes.size === 0 && item.score >= 2) {
+                            selectedAgentTypes.add(item.template.id);
+                        }
+                    }
+                }
+                
+                renderTypeSelector();
+            } catch (error) {
+                console.error('[AgentComposer] Score templates error:', error);
+            }
+        }
+        
+        // Add message to chat
+        function addMessage(role, content) {
+            const message = { role, content, timestamp: Date.now() };
+            chatMessages.push(message);
+            
+            // Hide welcome message
+            welcomeMessage.style.display = 'none';
+            
+            // Create message element
+            const msgEl = document.createElement('div');
+            msgEl.className = `chat-message ${role}`;
+            msgEl.innerHTML = `
+                <div class="message-avatar">${role === 'user' ? 'U' : 'AI'}</div>
+                <div class="message-content">${escapeHtml(content)}</div>
+            `;
+            
+            chatMessagesEl.appendChild(msgEl);
+            chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+        }
+        
+        // Show typing indicator
+        function showTyping() {
+            const typingEl = document.createElement('div');
+            typingEl.className = 'chat-message assistant';
+            typingEl.id = 'typingIndicator';
+            typingEl.innerHTML = `
+                <div class="message-avatar">AI</div>
+                <div class="message-content">
+                    <div class="typing-indicator">
+                        <span></span><span></span><span></span>
+                    </div>
+                </div>
+            `;
+            chatMessagesEl.appendChild(typingEl);
+            chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+        }
+        
+        // Hide typing indicator
+        function hideTyping() {
+            const typingEl = document.getElementById('typingIndicator');
+            if (typingEl) typingEl.remove();
+        }
+        
+        // Send message to AI
+        async function sendMessage() {
+            const message = chatInput.value.trim();
+            if (!message || isProcessing) return;
+            
+            // Add user message
+            addMessage('user', message);
+            chatInput.value = '';
+            
+            isProcessing = true;
+            sendBtn.disabled = true;
+            
+            // If no plan exists and this looks like an initial request, plan first
+            if (!currentPlan && !currentAgentDraft && chatMessages.length <= 2) {
+                await planAgent(message);
+            } else {
+                // Continue building with existing plan
+                await buildAgent(message);
+            }
+            
+            isProcessing = false;
+            sendBtn.disabled = false;
+        }
+        
+        // Step 1: Plan the agent using LLM
+        async function planAgent(description) {
+            isPlanning = true;
+            showPlanningIndicator();
+            
+            try {
+                const result = await window.claudeCodeAPI.planAgent(description);
+                
+                hidePlanningIndicator();
+                
+                if (result.success && result.plan) {
+                    currentPlan = result.plan;
+                    
+                    // Show the plan to the user
+                    showPlanCard(result.plan, description);
+                } else {
+                    // Better error message with debugging info
+                    let errorMsg = 'I had trouble creating a plan for that request.';
+                    if (result.error) {
+                        if (result.error.includes('JSON parse') || result.error.includes('truncated')) {
+                            errorMsg = 'The plan was too complex and got cut off. Try a simpler description like "control Apple Music" or "open websites".';
+                        } else {
+                            errorMsg += ' ' + result.error;
+                        }
+                    }
+                    addMessage('assistant', errorMsg);
+                    console.error('[PlanAgent] Planning failed:', result);
+                }
+            } catch (error) {
+                hidePlanningIndicator();
+                addMessage('assistant', `Planning failed: ${error.message}`);
+            }
+            
+            isPlanning = false;
+        }
+        
+        // Step 2: Build the agent based on the plan
+        async function buildAgent(message) {
+            showTyping();
+            
+            try {
+                // Build context with the plan and selected features
+                const context = {
+                    agentTypeId: currentPlan?.executionType || 'conversational',
+                    selectedTypes: currentPlan ? [currentPlan.executionType] : [],
+                    matchedTypes: [],
+                    currentDraft: currentAgentDraft,
+                    messageHistory: chatMessages.slice(-10),
+                    plan: currentPlan ? {
+                        ...currentPlan,
+                        // Ensure features reflect current checkbox states
+                        features: currentPlan.features || []
+                    } : null,
+                };
+                
+                const result = await window.claudeCodeAPI.chat(message, context);
+                
+                hideTyping();
+                
+                if (result.success) {
+                    addMessage('assistant', result.response);
+                    
+                    if (result.agentDraft) {
+                        // Include selected features in the agent draft
+                        const selectedFeatures = (currentPlan?.features || [])
+                            .filter(f => f.enabled && f.feasible)
+                            .map(f => ({ id: f.id, name: f.name, description: f.description }));
+                        
+                        currentAgentDraft = {
+                            ...result.agentDraft,
+                            features: selectedFeatures,
+                        };
+                        updatePreview(currentAgentDraft);
+                    }
+                } else {
+                    addMessage('assistant', `Sorry, I encountered an error: ${result.error}`);
+                }
+            } catch (error) {
+                hideTyping();
+                addMessage('assistant', `Sorry, something went wrong: ${error.message}`);
+            }
+        }
+        
+        // Show planning indicator
+        function showPlanningIndicator() {
+            const indicator = document.createElement('div');
+            indicator.id = 'planningIndicator';
+            indicator.className = 'planning-indicator';
+            indicator.innerHTML = `
+                <div class="planning-spinner"></div>
+                <span>Analyzing your request...</span>
+            `;
+            chatMessagesEl.appendChild(indicator);
+            chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+        }
+        
+        function hidePlanningIndicator() {
+            const indicator = document.getElementById('planningIndicator');
+            if (indicator) indicator.remove();
+        }
+        
+        // Show the plan card
+        function showPlanCard(plan, originalRequest) {
+            const confidence = Math.round((plan.confidence || 0.8) * 100);
+            const features = plan.features || [];
+            const enabledCount = features.filter(f => f.enabled && f.feasible).length;
+            const totalFeasible = features.filter(f => f.feasible).length;
+            
+            // Build features HTML
+            const featuresHtml = features.length > 0 ? `
+                <div class="plan-features">
+                    <div class="plan-features-header">
+                        <span class="plan-features-title">Features</span>
+                        <span class="plan-features-count" id="featureCount">${enabledCount}/${totalFeasible} selected</span>
+                    </div>
+                    ${features.map((f, i) => `
+                        <div class="feature-item ${!f.feasible ? 'not-feasible' : ''}">
+                            <input type="checkbox" 
+                                   class="feature-checkbox" 
+                                   id="feature_${i}" 
+                                   data-feature-id="${f.id}"
+                                   ${f.enabled && f.feasible ? 'checked' : ''} 
+                                   ${!f.feasible ? 'disabled' : ''}
+                                   onchange="updateFeatureSelection()">
+                            <div class="feature-content">
+                                <label class="feature-name" for="feature_${i}">
+                                    ${escapeHtml(f.name)}
+                                    <span class="feature-priority ${f.priority || 'optional'}">${f.priority || 'optional'}</span>
+                                </label>
+                                <div class="feature-description">${escapeHtml(f.description)}</div>
+                                ${!f.feasible ? `
+                                    <div class="feature-not-feasible">
+                                        <span class="feature-not-feasible-icon">X</span>
+                                        <span>${escapeHtml(f.feasibilityReason || 'Not possible')}</span>
+                                    </div>
+                                ` : ''}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            ` : '';
+            
+            const planHtml = `
+                <div class="plan-card" id="currentPlanCard">
+                    <div class="plan-header">
+                        <div class="plan-icon">P</div>
+                        <span class="plan-title">Agent Plan</span>
+                        <span class="plan-confidence">${confidence}% confident</span>
+                    </div>
+                    
+                    <div class="plan-section">
+                        <div class="plan-section-label">Understanding</div>
+                        <div class="plan-section-content">${escapeHtml(plan.understanding)}</div>
+                    </div>
+                    
+                    <div class="plan-section">
+                        <div class="plan-section-label">Execution Type</div>
+                        <div class="plan-section-content">
+                            <span class="plan-type-badge">${plan.executionType}</span>
+                            <span style="margin-left: 8px; color: #888; font-size: 11px;">${escapeHtml(plan.reasoning || '')}</span>
+                        </div>
+                    </div>
+                    
+                    ${featuresHtml}
+                    
+                    <div class="plan-section">
+                        <div class="plan-section-label">Approach</div>
+                        <ol class="plan-steps">
+                            ${(plan.approach?.steps || []).map(step => `<li>${escapeHtml(step)}</li>`).join('')}
+                        </ol>
+                    </div>
+                    
+                    ${plan.approach?.challenges?.length ? `
+                    <div class="plan-section">
+                        <div class="plan-section-label">Considerations</div>
+                        <div class="plan-section-content" style="color: #fbbf24;">
+                            ${plan.approach.challenges.map(c => escapeHtml(c)).join(' | ')}
+                        </div>
+                    </div>
+                    ` : ''}
+                    
+                    ${plan.testPlan?.tests?.length ? `
+                    <div class="plan-tests" id="testPlanSection">
+                        <div class="plan-tests-header">
+                            <span class="plan-tests-title">Test Plan</span>
+                        </div>
+                        ${plan.testPlan.tests.map((t, i) => `
+                            <div class="test-item" id="test_${i}">
+                                <div class="test-status pending" id="testStatus_${i}">-</div>
+                                <div class="test-content">
+                                    <div class="test-name">
+                                        ${escapeHtml(t.name)}
+                                        <span class="test-priority ${t.priority || 'important'}">${t.priority || 'important'}</span>
+                                    </div>
+                                    <div class="test-prompt">"${escapeHtml(t.testPrompt)}"</div>
+                                    <div class="test-expected">Expected: ${escapeHtml(t.expectedBehavior)}</div>
+                                    <div class="test-result" id="testResult_${i}" style="display: none;"></div>
+                                </div>
+                            </div>
+                        `).join('')}
+                        <div class="test-summary" id="testSummary" style="display: none;">
+                            <div class="test-summary-item"><div class="test-summary-dot passed"></div> <span id="passedCount">0</span> passed</div>
+                            <div class="test-summary-item"><div class="test-summary-dot failed"></div> <span id="failedCount">0</span> failed</div>
+                        </div>
+                    </div>
+                    ` : ''}
+                    
+                    <div class="plan-actions">
+                        <button class="plan-btn approve" onclick="approvePlan()">Build & Test Agent</button>
+                        <button class="plan-btn modify" onclick="modifyPlan()">Let Me Adjust</button>
+                    </div>
+                </div>
+            `;
+            
+            const messageEl = document.createElement('div');
+            messageEl.className = 'chat-message assistant';
+            messageEl.innerHTML = `
+                <div class="message-bubble">
+                    ${planHtml}
+                </div>
+            `;
+            
+            chatMessagesEl.appendChild(messageEl);
+            chatMessages.push({ role: 'assistant', content: '[Plan displayed]' });
+            chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+            
+            // Auto-select the execution type in the type selector
+            if (plan.executionType) {
+                selectedAgentTypes.clear();
+                selectedAgentTypes.add(plan.executionType);
+                renderTypeSelector();
+            }
+            
+            // Broadcast plan summary to Orb for TTS
+            broadcastPlanToOrb(plan);
+        }
+        
+        // Generate and broadcast plan summary for Orb TTS
+        async function broadcastPlanToOrb(plan) {
+            try {
+                // Build a concise, conversational spoken summary
+                const features = (plan.features || [])
+                    .filter(f => f.enabled && f.feasible)
+                    .map(f => f.name)
+                    .slice(0, 4);  // Limit to 4 features for brevity
+                
+                let summary = `I can create a ${plan.suggestedName || 'new agent'}. `;
+                
+                if (features.length > 0) {
+                    if (features.length === 1) {
+                        summary += `It will have ${features[0]}. `;
+                    } else {
+                        const lastFeature = features.pop();
+                        summary += `It will have ${features.join(', ')}, and ${lastFeature}. `;
+                    }
+                }
+                
+                summary += 'Does that sound good, or would you like to change anything?';
+                
+                // Send to Orb
+                if (window.claudeCodeAPI?.broadcastPlan) {
+                    await window.claudeCodeAPI.broadcastPlan(summary);
+                    console.log('[AgentComposer] Plan summary broadcast to Orb');
+                }
+            } catch (error) {
+                console.error('[AgentComposer] Failed to broadcast plan:', error);
+            }
+        }
+        
+        // Update feature selection and count
+        window.updateFeatureSelection = function() {
+            if (!currentPlan?.features) return;
+            
+            // Update the plan with current checkbox states
+            const checkboxes = document.querySelectorAll('.feature-checkbox');
+            let enabledCount = 0;
+            let totalFeasible = 0;
+            
+            checkboxes.forEach((cb, i) => {
+                if (currentPlan.features[i]) {
+                    currentPlan.features[i].enabled = cb.checked;
+                    if (currentPlan.features[i].feasible) {
+                        totalFeasible++;
+                        if (cb.checked) enabledCount++;
+                    }
+                }
+            });
+            
+            // Update count display
+            const countEl = document.getElementById('featureCount');
+            if (countEl) {
+                countEl.textContent = `${enabledCount}/${totalFeasible} selected`;
+            }
+        };
+        
+        // Approve the plan and start building
+        window.approvePlan = async function() {
+            if (!currentPlan) return;
+            
+            // ANNOUNCE BUILD START via TTS
+            if (window.claudeCodeAPI?.broadcastPlan) {
+                await window.claudeCodeAPI.broadcastPlan('Building your agent now.');
+            }
+            
+            // Remove the plan card buttons and disable checkboxes (make it static)
+            const planCard = document.getElementById('currentPlanCard');
+            if (planCard) {
+                const actions = planCard.querySelector('.plan-actions');
+                if (actions) actions.remove();
+                
+                // Disable all checkboxes
+                const checkboxes = planCard.querySelectorAll('.feature-checkbox');
+                checkboxes.forEach(cb => cb.disabled = true);
+            }
+            
+            // Get selected features
+            const selectedFeatures = (currentPlan.features || [])
+                .filter(f => f.enabled && f.feasible)
+                .map(f => f.name);
+            
+            const hasTests = currentPlan.testPlan?.tests?.length > 0;
+            const featuresList = selectedFeatures.length > 0 
+                ? `\n\nSelected features: ${selectedFeatures.join(', ')}`
+                : '';
+            
+            addMessage('assistant', `Building **${currentPlan.suggestedName || 'your agent'}** using **${currentPlan.executionType}**.${featuresList}${hasTests ? '\n\nWill run test plan after building.' : ''}`);
+            
+            isProcessing = true;
+            sendBtn.disabled = true;
+            showTyping();
+            
+            // Build the agent with the plan context (including selected features)
+            const buildMessage = `Build the agent "${currentPlan.suggestedName}" with these features: ${selectedFeatures.join(', ')}`;
+            await buildAgent(buildMessage);
+            
+            // If we have a test plan, run the tests
+            if (hasTests && currentAgentDraft) {
+                hideTyping();
+                // Announce testing via TTS
+                if (window.claudeCodeAPI?.broadcastPlan) {
+                    await window.claudeCodeAPI.broadcastPlan('Testing the agent now.');
+                }
+                addMessage('assistant', 'Agent built! Now running test plan...');
+                await runTestPlan();
+            }
+            
+            isProcessing = false;
+            sendBtn.disabled = false;
+        };
+        
+        // Run the test plan
+        async function runTestPlan() {
+            if (!currentPlan?.testPlan?.tests || !currentAgentDraft) return;
+            
+            const tests = currentPlan.testPlan.tests;
+            let passed = 0;
+            let failed = 0;
+            let fixed = 0;
+            
+            for (let i = 0; i < tests.length; i++) {
+                const test = tests[i];
+                
+                // Update UI to show running
+                updateTestStatus(i, 'running', '...');
+                
+                try {
+                    // Run the test using auto-test
+                    const result = await window.claudeCodeAPI.autoTest(currentAgentDraft, test.testPrompt);
+                    
+                    // Get detailed result from last attempt
+                    const lastResult = result.lastResult || result;
+                    
+                    if (result.success) {
+                        updateTestStatus(i, 'passed', '✓');
+                        showTestResult(i, 'success', result.verificationDetails || 'Test passed', lastResult);
+                        passed++;
+                        
+                        // Update agent if it was modified during fixing
+                        if (result.finalAgent) {
+                            currentAgentDraft = result.finalAgent;
+                            updatePreview(currentAgentDraft);
+                        }
+                        
+                        if (result.attempts > 1) {
+                            fixed++;
+                            updateTestStatus(i, 'fixed', '✓');
+                            showTestResult(i, 'fixing', `Fixed after ${result.attempts} attempts: ${result.verificationDetails || ''}`, lastResult);
+                        }
+                    } else {
+                        updateTestStatus(i, 'failed', '✗');
+                        showTestResult(i, 'failure', result.recommendation || `Failed after ${result.attempts} attempts`, lastResult);
+                        failed++;
+                    }
+                } catch (error) {
+                    updateTestStatus(i, 'failed', '✗');
+                    showTestResult(i, 'failure', `Error: ${error.message}`, null);
+                    failed++;
+                }
+                
+                // Small delay between tests
+                await new Promise(r => setTimeout(r, 500));
+            }
+            
+            // Show summary
+            showTestSummary(passed, failed, fixed);
+            
+            // Report results
+            const criticalFailed = tests.filter((t, i) => t.priority === 'critical' && document.getElementById(`testStatus_${i}`)?.classList.contains('failed')).length;
+            
+            if (criticalFailed > 0) {
+                addMessage('assistant', `Test plan complete: **${passed} passed**, **${failed} failed** (${criticalFailed} critical). The agent needs more work on critical tests.`);
+            } else if (failed > 0) {
+                addMessage('assistant', `Test plan complete: **${passed} passed**, **${failed} failed**. Core functionality works, but some features may need attention.`);
+            } else {
+                addMessage('assistant', `All tests passed! ${fixed > 0 ? `(${fixed} required auto-fixes)` : ''} The agent is ready to use.`);
+            }
+        }
+        
+        // Update test status in UI
+        function updateTestStatus(index, status, symbol) {
+            const statusEl = document.getElementById(`testStatus_${index}`);
+            if (statusEl) {
+                statusEl.className = `test-status ${status}`;
+                statusEl.textContent = symbol;
+            }
+        }
+        
+        // Show test result details - enhanced with expandable view
+        function showTestResult(index, type, message, fullResult = null) {
+            const resultEl = document.getElementById(`testResult_${index}`);
+            if (resultEl) {
+                resultEl.className = `test-result ${type}`;
+                
+                // Store result for later access (before rendering)
+                if (fullResult) {
+                    window.testResults = window.testResults || {};
+                    window.testResults[index] = fullResult;
+                }
+                
+                // Basic message with expand button if we have full result
+                if (fullResult && (fullResult.stateDiff || fullResult.verificationResults || fullResult.timeline)) {
+                    resultEl.innerHTML = `
+                        <span>${escapeHtml(message)}</span>
+                        <button class="test-details-toggle" onclick="toggleTestDetails(${index})">
+                            Show Details
+                        </button>
+                        <div class="test-details-expanded" id="testDetails_${index}" style="display: none;">
+                            ${renderTestDetails(fullResult, index)}
+                        </div>
+                    `;
+                } else {
+                    resultEl.textContent = message;
+                }
+                
+                resultEl.style.display = 'block';
+            }
+        }
+        
+        // Toggle test details visibility
+        window.toggleTestDetails = function(index) {
+            const detailsEl = document.getElementById(`testDetails_${index}`);
+            const toggleBtn = detailsEl?.previousElementSibling;
+            
+            if (detailsEl) {
+                const isHidden = detailsEl.style.display === 'none';
+                detailsEl.style.display = isHidden ? 'block' : 'none';
+                if (toggleBtn) {
+                    toggleBtn.textContent = isHidden ? 'Hide Details' : 'Show Details';
+                }
+            }
+        };
+        
+        // Render full test details
+        function renderTestDetails(result, testIndex) {
+            const sections = [];
+            
+            // Verification Results Section
+            if (result.verificationResults) {
+                sections.push(`
+                    <div class="test-details-section">
+                        <div class="test-details-section-title">Verification Results</div>
+                        <ul class="verification-list">
+                            ${renderVerificationResults(result.verificationResults)}
+                        </ul>
+                    </div>
+                `);
+            }
+            
+            // State Comparison Section
+            if (result.beforeState && result.afterState) {
+                sections.push(`
+                    <div class="test-details-section">
+                        <div class="test-details-section-title">State Comparison</div>
+                        <div class="state-comparison">
+                            <div class="state-column before">
+                                <div class="state-column-title">BEFORE</div>
+                                ${renderStateColumn(result.beforeState, result.stateDiff)}
+                            </div>
+                            <div class="state-column after">
+                                <div class="state-column-title">AFTER</div>
+                                ${renderStateColumn(result.afterState, result.stateDiff)}
+                            </div>
+                        </div>
+                    </div>
+                `);
+            }
+            
+            // State Diff Section
+            if (result.stateDiff) {
+                sections.push(`
+                    <div class="test-details-section">
+                        <div class="test-details-section-title">
+                            Changes Detected: ${result.stateDiff.changeCount || 0}
+                            <button class="copy-debug-btn" onclick="copyTestDebugInfo(${testIndex})">Copy Debug Info</button>
+                        </div>
+                        ${renderStateDiff(result.stateDiff)}
+                    </div>
+                `);
+            }
+            
+            // Timeline Section
+            if (result.timeline && result.timeline.length > 0) {
+                sections.push(`
+                    <div class="test-details-section">
+                        <div class="test-details-section-title">Timeline</div>
+                        <div class="timeline-container">
+                            ${renderTimeline(result.timeline)}
+                        </div>
+                    </div>
+                `);
+            }
+            
+            return sections.join('') || '<div style="color: #666;">No detailed information available</div>';
+        }
+        
+        // Render verification results list
+        function renderVerificationResults(results) {
+            return Object.entries(results).map(([key, result]) => {
+                const icon = result.passed ? 'pass' : 'fail';
+                const symbol = result.passed ? '✓' : '✗';
+                return `
+                    <li class="verification-item">
+                        <span class="verification-icon ${icon}">${symbol}</span>
+                        <div class="verification-text">
+                            <span class="verification-name">${escapeHtml(key)}</span>
+                            <div class="verification-detail">${escapeHtml(result.details || '')}</div>
+                        </div>
+                    </li>
+                `;
+            }).join('');
+        }
+        
+        // Render state column
+        function renderStateColumn(state, diff) {
+            const lines = [];
+            
+            if (state.frontmostApp) {
+                lines.push(`Frontmost: ${state.frontmostApp}`);
+            }
+            
+            if (state.appStates) {
+                for (const [appName, appState] of Object.entries(state.appStates)) {
+                    if (appState.type === 'media') {
+                        lines.push(`${appName}: ${appState.playerState || 'unknown'}`);
+                        if (appState.track?.name) {
+                            lines.push(`  Track: "${appState.track.name}"`);
+                            if (appState.track.artist) {
+                                lines.push(`  Artist: ${appState.track.artist}`);
+                            }
+                        }
+                    } else if (appState.type === 'browser') {
+                        lines.push(`${appName}: ${appState.tabCount || 0} tabs`);
+                        if (appState.url) {
+                            lines.push(`  URL: ${appState.url.substring(0, 50)}`);
+                        }
+                    }
+                }
+            }
+            
+            return lines.map(line => `<div class="state-line">${escapeHtml(line)}</div>`).join('');
+        }
+        
+        // Render state diff
+        function renderStateDiff(diff) {
+            if (!diff.hasChanges) {
+                return '<div style="color: #f87171; padding: 8px; background: rgba(248,113,113,0.1); border-radius: 4px;">NO CHANGES DETECTED - the action may have had no effect</div>';
+            }
+            
+            return diff.changes.map(change => `
+                <div style="padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05);">
+                    <span class="diff-${change.before !== null ? 'remove' : 'add'}">${escapeHtml(change.description)}</span>
+                    ${change.before !== undefined && change.after !== undefined ? `
+                        <div style="font-size: 9px; color: #666; margin-top: 2px;">
+                            ${change.before} → ${change.after}
+                        </div>
+                    ` : ''}
+                </div>
+            `).join('');
+        }
+        
+        // Render timeline
+        function renderTimeline(timeline) {
+            return timeline.slice(-15).map(event => {
+                const eventType = event.event?.includes('error') || event.event?.includes('fail') ? 'error' :
+                                 event.event?.includes('success') ? 'success' :
+                                 event.event?.includes('script') || event.event?.includes('action') ? 'action' : '';
+                return `
+                    <div class="timeline-event ${eventType}">
+                        <span class="timeline-time">${event.t}ms</span>
+                        <span class="timeline-text">${escapeHtml(event.event)}${event.details ? ': ' + escapeHtml(typeof event.details === 'string' ? event.details : '') : ''}</span>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        // Copy debug info to clipboard - uses stored test results
+        window.copyTestDebugInfo = function(testIndex) {
+            try {
+                const result = window.testResults?.[testIndex];
+                if (!result) {
+                    alert('No debug info available for this test');
+                    return;
+                }
+                const debugInfo = JSON.stringify(result, null, 2);
+                navigator.clipboard.writeText(debugInfo);
+                alert('Debug info copied to clipboard');
+            } catch (e) {
+                console.error('Failed to copy:', e);
+                alert('Failed to copy debug info');
+            }
+        };
+        
+        // Show test summary
+        function showTestSummary(passed, failed, fixed) {
+            const summaryEl = document.getElementById('testSummary');
+            const passedEl = document.getElementById('passedCount');
+            const failedEl = document.getElementById('failedCount');
+            
+            if (summaryEl) {
+                summaryEl.style.display = 'flex';
+                if (passedEl) passedEl.textContent = passed + (fixed > 0 ? ` (${fixed} fixed)` : '');
+                if (failedEl) failedEl.textContent = failed;
+            }
+            
+            // Add rerun button if there were failures
+            const testSection = document.getElementById('testPlanSection');
+            if (testSection && failed > 0) {
+                let rerunBtn = document.getElementById('rerunTestsBtn');
+                if (!rerunBtn) {
+                    rerunBtn = document.createElement('button');
+                    rerunBtn.id = 'rerunTestsBtn';
+                    rerunBtn.className = 'test-run-all';
+                    rerunBtn.textContent = 'Rerun Failed Tests';
+                    rerunBtn.onclick = rerunFailedTests;
+                    testSection.appendChild(rerunBtn);
+                }
+            }
+        }
+        
+        // Rerun only failed tests
+        async function rerunFailedTests() {
+            if (!currentPlan?.testPlan?.tests || !currentAgentDraft) return;
+            
+            const rerunBtn = document.getElementById('rerunTestsBtn');
+            if (rerunBtn) {
+                rerunBtn.disabled = true;
+                rerunBtn.textContent = 'Running...';
+            }
+            
+            const tests = currentPlan.testPlan.tests;
+            let passed = 0;
+            let failed = 0;
+            let fixed = 0;
+            
+            for (let i = 0; i < tests.length; i++) {
+                const statusEl = document.getElementById(`testStatus_${i}`);
+                
+                // Skip already passed tests
+                if (statusEl?.classList.contains('passed') || statusEl?.classList.contains('fixed')) {
+                    passed++;
+                    continue;
+                }
+                
+                const test = tests[i];
+                updateTestStatus(i, 'running', '...');
+                
+                try {
+                    const result = await window.claudeCodeAPI.autoTest(currentAgentDraft, test.testPrompt);
+                    const lastResult = result.lastResult || result;
+                    
+                    if (result.success) {
+                        updateTestStatus(i, result.attempts > 1 ? 'fixed' : 'passed', '✓');
+                        showTestResult(i, result.attempts > 1 ? 'fixing' : 'success', 
+                            result.attempts > 1 ? `Fixed after ${result.attempts} attempts` : 'Test passed', lastResult);
+                        passed++;
+                        if (result.attempts > 1) fixed++;
+                        
+                        if (result.finalAgent) {
+                            currentAgentDraft = result.finalAgent;
+                            updatePreview(currentAgentDraft);
+                        }
+                    } else {
+                        updateTestStatus(i, 'failed', '✗');
+                        showTestResult(i, 'failure', result.recommendation || 'Still failing', lastResult);
+                        failed++;
+                    }
+                } catch (error) {
+                    updateTestStatus(i, 'failed', '✗');
+                    showTestResult(i, 'failure', `Error: ${error.message}`, null);
+                    failed++;
+                }
+                
+                await new Promise(r => setTimeout(r, 500));
+            }
+            
+            // Update summary
+            const passedEl = document.getElementById('passedCount');
+            const failedEl = document.getElementById('failedCount');
+            if (passedEl) passedEl.textContent = passed + (fixed > 0 ? ` (${fixed} fixed)` : '');
+            if (failedEl) failedEl.textContent = failed;
+            
+            if (rerunBtn) {
+                if (failed === 0) {
+                    rerunBtn.remove();
+                    addMessage('assistant', 'All tests now pass! The agent is ready.');
+                } else {
+                    rerunBtn.disabled = false;
+                    rerunBtn.textContent = 'Rerun Failed Tests';
+                    addMessage('assistant', `Rerun complete: ${passed} passed, ${failed} still failing.`);
+                }
+            }
+        }
+        
+        // Let user modify the plan
+        window.modifyPlan = function() {
+            const planCard = document.getElementById('currentPlanCard');
+            if (planCard) {
+                const actions = planCard.querySelector('.plan-actions');
+                if (actions) actions.remove();
+            }
+            
+            addMessage('assistant', 'No problem! Tell me what you\'d like to change about the plan - different execution type, different approach, or clarify what you want.');
+            chatInput.focus();
+        };
+        
+        // Update preview panel
+        function updatePreview(draft) {
+            previewEmpty.style.display = 'none';
+            agentCard.style.display = 'block';
+            previewStatus.textContent = draft.id ? 'Saved' : 'Draft';
+            previewStatus.classList.add('has-draft');
+            saveBtn.disabled = false;
+            
+            agentName.textContent = draft.name || 'Unnamed Agent';
+            agentTypeBadge.textContent = draft.executionType || 'llm';
+            agentPrompt.textContent = draft.prompt || 'No prompt defined';
+            
+            // Keywords
+            if (draft.keywords?.length) {
+                agentKeywords.innerHTML = draft.keywords.slice(0, 8).map(kw => 
+                    `<span class="keyword-tag">${escapeHtml(kw)}</span>`
+                ).join('');
+            } else {
+                agentKeywords.innerHTML = '<span style="color: #666; font-size: 12px;">No keywords</span>';
+            }
+            
+            // Capabilities
+            if (draft.capabilities?.length) {
+                agentCapabilities.textContent = draft.capabilities.join(', ');
+            } else {
+                agentCapabilities.textContent = 'No capabilities defined';
+            }
+            
+            // Update version info
+            updateVersionInfo(draft);
+        }
+        
+        // Start over
+        function startOver() {
+            chatMessages = [];
+            currentAgentDraft = null;
+            currentPlan = null; // Reset plan
+            
+            // Clear type selections
+            selectedAgentTypes.clear();
+            autoMatchedTypes.clear();
+            renderTypeSelector();
+            
+            // Reset UI
+            chatMessagesEl.innerHTML = '';
+            welcomeMessage.style.display = 'block';
+            chatMessagesEl.appendChild(welcomeMessage);
+            
+            previewEmpty.style.display = 'flex';
+            agentCard.style.display = 'none';
+            previewStatus.textContent = 'No draft';
+            previewStatus.classList.remove('has-draft');
+            saveBtn.disabled = true;
+            
+            // Reset version info
+            versionInfo.style.display = 'none';
+            undoBtn.disabled = true;
+            
+            testInput.value = '';
+            testResponse.textContent = 'Enter a test message to see how your agent responds.';
+            testResponse.classList.remove('loading', 'error', 'success');
+            
+            // Hide auto-test progress
+            document.getElementById('autoTestProgress').style.display = 'none';
+        }
+        
+        // Save agent
+        async function saveAgent() {
+            if (!currentAgentDraft) return;
+            
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Saving...';
+            
+            try {
+                const result = await window.claudeCodeAPI.saveAgent(currentAgentDraft);
+                
+                if (result.success) {
+                    // Update currentAgentDraft with the saved agent (includes ID and version)
+                    currentAgentDraft = result.agent;
+                    updatePreview(currentAgentDraft);
+                    
+                    addMessage('assistant', `Great! "${currentAgentDraft.name}" has been saved (v${currentAgentDraft.version}) and is now available in the Orb. You can continue refining it - changes will be versioned!`);
+                    
+                    // Notify Orb that agent creation is complete (for TTS announcement)
+                    if (window.claudeCodeAPI?.notifyCreationComplete) {
+                        try {
+                            await window.claudeCodeAPI.notifyCreationComplete(currentAgentDraft.name);
+                        } catch (e) {
+                            console.warn('[AgentComposer] Could not notify creation complete:', e);
+                        }
+                    }
+                    
+                    saveBtn.textContent = 'Saved!';
+                    setTimeout(() => {
+                        saveBtn.textContent = 'Save Agent';
+                        saveBtn.disabled = false;
+                    }, 2000);
+                } else {
+                    addMessage('assistant', `Sorry, I couldn't save the agent: ${result.error}`);
+                    saveBtn.textContent = 'Save Agent';
+                    saveBtn.disabled = false;
+                }
+            } catch (error) {
+                addMessage('assistant', `Error saving agent: ${error.message}`);
+                saveBtn.textContent = 'Save Agent';
+                saveBtn.disabled = false;
+            }
+        }
+        
+        // Test agent - supports both quick test and autonomous test modes
+        async function testAgent() {
+            console.log('[AgentComposer-UI] testAgent called, draft:', currentAgentDraft?.name, 'isTesting:', isTesting);
+            if (!currentAgentDraft || isTesting) {
+                console.log('[AgentComposer-UI] testAgent early return - no draft or already testing');
+                return;
+            }
+            
+            const testPrompt = testInput.value.trim();
+            if (!testPrompt) {
+                testResponse.textContent = 'Please enter a test message.';
+                return;
+            }
+            
+            const autoTestEnabled = document.getElementById('autoTestToggle').checked;
+            
+            isTesting = true;
+            testBtn.disabled = true;
+            testResponse.classList.remove('error', 'success');
+            
+            if (autoTestEnabled) {
+                // Autonomous test mode - test, diagnose, fix, retry
+                await runAutonomousTest(testPrompt);
+            } else {
+                // Quick test mode - single attempt
+                await runQuickTest(testPrompt);
+            }
+            
+            isTesting = false;
+            testBtn.disabled = false;
+        }
+        
+        // Quick test - single attempt
+        async function runQuickTest(testPrompt) {
+            testResponse.textContent = 'Testing...';
+            testResponse.classList.add('loading');
+            
+            try {
+                const result = await window.claudeCodeAPI.quickTest(currentAgentDraft, testPrompt);
+                
+                if (result.success || result.verified === true) {
+                    testResponse.textContent = result.details || 'Test passed!';
+                    testResponse.classList.remove('loading');
+                    testResponse.classList.add('success');
+                } else if (result.verified === null && result.needsUserConfirmation) {
+                    testResponse.textContent = result.details || 'Action executed - please confirm it worked.';
+                    testResponse.classList.remove('loading');
+                } else {
+                    testResponse.textContent = `Failed: ${result.details || result.error}`;
+                    testResponse.classList.remove('loading');
+                    testResponse.classList.add('error');
+                }
+            } catch (error) {
+                testResponse.textContent = `Error: ${error.message}`;
+                testResponse.classList.remove('loading');
+                testResponse.classList.add('error');
+            }
+        }
+        
+        // Autonomous test - test, diagnose, fix, retry until success
+        async function runAutonomousTest(testPrompt) {
+            const progressEl = document.getElementById('autoTestProgress');
+            const progressStatus = document.getElementById('progressStatus');
+            const progressAttempts = document.getElementById('progressAttempts');
+            const progressBar = document.getElementById('progressBar');
+            const progressLog = document.getElementById('progressLog');
+            
+            // Show progress UI
+            progressEl.style.display = 'block';
+            progressLog.innerHTML = '';
+            testResponse.textContent = 'Starting autonomous test...';
+            testResponse.classList.add('loading');
+            
+            // Subscribe to progress updates
+            let unsubscribe = null;
+            if (window.claudeCodeAPI.onAutoTestProgress) {
+                unsubscribe = window.claudeCodeAPI.onAutoTestProgress((update) => {
+                    handleProgressUpdate(update, progressStatus, progressAttempts, progressBar, progressLog);
+                });
+            }
+            
+            try {
+                const result = await window.claudeCodeAPI.autoTest(currentAgentDraft, testPrompt);
+                
+                // Update final status
+                if (result.success) {
+                    progressStatus.textContent = 'SUCCESS';
+                    progressBar.style.width = '100%';
+                    testResponse.textContent = `VERIFIED: ${result.verificationDetails || 'Agent working!'}`;
+                    testResponse.classList.remove('loading');
+                    testResponse.classList.add('success');
+                    
+                    addLogEntry(progressLog, `SUCCESS after ${result.attempts} attempt(s)`, 'success');
+                    
+                    // Update agent draft if it was modified
+                    if (result.finalAgent) {
+                        currentAgentDraft = result.finalAgent;
+                        updatePreview(currentAgentDraft);
+                    }
+                } else {
+                    progressStatus.textContent = 'FAILED';
+                    testResponse.innerHTML = `
+                        <div style="margin-bottom: 8px;">Failed after ${result.attempts} attempts</div>
+                        <div style="font-size: 11px; color: #888;">${result.recommendation || 'Manual intervention required.'}</div>
+                    `;
+                    testResponse.classList.remove('loading');
+                    testResponse.classList.add('error');
+                    
+                    addLogEntry(progressLog, `FAILED after ${result.attempts} attempts`, 'error');
+                }
+            } catch (error) {
+                progressStatus.textContent = 'ERROR';
+                testResponse.textContent = `Error: ${error.message}`;
+                testResponse.classList.remove('loading');
+                testResponse.classList.add('error');
+                addLogEntry(progressLog, `Error: ${error.message}`, 'error');
+            }
+            
+            // Cleanup subscription
+            if (unsubscribe) unsubscribe();
+        }
+        
+        // Handle progress update from autonomous tester
+        function handleProgressUpdate(update, statusEl, attemptsEl, barEl, logEl) {
+            const maxAttempts = update.maxAttempts || 5;
+            
+            switch (update.type) {
+                case 'attempt-start':
+                    statusEl.textContent = `Testing (Attempt ${update.attempt})...`;
+                    attemptsEl.textContent = `Attempt ${update.attempt}/${maxAttempts}`;
+                    barEl.style.width = `${(update.attempt - 1) / maxAttempts * 100}%`;
+                    addLogEntry(logEl, `Attempt ${update.attempt}: Testing...`, 'attempt');
+                    break;
+                    
+                case 'diagnosing':
+                    statusEl.textContent = 'Diagnosing failure...';
+                    addLogEntry(logEl, `Failed: ${update.failureDetails}`, 'error');
+                    addLogEntry(logEl, 'Diagnosing...', 'diagnosing');
+                    break;
+                    
+                case 'diagnosis-complete':
+                    addLogEntry(logEl, `Diagnosis: ${update.diagnosis?.summary || update.message}`, 'diagnosing');
+                    break;
+                    
+                case 'generating-fix':
+                    statusEl.textContent = 'Generating fix...';
+                    addLogEntry(logEl, 'Generating fix...', 'fixing');
+                    break;
+                    
+                case 'applying-fix':
+                    statusEl.textContent = 'Applying fix...';
+                    addLogEntry(logEl, `Fix: ${update.fix?.description || update.message}`, 'fixing');
+                    break;
+                    
+                case 'cannot-fix':
+                    addLogEntry(logEl, `Cannot auto-fix: ${update.message}`, 'error');
+                    break;
+                    
+                case 'success':
+                    statusEl.textContent = 'SUCCESS';
+                    barEl.style.width = '100%';
+                    addLogEntry(logEl, `SUCCESS: ${update.details || update.message}`, 'success');
+                    break;
+                    
+                case 'max-attempts':
+                    statusEl.textContent = 'Max attempts reached';
+                    break;
+            }
+        }
+        
+        // Add entry to progress log
+        function addLogEntry(logEl, message, type) {
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logEl.appendChild(entry);
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+        
+        // Escape HTML
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // ==================== VERSION MANAGEMENT ====================
+        
+        // Update version info display
+        function updateVersionInfo(agent) {
+            if (agent?.id && agent?.version) {
+                versionInfo.style.display = 'flex';
+                versionBadge.textContent = `v${agent.version}`;
+                versionText.textContent = `Version ${agent.version}`;
+                undoBtn.disabled = agent.version <= 1;
+            } else {
+                versionInfo.style.display = 'none';
+                undoBtn.disabled = true;
+            }
+        }
+        
+        // Undo last change
+        async function undoLastChange() {
+            if (!currentAgentDraft?.id) {
+                addMessage('assistant', 'No saved agent to undo. Save the agent first.');
+                return;
+            }
+            
+            undoBtn.disabled = true;
+            undoBtn.textContent = 'Undoing...';
+            
+            try {
+                const restored = await window.claudeCodeAPI.undoAgent(currentAgentDraft.id);
+                currentAgentDraft = restored;
+                updatePreview(restored);
+                updateVersionInfo(restored);
+                addMessage('assistant', `Reverted to previous version. Now at version ${restored.version}.`);
+            } catch (error) {
+                addMessage('assistant', `Couldn't undo: ${error.message}`);
+            }
+            
+            undoBtn.textContent = 'Undo';
+            undoBtn.disabled = !currentAgentDraft?.id || currentAgentDraft?.version <= 1;
+        }
+        
+        // Show version history modal
+        async function showVersionHistory() {
+            if (!currentAgentDraft?.id) {
+                addMessage('assistant', 'No saved agent to show history for.');
+                return;
+            }
+            
+            try {
+                const versions = await window.claudeCodeAPI.getVersionHistory(currentAgentDraft.id);
+                renderVersionHistory(versions);
+                versionModal.style.display = 'flex';
+            } catch (error) {
+                addMessage('assistant', `Couldn't load version history: ${error.message}`);
+            }
+        }
+        
+        // Render version history list
+        function renderVersionHistory(versions) {
+            if (!versions || versions.length === 0) {
+                versionList.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">No version history available</div>';
+                return;
+            }
+            
+            // Sort by version number descending (newest first)
+            const sorted = [...versions].sort((a, b) => b.versionNumber - a.versionNumber);
+            
+            versionList.innerHTML = sorted.map(v => `
+                <div class="version-item ${v.isCurrent ? 'current' : ''}" data-version="${v.versionNumber}">
+                    <span class="version-number">v${v.versionNumber}</span>
+                    <div class="version-details">
+                        <div class="version-reason">${escapeHtml(v.description || v.reason || 'Updated')}</div>
+                        <div class="version-timestamp">${formatTimestamp(v.timestamp)}</div>
+                    </div>
+                    ${!v.isCurrent ? `<button class="version-revert-btn" onclick="revertToVersion(${v.versionNumber})">Revert</button>` : '<span style="font-size: 10px; color: #4ade80;">Current</span>'}
+                </div>
+            `).join('');
+        }
+        
+        // Revert to specific version (global function for onclick)
+        window.revertToVersion = async function(versionNumber) {
+            if (!currentAgentDraft?.id) return;
+            
+            try {
+                const restored = await window.claudeCodeAPI.revertToVersion(currentAgentDraft.id, versionNumber);
+                currentAgentDraft = restored;
+                updatePreview(restored);
+                updateVersionInfo(restored);
+                versionModal.style.display = 'none';
+                addMessage('assistant', `Reverted to version ${versionNumber}. Agent is now at version ${restored.version}.`);
+            } catch (error) {
+                addMessage('assistant', `Couldn't revert: ${error.message}`);
+            }
+        };
+        
+        // Format timestamp for display
+        function formatTimestamp(isoString) {
+            const date = new Date(isoString);
+            return date.toLocaleString();
+        }
+        
+        // ==================== INITIALIZATION ====================
+        async function init() {
+            try {
+                // Load agent types
+                if (window.claudeCodeAPI?.getAgentTypes) {
+                    agentTypes = await window.claudeCodeAPI.getAgentTypes();
+                    // No pre-selection - let auto-detection or user select
+                    renderTypeSelector();
+                }
+                
+                // Listen for initial description from voice command
+                if (window.claudeCodeAPI?.onInit) {
+                    window.claudeCodeAPI.onInit(async (data) => {
+                        console.log('[AgentComposer] Received init with description:', data.description);
+                        if (data.description) {
+                            // Auto-start planning with the voice description
+                            chatInput.value = data.description;
+                            await sendMessage();
+                        }
+                    });
+                }
+                
+                // Listen for voice input relay from Orb
+                if (window.claudeCodeAPI?.onVoiceInput) {
+                    window.claudeCodeAPI.onVoiceInput(async (data) => {
+                        console.log('[AgentComposer] Received voice input:', data.transcript);
+                        await handleVoiceInput(data.transcript);
+                    });
+                }
+            } catch (error) {
+                console.error('[AgentComposer] Init error:', error);
+            }
+        }
+        
+        // Handle voice input from Orb
+        async function handleVoiceInput(transcript) {
+            const text = transcript.toLowerCase().trim();
+            
+            // Check for approval phrases
+            if (text.includes('looks good') || text.includes('build it') || 
+                text.includes('approve') || text.includes('create it') ||
+                text.includes('yes') || text.includes('go ahead') ||
+                text.includes('that\'s good') || text.includes('sounds good') ||
+                text.includes('perfect') || text.includes('do it')) {
+                
+                if (currentPlan && !currentAgentDraft) {
+                    // Approve the plan
+                    window.approvePlan();
+                    return;
+                }
+            }
+            
+            // Check for cancel/reset phrases
+            if (text.includes('start over') || text.includes('cancel') || 
+                text.includes('reset') || text.includes('never mind')) {
+                // Confirm cancellation via TTS
+                if (window.claudeCodeAPI?.broadcastPlan) {
+                    await window.claudeCodeAPI.broadcastPlan('Starting over. What would you like to create?');
+                }
+                startOver();
+                addMessage('assistant', 'Starting over. What kind of agent would you like to create?');
+                return;
+            }
+            
+            // Check for modification phrases - ADD features
+            if (text.includes('also add') || text.includes('add feature') || 
+                text.includes('include') || text.includes('i also want') ||
+                text.includes('can you add') || text.includes('please add')) {
+                // Extract the feature to add and send as message
+                chatInput.value = transcript;
+                await sendMessage();
+                // Short confirmation
+                if (window.claudeCodeAPI?.broadcastPlan) {
+                    await window.claudeCodeAPI.broadcastPlan('Added. Anything else?');
+                }
+                return;
+            }
+            
+            // Check for modification phrases - REMOVE features
+            if (text.includes('remove') || text.includes('don\'t include') ||
+                text.includes('skip') || text.includes('without') ||
+                text.includes('don\'t need') || text.includes('no need for')) {
+                // Handle removal - send as message
+                chatInput.value = transcript;
+                await sendMessage();
+                // Short confirmation
+                if (window.claudeCodeAPI?.broadcastPlan) {
+                    await window.claudeCodeAPI.broadcastPlan('Removed. Anything else?');
+                }
+                return;
+            }
+            
+            // Default: treat as a chat message
+            chatInput.value = transcript;
+            await sendMessage();
+        }
+        
+        if (window.claudeCodeAPI) {
+            init();
+        }
+        
+        console.log('[AgentComposer] UI initialized');
+    </script>
+</body>
+</html>

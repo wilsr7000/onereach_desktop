@@ -378,7 +378,8 @@ class ModuleManager {
     try {
       const webToolsPath = this.getWebToolsPath();
       if (fs.existsSync(webToolsPath)) {
-        return JSON.parse(fs.readFileSync(webToolsPath, 'utf8'));
+        const tools = JSON.parse(fs.readFileSync(webToolsPath, 'utf8'));
+        return tools;
       }
     } catch (error) {
       console.error('Error loading web tools:', error);
@@ -401,12 +402,28 @@ class ModuleManager {
     return this.loadWebTools();
   }
   
-  addWebTool(tool) {
+  async addWebTool(tool) {
     const tools = this.loadWebTools();
     tools.push(tool);
     this.saveWebTools(tools);
     this.updateApplicationMenu();
-    return tool;
+    
+    // Auto-generate agent if docs URL provided
+    let agentCreated = false;
+    if (tool.docsUrl) {
+      try {
+        const { generateAgentFromDocs } = require('./lib/tool-agent-generator');
+        console.log(`[ModuleManager] Generating agent from docs for: ${tool.name}`);
+        await generateAgentFromDocs(tool);
+        agentCreated = true;
+        console.log(`[ModuleManager] Agent created successfully for: ${tool.name}`);
+      } catch (error) {
+        console.warn(`[ModuleManager] Could not auto-create agent for ${tool.name}:`, error.message);
+        // Don't fail the tool addition if agent creation fails
+      }
+    }
+    
+    return { ...tool, agentCreated };
   }
   
   openWebTool(toolId) {
@@ -435,6 +452,7 @@ class ModuleManager {
     const size = windowSizes[tool.windowSize] || windowSizes.medium;
     
     // Create new window for the web tool
+    // Use preload-spaces.js to give tools access to the full Spaces API (window.spaces)
     const window = new BrowserWindow({
       width: size.width,
       height: size.height,
@@ -443,14 +461,300 @@ class ModuleManager {
         nodeIntegration: false,
         contextIsolation: true,
         webSecurity: true,
-        preload: path.join(__dirname, 'preload.js')
+        preload: path.join(__dirname, 'preload-spaces.js'),
+        // Enable features needed for speech recognition and media
+        enableBlinkFeatures: 'MediaStreamAPI,WebRTC,AudioWorklet,WebAudio,MediaRecorder',
+        experimentalFeatures: true
       }
     });
+    
+    // Set up permission handlers for microphone, speech recognition, etc.
+    window.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
+      console.log(`[WebTool] Permission requested: ${permission} from ${webContents.getURL()}`);
+      
+      // Allow media permissions (microphone, camera, speech recognition)
+      const allowedPermissions = [
+        'media',
+        'audioCapture', 
+        'microphone',
+        'camera',
+        'geolocation',
+        'notifications',
+        'clipboard-read',
+        'clipboard-write',
+        'speech',           // For Web Speech API
+        'background-sync'
+      ];
+      
+      if (allowedPermissions.includes(permission)) {
+        console.log(`[WebTool] Allowing ${permission} permission`);
+        callback(true);
+      } else {
+        console.log(`[WebTool] Denying ${permission} permission`);
+        callback(false);
+      }
+    });
+    
+    // Also set permission check handler
+    window.webContents.session.setPermissionCheckHandler((webContents, permission) => {
+      const allowedPermissions = [
+        'media',
+        'audioCapture',
+        'microphone', 
+        'camera',
+        'geolocation',
+        'notifications',
+        'clipboard-read',
+        'clipboard-write',
+        'speech',
+        'background-sync'
+      ];
+      
+      return allowedPermissions.includes(permission);
+    });
+    
+    // Set Chrome user agent (important for Web Speech API - Google may reject Electron)
+    const chromeVersion = process.versions.chrome || '120.0.0.0';
+    const userAgent = `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
+    window.webContents.setUserAgent(userAgent);
+    
+    // Modify request headers to look like Chrome (not Electron)
+    window.webContents.session.webRequest.onBeforeSendHeaders((details, callback) => {
+      const headers = { ...details.requestHeaders };
+      headers['User-Agent'] = userAgent;
+      delete headers['X-Electron'];
+      if (!headers['Accept-Language']) {
+        headers['Accept-Language'] = 'en-US,en;q=0.9';
+      }
+      callback({ requestHeaders: headers });
+    });
+    
+    console.log(`[WebTool] Set Chrome user agent: ${chromeVersion}`);
     
     // Center the window for non-fullscreen sizes
     if (tool.windowSize !== 'fullscreen') {
       window.center();
     }
+    
+    // Define the speech polyfill code once, inject it multiple times to ensure it's available
+    const speechPolyfillCode = `
+      (function() {
+        // Skip if already installed
+        if (window._speechPolyfillInstalled) return;
+        
+        // Only inject if speechBridge is available
+        if (!window.speechBridge) {
+          console.log('[Speech Polyfill] speechBridge not available yet, will retry...');
+          return;
+        }
+        
+        window._speechPolyfillInstalled = true;
+        console.log('[Speech Polyfill] Installing Web Speech API polyfill...');
+        
+        // Create a polyfill that mimics SpeechRecognition API
+        class SpeechRecognitionPolyfill {
+          constructor() {
+            this.continuous = false;
+            this.interimResults = false;
+            this.lang = 'en-US';
+            this.maxAlternatives = 1;
+            this._isRunning = false;
+            this._mediaRecorder = null;
+            this._audioChunks = [];
+            this._stream = null;
+            
+            // Event handlers
+            this.onstart = null;
+            this.onend = null;
+            this.onresult = null;
+            this.onerror = null;
+            this.onnomatch = null;
+            this.onaudiostart = null;
+            this.onaudioend = null;
+            this.onsoundstart = null;
+            this.onsoundend = null;
+            this.onspeechstart = null;
+            this.onspeechend = null;
+          }
+          
+          async start() {
+            if (this._isRunning) return;
+            
+            try {
+              // Request microphone permission first
+              await window.speechBridge.requestMicPermission();
+              
+              // Get microphone stream
+              this._stream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                  channelCount: 1,
+                  sampleRate: 16000,
+                  echoCancellation: true,
+                  noiseSuppression: true
+                }
+              });
+              
+              this._isRunning = true;
+              this._audioChunks = [];
+              
+              // Create MediaRecorder
+              this._mediaRecorder = new MediaRecorder(this._stream, {
+                mimeType: 'audio/webm;codecs=opus'
+              });
+              
+              this._mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                  this._audioChunks.push(event.data);
+                }
+              };
+              
+              this._mediaRecorder.onstop = async () => {
+                if (this._audioChunks.length === 0) {
+                  this._triggerEnd();
+                  return;
+                }
+                
+                try {
+                  // Combine chunks and convert to base64
+                  const audioBlob = new Blob(this._audioChunks, { type: 'audio/webm' });
+                  const base64 = await window.speechBridge.blobToBase64(audioBlob);
+                  
+                  // Transcribe using speechBridge
+                  const result = await window.speechBridge.transcribe({
+                    audioData: base64,
+                    language: this.lang.split('-')[0],
+                    format: 'webm'
+                  });
+                  
+                  if (result && result.text) {
+                    this._triggerResult(result.text, true);
+                  } else {
+                    this._triggerNoMatch();
+                  }
+                } catch (err) {
+                  console.error('[Speech Polyfill] Transcription error:', err);
+                  this._triggerError('network');
+                }
+                
+                this._triggerEnd();
+              };
+              
+              // Fire start event
+              this._triggerStart();
+              
+              // Start recording
+              this._mediaRecorder.start(1000); // Collect chunks every second
+              
+              // If not continuous, auto-stop after silence detection or timeout
+              if (!this.continuous) {
+                setTimeout(() => {
+                  if (this._isRunning) {
+                    this.stop();
+                  }
+                }, 5000); // 5 second timeout for non-continuous mode
+              }
+              
+            } catch (err) {
+              console.error('[Speech Polyfill] Start error:', err);
+              this._triggerError(err.name === 'NotAllowedError' ? 'not-allowed' : 'audio-capture');
+              this._triggerEnd();
+            }
+          }
+          
+          stop() {
+            if (!this._isRunning) return;
+            
+            this._isRunning = false;
+            
+            if (this._mediaRecorder && this._mediaRecorder.state !== 'inactive') {
+              this._mediaRecorder.stop();
+            }
+            
+            if (this._stream) {
+              this._stream.getTracks().forEach(t => t.stop());
+              this._stream = null;
+            }
+          }
+          
+          abort() {
+            this._audioChunks = [];
+            this.stop();
+          }
+          
+          _triggerStart() {
+            if (this.onstart) this.onstart(new Event('start'));
+            if (this.onaudiostart) this.onaudiostart(new Event('audiostart'));
+            if (this.onsoundstart) this.onsoundstart(new Event('soundstart'));
+            if (this.onspeechstart) this.onspeechstart(new Event('speechstart'));
+          }
+          
+          _triggerEnd() {
+            if (this.onspeechend) this.onspeechend(new Event('speechend'));
+            if (this.onsoundend) this.onsoundend(new Event('soundend'));
+            if (this.onaudioend) this.onaudioend(new Event('audioend'));
+            if (this.onend) this.onend(new Event('end'));
+          }
+          
+          _triggerResult(text, isFinal) {
+            if (!this.onresult) return;
+            
+            const result = {
+              results: [[{
+                transcript: text,
+                confidence: 0.95
+              }]],
+              resultIndex: 0
+            };
+            
+            result.results[0].isFinal = isFinal;
+            result.results.length = 1;
+            
+            // Add item() method to match Web Speech API
+            result.results.item = function(i) { return this[i]; };
+            result.results[0].item = function(i) { return this[i]; };
+            
+            this.onresult(result);
+          }
+          
+          _triggerError(type) {
+            if (!this.onerror) return;
+            
+            const event = new Event('error');
+            event.error = type;
+            event.message = 'Speech recognition error: ' + type;
+            this.onerror(event);
+          }
+          
+          _triggerNoMatch() {
+            if (this.onnomatch) {
+              this.onnomatch(new Event('nomatch'));
+            }
+          }
+        }
+        
+        // Override the native SpeechRecognition with our polyfill
+        window.SpeechRecognition = SpeechRecognitionPolyfill;
+        window.webkitSpeechRecognition = SpeechRecognitionPolyfill;
+        
+        console.log('[Speech Polyfill] Web Speech API polyfill installed successfully');
+      })();
+    `;
+    
+    // Inject Web Speech API polyfill as early as possible
+    // Try multiple times to ensure it's available before page scripts run
+    window.webContents.on('did-start-loading', () => {
+      // Initial attempt (speechBridge might not be ready yet)
+      setTimeout(() => {
+        window.webContents.executeJavaScript(speechPolyfillCode)
+          .catch(err => console.log('[WebTool] Early speech polyfill injection pending...'));
+      }, 50);
+    });
+    
+    // Also try at dom-ready to ensure speechBridge is available
+    window.webContents.on('dom-ready', () => {
+      window.webContents.executeJavaScript(speechPolyfillCode)
+        .catch(err => console.error('[WebTool] Error injecting speech polyfill:', err));
+    });
     
     // Inject the minimal toolbar after page loads
     window.webContents.on('did-finish-load', () => {
@@ -537,7 +841,12 @@ class ModuleManager {
           });
           
           document.getElementById('gsx-refresh').addEventListener('click', () => {
-            window.location.reload();
+            // Clear cache and reload using Electron API
+            if (window.electronAPI && window.electronAPI.clearCacheAndReload) {
+              window.electronAPI.clearCacheAndReload();
+            } else {
+              window.location.reload();
+            }
           });
           
           document.getElementById('gsx-mission-control').addEventListener('click', () => {
@@ -566,16 +875,30 @@ class ModuleManager {
     console.log(`Opened web tool: ${tool.name} (${tool.url}) - Size: ${tool.windowSize || 'medium'}`);
   }
   
-  deleteWebTool(toolId) {
+  async deleteWebTool(toolId) {
     const tools = this.loadWebTools();
+    const toolToDelete = tools.find(t => t.id === toolId);
     const filteredTools = tools.filter(t => t.id !== toolId);
-    
+
     if (tools.length === filteredTools.length) {
       throw new Error(`Web tool not found: ${toolId}`);
     }
-    
+
     this.saveWebTools(filteredTools);
     this.updateApplicationMenu();
+    
+    // Clean up any auto-generated agent for this tool
+    if (toolToDelete && toolToDelete.docsUrl) {
+      try {
+        const { deleteToolAgent } = require('./lib/tool-agent-generator');
+        await deleteToolAgent(toolId);
+        console.log(`[ModuleManager] Cleaned up agent for deleted tool: ${toolToDelete.name}`);
+      } catch (error) {
+        console.warn(`[ModuleManager] Could not clean up agent:`, error.message);
+        // Don't fail the tool deletion if agent cleanup fails
+      }
+    }
+    
     return true;
   }
 }

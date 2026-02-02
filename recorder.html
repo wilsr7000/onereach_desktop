@@ -1,0 +1,1380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; media-src 'self' blob: mediastream:; img-src 'self' blob: data:;">
+  <title>GSX Capture</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-darkest: #0d0d0d;
+      --bg-dark: #181818;
+      --bg-surface: #1e1e1e;
+      --bg-panel: #232323;
+      --bg-elevated: #2a2a2a;
+      --bg-hover: #333333;
+      --accent-primary: #e84c3d;
+      --accent-secondary: #4a9eff;
+      --accent-success: #22c55e;
+      --text-primary: #e4e4e4;
+      --text-secondary: #909090;
+      --text-muted: #5c5c5c;
+      --border-color: #2a2a2a;
+      --border-light: #383838;
+      --recording-red: #ef4444;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg-darkest);
+      color: var(--text-primary);
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      height: 48px;
+      background: linear-gradient(180deg, #252525 0%, #1a1a1a 100%);
+      border-bottom: 1px solid #141414;
+      -webkit-app-region: drag;
+    }
+
+    .header-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .header-title svg {
+      width: 20px;
+      height: 20px;
+      color: var(--accent-primary);
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 8px;
+      -webkit-app-region: no-drag;
+    }
+
+    .header-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-secondary);
+      cursor: pointer;
+      padding: 6px;
+      border-radius: 4px;
+      transition: all 0.15s;
+    }
+
+    .header-btn:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+
+    /* Main Content */
+    .main-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 20px;
+      gap: 16px;
+      overflow-y: auto;
+    }
+
+    /* Preview Container */
+    .preview-container {
+      flex: 1;
+      min-height: 300px;
+      background: var(--bg-dark);
+      border-radius: 12px;
+      overflow: hidden;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .preview-container video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #000;
+    }
+
+    .preview-placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+      color: var(--text-muted);
+    }
+
+    .preview-placeholder svg {
+      width: 64px;
+      height: 64px;
+      opacity: 0.5;
+    }
+
+    /* Recording indicator */
+    .recording-indicator {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 8px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+
+    .recording-indicator.active {
+      opacity: 1;
+    }
+
+    .recording-dot {
+      width: 10px;
+      height: 10px;
+      background: var(--recording-red);
+      border-radius: 50%;
+      animation: pulse 1s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    /* Duration display */
+    .duration-display {
+      position: absolute;
+      bottom: 16px;
+      right: 16px;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .duration-display .target {
+      color: var(--text-muted);
+      font-size: 12px;
+      margin-left: 8px;
+    }
+
+    /* Instructions Panel */
+    .instructions-panel {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    .instructions-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .instructions-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .instructions-content {
+      font-size: 14px;
+      line-height: 1.6;
+      color: var(--text-primary);
+      background: var(--bg-panel);
+      padding: 12px;
+      border-radius: 6px;
+      min-height: 60px;
+    }
+
+    .instructions-content.empty {
+      color: var(--text-muted);
+      font-style: italic;
+    }
+
+    /* Source Selection */
+    .source-section {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .source-group {
+      flex: 1;
+      min-width: 200px;
+    }
+
+    .source-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+
+    .source-select {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      color: var(--text-primary);
+      font-size: 13px;
+      cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23909090' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+    }
+
+    .source-select:hover {
+      border-color: var(--border-light);
+    }
+
+    .source-select:focus {
+      outline: none;
+      border-color: var(--accent-primary);
+    }
+
+    /* Controls */
+    .controls-section {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 16px;
+      background: var(--bg-surface);
+      border-radius: 12px;
+    }
+
+    .record-btn {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      border: 4px solid var(--text-muted);
+      background: transparent;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+
+    .record-btn:hover {
+      border-color: var(--recording-red);
+      transform: scale(1.05);
+    }
+
+    .record-btn-inner {
+      width: 48px;
+      height: 48px;
+      background: var(--recording-red);
+      border-radius: 50%;
+      transition: all 0.2s;
+    }
+
+    .record-btn.recording .record-btn-inner {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+    }
+
+    .record-btn.recording {
+      border-color: var(--recording-red);
+    }
+
+    .control-btn {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .control-btn.secondary {
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+    }
+
+    .control-btn.secondary:hover {
+      background: var(--bg-hover);
+    }
+
+    .control-btn.primary {
+      background: var(--accent-success);
+      color: white;
+    }
+
+    .control-btn.primary:hover {
+      filter: brightness(1.1);
+    }
+
+    .control-btn.danger {
+      background: var(--recording-red);
+      color: white;
+    }
+
+    .control-btn.danger:hover {
+      filter: brightness(1.1);
+    }
+
+    .control-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* Save Dialog */
+    .save-dialog {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.8);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      opacity: 0;
+      visibility: hidden;
+      transition: all 0.2s;
+    }
+
+    .save-dialog.active {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .save-dialog-content {
+      background: var(--bg-surface);
+      border-radius: 12px;
+      padding: 24px;
+      width: 400px;
+      max-width: 90%;
+    }
+
+    .save-dialog-title {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 20px;
+    }
+
+    .save-form-group {
+      margin-bottom: 16px;
+    }
+
+    .save-form-label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
+    }
+
+    .save-form-input {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--bg-panel);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      color: var(--text-primary);
+      font-size: 14px;
+    }
+
+    .save-form-input:focus {
+      outline: none;
+      border-color: var(--accent-primary);
+    }
+
+    .save-dialog-actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 24px;
+    }
+
+    .save-dialog-actions .control-btn {
+      flex: 1;
+    }
+
+    /* Status messages */
+    .status-message {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-color);
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 14px;
+      opacity: 0;
+      visibility: hidden;
+      transition: all 0.3s;
+    }
+
+    .status-message.active {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .status-message.success {
+      border-color: var(--accent-success);
+      color: var(--accent-success);
+    }
+
+    .status-message.error {
+      border-color: var(--recording-red);
+      color: var(--recording-red);
+    }
+
+    /* Permission overlay */
+    .permission-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.9);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      z-index: 10;
+    }
+
+    .permission-overlay.hidden {
+      display: none;
+    }
+
+    .permission-btn {
+      padding: 14px 28px;
+      background: var(--accent-primary);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .permission-btn:hover {
+      filter: brightness(1.1);
+    }
+
+    /* Screen Source Picker */
+    .screen-picker {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.9);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      opacity: 0;
+      visibility: hidden;
+      transition: all 0.2s;
+    }
+
+    .screen-picker.active {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .screen-picker-content {
+      background: var(--bg-surface);
+      border-radius: 12px;
+      padding: 24px;
+      width: 600px;
+      max-width: 90%;
+      max-height: 80vh;
+      overflow-y: auto;
+    }
+
+    .screen-picker-title {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .screen-picker-subtitle {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-bottom: 20px;
+    }
+
+    .screen-picker-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .screen-source-item {
+      background: var(--bg-panel);
+      border: 2px solid var(--border-color);
+      border-radius: 8px;
+      padding: 8px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .screen-source-item:hover {
+      border-color: var(--accent-primary);
+      background: var(--bg-elevated);
+    }
+
+    .screen-source-item.selected {
+      border-color: var(--accent-primary);
+      background: var(--bg-elevated);
+    }
+
+    .screen-source-thumbnail {
+      width: 100%;
+      aspect-ratio: 16/9;
+      object-fit: contain;
+      background: #000;
+      border-radius: 4px;
+      margin-bottom: 8px;
+    }
+
+    .screen-source-name {
+      font-size: 12px;
+      color: var(--text-primary);
+      text-align: center;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .screen-picker-actions {
+      display: flex;
+      gap: 12px;
+      justify-content: flex-end;
+    }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <div class="header">
+    <div class="header-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/>
+        <circle cx="12" cy="12" r="3" fill="currentColor"/>
+      </svg>
+      GSX Capture
+    </div>
+    <div class="header-actions">
+      <button class="header-btn" onclick="app.minimize()" title="Minimize">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M5 12h14"/>
+        </svg>
+      </button>
+      <button class="header-btn" onclick="app.close()" title="Close">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 6L6 18M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <div class="main-content">
+    <!-- Preview -->
+    <div class="preview-container" id="previewContainer">
+      <video id="previewVideo" autoplay muted playsinline></video>
+      <video id="reviewVideo" style="display: none;" controls></video>
+      
+      <div class="preview-placeholder" id="previewPlaceholder">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+          <circle cx="12" cy="13" r="4"/>
+        </svg>
+        <span>Select a source to start preview</span>
+      </div>
+
+      <div class="permission-overlay hidden" id="permissionOverlay">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+          <circle cx="12" cy="13" r="4"/>
+        </svg>
+        <p>Camera access is required to record</p>
+        <button class="permission-btn" onclick="app.requestPermissions()">
+          Grant Camera Access
+        </button>
+      </div>
+
+      <div class="recording-indicator" id="recordingIndicator">
+        <div class="recording-dot"></div>
+        <span>REC</span>
+      </div>
+
+      <div class="duration-display" id="durationDisplay">
+        <span id="currentDuration">00:00</span>
+        <span class="target" id="targetDuration"></span>
+      </div>
+    </div>
+
+    <!-- Instructions -->
+    <div class="instructions-panel" id="instructionsPanel">
+      <div class="instructions-header">
+        <span class="instructions-title">📋 Recording Instructions</span>
+      </div>
+      <div class="instructions-content" id="instructionsContent">
+        No specific instructions. Record freely.
+      </div>
+    </div>
+
+    <!-- Source Selection -->
+    <div class="source-section">
+      <div class="source-group">
+        <div class="source-label">Video Source</div>
+        <select class="source-select" id="videoSource" onchange="app.changeVideoSource()">
+          <option value="">Select camera...</option>
+        </select>
+      </div>
+      <div class="source-group">
+        <div class="source-label">Audio Source</div>
+        <select class="source-select" id="audioSource" onchange="app.changeAudioSource()">
+          <option value="">Select microphone...</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls-section" id="controlsSection">
+      <button class="record-btn" id="recordBtn" onclick="app.toggleRecording()">
+        <div class="record-btn-inner"></div>
+      </button>
+    </div>
+
+    <!-- Review Controls (shown after recording) -->
+    <div class="controls-section" id="reviewControls" style="display: none;">
+      <button class="control-btn danger" onclick="app.discardRecording()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+        </svg>
+        Discard
+      </button>
+      <button class="control-btn secondary" onclick="app.recordAgain()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M1 4v6h6M23 20v-6h-6"/>
+          <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
+        </svg>
+        Record Again
+      </button>
+      <button class="control-btn primary" onclick="app.showSaveDialog()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+          <polyline points="17 21 17 13 7 13 7 21"/>
+          <polyline points="7 3 7 8 15 8"/>
+        </svg>
+        Save to Space
+      </button>
+    </div>
+  </div>
+
+  <!-- Save Dialog -->
+  <div class="save-dialog" id="saveDialog">
+    <div class="save-dialog-content">
+      <div class="save-dialog-title">Save Recording</div>
+      
+      <div class="save-form-group">
+        <label class="save-form-label">Filename</label>
+        <input type="text" class="save-form-input" id="saveFilename" placeholder="recording.webm">
+      </div>
+
+      <div class="save-form-group">
+        <label class="save-form-label">Save to Space</label>
+        <select class="save-form-input" id="saveSpace">
+          <option value="">Select a space...</option>
+        </select>
+      </div>
+
+      <div class="save-form-group">
+        <label class="save-form-label">Project (optional)</label>
+        <select class="save-form-input" id="saveProject">
+          <option value="">No project - save to space root</option>
+        </select>
+      </div>
+
+      <div class="save-dialog-actions">
+        <button class="control-btn secondary" onclick="app.hideSaveDialog()">Cancel</button>
+        <button class="control-btn primary" onclick="app.saveRecording()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Screen Source Picker -->
+  <div class="screen-picker" id="screenPicker">
+    <div class="screen-picker-content">
+      <div class="screen-picker-title">Select Screen or Window</div>
+      <div class="screen-picker-subtitle">Choose what you want to record</div>
+      <div class="screen-picker-grid" id="screenSourcesGrid">
+        <!-- Sources will be populated here -->
+      </div>
+      <div class="screen-picker-actions">
+        <button class="control-btn secondary" onclick="app.hideScreenPicker()">Cancel</button>
+        <button class="control-btn primary" onclick="app.selectScreenSource()">Select</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Status Message -->
+  <div class="status-message" id="statusMessage"></div>
+
+  <script>
+    const app = {
+      // State
+      stream: null,
+      mediaRecorder: null,
+      recordedChunks: [],
+      recordedBlob: null,
+      isRecording: false,
+      recordingStartTime: null,
+      lastRecordingDuration: null,
+      reviewBlobUrl: null,
+      durationInterval: null,
+      instructions: null,
+      screenSources: [],
+      selectedScreenSourceId: null,
+
+      // DOM Elements
+      elements: {},
+
+      // Initialize
+      async init() {
+        console.log('[Recorder] Initializing...');
+        
+        this.cacheElements();
+        await this.loadDevices();
+        await this.loadSpaces();
+        this.setupEventListeners();
+        
+        // Check for instructions from editor
+        if (window.recorder) {
+          const instructions = await window.recorder.getInstructions();
+          if (instructions) {
+            this.setInstructions(instructions);
+          }
+
+          // Listen for new instructions
+          window.recorder.onInstructionsReceived((instructions) => {
+            this.setInstructions(instructions);
+          });
+        }
+
+        console.log('[Recorder] Ready');
+      },
+
+      cacheElements() {
+        this.elements = {
+          previewVideo: document.getElementById('previewVideo'),
+          reviewVideo: document.getElementById('reviewVideo'),
+          previewPlaceholder: document.getElementById('previewPlaceholder'),
+          permissionOverlay: document.getElementById('permissionOverlay'),
+          recordingIndicator: document.getElementById('recordingIndicator'),
+          durationDisplay: document.getElementById('durationDisplay'),
+          currentDuration: document.getElementById('currentDuration'),
+          targetDuration: document.getElementById('targetDuration'),
+          instructionsContent: document.getElementById('instructionsContent'),
+          videoSource: document.getElementById('videoSource'),
+          audioSource: document.getElementById('audioSource'),
+          controlsSection: document.getElementById('controlsSection'),
+          reviewControls: document.getElementById('reviewControls'),
+          recordBtn: document.getElementById('recordBtn'),
+          saveDialog: document.getElementById('saveDialog'),
+          saveFilename: document.getElementById('saveFilename'),
+          saveSpace: document.getElementById('saveSpace'),
+          saveProject: document.getElementById('saveProject'),
+          statusMessage: document.getElementById('statusMessage'),
+          screenPicker: document.getElementById('screenPicker'),
+          screenSourcesGrid: document.getElementById('screenSourcesGrid')
+        };
+      },
+
+      setupEventListeners() {
+        // Space selection change - load projects
+        this.elements.saveSpace.addEventListener('change', async () => {
+          const spaceId = this.elements.saveSpace.value;
+          if (spaceId && window.recorder) {
+            const result = await window.recorder.getProjectFolder(spaceId);
+            this.elements.saveProject.innerHTML = '<option value="">No project - save to space root</option>';
+            if (result.success && result.projects) {
+              result.projects.forEach(p => {
+                const option = document.createElement('option');
+                option.value = p.id;
+                option.textContent = p.name;
+                this.elements.saveProject.appendChild(option);
+              });
+            }
+          }
+        });
+      },
+
+      // Load available media devices
+      async loadDevices() {
+        try {
+          // Request permission first to get device labels
+          let hasCamera = false;
+          try {
+            const tempStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            tempStream.getTracks().forEach(t => t.stop());
+            hasCamera = true;
+          } catch (e) {
+            // Camera not available, try audio only
+            try {
+              const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+              audioStream.getTracks().forEach(t => t.stop());
+            } catch (e2) {
+              console.warn('[Recorder] No camera or mic available');
+            }
+          }
+
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          
+          // Video devices
+          const videoDevices = devices.filter(d => d.kind === 'videoinput');
+          this.elements.videoSource.innerHTML = '<option value="">Select source...</option>';
+          
+          // Add camera options if available
+          if (videoDevices.length > 0) {
+            const cameraGroup = document.createElement('optgroup');
+            cameraGroup.label = '📹 Cameras';
+            videoDevices.forEach((device, i) => {
+              const option = document.createElement('option');
+              option.value = device.deviceId;
+              option.textContent = device.label || `Camera ${i + 1}`;
+              cameraGroup.appendChild(option);
+            });
+            this.elements.videoSource.appendChild(cameraGroup);
+          }
+
+          // Add screen capture option group
+          const screenGroup = document.createElement('optgroup');
+          screenGroup.label = '🖥️ Screen Recording';
+          const screenOption = document.createElement('option');
+          screenOption.value = 'screen';
+          screenOption.textContent = 'Select Screen or Window...';
+          screenGroup.appendChild(screenOption);
+          this.elements.videoSource.appendChild(screenGroup);
+
+          // Audio devices
+          const audioDevices = devices.filter(d => d.kind === 'audioinput');
+          this.elements.audioSource.innerHTML = '<option value="">No microphone</option>';
+          audioDevices.forEach((device, i) => {
+            const option = document.createElement('option');
+            option.value = device.deviceId;
+            option.textContent = device.label || `Microphone ${i + 1}`;
+            this.elements.audioSource.appendChild(option);
+          });
+
+          // Auto-select first devices
+          if (videoDevices.length > 0) {
+            this.elements.videoSource.value = videoDevices[0].deviceId;
+            this.changeVideoSource();
+          }
+          if (audioDevices.length > 0) {
+            this.elements.audioSource.value = audioDevices[0].deviceId;
+          }
+
+          this.elements.permissionOverlay.classList.add('hidden');
+        } catch (error) {
+          console.error('[Recorder] Device enumeration error:', error);
+          this.elements.permissionOverlay.classList.remove('hidden');
+        }
+      },
+
+      // Load spaces for save dialog
+      async loadSpaces() {
+        if (!window.recorder) return;
+
+        try {
+          const spaces = await window.recorder.getSpaces();
+          this.elements.saveSpace.innerHTML = '<option value="">Select a space...</option>';
+          
+          if (spaces && spaces.length > 0) {
+            spaces.forEach(space => {
+              const option = document.createElement('option');
+              option.value = space.id;
+              option.textContent = space.name || space.id;
+              this.elements.saveSpace.appendChild(option);
+            });
+          }
+        } catch (error) {
+          console.error('[Recorder] Failed to load spaces:', error);
+        }
+      },
+
+      // Request permissions
+      async requestPermissions() {
+        if (window.recorder) {
+          await window.recorder.requestPermissions('camera');
+          await window.recorder.requestPermissions('microphone');
+        }
+        await this.loadDevices();
+      },
+
+      // Change video source
+      async changeVideoSource() {
+        const deviceId = this.elements.videoSource.value;
+        if (!deviceId) {
+          if (this.stream) {
+            this.stream.getTracks().forEach(t => t.stop());
+            this.stream = null;
+          }
+          this.elements.previewVideo.srcObject = null;
+          this.elements.previewPlaceholder.style.display = 'flex';
+          return;
+        }
+
+        try {
+          // Stop existing stream
+          if (this.stream) {
+            this.stream.getTracks().forEach(t => t.stop());
+          }
+
+          if (deviceId === 'screen') {
+            // Show screen picker for screen capture
+            await this.showScreenPicker();
+            return; // Stream will be set when user selects a source
+          } else if (deviceId.startsWith('screen:')) {
+            // Selected a specific screen source
+            const sourceId = deviceId.replace('screen:', '');
+            await this.startScreenCapture(sourceId);
+          } else {
+            // Camera
+            const videoConstraints = { deviceId: { exact: deviceId } };
+            const audioDeviceId = this.elements.audioSource.value;
+            
+            this.stream = await navigator.mediaDevices.getUserMedia({
+              video: videoConstraints,
+              audio: audioDeviceId ? { deviceId: { exact: audioDeviceId } } : true
+            });
+            
+            this.elements.previewVideo.srcObject = this.stream;
+            this.elements.previewPlaceholder.style.display = 'none';
+            this.elements.previewVideo.style.display = 'block';
+            this.elements.reviewVideo.style.display = 'none';
+          }
+        } catch (error) {
+          console.error('[Recorder] Failed to get media:', error);
+          this.showStatus('Failed to access camera: ' + error.message, 'error');
+        }
+      },
+
+      // Show screen source picker
+      async showScreenPicker() {
+        if (!window.recorder || !window.recorder.getScreenSources) {
+          this.showStatus('Screen capture not available', 'error');
+          return;
+        }
+
+        try {
+          this.screenSources = await window.recorder.getScreenSources();
+          
+          if (this.screenSources.length === 0) {
+            this.showStatus('No screen sources found. Check screen recording permissions.', 'error');
+            return;
+          }
+
+          // Populate the grid
+          this.elements.screenSourcesGrid.innerHTML = '';
+          this.selectedScreenSourceId = null;
+          
+          this.screenSources.forEach((source, index) => {
+            const item = document.createElement('div');
+            item.className = 'screen-source-item';
+            item.dataset.sourceId = source.id;
+            item.onclick = () => this.selectScreenSourceItem(source.id);
+            
+            // Auto-select first item
+            if (index === 0) {
+              item.classList.add('selected');
+              this.selectedScreenSourceId = source.id;
+            }
+            
+            item.innerHTML = `
+              <img class="screen-source-thumbnail" src="${source.thumbnail}" alt="${source.name}">
+              <div class="screen-source-name">${source.name}</div>
+            `;
+            
+            this.elements.screenSourcesGrid.appendChild(item);
+          });
+
+          this.elements.screenPicker.classList.add('active');
+        } catch (error) {
+          console.error('[Recorder] Error loading screen sources:', error);
+          this.showStatus('Failed to load screen sources: ' + error.message, 'error');
+        }
+      },
+
+      // Select a screen source item in the picker
+      selectScreenSourceItem(sourceId) {
+        this.selectedScreenSourceId = sourceId;
+        
+        // Update visual selection
+        this.elements.screenSourcesGrid.querySelectorAll('.screen-source-item').forEach(item => {
+          item.classList.toggle('selected', item.dataset.sourceId === sourceId);
+        });
+      },
+
+      // Hide screen picker
+      hideScreenPicker() {
+        this.elements.screenPicker.classList.remove('active');
+        // Reset video source to empty if cancelled
+        if (!this.stream) {
+          this.elements.videoSource.value = '';
+        }
+      },
+
+      // Confirm screen source selection
+      async selectScreenSource() {
+        if (!this.selectedScreenSourceId) {
+          this.showStatus('Please select a screen or window', 'error');
+          return;
+        }
+
+        this.elements.screenPicker.classList.remove('active');
+        await this.startScreenCapture(this.selectedScreenSourceId);
+      },
+
+      // Start screen capture with a specific source
+      async startScreenCapture(sourceId) {
+        try {
+          const audioDeviceId = this.elements.audioSource.value;
+          
+          // Use Electron's chromeMediaSource constraint
+          this.stream = await navigator.mediaDevices.getUserMedia({
+            audio: audioDeviceId ? { deviceId: { exact: audioDeviceId } } : false,
+            video: {
+              mandatory: {
+                chromeMediaSource: 'desktop',
+                chromeMediaSourceId: sourceId
+              }
+            }
+          });
+
+          this.elements.previewVideo.srcObject = this.stream;
+          this.elements.previewPlaceholder.style.display = 'none';
+          this.elements.previewVideo.style.display = 'block';
+          this.elements.reviewVideo.style.display = 'none';
+          
+          // Update the source name in dropdown
+          const source = this.screenSources.find(s => s.id === sourceId);
+          if (source) {
+            // Update or add the option
+            let option = this.elements.videoSource.querySelector('option[value="screen"]');
+            if (option) {
+              option.textContent = `🖥️ ${source.name}`;
+              option.value = `screen:${sourceId}`;
+              this.elements.videoSource.value = `screen:${sourceId}`;
+            }
+          }
+          
+          console.log('[Recorder] Screen capture started:', sourceId);
+        } catch (error) {
+          console.error('[Recorder] Screen capture error:', error);
+          this.showStatus('Failed to start screen capture: ' + error.message, 'error');
+          this.elements.videoSource.value = '';
+        }
+      },
+
+      // Change audio source
+      async changeAudioSource() {
+        // Re-initialize stream with new audio
+        if (this.elements.videoSource.value && this.elements.videoSource.value !== 'screen') {
+          await this.changeVideoSource();
+        }
+      },
+
+      // Set instructions from editor
+      setInstructions(data) {
+        this.instructions = data;
+        
+        if (data.instructions) {
+          this.elements.instructionsContent.textContent = data.instructions;
+          this.elements.instructionsContent.classList.remove('empty');
+        }
+
+        if (data.targetDuration) {
+          this.elements.targetDuration.textContent = `/ ~${this.formatDuration(data.targetDuration)}`;
+        }
+
+        // Pre-select space if provided
+        if (data.spaceId && this.elements.saveSpace) {
+          this.elements.saveSpace.value = data.spaceId;
+          this.elements.saveSpace.dispatchEvent(new Event('change'));
+        }
+      },
+
+      // Toggle recording
+      toggleRecording() {
+        if (this.isRecording) {
+          this.stopRecording();
+        } else {
+          this.startRecording();
+        }
+      },
+
+      // Start recording
+      startRecording() {
+        if (!this.stream) {
+          this.showStatus('No media stream available', 'error');
+          return;
+        }
+
+        this.recordedChunks = [];
+        
+        // Create MediaRecorder
+        const options = { mimeType: 'video/webm;codecs=vp9,opus' };
+        try {
+          this.mediaRecorder = new MediaRecorder(this.stream, options);
+        } catch (e) {
+          // Fallback
+          this.mediaRecorder = new MediaRecorder(this.stream);
+        }
+
+        this.mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            this.recordedChunks.push(event.data);
+          }
+        };
+
+        this.mediaRecorder.onstop = () => {
+          this.recordedBlob = new Blob(this.recordedChunks, { type: 'video/webm' });
+          this.showReview();
+        };
+
+        this.mediaRecorder.start(1000); // Collect data every second
+        this.isRecording = true;
+        this.recordingStartTime = Date.now();
+
+        // Update UI
+        this.elements.recordBtn.classList.add('recording');
+        this.elements.recordingIndicator.classList.add('active');
+
+        // Start duration counter
+        this.durationInterval = setInterval(() => {
+          const elapsed = (Date.now() - this.recordingStartTime) / 1000;
+          this.elements.currentDuration.textContent = this.formatDuration(elapsed);
+        }, 100);
+
+        console.log('[Recorder] Recording started');
+      },
+
+      // Stop recording
+      stopRecording() {
+        if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+          this.mediaRecorder.stop();
+        }
+
+        this.isRecording = false;
+        clearInterval(this.durationInterval);
+
+        // Update UI
+        this.elements.recordBtn.classList.remove('recording');
+        this.elements.recordingIndicator.classList.remove('active');
+
+        console.log('[Recorder] Recording stopped');
+      },
+
+      // Show review mode
+      showReview() {
+        // Store the recording duration for metadata before any reset
+        this.lastRecordingDuration = (Date.now() - this.recordingStartTime) / 1000;
+        
+        // Revoke any existing blob URL to prevent memory leak
+        if (this.reviewBlobUrl) {
+          URL.revokeObjectURL(this.reviewBlobUrl);
+        }
+        
+        // Hide preview, show review video
+        this.elements.previewVideo.style.display = 'none';
+        this.elements.reviewVideo.style.display = 'block';
+        this.reviewBlobUrl = URL.createObjectURL(this.recordedBlob);
+        this.elements.reviewVideo.src = this.reviewBlobUrl;
+
+        // Show review controls
+        this.elements.controlsSection.style.display = 'none';
+        this.elements.reviewControls.style.display = 'flex';
+
+        // Set default filename
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        this.elements.saveFilename.value = `recording_${timestamp}.webm`;
+      },
+
+      // Record again
+      recordAgain() {
+        // Revoke blob URL to prevent memory leak
+        if (this.reviewBlobUrl) {
+          URL.revokeObjectURL(this.reviewBlobUrl);
+          this.reviewBlobUrl = null;
+        }
+        
+        // Reset to preview mode
+        this.elements.previewVideo.style.display = 'block';
+        this.elements.reviewVideo.style.display = 'none';
+        this.elements.reviewVideo.src = '';
+        
+        this.elements.controlsSection.style.display = 'flex';
+        this.elements.reviewControls.style.display = 'none';
+
+        this.elements.currentDuration.textContent = '00:00';
+        this.recordedBlob = null;
+        this.recordedChunks = [];
+        this.lastRecordingDuration = null;
+      },
+
+      // Discard recording
+      discardRecording() {
+        this.recordAgain();
+        this.showStatus('Recording discarded', 'error');
+      },
+
+      // Show save dialog
+      showSaveDialog() {
+        this.elements.saveDialog.classList.add('active');
+      },
+
+      // Hide save dialog
+      hideSaveDialog() {
+        this.elements.saveDialog.classList.remove('active');
+      },
+
+      // Save recording
+      async saveRecording() {
+        if (!this.recordedBlob) {
+          this.showStatus('No recording to save', 'error');
+          return;
+        }
+
+        const filename = this.elements.saveFilename.value || 'recording.webm';
+        const spaceId = this.elements.saveSpace.value;
+        const projectId = this.elements.saveProject.value;
+
+        try {
+          // Convert blob to base64
+          const reader = new FileReader();
+          const base64Promise = new Promise((resolve, reject) => {
+            reader.onload = () => {
+              const base64 = reader.result.split(',')[1];
+              resolve(base64);
+            };
+            reader.onerror = reject;
+          });
+          reader.readAsDataURL(this.recordedBlob);
+          const base64Data = await base64Promise;
+
+          // Save via IPC
+          if (window.recorder) {
+            const result = await window.recorder.saveToSpace({
+              blob: base64Data,
+              filename,
+              spaceId,
+              projectId,
+              metadata: {
+                duration: this.lastRecordingDuration || 0,
+                instructions: this.instructions?.instructions || null,
+                recordedAt: new Date().toISOString()
+              }
+            });
+
+            if (result.success) {
+              this.showStatus(`Saved to ${result.path}`, 'success');
+              this.hideSaveDialog();
+              
+              // Reset for new recording
+              setTimeout(() => {
+                this.recordAgain();
+              }, 2000);
+            } else {
+              throw new Error(result.error || 'Save failed');
+            }
+          }
+        } catch (error) {
+          console.error('[Recorder] Save error:', error);
+          this.showStatus('Failed to save: ' + error.message, 'error');
+        }
+      },
+
+      // Format duration
+      formatDuration(seconds) {
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+      },
+
+      // Show status message
+      showStatus(message, type = 'info') {
+        this.elements.statusMessage.textContent = message;
+        this.elements.statusMessage.className = 'status-message active ' + type;
+        
+        setTimeout(() => {
+          this.elements.statusMessage.classList.remove('active');
+        }, 3000);
+      },
+
+      // Window controls
+      minimize() {
+        if (window.recorder) {
+          window.recorder.minimize();
+        }
+      },
+
+      close() {
+        if (this.stream) {
+          this.stream.getTracks().forEach(t => t.stop());
+        }
+        if (window.recorder) {
+          window.recorder.close();
+        }
+      }
+    };
+
+    // Initialize on load
+    document.addEventListener('DOMContentLoaded', () => app.init());
+  </script>
+</body>
+</html>

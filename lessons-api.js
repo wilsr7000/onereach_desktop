@@ -2,6 +2,7 @@
 const { net } = require('electron');
 const https = require('https');
 const { URL } = require('url');
+const getLogger = require('./event-logger');
 
 class LessonsAPI {
   constructor() {
@@ -38,7 +39,10 @@ class LessonsAPI {
         this.baseUrl = this.defaultUrl.replace('/idw_quick_starts', '');
       }
     } catch (error) {
-      console.error('[LessonsAPI] Error loading settings, using defaults:', error);
+      const logger = getLogger();
+      logger.warn('LessonsAPI settings load failed, using defaults', {
+        error: error.message
+      });
       this.baseUrl = this.defaultUrl.replace('/idw_quick_starts', '');
     }
   }
@@ -61,7 +65,8 @@ class LessonsAPI {
     
     const cached = this.cache.get(key);
     if (cached && Date.now() - cached.timestamp < this.cacheExpiry) {
-      console.log(`[LessonsAPI] Using cached data for ${key}`);
+      const logger = getLogger();
+      logger.debug('LessonsAPI cache hit', { key });
       return cached.data;
     }
     return null;
@@ -93,9 +98,15 @@ class LessonsAPI {
       return cached;
     }
     
+    const logger = getLogger();
     try {
       // Fetching lessons from OneReach API
-      console.log(`[LessonsAPI] Fetching from ${this.baseUrl}/idw_quick_starts using ${this.method}`);
+      logger.info('LessonsAPI request', {
+        event: 'api:request',
+        provider: 'onereach',
+        endpoint: '/idw_quick_starts',
+        method: this.method
+      });
       
       // Prepare request options based on method
       const requestOptions = {
@@ -126,8 +137,14 @@ class LessonsAPI {
       
       return data;
     } catch (error) {
-      console.error('[LessonsAPI] Error fetching lessons from API:', error);
-      console.log('[LessonsAPI] Falling back to mock data');
+      logger.logAPIError('/idw_quick_starts', error, {
+        provider: 'onereach',
+        operation: 'fetchUserLessons',
+        userId
+      });
+      logger.info('LessonsAPI falling back to mock data', {
+        reason: error.message
+      });
       
       // Fallback to mock data if API fails
       const mockData = await this.getMockLessonsData(userId);
@@ -144,8 +161,7 @@ class LessonsAPI {
   async makeApiCall(endpoint, options = {}) {
     return new Promise((resolve, reject) => {
       const url = new URL(`${this.baseUrl}${endpoint}`);
-      
-      // Making API request
+      const requestStartTime = Date.now();
       
       const requestOptions = {
         method: options.method || 'GET',
@@ -170,26 +186,37 @@ class LessonsAPI {
         });
         
         res.on('end', () => {
+          const logger = getLogger();
           try {
             // Response received
             
             if (res.statusCode >= 200 && res.statusCode < 300) {
               const jsonData = JSON.parse(data);
+              logger.logNetworkRequest(options.method || 'GET', endpoint, res.statusCode, Date.now() - requestStartTime);
               resolve(jsonData);
             } else {
-              console.error(`[LessonsAPI] API error response: ${data}`);
+              logger.logAPIError(endpoint, new Error(`API error: ${res.statusCode}`), {
+                provider: 'onereach',
+                statusCode: res.statusCode
+              });
               reject(new Error(`API error: ${res.statusCode}`));
             }
           } catch (error) {
-            console.error(`[LessonsAPI] Failed to parse response: ${error.message}`);
-            console.error(`[LessonsAPI] Raw response: ${data}`);
+            logger.logAPIError(endpoint, error, {
+              provider: 'onereach',
+              parseError: true
+            });
             reject(new Error(`Failed to parse API response: ${error.message}`));
           }
         });
       });
       
       req.on('error', (error) => {
-        console.error(`[LessonsAPI] Request error: ${error.message}`);
+        const logger = getLogger();
+        logger.logAPIError(endpoint, error, {
+          provider: 'onereach',
+          networkError: true
+        });
         reject(error);
       });
       

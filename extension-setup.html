@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Browser Extension Setup - OneReach.ai</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: #0d0d14;
+      color: #e8e8ec;
+      min-height: 100vh;
+      padding: 40px;
+    }
+
+    .container {
+      max-width: 520px;
+      margin: 0 auto;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+
+    .logo {
+      width: 64px;
+      height: 64px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      font-weight: bold;
+      margin: 0 auto 16px;
+    }
+
+    h1 {
+      font-size: 24px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      color: #8888a0;
+      font-size: 14px;
+    }
+
+    .step {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+
+    .step-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .step-number {
+      width: 28px;
+      height: 28px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+
+    .step-title {
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .step-content {
+      color: #b8b8c8;
+      font-size: 14px;
+      line-height: 1.6;
+      padding-left: 40px;
+    }
+
+    .step-content p {
+      margin-bottom: 12px;
+    }
+
+    .step-content ul {
+      margin-left: 20px;
+      margin-bottom: 12px;
+    }
+
+    .step-content li {
+      margin-bottom: 6px;
+    }
+
+    .token-box {
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      padding: 16px;
+      margin: 16px 0;
+    }
+
+    .token-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: #6b6b80;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+
+    .token-value {
+      font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+      font-size: 12px;
+      color: #667eea;
+      word-break: break-all;
+      background: rgba(102, 126, 234, 0.1);
+      padding: 12px;
+      border-radius: 6px;
+      margin-bottom: 12px;
+      user-select: all;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 20px;
+      border-radius: 8px;
+      border: none;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: transform 0.15s, background 0.15s;
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.1);
+      color: #e8e8ec;
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.15);
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .browser-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .browser-tab {
+      flex: 1;
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      text-align: center;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+
+    .browser-tab:hover {
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .browser-tab.active {
+      background: rgba(102, 126, 234, 0.15);
+      border-color: #667eea;
+    }
+
+    .browser-tab .icon {
+      font-size: 24px;
+      margin-bottom: 4px;
+    }
+
+    .browser-tab .name {
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .browser-content {
+      display: none;
+    }
+
+    .browser-content.active {
+      display: block;
+    }
+
+    .help-text {
+      font-size: 12px;
+      color: #6b6b80;
+      margin-top: 8px;
+    }
+
+    .success-message {
+      background: rgba(34, 197, 94, 0.1);
+      border: 1px solid rgba(34, 197, 94, 0.3);
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 20px;
+      display: none;
+    }
+
+    .success-message.show {
+      display: block;
+    }
+
+    .success-message h3 {
+      color: #22c55e;
+      font-size: 14px;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .success-message p {
+      color: #b8b8c8;
+      font-size: 13px;
+    }
+
+    .ext-path {
+      font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+      font-size: 11px;
+      color: #b8b8c8;
+      background: rgba(0, 0, 0, 0.3);
+      padding: 8px 12px;
+      border-radius: 6px;
+      margin-top: 8px;
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="logo">O</div>
+      <h1>Browser Extension Setup</h1>
+      <p class="subtitle">Share browser tabs directly with OneReach.ai</p>
+    </div>
+
+    <div class="step">
+      <div class="step-header">
+        <div class="step-number">1</div>
+        <div class="step-title">Choose Your Browser</div>
+      </div>
+      <div class="step-content">
+        <div class="browser-tabs">
+          <div class="browser-tab active" data-browser="chrome">
+            <div class="icon">🌐</div>
+            <div class="name">Chrome</div>
+          </div>
+          <div class="browser-tab" data-browser="safari">
+            <div class="icon">🧭</div>
+            <div class="name">Safari</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="browser-content active" id="chrome-content">
+      <div class="step">
+        <div class="step-header">
+          <div class="step-number">2</div>
+          <div class="step-title">Install the Extension</div>
+        </div>
+        <div class="step-content">
+          <p>The extension files are bundled with this app. Follow these steps:</p>
+          <ul>
+            <li>Open Chrome and go to <strong>chrome://extensions</strong></li>
+            <li>Enable <strong>Developer mode</strong> (toggle in top right)</li>
+            <li>Click <strong>Load unpacked</strong></li>
+            <li>Select the extension folder (shown below)</li>
+          </ul>
+          <div class="ext-path" id="extensionPath">Loading path...</div>
+          <div class="btn-row" style="margin-top: 12px;">
+            <button class="btn btn-secondary" id="openExtensionsPage">Open Chrome Extensions</button>
+            <button class="btn btn-secondary" id="showInFinder">Show in Finder</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-header">
+          <div class="step-number">3</div>
+          <div class="step-title">Connect with Auth Token</div>
+        </div>
+        <div class="step-content">
+          <p>Copy this token and paste it in the extension popup:</p>
+          <div class="token-box">
+            <div class="token-label">Authentication Token</div>
+            <div class="token-value" id="authToken">Loading...</div>
+            <button class="btn btn-primary" id="copyToken">📋 Copy Token</button>
+          </div>
+          <p class="help-text">Click the extension icon in Chrome, paste the token, and click Save.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="browser-content" id="safari-content">
+      <div class="step">
+        <div class="step-header">
+          <div class="step-number">2</div>
+          <div class="step-title">Safari Extension (Coming Soon)</div>
+        </div>
+        <div class="step-content">
+          <p>Safari extension support is being developed. In the meantime, you can:</p>
+          <ul>
+            <li>Use the Chrome extension</li>
+            <li>Or paste URLs directly in the tab picker</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="success-message" id="successMessage">
+      <h3>✅ Extension Connected!</h3>
+      <p>The browser extension is now connected. You can close this window and start sharing tabs.</p>
+    </div>
+  </div>
+
+  <script>
+    // Get elements
+    const browserTabs = document.querySelectorAll('.browser-tab');
+    const browserContents = document.querySelectorAll('.browser-content');
+    const authTokenEl = document.getElementById('authToken');
+    const extensionPathEl = document.getElementById('extensionPath');
+    const copyTokenBtn = document.getElementById('copyToken');
+    const openExtensionsPageBtn = document.getElementById('openExtensionsPage');
+    const showInFinderBtn = document.getElementById('showInFinder');
+    const successMessage = document.getElementById('successMessage');
+
+    // Browser tab switching
+    browserTabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        const browser = tab.dataset.browser;
+        
+        browserTabs.forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        
+        browserContents.forEach(c => c.classList.remove('active'));
+        document.getElementById(`${browser}-content`).classList.add('active');
+      });
+    });
+
+    // Load auth token
+    async function loadAuthToken() {
+      try {
+        // Use fetch to get token from local API
+        const response = await fetch('http://127.0.0.1:47291/api/token');
+        if (response.ok) {
+          const data = await response.json();
+          authTokenEl.textContent = data.token;
+        } else {
+          authTokenEl.textContent = 'Error loading token';
+        }
+      } catch (error) {
+        authTokenEl.textContent = 'App API not responding';
+      }
+    }
+
+    // Set extension path
+    function setExtensionPath() {
+      // This will be the path in the app bundle or dev location
+      const isPackaged = !window.location.href.includes('file://');
+      const basePath = isPackaged 
+        ? '/Applications/OneReach.ai.app/Contents/Resources/browser-extensions/chrome'
+        : window.location.href.replace('extension-setup.html', 'resources/browser-extensions/chrome');
+      
+      // For Electron apps, we'll use a cleaner path display
+      extensionPathEl.textContent = 'resources/browser-extensions/chrome';
+    }
+
+    // Copy token
+    copyTokenBtn.addEventListener('click', async () => {
+      const token = authTokenEl.textContent;
+      if (token && token !== 'Loading...' && token !== 'Error loading token') {
+        try {
+          await navigator.clipboard.writeText(token);
+          copyTokenBtn.textContent = '✓ Copied!';
+          setTimeout(() => {
+            copyTokenBtn.textContent = '📋 Copy Token';
+          }, 2000);
+        } catch (error) {
+          // Fallback for older browsers
+          const textarea = document.createElement('textarea');
+          textarea.value = token;
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand('copy');
+          document.body.removeChild(textarea);
+          copyTokenBtn.textContent = '✓ Copied!';
+          setTimeout(() => {
+            copyTokenBtn.textContent = '📋 Copy Token';
+          }, 2000);
+        }
+      }
+    });
+
+    // Open Chrome extensions page
+    openExtensionsPageBtn.addEventListener('click', () => {
+      // This will be handled by the app if preload is available, otherwise show instructions
+      if (window.api && window.api.openExternal) {
+        window.api.openExternal('chrome://extensions');
+      } else {
+        alert('Open Chrome and navigate to: chrome://extensions');
+      }
+    });
+
+    // Show in Finder
+    showInFinderBtn.addEventListener('click', () => {
+      if (window.api && window.api.showInFinder) {
+        window.api.showInFinder('resources/browser-extensions/chrome');
+      } else {
+        alert('Extension files are in: resources/browser-extensions/chrome');
+      }
+    });
+
+    // Check connection status periodically
+    async function checkConnection() {
+      try {
+        const response = await fetch('http://127.0.0.1:47291/api/status');
+        if (response.ok) {
+          const data = await response.json();
+          if (data.extensionConnected) {
+            successMessage.classList.add('show');
+          }
+        }
+      } catch (error) {
+        // API not available
+      }
+    }
+
+    // Initialize
+    loadAuthToken();
+    setExtensionPath();
+    
+    // Check connection every 2 seconds
+    setInterval(checkConnection, 2000);
+  </script>
+</body>
+</html>
+
+
+
+

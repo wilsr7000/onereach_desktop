@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Metadata Generation Test Runner</title>
+  <style>
+    :root {
+      --bg-primary: #1a1a2e;
+      --bg-secondary: #16213e;
+      --bg-card: #0f3460;
+      --accent: #e94560;
+      --accent-light: #ff6b6b;
+      --text-primary: #ffffff;
+      --text-secondary: #a0a0a0;
+      --success: #4ade80;
+      --warning: #fbbf24;
+      --error: #ef4444;
+      --border: #2d3748;
+    }
+    
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      padding: 20px;
+    }
+    
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+    
+    header {
+      text-align: center;
+      padding: 20px 0 30px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 30px;
+    }
+    
+    header h1 {
+      font-size: 28px;
+      margin-bottom: 10px;
+      background: linear-gradient(135deg, var(--accent) 0%, var(--accent-light) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    
+    header p {
+      color: var(--text-secondary);
+      font-size: 14px;
+    }
+    
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+    
+    .panel {
+      background: var(--bg-secondary);
+      border-radius: 12px;
+      padding: 20px;
+      border: 1px solid var(--border);
+    }
+    
+    .panel h2 {
+      font-size: 16px;
+      margin-bottom: 15px;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .panel h2::before {
+      content: '';
+      width: 4px;
+      height: 16px;
+      background: var(--accent);
+      border-radius: 2px;
+    }
+    
+    /* Drop Zone */
+    .drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: 12px;
+      padding: 40px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      background: var(--bg-card);
+      min-height: 200px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .drop-zone:hover, .drop-zone.dragover {
+      border-color: var(--accent);
+      background: rgba(233, 69, 96, 0.1);
+    }
+    
+    .drop-zone .icon {
+      font-size: 48px;
+      margin-bottom: 15px;
+    }
+    
+    .drop-zone p {
+      color: var(--text-secondary);
+      margin-bottom: 10px;
+    }
+    
+    .drop-zone .hint {
+      font-size: 12px;
+      color: var(--text-secondary);
+      opacity: 0.7;
+    }
+    
+    /* Test Items */
+    .test-items {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    
+    .test-item {
+      background: var(--bg-card);
+      border-radius: 8px;
+      padding: 12px 15px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      border: 1px solid transparent;
+    }
+    
+    .test-item:hover {
+      border-color: var(--accent);
+    }
+    
+    .test-item .icon {
+      font-size: 24px;
+      width: 40px;
+      text-align: center;
+    }
+    
+    .test-item .info {
+      flex: 1;
+    }
+    
+    .test-item .name {
+      font-weight: 500;
+      margin-bottom: 2px;
+    }
+    
+    .test-item .type {
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+    
+    .test-item .status {
+      font-size: 20px;
+    }
+    
+    .test-item.pending .status::after { content: '⏳'; }
+    .test-item.testing .status::after { content: '🔄'; }
+    .test-item.passed .status::after { content: '✅'; }
+    .test-item.failed .status::after { content: '❌'; }
+    
+    /* Buttons */
+    .button-group {
+      display: flex;
+      gap: 10px;
+      margin-top: 15px;
+    }
+    
+    button {
+      padding: 10px 20px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      transition: all 0.2s ease;
+    }
+    
+    button.primary {
+      background: var(--accent);
+      color: white;
+    }
+    
+    button.primary:hover {
+      background: var(--accent-light);
+    }
+    
+    button.secondary {
+      background: var(--bg-card);
+      color: var(--text-primary);
+      border: 1px solid var(--border);
+    }
+    
+    button.secondary:hover {
+      border-color: var(--accent);
+    }
+    
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    /* Results */
+    .results {
+      margin-top: 20px;
+    }
+    
+    .result-card {
+      background: var(--bg-card);
+      border-radius: 8px;
+      padding: 15px;
+      margin-bottom: 10px;
+      border-left: 4px solid var(--accent);
+    }
+    
+    .result-card h3 {
+      font-size: 14px;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .result-card .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+      font-size: 13px;
+    }
+    
+    .result-card .meta-item {
+      background: var(--bg-secondary);
+      padding: 8px 10px;
+      border-radius: 4px;
+    }
+    
+    .result-card .meta-item label {
+      display: block;
+      font-size: 11px;
+      color: var(--text-secondary);
+      margin-bottom: 2px;
+    }
+    
+    .result-card .meta-item .value {
+      color: var(--text-primary);
+      word-break: break-word;
+    }
+    
+    .result-card .tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 8px;
+    }
+    
+    .result-card .tag {
+      background: var(--accent);
+      color: white;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+    }
+    
+    /* Schema Check */
+    .schema-check {
+      background: var(--bg-card);
+      border-radius: 8px;
+      padding: 15px;
+      margin-top: 15px;
+    }
+    
+    .schema-check h4 {
+      font-size: 13px;
+      margin-bottom: 10px;
+      color: var(--text-secondary);
+    }
+    
+    .schema-fields {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    
+    .schema-field {
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    
+    .schema-field.present {
+      background: rgba(74, 222, 128, 0.2);
+      color: var(--success);
+    }
+    
+    .schema-field.missing {
+      background: rgba(239, 68, 68, 0.2);
+      color: var(--error);
+    }
+    
+    /* Log */
+    .log {
+      background: #0d1117;
+      border-radius: 8px;
+      padding: 15px;
+      font-family: 'SF Mono', Consolas, monospace;
+      font-size: 12px;
+      max-height: 300px;
+      overflow-y: auto;
+      margin-top: 15px;
+    }
+    
+    .log-entry {
+      padding: 2px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    
+    .log-entry.info { color: #58a6ff; }
+    .log-entry.success { color: var(--success); }
+    .log-entry.error { color: var(--error); }
+    .log-entry.warn { color: var(--warning); }
+    
+    /* Summary */
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 15px;
+      margin-top: 20px;
+    }
+    
+    .summary-card {
+      background: var(--bg-card);
+      border-radius: 8px;
+      padding: 15px;
+      text-align: center;
+    }
+    
+    .summary-card .value {
+      font-size: 32px;
+      font-weight: 700;
+    }
+    
+    .summary-card .label {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-top: 5px;
+    }
+    
+    .summary-card.total .value { color: var(--accent); }
+    .summary-card.passed .value { color: var(--success); }
+    .summary-card.failed .value { color: var(--error); }
+    .summary-card.pending .value { color: var(--warning); }
+    
+    /* Full Width */
+    .full-width {
+      grid-column: 1 / -1;
+    }
+    
+    /* Responsive */
+    @media (max-width: 900px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🧪 Metadata Generation Test Runner</h1>
+      <p>Test file type detection, metadata schemas, and LLM routing for the Spaces menu</p>
+    </header>
+    
+    <div class="grid">
+      <!-- Left Panel: Drop Zone & Test Items -->
+      <div class="panel">
+        <h2>Test Files</h2>
+        
+        <div class="drop-zone" id="dropZone">
+          <div class="icon">📁</div>
+          <p>Drop files here or click to select</p>
+          <p class="hint">Supports: images, videos, audio, PDFs, code, text, data files</p>
+        </div>
+        <input type="file" id="fileInput" multiple hidden>
+        
+        <div class="button-group">
+          <button class="primary" onclick="runAllTests()">▶ Run All Tests</button>
+          <button class="secondary" onclick="addSampleFiles()">+ Add Sample Files</button>
+          <button class="secondary" onclick="clearTests()">🗑️ Clear</button>
+        </div>
+        
+        <div class="test-items" id="testItems">
+          <!-- Test items will be added here -->
+        </div>
+      </div>
+      
+      <!-- Right Panel: Results -->
+      <div class="panel">
+        <h2>Test Results</h2>
+        
+        <div class="summary">
+          <div class="summary-card total">
+            <div class="value" id="totalCount">0</div>
+            <div class="label">Total</div>
+          </div>
+          <div class="summary-card passed">
+            <div class="value" id="passedCount">0</div>
+            <div class="label">Passed</div>
+          </div>
+          <div class="summary-card failed">
+            <div class="value" id="failedCount">0</div>
+            <div class="label">Failed</div>
+          </div>
+          <div class="summary-card pending">
+            <div class="value" id="pendingCount">0</div>
+            <div class="label">Pending</div>
+          </div>
+        </div>
+        
+        <div class="results" id="results">
+          <!-- Results will be displayed here -->
+        </div>
+      </div>
+      
+      <!-- Log Panel -->
+      <div class="panel full-width">
+        <h2>Test Log</h2>
+        <div class="log" id="log">
+          <div class="log-entry info">Ready to test. Drop files or add samples to begin.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <script>
+    // ============================================
+    // Test Configuration
+    // ============================================
+    
+    const testFiles = [];
+    const testResults = [];
+    
+    // Expected schemas per type
+    const schemas = {
+      image: {
+        required: ['title', 'description', 'tags', 'category'],
+        optional: ['notes', 'extracted_text', 'visible_urls', 'app_detected', 'ai_detected']
+      },
+      video: {
+        required: ['title', 'shortDescription', 'category', 'tags'],
+        optional: ['longDescription', 'topics', 'speakers', 'keyPoints']
+      },
+      audio: {
+        required: ['title', 'description', 'audioType', 'tags'],
+        optional: ['topics', 'speakers', 'keyPoints', 'genre']
+      },
+      code: {
+        required: ['title', 'description', 'language', 'tags'],
+        optional: ['purpose', 'functions', 'dependencies', 'complexity']
+      },
+      text: {
+        required: ['title', 'description', 'contentType', 'tags'],
+        optional: ['topics', 'keyPoints', 'actionItems']
+      },
+      pdf: {
+        required: ['title', 'description', 'documentType', 'tags'],
+        optional: ['subject', 'category', 'purpose']
+      },
+      data: {
+        required: ['title', 'description', 'dataType', 'format', 'tags'],
+        optional: ['entities', 'keyFields', 'purpose']
+      },
+      url: {
+        required: ['title', 'description', 'urlType', 'tags'],
+        optional: ['platform', 'topics', 'category']
+      },
+      html: {
+        required: ['title', 'description', 'documentType', 'tags'],
+        optional: ['topics', 'keyPoints', 'author']
+      }
+    };
+    
+    // File type icons
+    const icons = {
+      image: '🖼️',
+      video: '🎬',
+      audio: '🎵',
+      pdf: '📄',
+      code: '💻',
+      text: '📝',
+      data: '📊',
+      url: '🔗',
+      html: '🌐',
+      file: '📁'
+    };
+    
+    // ============================================
+    // DOM References
+    // ============================================
+    
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const testItemsContainer = document.getElementById('testItems');
+    const resultsContainer = document.getElementById('results');
+    const logContainer = document.getElementById('log');
+    
+    // ============================================
+    // Utility Functions
+    // ============================================
+    
+    function log(message, type = 'info') {
+      const entry = document.createElement('div');
+      entry.className = `log-entry ${type}`;
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+      logContainer.appendChild(entry);
+      logContainer.scrollTop = logContainer.scrollHeight;
+    }
+    
+    function updateSummary() {
+      const total = testFiles.length;
+      const passed = testResults.filter(r => r.status === 'passed').length;
+      const failed = testResults.filter(r => r.status === 'failed').length;
+      const pending = total - passed - failed;
+      
+      document.getElementById('totalCount').textContent = total;
+      document.getElementById('passedCount').textContent = passed;
+      document.getElementById('failedCount').textContent = failed;
+      document.getElementById('pendingCount').textContent = pending;
+    }
+    
+    function detectFileType(file) {
+      const ext = '.' + file.name.split('.').pop().toLowerCase();
+      const mimeType = file.type;
+      
+      // Images
+      if (mimeType.startsWith('image/') || ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'].includes(ext)) {
+        return 'image';
+      }
+      // Videos
+      if (mimeType.startsWith('video/') || ['.mp4', '.mov', '.webm', '.mkv', '.avi'].includes(ext)) {
+        return 'video';
+      }
+      // Audio
+      if (mimeType.startsWith('audio/') || ['.mp3', '.wav', '.m4a', '.ogg', '.flac'].includes(ext)) {
+        return 'audio';
+      }
+      // PDF
+      if (mimeType === 'application/pdf' || ext === '.pdf') {
+        return 'pdf';
+      }
+      // Code
+      if (['.js', '.ts', '.jsx', '.tsx', '.py', '.java', '.cpp', '.c', '.go', '.rs', '.swift'].includes(ext)) {
+        return 'code';
+      }
+      // Data
+      if (['.json', '.csv', '.xml', '.yaml', '.yml'].includes(ext)) {
+        return 'data';
+      }
+      // HTML
+      if (['.html', '.htm'].includes(ext)) {
+        return 'html';
+      }
+      // Text
+      if (['.txt', '.md', '.rtf'].includes(ext)) {
+        return 'text';
+      }
+      
+      return 'file';
+    }
+    
+    // ============================================
+    // File Handling
+    // ============================================
+    
+    dropZone.addEventListener('click', () => fileInput.click());
+    
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('dragover');
+    });
+    
+    dropZone.addEventListener('dragleave', () => {
+      dropZone.classList.remove('dragover');
+    });
+    
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+      handleFiles(e.dataTransfer.files);
+    });
+    
+    fileInput.addEventListener('change', (e) => {
+      handleFiles(e.target.files);
+    });
+    
+    function handleFiles(files) {
+      Array.from(files).forEach(file => {
+        const type = detectFileType(file);
+        const id = `test-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        
+        const testFile = {
+          id,
+          file,
+          name: file.name,
+          size: file.size,
+          type,
+          status: 'pending'
+        };
+        
+        testFiles.push(testFile);
+        log(`Added file: ${file.name} (${type})`, 'info');
+        renderTestItems();
+      });
+      
+      updateSummary();
+    }
+    
+    function renderTestItems() {
+      testItemsContainer.innerHTML = testFiles.map(file => `
+        <div class="test-item ${file.status}" data-id="${file.id}">
+          <div class="icon">${icons[file.type] || '📁'}</div>
+          <div class="info">
+            <div class="name">${file.name}</div>
+            <div class="type">${file.type} • ${formatBytes(file.size)}</div>
+          </div>
+          <div class="status"></div>
+        </div>
+      `).join('');
+    }
+    
+    function formatBytes(bytes) {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+    
+    // ============================================
+    // Test Execution
+    // ============================================
+    
+    async function runAllTests() {
+      log('Starting test run...', 'info');
+      
+      for (const testFile of testFiles) {
+        await runTest(testFile);
+      }
+      
+      log(`Test run complete. ${testResults.filter(r => r.status === 'passed').length}/${testFiles.length} passed`, 
+          testResults.every(r => r.status === 'passed') ? 'success' : 'warn');
+    }
+    
+    async function runTest(testFile) {
+      testFile.status = 'testing';
+      renderTestItems();
+      log(`Testing: ${testFile.name}...`, 'info');
+      
+      try {
+        // Read file content
+        const content = await readFileContent(testFile.file);
+        
+        // Check if API is available
+        if (window.api && window.api.invoke) {
+          // Use the actual API
+          const result = await window.api.invoke('clipboard:generate-metadata', {
+            content,
+            type: testFile.type,
+            fileName: testFile.name
+          });
+          
+          validateResult(testFile, result);
+        } else {
+          // Simulate test (no API available)
+          log('API not available - running validation only', 'warn');
+          simulateTest(testFile);
+        }
+        
+      } catch (error) {
+        testFile.status = 'failed';
+        log(`Error testing ${testFile.name}: ${error.message}`, 'error');
+        
+        testResults.push({
+          id: testFile.id,
+          status: 'failed',
+          error: error.message
+        });
+      }
+      
+      renderTestItems();
+      updateSummary();
+      renderResults();
+    }
+    
+    async function readFileContent(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        
+        reader.onload = (e) => {
+          if (file.type.startsWith('image/') || file.type.startsWith('video/') || file.type.startsWith('audio/')) {
+            resolve(e.target.result); // base64
+          } else {
+            resolve(e.target.result); // text
+          }
+        };
+        
+        reader.onerror = reject;
+        
+        if (file.type.startsWith('image/')) {
+          reader.readAsDataURL(file);
+        } else if (file.type.startsWith('text/') || file.name.match(/\.(json|csv|xml|yaml|yml|txt|md|js|ts|py|java|html|css)$/i)) {
+          reader.readAsText(file);
+        } else {
+          reader.readAsDataURL(file);
+        }
+      });
+    }
+    
+    function validateResult(testFile, result) {
+      const schema = schemas[testFile.type] || schemas.text;
+      const metadata = result.metadata || result;
+      
+      // Check required fields
+      const missingRequired = schema.required.filter(field => !(field in metadata));
+      const presentRequired = schema.required.filter(field => field in metadata);
+      const presentOptional = schema.optional.filter(field => field in metadata);
+      
+      const passed = missingRequired.length === 0;
+      testFile.status = passed ? 'passed' : 'failed';
+      
+      testResults.push({
+        id: testFile.id,
+        status: testFile.status,
+        metadata,
+        schema: testFile.type,
+        missingRequired,
+        presentRequired,
+        presentOptional,
+        model: result.model || 'claude-sonnet-4-20250514'
+      });
+      
+      if (passed) {
+        log(`✓ ${testFile.name}: All required fields present`, 'success');
+      } else {
+        log(`✗ ${testFile.name}: Missing fields: ${missingRequired.join(', ')}`, 'error');
+      }
+    }
+    
+    function simulateTest(testFile) {
+      const schema = schemas[testFile.type] || schemas.text;
+      
+      // Generate mock metadata
+      const mockMetadata = {};
+      schema.required.forEach(field => {
+        if (field === 'tags') {
+          mockMetadata[field] = ['sample', 'test', testFile.type];
+        } else if (field === 'title') {
+          mockMetadata[field] = `Test ${testFile.name}`;
+        } else if (field === 'description') {
+          mockMetadata[field] = `This is a test ${testFile.type} file`;
+        } else {
+          mockMetadata[field] = `test-${field}`;
+        }
+      });
+      
+      testFile.status = 'passed';
+      testResults.push({
+        id: testFile.id,
+        status: 'passed',
+        metadata: mockMetadata,
+        schema: testFile.type,
+        missingRequired: [],
+        presentRequired: schema.required,
+        presentOptional: [],
+        model: 'simulated',
+        simulated: true
+      });
+      
+      log(`✓ ${testFile.name}: Validation passed (simulated)`, 'success');
+    }
+    
+    // ============================================
+    // Results Display
+    // ============================================
+    
+    function renderResults() {
+      resultsContainer.innerHTML = testResults.map(result => {
+        const testFile = testFiles.find(f => f.id === result.id);
+        if (!testFile) return '';
+        
+        return `
+          <div class="result-card">
+            <h3>
+              ${icons[testFile.type] || '📁'} ${testFile.name}
+              ${result.status === 'passed' ? '✅' : '❌'}
+              ${result.simulated ? '<span style="color: var(--warning)">(simulated)</span>' : ''}
+            </h3>
+            
+            ${result.metadata ? `
+              <div class="meta-grid">
+                <div class="meta-item">
+                  <label>Title</label>
+                  <div class="value">${result.metadata.title || 'N/A'}</div>
+                </div>
+                <div class="meta-item">
+                  <label>Type/Category</label>
+                  <div class="value">${result.metadata.category || result.metadata.contentType || result.metadata.documentType || testFile.type}</div>
+                </div>
+                <div class="meta-item" style="grid-column: 1 / -1;">
+                  <label>Description</label>
+                  <div class="value">${result.metadata.description || 'N/A'}</div>
+                </div>
+              </div>
+              
+              ${result.metadata.tags ? `
+                <div class="tags">
+                  ${result.metadata.tags.map(tag => `<span class="tag">${tag}</span>`).join('')}
+                </div>
+              ` : ''}
+            ` : ''}
+            
+            <div class="schema-check">
+              <h4>Schema Validation (${result.schema})</h4>
+              <div class="schema-fields">
+                ${result.presentRequired.map(f => `<span class="schema-field present">✓ ${f}</span>`).join('')}
+                ${result.missingRequired.map(f => `<span class="schema-field missing">✗ ${f}</span>`).join('')}
+                ${result.presentOptional.map(f => `<span class="schema-field present" style="opacity: 0.7;">+ ${f}</span>`).join('')}
+              </div>
+            </div>
+            
+            <div style="margin-top: 10px; font-size: 11px; color: var(--text-secondary);">
+              Model: ${result.model}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+    
+    // ============================================
+    // Sample Files
+    // ============================================
+    
+    function addSampleFiles() {
+      const samples = [
+        { name: 'screenshot.png', type: 'image', size: 245000 },
+        { name: 'video-tutorial.mp4', type: 'video', size: 52000000 },
+        { name: 'podcast-episode.mp3', type: 'audio', size: 15000000 },
+        { name: 'quarterly-report.pdf', type: 'pdf', size: 2500000 },
+        { name: 'useAuth.ts', type: 'code', size: 2500 },
+        { name: 'meeting-notes.txt', type: 'text', size: 5000 },
+        { name: 'users.json', type: 'data', size: 50000 },
+        { name: 'product-page.html', type: 'html', size: 15000 }
+      ];
+      
+      samples.forEach(sample => {
+        const id = `sample-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        
+        testFiles.push({
+          id,
+          file: null, // No actual file
+          name: sample.name,
+          size: sample.size,
+          type: sample.type,
+          status: 'pending',
+          isSample: true
+        });
+      });
+      
+      log(`Added ${samples.length} sample files`, 'info');
+      renderTestItems();
+      updateSummary();
+    }
+    
+    function clearTests() {
+      testFiles.length = 0;
+      testResults.length = 0;
+      renderTestItems();
+      renderResults();
+      updateSummary();
+      log('Cleared all tests', 'info');
+    }
+  </script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

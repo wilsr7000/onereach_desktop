@@ -48,6 +48,9 @@ _archive/
 test-report-*.json
 coverage/
 .nyc_output/
+test-results/
+playwright-report/
+*.spec.js.snap
 
 # Scripts directory (optional - remove if you want to track scripts)
 _scripts/
@@ -74,6 +77,9 @@ _scripts/
 # Electron-specific
 electron-builder.yml
 app/dist/
+
+# Claude Code binaries (downloaded at build time)
+resources/claude-code/
 
 # Debug files
 debug-*.html

@@ -1,6 +1,7 @@
 const { getSettingsManager } = require('./settings-manager');
 const fs = require('fs');
 const path = require('path');
+const { pathToFileURL } = require('url');
 const { ipcMain } = require('electron');
 const WebStyleAnalyzer = require('./web-style-analyzer');
 const ContentStyleAnalyzer = require('./content-style-analyzer');
@@ -449,10 +450,10 @@ class SmartExport {
         
         // Preserve image source information
         if (item.filePath) {
-          // Convert absolute path to file:// URL for HTML
-          cleanedItem.imagePath = `file://${item.filePath}`;
+          // Convert absolute path to file:// URL for HTML (cross-platform)
+          cleanedItem.imagePath = pathToFileURL(item.filePath).href;
         } else if (item.metadata?.path) {
-          cleanedItem.imagePath = `file://${item.metadata.path}`;
+          cleanedItem.imagePath = pathToFileURL(item.metadata.path).href;
         } else if (item.content && item.content.startsWith('data:')) {
           // For base64 images, keep reference for post-processing
           cleanedItem.imageDataUrl = '[DATA_URL_PLACEHOLDER]';
@@ -546,11 +547,11 @@ class SmartExport {
         if (item.type === 'image' || (item.type === 'file' && item.fileType === 'image')) {
           cleanedItem.content = `[Image: ${item.metadata?.filename || 'Untitled'}]`;
           
-          // Preserve image source information
+          // Preserve image source information (cross-platform)
           if (item.filePath) {
-            cleanedItem.imagePath = `file://${item.filePath}`;
+            cleanedItem.imagePath = pathToFileURL(item.filePath).href;
           } else if (item.metadata?.path) {
-            cleanedItem.imagePath = `file://${item.metadata.path}`;
+            cleanedItem.imagePath = pathToFileURL(item.metadata.path).href;
           } else if (item.content && item.content.startsWith('data:')) {
             cleanedItem.imageDataUrl = '[DATA_URL_PLACEHOLDER]';
             cleanedItem.originalDataUrl = item.content;

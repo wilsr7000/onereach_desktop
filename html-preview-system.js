@@ -2,6 +2,7 @@ const { exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { pathToFileURL } = require('url');
 
 class HTMLPreviewSystem {
   constructor() {
@@ -107,7 +108,7 @@ class HTMLPreviewSystem {
         '--hide-scrollbars',
         '--disable-gpu',
         '--no-sandbox',
-        `file://${path.resolve(htmlPath)}`
+        pathToFileURL(path.resolve(htmlPath)).href
       ];
 
       const command = `"${this.chromePath}" ${args.join(' ')}`;

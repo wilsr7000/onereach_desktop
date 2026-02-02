@@ -37,6 +37,7 @@ npm run test:external-ai-interactive
 - **Claude** - Anthropic's AI assistant
 - **Perplexity** - Search-focused AI
 - **Google Gemini** - Google's multimodal AI
+- **Grok** - xAI's advanced AI with real-time knowledge
 
 ### 🎨 Image Creators
 - **Midjourney** - Artistic image generation

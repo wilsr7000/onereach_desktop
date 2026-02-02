@@ -1,4 +1,4 @@
-const { BrowserWindow, shell, app, dialog, Notification } = require('electron');
+const { BrowserWindow, shell, app, dialog, Notification, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const getLogger = require('./event-logger');
@@ -7,9 +7,634 @@ let logger;
 // Main browser window reference - kept global to prevent garbage collection
 let mainWindow = null;
 
+// Graceful shutdown state (module-level for IPC handler access)
+let isShuttingDown = false;
+let shutdownTimeout = null;
+let shutdownHandlersRegistered = false;
+
 // Add at the top with other global variables
 let authWindow = null;
 let authTokens = new Map();
+
+// Credential manager and TOTP manager for auto-login
+let credentialManager = null;
+let totpManager = null;
+
+// Track auto-login state per GSX window to prevent duplicate attempts
+const gsxAutoLoginState = new Map();
+
+/**
+ * Check if auto-login should be attempted for a GSX window
+ */
+function shouldAttemptGSXAutoLogin(windowId) {
+  const state = gsxAutoLoginState.get(windowId);
+  if (!state) return true;
+  
+  // Don't attempt if login completed successfully
+  if (state.loginComplete) {
+    console.log(`[GSX AutoLogin] Skipping window ${windowId} - login already complete`);
+    return false;
+  }
+  
+  // Don't attempt if already in progress (within 5 seconds)
+  if (state.inProgress && Date.now() - state.lastAttempt < 5000) {
+    console.log(`[GSX AutoLogin] Skipping window ${windowId} - login in progress`);
+    return false;
+  }
+  
+  return true;
+}
+
+/**
+ * Attempt auto-login for GSX windows with retry mechanism
+ * @param {BrowserWindow} gsxWindow - The GSX window
+ * @param {string} url - Current URL  
+ * @param {number} attempt - Current attempt number
+ */
+async function attemptGSXAutoLoginWithRetry(gsxWindow, url, attempt = 0) {
+  const maxAttempts = 5;
+  const retryDelay = 1000;
+  const windowId = gsxWindow.id;
+  
+  // Check if we should attempt login
+  if (attempt === 0 && !shouldAttemptGSXAutoLogin(windowId)) {
+    return;
+  }
+  
+  // Mark as in progress on first attempt
+  if (attempt === 0) {
+    gsxAutoLoginState.set(windowId, {
+      ...(gsxAutoLoginState.get(windowId) || {}),
+      inProgress: true,
+      lastAttempt: Date.now()
+    });
+  }
+  
+  console.log(`[GSX AutoLogin] Attempt ${attempt + 1}/${maxAttempts} for window ${windowId}`);
+  
+  try {
+    // Check if form fields exist yet (including cross-origin detection)
+    const formInfo = await gsxWindow.webContents.executeJavaScript(`
+      (function() {
+        const hasPasswordInMain = !!document.querySelector('input[type="password"]');
+        if (hasPasswordInMain) {
+          console.log('[GSX AutoLogin] Form found in main document');
+          return { location: 'main', crossOrigin: false };
+        }
+        
+        // Check iframes
+        const iframes = document.querySelectorAll('iframe');
+        console.log('[GSX AutoLogin] Found ' + iframes.length + ' iframes');
+        
+        let hasCrossOriginAuthIframe = false;
+        
+        for (let i = 0; i < iframes.length; i++) {
+          const iframe = iframes[i];
+          const src = iframe.src || '';
+          
+          try {
+            const doc = iframe.contentDocument || iframe.contentWindow.document;
+            if (doc && doc.querySelector('input[type="password"]')) {
+              console.log('[GSX AutoLogin] Form found in same-origin iframe ' + i);
+              return { location: 'iframe', crossOrigin: false };
+            }
+          } catch (e) {
+            // Cross-origin iframe
+            console.log('[GSX AutoLogin] Cross-origin iframe detected: ' + src);
+            if (src.includes('auth.') && src.includes('onereach.ai')) {
+              hasCrossOriginAuthIframe = true;
+            }
+          }
+        }
+        
+        if (hasCrossOriginAuthIframe) {
+          return { location: 'cross-origin', crossOrigin: true };
+        }
+        
+        return { location: 'none', crossOrigin: false };
+      })()
+    `).catch(() => ({ location: 'error', crossOrigin: false }));
+    
+    console.log(`[GSX AutoLogin] Form info for window ${windowId}:`, formInfo);
+    
+    if (formInfo.location === 'main' || formInfo.location === 'iframe') {
+      await attemptGSXAutoLogin(gsxWindow, url);
+      // Mark as complete after successful login attempt
+      gsxAutoLoginState.set(windowId, {
+        ...(gsxAutoLoginState.get(windowId) || {}),
+        inProgress: false,
+        loginComplete: true
+      });
+    } else if (formInfo.crossOrigin) {
+      // Cross-origin iframe - use webFrameMain to access it
+      console.log(`[GSX AutoLogin] Cross-origin auth iframe detected, accessing via frames...`);
+      await attemptGSXCrossOriginLogin(gsxWindow, windowId);
+    } else if (formInfo.location === 'none' && attempt < maxAttempts - 1) {
+      console.log(`[GSX AutoLogin] No form found, retrying in ${retryDelay}ms...`);
+      setTimeout(() => {
+        attemptGSXAutoLoginWithRetry(gsxWindow, url, attempt + 1);
+      }, retryDelay);
+    } else {
+      console.log(`[GSX AutoLogin] No form found after ${attempt + 1} attempts`);
+    }
+  } catch (error) {
+    console.error('[GSX AutoLogin] Retry error:', error);
+  }
+}
+
+/**
+ * Attempt cross-origin login for GSX windows using webFrameMain
+ */
+async function attemptGSXCrossOriginLogin(gsxWindow, windowId) {
+  try {
+    // Lazy load credential manager
+    if (!credentialManager) {
+      credentialManager = require('./credential-manager');
+    }
+    
+    const credentials = await credentialManager.getOneReachCredentials();
+    if (!credentials || !credentials.email || !credentials.password) {
+      console.log('[GSX CrossOrigin] No credentials configured');
+      return;
+    }
+    
+    // Get all frames
+    const mainFrame = gsxWindow.webContents.mainFrame;
+    const allFrames = [mainFrame, ...mainFrame.framesInSubtree];
+    
+    console.log(`[GSX CrossOrigin] Found ${allFrames.length} frames total`);
+    
+    // Find the auth frame
+    let authFrame = null;
+    for (const frame of allFrames) {
+      const frameUrl = frame.url;
+      console.log(`[GSX CrossOrigin] Frame: ${frameUrl}`);
+      if (frameUrl && frameUrl.includes('auth.') && frameUrl.includes('onereach.ai')) {
+        authFrame = frame;
+        console.log(`[GSX CrossOrigin] Found auth frame: ${frameUrl}`);
+        break;
+      }
+    }
+    
+    if (!authFrame) {
+      console.log('[GSX CrossOrigin] No auth frame found');
+      return;
+    }
+    
+    // Build and execute login script
+    const loginScript = `
+      (function() {
+        const email = ${JSON.stringify(credentials.email)};
+        const password = ${JSON.stringify(credentials.password)};
+        
+        console.log('[GSX CrossOrigin] Running in auth frame');
+        console.log('[GSX CrossOrigin] URL:', window.location.href);
+        
+        function fillInput(input, value) {
+          if (!input) return false;
+          input.focus();
+          const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+            window.HTMLInputElement.prototype, 'value'
+          ).set;
+          if (nativeInputValueSetter) {
+            nativeInputValueSetter.call(input, value);
+          } else {
+            input.value = value;
+          }
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+          input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+          console.log('[GSX CrossOrigin] Filled:', input.name || input.type);
+          return true;
+        }
+        
+        // Find email field
+        const emailField = document.querySelector(
+          'input[type="email"], input[type="text"][name*="email" i], ' +
+          'input[type="text"][name*="user" i], input[name="email"], input[name="username"], ' +
+          'input[placeholder*="email" i], input[type="text"]:not([name*="search"])'
+        );
+        
+        // Find password field
+        const passwordField = document.querySelector('input[type="password"]');
+        
+        if (!passwordField) {
+          console.log('[GSX CrossOrigin] No password field found');
+          return { success: false, reason: 'no_password_field' };
+        }
+        
+        if (emailField) fillInput(emailField, email);
+        fillInput(passwordField, password);
+        
+        // Click submit
+        setTimeout(() => {
+          const submitBtn = document.querySelector('button[type="submit"], input[type="submit"]') ||
+                           document.querySelector('form button:not([type="button"])');
+          if (submitBtn) {
+            console.log('[GSX CrossOrigin] Clicking submit:', submitBtn.textContent);
+            submitBtn.click();
+          } else {
+            const buttons = document.querySelectorAll('button');
+            for (const btn of buttons) {
+              const text = (btn.textContent || '').toLowerCase();
+              if (text.includes('sign in') || text.includes('log in') || text.includes('login') || text.includes('continue')) {
+                console.log('[GSX CrossOrigin] Clicking button by text:', btn.textContent);
+                btn.click();
+                break;
+              }
+            }
+          }
+        }, 500);
+        
+        return { success: true };
+      })()
+    `;
+    
+    const result = await authFrame.executeJavaScript(loginScript);
+    console.log('[GSX CrossOrigin] Login result:', result);
+    
+    if (result && result.success) {
+      console.log('[GSX CrossOrigin] Successfully filled login form, setting up 2FA monitoring...');
+      
+      // Mark login as in progress (not complete until 2FA done)
+      gsxAutoLoginState.set(windowId, {
+        ...(gsxAutoLoginState.get(windowId) || {}),
+        loginFilled: true
+      });
+      
+      // Monitor for 2FA
+      setTimeout(() => {
+        attemptGSXCrossOrigin2FA(gsxWindow, windowId, 0);
+      }, 2000);
+    }
+    
+  } catch (error) {
+    console.error('[GSX CrossOrigin] Login error:', error);
+  }
+}
+
+/**
+ * Attempt 2FA in cross-origin GSX window
+ */
+async function attemptGSXCrossOrigin2FA(gsxWindow, windowId, attempt) {
+  const maxAttempts = 5;
+  const retryDelay = 1500;
+  
+  // Check if already complete
+  const state = gsxAutoLoginState.get(windowId);
+  if (state && state.twoFAComplete) {
+    console.log(`[GSX 2FA] Skipping window ${windowId} - 2FA already complete`);
+    return;
+  }
+  
+  try {
+    console.log(`[GSX 2FA] Attempt ${attempt + 1}/${maxAttempts} for window ${windowId}`);
+    
+    // Get auth frame
+    const mainFrame = gsxWindow.webContents.mainFrame;
+    const allFrames = [mainFrame, ...mainFrame.framesInSubtree];
+    
+    let authFrame = null;
+    for (const frame of allFrames) {
+      if (frame.url && frame.url.includes('auth.') && frame.url.includes('onereach.ai')) {
+        authFrame = frame;
+        break;
+      }
+    }
+    
+    if (!authFrame) {
+      console.log('[GSX 2FA] No auth frame found');
+      if (attempt < maxAttempts - 1) {
+        setTimeout(() => attemptGSXCrossOrigin2FA(gsxWindow, windowId, attempt + 1), retryDelay);
+      }
+      return;
+    }
+    
+    // Check if on 2FA page
+    const detection = await authFrame.executeJavaScript(`
+      (function() {
+        const passwordField = document.querySelector('input[type="password"]');
+        const totpInput = document.querySelector(
+          'input[name="totp"], input[name="code"], input[name="otp"], ' +
+          'input[autocomplete="one-time-code"], input[maxlength="6"]:not([type="password"])'
+        );
+        
+        if (totpInput) return { is2FAPage: true };
+        if (passwordField) return { is2FAPage: false, reason: 'still_login' };
+        return { is2FAPage: false, reason: 'unknown' };
+      })()
+    `);
+    
+    console.log('[GSX 2FA] Detection:', detection);
+    
+    if (!detection.is2FAPage) {
+      if (attempt < maxAttempts - 1) {
+        console.log(`[GSX 2FA] Not on 2FA page yet, retrying in ${retryDelay}ms...`);
+        setTimeout(() => attemptGSXCrossOrigin2FA(gsxWindow, windowId, attempt + 1), retryDelay);
+      } else {
+        console.log('[GSX 2FA] Not on 2FA page after max attempts (may have succeeded without 2FA)');
+        gsxAutoLoginState.set(windowId, {
+          ...(gsxAutoLoginState.get(windowId) || {}),
+          loginComplete: true
+        });
+      }
+      return;
+    }
+    
+    // Get TOTP code
+    if (!totpManager) {
+      const { getTOTPManager } = require('./lib/totp-manager');
+      totpManager = getTOTPManager();
+    }
+    
+    if (!credentialManager) {
+      credentialManager = require('./credential-manager');
+    }
+    
+    const totpSecret = await credentialManager.getTOTPSecret();
+    if (!totpSecret) {
+      console.log('[GSX 2FA] No TOTP secret configured');
+      return;
+    }
+    
+    const code = totpManager.generateCode(totpSecret);
+    console.log('[GSX 2FA] Generated TOTP code, filling form...');
+    
+    // Fill 2FA code
+    const fillResult = await authFrame.executeJavaScript(`
+      (function() {
+        const code = ${JSON.stringify(code)};
+        
+        function fillInput(input, value) {
+          if (!input) return false;
+          input.focus();
+          const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+            window.HTMLInputElement.prototype, 'value'
+          ).set;
+          if (nativeInputValueSetter) {
+            nativeInputValueSetter.call(input, value);
+          } else {
+            input.value = value;
+          }
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
+        }
+        
+        const totpInput = document.querySelector(
+          'input[name="totp"], input[name="code"], input[name="otp"], ' +
+          'input[autocomplete="one-time-code"], input[maxlength="6"]:not([type="password"])'
+        ) || document.querySelector('input[type="text"]:not([name*="email"]):not([name*="user"])');
+        
+        if (totpInput) {
+          fillInput(totpInput, code);
+          
+          setTimeout(() => {
+            const submitBtn = document.querySelector('button[type="submit"]') ||
+                             document.querySelector('form button');
+            if (submitBtn) {
+              console.log('[GSX 2FA] Clicking submit');
+              submitBtn.click();
+            }
+          }, 500);
+          
+          return { success: true };
+        }
+        
+        return { success: false };
+      })()
+    `);
+    
+    console.log('[GSX 2FA] Fill result:', fillResult);
+    
+    if (fillResult && fillResult.success) {
+      console.log('[GSX 2FA] Successfully filled 2FA code!');
+      gsxAutoLoginState.set(windowId, {
+        ...(gsxAutoLoginState.get(windowId) || {}),
+        twoFAComplete: true,
+        loginComplete: true
+      });
+    }
+    
+  } catch (error) {
+    console.error('[GSX 2FA] Error:', error);
+  }
+}
+
+/**
+ * Attempt auto-login for GSX windows
+ * @param {BrowserWindow} gsxWindow - The GSX window
+ * @param {string} url - Current URL
+ */
+async function attemptGSXAutoLogin(gsxWindow, url) {
+  try {
+    // Lazy load credential manager
+    if (!credentialManager) {
+      credentialManager = require('./credential-manager');
+    }
+    
+    // Check if we have credentials
+    const credentials = await credentialManager.getOneReachCredentials();
+    if (!credentials || !credentials.email || !credentials.password) {
+      console.log('[GSX AutoLogin] No credentials configured');
+      return;
+    }
+    
+    // Get settings to check if auto-login is enabled
+    const settingsManager = global.settingsManager;
+    const settings = settingsManager ? settingsManager.getAll() : {};
+    const autoLoginSettings = settings.autoLoginSettings || {};
+    
+    if (autoLoginSettings.enabled === false) {
+      console.log('[GSX AutoLogin] Auto-login disabled');
+      return;
+    }
+    
+    // Detect page type with detailed logging
+    const pageType = await gsxWindow.webContents.executeJavaScript(`
+      (function() {
+        // Log all inputs for debugging
+        const allInputs = document.querySelectorAll('input');
+        console.log('[GSX AutoLogin] Found ' + allInputs.length + ' input fields on page');
+        allInputs.forEach((inp, i) => {
+          if (inp.type !== 'hidden') {
+            console.log('[GSX AutoLogin] Input ' + i + ': type=' + inp.type + ', name=' + inp.name + ', placeholder=' + inp.placeholder);
+          }
+        });
+        
+        const pageContent = document.body ? document.body.innerText.toLowerCase() : '';
+        
+        // Check for 2FA page indicators
+        const has2FAField = document.querySelector(
+          'input[name="code"], input[name="otp"], input[name="totp"], ' +
+          'input[placeholder*="code" i], input[placeholder*="2fa" i], ' +
+          'input[placeholder*="authenticator" i], input[maxlength="6"][inputmode="numeric"]'
+        );
+        const has2FAText = pageContent.includes('two-factor') || pageContent.includes('2fa') || 
+                          pageContent.includes('verification code') || pageContent.includes('authenticator') ||
+                          pageContent.includes('enter the code') || pageContent.includes('6-digit');
+        
+        if (has2FAField || (has2FAText && !document.querySelector('input[type="password"]'))) {
+          console.log('[GSX AutoLogin] 2FA page detected');
+          return '2fa';
+        }
+        
+        // Check for login page indicators (broader search)
+        const hasEmailField = document.querySelector(
+          'input[type="email"], input[type="text"][name*="email" i], ' +
+          'input[type="text"][name*="user" i], input[name="email"], input[name="username"], ' +
+          'input[autocomplete="email"], input[autocomplete="username"], ' +
+          'input[placeholder*="email" i], input[placeholder*="user" i]'
+        );
+        const hasPasswordField = document.querySelector('input[type="password"]');
+        
+        console.log('[GSX AutoLogin] Email field:', !!hasEmailField, 'Password field:', !!hasPasswordField);
+        
+        if (hasEmailField && hasPasswordField) {
+          console.log('[GSX AutoLogin] Login form detected');
+          return 'login';
+        }
+        
+        if (hasPasswordField) {
+          console.log('[GSX AutoLogin] Password-only page');
+          return 'password-only';
+        }
+        
+        return 'other';
+      })()
+    `);
+    
+    console.log('[GSX AutoLogin] Page type:', pageType);
+    
+    if (pageType === 'other') {
+      return; // Not a login page
+    }
+    
+    if (pageType === 'login' || pageType === 'password-only') {
+      console.log('[GSX AutoLogin] Filling', pageType, 'form for', credentials.email);
+      
+      await gsxWindow.webContents.executeJavaScript(`
+        (function() {
+          const email = ${JSON.stringify(credentials.email)};
+          const password = ${JSON.stringify(credentials.password)};
+          
+          function fillInput(input, value) {
+            if (!input) return false;
+            input.focus();
+            
+            // React compatibility - set native value
+            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+              window.HTMLInputElement.prototype, 'value'
+            ).set;
+            nativeInputValueSetter.call(input, value);
+            
+            // Dispatch events
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+            input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+            
+            console.log('[GSX AutoLogin] Filled field:', input.name || input.type);
+            return true;
+          }
+          
+          // Find and fill email field (broader search)
+          const emailField = document.querySelector(
+            'input[type="email"], input[type="text"][name*="email" i], ' +
+            'input[type="text"][name*="user" i], input[name="email"], input[name="username"], ' +
+            'input[autocomplete="email"], input[autocomplete="username"], ' +
+            'input[placeholder*="email" i], input[placeholder*="user" i]'
+          );
+          if (emailField) {
+            fillInput(emailField, email);
+          }
+          
+          // Find and fill password field
+          const passwordField = document.querySelector('input[type="password"]');
+          if (passwordField) {
+            fillInput(passwordField, password);
+          }
+          
+          // Find and click submit button after a short delay
+          setTimeout(() => {
+            const submitBtn = document.querySelector(
+              'button[type="submit"], input[type="submit"], button.submit, button.login'
+            ) || document.querySelector('form button:not([type="button"])');
+            
+            if (submitBtn) {
+              console.log('[GSX AutoLogin] Clicking submit:', submitBtn.textContent || submitBtn.type);
+              submitBtn.click();
+            } else {
+              // Try finding by text content
+              const buttons = document.querySelectorAll('button');
+              for (const btn of buttons) {
+                const text = (btn.textContent || '').toLowerCase();
+                if (text.includes('sign in') || text.includes('log in') || text.includes('login') || text.includes('submit') || text.includes('continue')) {
+                  console.log('[GSX AutoLogin] Clicking button by text:', btn.textContent);
+                  btn.click();
+                  break;
+                }
+              }
+            }
+          }, 500);
+          
+          return true;
+        })()
+      `);
+      
+    } else if (pageType === '2fa') {
+      if (!credentials.totpSecret) {
+        console.log('[GSX AutoLogin] No TOTP secret configured');
+        return;
+      }
+      
+      // Lazy load TOTP manager
+      if (!totpManager) {
+        const { getTOTPManager } = require('./lib/totp-manager');
+        totpManager = getTOTPManager();
+      }
+      
+      // Generate TOTP code
+      const code = totpManager.generateCode(credentials.totpSecret);
+      console.log('[GSX AutoLogin] Filling 2FA code');
+      
+      await gsxWindow.webContents.executeJavaScript(`
+        (function() {
+          const code = ${JSON.stringify(code)};
+          
+          // Find 2FA input field
+          const codeField = document.querySelector('input[name="code"], input[name="otp"], input[name="totp"], input[placeholder*="code" i], input[placeholder*="2fa" i], input[maxlength="6"]');
+          if (codeField) {
+            codeField.value = code;
+            codeField.dispatchEvent(new Event('input', { bubbles: true }));
+            codeField.dispatchEvent(new Event('change', { bubbles: true }));
+            
+            // Auto-submit after a short delay
+            setTimeout(() => {
+              const submitBtn = document.querySelector('button[type="submit"], input[type="submit"]');
+              if (submitBtn) {
+                submitBtn.click();
+              } else {
+                const buttons = document.querySelectorAll('button');
+                for (const btn of buttons) {
+                  const text = btn.textContent.toLowerCase();
+                  if (text.includes('verify') || text.includes('submit') || text.includes('continue') || text.includes('confirm')) {
+                    btn.click();
+                    break;
+                  }
+                }
+              }
+            }, 500);
+          }
+          
+          return true;
+        })()
+      `);
+    }
+    
+  } catch (error) {
+    console.error('[GSX AutoLogin] Error:', error.message);
+  }
+}
 
 /**
  * Creates the main application window
@@ -35,12 +660,13 @@ function createMainWindow(app) {
   mainWindow = new BrowserWindow({
     width: 1600,
     height: 1000,
+    show: true, // Explicitly show window
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(app.getAppPath(), 'preload.js'),
-      webSecurity: false,
-      allowRunningInsecureContent: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
       webviewTag: true,
       // Enable features needed for media/voice
       enableBlinkFeatures: 'MediaStreamAPI,WebRTC,AudioWorklet,WebAudio,MediaRecorder',
@@ -70,7 +696,18 @@ function createMainWindow(app) {
   });
   
   // Enhanced browser fingerprinting to be more Chrome-like
-  session.webRequest.onBeforeSendHeaders((details, callback) => {
+  // PERFORMANCE: Only intercept requests to domains that need Chrome-like headers
+  const headerFilterUrls = [
+    '*://*.onereach.ai/*',
+    '*://*.google.com/*',
+    '*://*.googleapis.com/*',
+    '*://*.gstatic.com/*',
+    '*://*.microsoft.com/*',
+    '*://*.openai.com/*',
+    '*://*.chatgpt.com/*'
+  ];
+  
+  session.webRequest.onBeforeSendHeaders({ urls: headerFilterUrls }, (details, callback) => {
     const headers = { ...details.requestHeaders };
     
     // Set headers to match Chrome exactly
@@ -204,7 +841,10 @@ function createMainWindow(app) {
   });
 
   // Set Content Security Policy
-  mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+  // PERFORMANCE: Only apply CSP to onereach.ai domains (main app content)
+  const cspFilterUrls = ['*://*.onereach.ai/*', 'file://*'];
+  
+  mainWindow.webContents.session.webRequest.onHeadersReceived({ urls: cspFilterUrls }, (details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
@@ -214,7 +854,7 @@ function createMainWindow(app) {
           "style-src-elem 'self' 'unsafe-inline' * https://*.onereach.ai https://fonts.googleapis.com; " +
           "script-src 'self' 'unsafe-inline' 'unsafe-eval' * https://*.onereach.ai https://unpkg.com https://cdn.jsdelivr.net; " +
           "connect-src 'self' * https://*.onereach.ai https://*.api.onereach.ai ws://localhost:3322 wss://*; " +
-          "img-src 'self' data: blob: * https://*.onereach.ai; " +
+          "img-src 'self' data: blob: spaces: * https://*.onereach.ai; " +
           "font-src 'self' data: * https://*.onereach.ai https://fonts.gstatic.com; " +
           "media-src 'self' blob: mediastream: * https://*.onereach.ai https://*.chatgpt.com https://*.openai.com; " +
           "worker-src 'self' blob:; " +
@@ -381,6 +1021,51 @@ function createMainWindow(app) {
     `).catch(err => console.error('Failed to check for Material Symbols:', err));
   });
 
+  // Handle window close event - save state and close gracefully
+  mainWindow.on('close', (event) => {
+    console.log('[BrowserWindow] Close event - isShuttingDown:', isShuttingDown);
+    
+    // If already shutting down, allow the close
+    if (isShuttingDown) {
+      console.log('[BrowserWindow] Already shutting down, allowing close');
+      return;
+    }
+    
+    // Mark as shutting down immediately
+    isShuttingDown = true;
+    
+    // Prevent the default close temporarily
+    event.preventDefault();
+    console.log('[BrowserWindow] Close requested - giving renderer time to save state');
+    
+    // Send shutdown signal to renderer (it will save state via beforeunload anyway)
+    try {
+      mainWindow.webContents.send('request-graceful-shutdown');
+    } catch (e) {
+      console.log('[BrowserWindow] Could not send shutdown signal:', e.message);
+    }
+    
+    // Short delay to let beforeunload complete, then force destroy
+    // This is a simple, reliable approach
+    setTimeout(() => {
+      console.log('[BrowserWindow] Forcing window destroy');
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.destroy();
+      }
+    }, 500); // 500ms is enough for localStorage saves
+  });
+  
+  // Register IPC handlers only once (for future extension if needed)
+  if (!shutdownHandlersRegistered) {
+    shutdownHandlersRegistered = true;
+    
+    // Optional: renderer can signal early if ready
+    ipcMain.on('shutdown-ready', () => {
+      console.log('[BrowserWindow] Renderer signaled shutdown-ready (early)');
+      // Window will be destroyed by the timeout anyway
+    });
+  }
+  
   // Handle window closed event
   mainWindow.on('closed', () => {
     logger.logWindowClosed('main-window', 'main');
@@ -392,43 +1077,239 @@ function createMainWindow(app) {
     logger.logWindowFocused('main-window', 'main');
   });
 
-  // Add context menu handler for right-click "Paste to Black Hole"
+  // Add context menu handler for right-click with standard editing options and "Send to Space"
   mainWindow.webContents.on('context-menu', (event, params) => {
-    console.log('[BrowserWindow] Context menu requested at:', params.x, params.y);
+    console.log('[BrowserWindow] Context menu requested at:', params.x, params.y, 'selectionText:', params.selectionText);
+    
+    // Allow native DevTools context menu to work (only when right-clicking IN DevTools)
+    const url = mainWindow.webContents.getURL();
+    if (url.startsWith('devtools://') || url.startsWith('chrome-devtools://')) {
+      console.log('[BrowserWindow] DevTools panel detected, allowing native context menu');
+      return; // Don't prevent default, let DevTools handle it
+    }
+    
     event.preventDefault();
     
-    const { Menu, MenuItem } = require('electron');
+    const { Menu, MenuItem, clipboard } = require('electron');
     const contextMenu = new Menu();
     
+    // Add Cut option if text is selected and editable
+    if (params.editFlags.canCut) {
+      contextMenu.append(new MenuItem({
+        label: 'Cut',
+        accelerator: 'CmdOrCtrl+X',
+        click: () => {
+          mainWindow.webContents.cut();
+        }
+      }));
+    }
+    
+    // Add Copy option if text is selected
+    if (params.editFlags.canCopy) {
+      contextMenu.append(new MenuItem({
+        label: 'Copy',
+        accelerator: 'CmdOrCtrl+C',
+        click: () => {
+          mainWindow.webContents.copy();
+        }
+      }));
+    }
+    
+    // Add Paste option if paste is available
+    if (params.editFlags.canPaste) {
+      contextMenu.append(new MenuItem({
+        label: 'Paste',
+        accelerator: 'CmdOrCtrl+V',
+        click: () => {
+          mainWindow.webContents.paste();
+        }
+      }));
+    }
+    
+    // Add Select All option
+    if (params.editFlags.canSelectAll) {
+      contextMenu.append(new MenuItem({
+        label: 'Select All',
+        accelerator: 'CmdOrCtrl+A',
+        click: () => {
+          mainWindow.webContents.selectAll();
+        }
+      }));
+    }
+    
+    // Add separator if we have any standard options
+    if (params.editFlags.canCut || params.editFlags.canCopy || params.editFlags.canPaste || params.editFlags.canSelectAll) {
+      contextMenu.append(new MenuItem({ type: 'separator' }));
+    }
+    
+    // Add "Send to Space" option if text is selected
+    if (params.selectionText && params.selectionText.trim().length > 0) {
+      contextMenu.append(new MenuItem({
+        label: 'Send to Space',
+        click: () => {
+          console.log('[BrowserWindow] Send to Space clicked with selection:', params.selectionText.substring(0, 50));
+          
+          if (global.clipboardManager) {
+            const selectionData = {
+              hasText: true,
+              hasHtml: false,
+              hasImage: false,
+              text: params.selectionText,
+              html: null
+            };
+            
+            console.log('[BrowserWindow] Selection data ready:', { textLength: params.selectionText.length });
+            
+            // Position the window
+            const bounds = mainWindow.getBounds();
+            const position = {
+              x: bounds.x + bounds.width - 100,
+              y: bounds.y + 100
+            };
+            
+            // Create window with selection data - will show modal directly
+            global.clipboardManager.createBlackHoleWindow(position, true, selectionData);
+          }
+        }
+      }));
+    }
+    
+    // Add "Send Image to Space" option if right-clicking on an image
+    if (params.mediaType === 'image' && params.srcURL) {
+      contextMenu.append(new MenuItem({
+        label: 'Send Image to Space',
+        click: async () => {
+          console.log('[BrowserWindow] Send Image to Space clicked:', params.srcURL);
+          
+          if (global.clipboardManager) {
+            try {
+              const { net } = require('electron');
+              
+              // Download the image
+              const imageData = await new Promise((resolve, reject) => {
+                const request = net.request(params.srcURL);
+                const chunks = [];
+                
+                request.on('response', (response) => {
+                  const contentType = response.headers['content-type'] || 'image/png';
+                  
+                  response.on('data', (chunk) => {
+                    chunks.push(chunk);
+                  });
+                  
+                  response.on('end', () => {
+                    const buffer = Buffer.concat(chunks);
+                    const base64 = buffer.toString('base64');
+                    const mimeType = Array.isArray(contentType) ? contentType[0] : contentType;
+                    resolve(`data:${mimeType};base64,${base64}`);
+                  });
+                  
+                  response.on('error', reject);
+                });
+                
+                request.on('error', reject);
+                request.end();
+              });
+              
+              const imageDataObj = {
+                hasText: false,
+                hasHtml: false,
+                hasImage: true,
+                text: null,
+                html: null,
+                imageDataUrl: imageData,
+                sourceUrl: params.srcURL
+              };
+              
+              console.log('[BrowserWindow] Image data ready from:', params.srcURL);
+              
+              // Position the window
+              const bounds = mainWindow.getBounds();
+              const position = {
+                x: bounds.x + bounds.width - 100,
+                y: bounds.y + 100
+              };
+              
+              // Create window with image data - will show modal directly
+              global.clipboardManager.createBlackHoleWindow(position, true, imageDataObj);
+            } catch (error) {
+              console.error('[BrowserWindow] Error downloading image:', error);
+              // Fallback: just send the URL as text
+              const fallbackData = {
+                hasText: true,
+                hasHtml: false,
+                hasImage: false,
+                text: params.srcURL,
+                html: null
+              };
+              
+              const bounds = mainWindow.getBounds();
+              const position = {
+                x: bounds.x + bounds.width - 100,
+                y: bounds.y + 100
+              };
+              
+              global.clipboardManager.createBlackHoleWindow(position, true, fallbackData);
+            }
+          }
+        }
+      }));
+      
+      // Also add "Copy Image" option for convenience
+      contextMenu.append(new MenuItem({
+        label: 'Copy Image',
+        click: () => {
+          mainWindow.webContents.copyImageAt(params.x, params.y);
+        }
+      }));
+    }
+    
+    // Add "Paste to Space" option (for clipboard content)
     contextMenu.append(new MenuItem({
-      label: 'Paste to Black Hole',
+      label: 'Paste to Space',
       click: () => {
-        console.log('[BrowserWindow] Paste to Black Hole clicked');
-        
-        // Send message to main process to show black hole
-        const { ipcMain } = require('electron');
+        console.log('[BrowserWindow] Paste to Space clicked');
         
         // Get clipboard manager from global
         if (global.clipboardManager) {
+          // Read clipboard data FIRST
+          const text = clipboard.readText();
+          const html = clipboard.readHTML();
+          const image = clipboard.readImage();
+          
+          // Check if HTML is really meaningful
+          let isRealHtml = false;
+          if (html && text) {
+            const hasBlocks = /<(div|p|br|table|ul|ol|li|h[1-6])\b/i.test(html);
+            const hasLinks = /<a\s+[^>]*href\s*=/i.test(html);
+            const hasImages = /<img\s+[^>]*src\s*=/i.test(html);
+            const hasFormatting = /<(strong|em|b|i|u)\b/i.test(html);
+            isRealHtml = hasBlocks || hasLinks || hasImages || hasFormatting;
+          }
+          
+          const clipboardData = {
+            hasText: !!text,
+            hasHtml: isRealHtml,
+            hasImage: !image.isEmpty(),
+            text: text,
+            html: isRealHtml ? html : null
+          };
+          
+          if (!image.isEmpty()) {
+            clipboardData.imageDataUrl = image.toDataURL();
+          }
+          
+          console.log('[BrowserWindow] Clipboard data ready:', { hasText: !!text, hasHtml: isRealHtml, hasImage: !image.isEmpty() });
+          
+          // Position the window
           const bounds = mainWindow.getBounds();
           const position = {
             x: bounds.x + bounds.width - 100,
             y: bounds.y + 100
           };
-          // Pass true as second parameter to show in expanded mode with space chooser
-          global.clipboardManager.createBlackHoleWindow(position, true);
           
-          // Send clipboard content after a delay
-          setTimeout(() => {
-            const { clipboard } = require('electron');
-            const text = clipboard.readText();
-            if (text && global.clipboardManager && global.clipboardManager.blackHoleWindow) {
-              global.clipboardManager.blackHoleWindow.webContents.send('paste-content', {
-                type: 'text',
-                content: text
-              });
-            }
-          }, 300);
+          // Create window with clipboard data - will show modal directly
+          global.clipboardManager.createBlackHoleWindow(position, true, clipboardData);
         }
       }
     }));
@@ -460,16 +1341,17 @@ function createSecureContentWindow(parentWindow) {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: false,
-      allowRunningInsecureContent: true,
-      sandbox: false,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      sandbox: true,
       enableRemoteModule: false, // Disable remote module
       preload: path.join(__dirname, 'preload-minimal.js') // Use a minimal preload script
     }
   });
 
   // Set Content Security Policy for the content window
-  contentWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+  // PERFORMANCE: Only apply CSP to onereach.ai domains
+  contentWindow.webContents.session.webRequest.onHeadersReceived({ urls: ['*://*.onereach.ai/*', 'file://*'] }, (details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
@@ -479,7 +1361,7 @@ function createSecureContentWindow(parentWindow) {
           "style-src-elem 'self' 'unsafe-inline' * https://*.onereach.ai https://fonts.googleapis.com; " +
           "script-src 'self' 'unsafe-inline' 'unsafe-eval' * https://*.onereach.ai https://unpkg.com https://cdn.jsdelivr.net; " +
           "connect-src 'self' * https://*.onereach.ai https://*.api.onereach.ai ws://localhost:3322; " +
-          "img-src 'self' data: blob: * https://*.onereach.ai; " +
+          "img-src 'self' data: blob: spaces: * https://*.onereach.ai; " +
           "font-src 'self' data: * https://*.onereach.ai https://fonts.gstatic.com; " +
           "media-src 'self' blob: * https://*.onereach.ai; " +
           "worker-src 'self' blob:; " +
@@ -791,6 +1673,7 @@ function createSetupWizardWindow(options = {}) {
     resizable: true,
     minimizable: false,
     maximizable: false,
+    backgroundColor: '#141414', // Match setup-wizard.html body background
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -803,7 +1686,8 @@ function createSetupWizardWindow(options = {}) {
   });
 
   // Set CSP for wizard window
-  wizardWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+  // PERFORMANCE: Only apply CSP to onereach.ai domains
+  wizardWindow.webContents.session.webRequest.onHeadersReceived({ urls: ['*://*.onereach.ai/*', 'file://*'] }, (details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
@@ -813,7 +1697,7 @@ function createSetupWizardWindow(options = {}) {
           "style-src-elem 'self' 'unsafe-inline' * https://*.onereach.ai; " +
           "script-src 'self' 'unsafe-inline' 'unsafe-eval' * https://*.onereach.ai https://unpkg.com https://cdn.jsdelivr.net; " +
           "connect-src 'self' * https://*.onereach.ai https://*.api.onereach.ai ws://localhost:3322; " +
-          "img-src 'self' data: blob: * https://*.onereach.ai; " +
+          "img-src 'self' data: blob: spaces: * https://*.onereach.ai; " +
           "font-src 'self' data: * https://*.onereach.ai; " +
           "media-src 'self' * https://*.onereach.ai; " +
           "object-src 'none'; " +
@@ -843,7 +1727,8 @@ function createTestWindow() {
   });
 
   // Set CSP for test window
-  testWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+  // PERFORMANCE: Only apply CSP to onereach.ai domains
+  testWindow.webContents.session.webRequest.onHeadersReceived({ urls: ['*://*.onereach.ai/*', 'file://*'] }, (details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
@@ -853,7 +1738,7 @@ function createTestWindow() {
           "style-src-elem 'self' 'unsafe-inline' * https://*.onereach.ai https://fonts.googleapis.com; " +
           "script-src 'self' 'unsafe-inline' 'unsafe-eval' * https://*.onereach.ai https://unpkg.com https://cdn.jsdelivr.net; " +
           "connect-src 'self' * https://*.onereach.ai https://*.api.onereach.ai ws://localhost:3322; " +
-          "img-src 'self' data: blob: * https://*.onereach.ai; " +
+          "img-src 'self' data: blob: spaces: * https://*.onereach.ai; " +
           "font-src 'self' data: * https://*.onereach.ai https://fonts.gstatic.com; " +
           "media-src 'self' * https://*.onereach.ai; " +
           "object-src 'none'; " +
@@ -881,7 +1766,7 @@ function getMainWindow() {
  * @param {string} idwEnvironment - Optional environment name to create environment-specific sessions
  * @returns {BrowserWindow} The created GSX window
  */
-function openGSXWindow(url, title, idwEnvironment) {
+async function openGSXWindow(url, title, idwEnvironment) {
   console.log(`Opening GSX window for ${title}: ${url}`);
   
   if (!logger) {
@@ -912,8 +1797,68 @@ function openGSXWindow(url, title, idwEnvironment) {
   // This allows all GSX windows in the same IDW group to share cookies
   // while keeping different IDW groups sandboxed from each other
   const partitionName = `gsx-${idwEnvironment}`;
+  const fullPartition = `persist:${partitionName}`;
   
   console.log(`Using shared session partition for IDW group: ${partitionName}`);
+  
+  // Multi-tenant token injection - inject BEFORE creating window
+  // This ensures the token is available when the window first loads
+  const multiTenantStore = require('./multi-tenant-store');
+  
+  // #region agent log
+  try{require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log',JSON.stringify({location:'browserWindow.js:1808',message:'openGSXWindow token check',data:{idwEnvironment,fullPartition,hasValidToken:multiTenantStore.hasValidToken(idwEnvironment)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-compare'})+'\n');}catch(e){}
+  // #endregion
+  
+  if (multiTenantStore.hasValidToken(idwEnvironment)) {
+    const token = multiTenantStore.getToken(idwEnvironment);
+    const ses = session.fromPartition(fullPartition);
+    
+    // Use broader domain to cover all subdomains (auth, idw, chat, api)
+    const broaderDomain = multiTenantStore.getBroaderDomain(idwEnvironment);
+    
+    try {
+      // Check if token already exists in this partition (check broader domain)
+      const existing = await ses.cookies.get({ domain: broaderDomain, name: 'mult' });
+      if (existing.length === 0) {
+        // Inject token with broader domain so it's sent to all subdomains
+        await ses.cookies.set({
+          url: `https://auth${broaderDomain}`,
+          name: 'mult',
+          value: token.value,
+          domain: broaderDomain,
+          path: '/',
+          secure: true,
+          httpOnly: true,
+          sameSite: 'no_restriction',
+          expirationDate: token.expiresAt
+        });
+        
+        // CRITICAL: Flush to ensure cookie is persisted before window loads
+        await ses.cookies.flushStore();
+        
+        // Verify cookie was set
+        const cookies = await ses.cookies.get({ name: 'mult' });
+        console.log(`[GSX] Injected ${idwEnvironment} token into ${partitionName} - ${cookies.length} mult cookies:`,
+          cookies.map(c => ({ domain: c.domain, sameSite: c.sameSite })));
+        // #region agent log
+        try{require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log',JSON.stringify({location:'browserWindow.js:1838',message:'openGSXWindow TOKEN INJECTED',data:{idwEnvironment,partitionName,cookieCount:cookies.length,cookieDomains:cookies.map(c=>c.domain)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-compare'})+'\n');}catch(e){}
+      } else {
+        console.log(`[GSX] Token already exists in ${partitionName}:`, existing.map(c => ({ domain: c.domain })));
+      }
+    } catch (err) {
+      console.error(`[GSX] Failed to inject token:`, err.message);
+      // Continue anyway - user can still login manually
+    }
+  } else {
+    console.log(`[GSX] No valid ${idwEnvironment} token available`);
+  }
+  
+  // ALWAYS register the GSX partition for token propagation (even if no token yet)
+  // This ensures that when user logs in via auto-login, tokens are propagated here
+  multiTenantStore.registerPartition(idwEnvironment, fullPartition);
+  
+  // Attach cookie listener (idempotent - only attaches once per partition)
+  multiTenantStore.attachCookieListener(fullPartition);
   
   // Create a window with proper security settings for GSX content
   const gsxWindow = new BrowserWindow({
@@ -928,7 +1873,7 @@ function openGSXWindow(url, title, idwEnvironment) {
       // Screen-sharing removed – use standard preload
       preload: path.join(__dirname, 'preload.js'),
       // Use a persistent partition specific to this GSX service and environment
-      partition: `persist:${partitionName}`,
+      partition: fullPartition,
       // Enable media access for screen sharing
       enableRemoteModule: false,
       allowRunningInsecureContent: false
@@ -936,7 +1881,8 @@ function openGSXWindow(url, title, idwEnvironment) {
   });
   
   // Set Content Security Policy for the GSX window
-  gsxWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+  // PERFORMANCE: Only apply CSP to onereach.ai domains
+  gsxWindow.webContents.session.webRequest.onHeadersReceived({ urls: ['*://*.onereach.ai/*', 'file://*'] }, (details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
@@ -946,7 +1892,7 @@ function openGSXWindow(url, title, idwEnvironment) {
           "style-src-elem 'self' 'unsafe-inline' * https://*.onereach.ai https://fonts.googleapis.com; " +
           "script-src 'self' 'unsafe-inline' 'unsafe-eval' * https://*.onereach.ai https://unpkg.com https://cdn.jsdelivr.net; " +
           "connect-src 'self' * https://*.onereach.ai https://*.api.onereach.ai ws://localhost:3322; " +
-          "img-src 'self' data: blob: * https://*.onereach.ai; " +
+          "img-src 'self' data: blob: spaces: * https://*.onereach.ai; " +
           "font-src 'self' data: * https://*.onereach.ai https://fonts.gstatic.com; " +
           "media-src 'self' blob: * https://*.onereach.ai; " +
           "worker-src 'self' blob:; " +
@@ -1089,7 +2035,11 @@ function openGSXWindow(url, title, idwEnvironment) {
   });
   
   // Add custom scrollbar CSS when content loads
-  gsxWindow.webContents.on('did-finish-load', () => {
+  gsxWindow.webContents.on('did-finish-load', async () => {
+    const currentUrl = gsxWindow.webContents.getURL();
+    console.log(`[GSX Window] Loaded: ${currentUrl}`);
+    
+    // Inject scrollbar CSS
     gsxWindow.webContents.insertCSS(`
       ::-webkit-scrollbar {
         width: 6px;
@@ -1110,6 +2060,56 @@ function openGSXWindow(url, title, idwEnvironment) {
         background: rgba(255, 255, 255, 0.2);
       }
     `).catch(err => console.error('Failed to inject scrollbar CSS in GSX window:', err));
+    
+    // Auto-login for OneReach pages (with retry for async-loaded forms)
+    if (currentUrl && currentUrl.includes('onereach.ai')) {
+      // Check state before attempting
+      if (!shouldAttemptGSXAutoLogin(gsxWindow.id)) {
+        console.log('[GSX AutoLogin] Skipping - already in progress or complete');
+      } else {
+        console.log('[GSX AutoLogin] OneReach page detected, starting auto-login...');
+        setTimeout(() => {
+          attemptGSXAutoLoginWithRetry(gsxWindow, currentUrl, 0);
+        }, 1000);
+      }
+    }
+  });
+  
+  // Handle full page navigation (for auth redirects)
+  gsxWindow.webContents.on('did-navigate', async (event, url) => {
+    console.log(`[GSX Window] Full navigation: ${url}`);
+    
+    // Auto-login for auth pages (when GSX redirects to auth.*.onereach.ai)
+    if (url && url.includes('auth.') && url.includes('onereach.ai')) {
+      // Check state before attempting
+      if (!shouldAttemptGSXAutoLogin(gsxWindow.id)) {
+        console.log('[GSX AutoLogin] Skipping - already in progress or complete');
+        return;
+      }
+      console.log('[GSX AutoLogin] Auth page detected via redirect, starting auto-login...');
+      // Wait for form to render
+      setTimeout(() => {
+        attemptGSXAutoLoginWithRetry(gsxWindow, url, 0);
+      }, 1500);
+    }
+  });
+  
+  // Handle SPA navigation (for auth page internal navigation)
+  gsxWindow.webContents.on('did-navigate-in-page', async (event, url) => {
+    console.log(`[GSX Window] In-page navigation: ${url}`);
+    
+    // Auto-login for auth pages
+    if (url && url.includes('onereach.ai') && url.includes('/login')) {
+      // Check state before attempting
+      if (!shouldAttemptGSXAutoLogin(gsxWindow.id)) {
+        return;
+      }
+      console.log('[GSX AutoLogin] Auth login page detected via SPA navigation');
+      // Wait for form to render then retry
+      setTimeout(() => {
+        attemptGSXAutoLoginWithRetry(gsxWindow, url, 0);
+      }, 1000);
+    }
   });
   
   return gsxWindow;

@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:;">
+  <title>OneReach.ai - App Health Dashboard</title>
+  <link rel="stylesheet" href="app-health-dashboard.css">
+</head>
+<body>
+  <div class="dashboard-container">
+    <!-- Header -->
+    <header class="dashboard-header">
+      <div class="header-left">
+        <div class="logo">
+          <span class="logo-icon">◎</span>
+          <span class="logo-text">OneReach.ai</span>
+        </div>
+        <h1 class="dashboard-title">App Health Dashboard</h1>
+      </div>
+      <div class="header-right">
+        <div class="header-status">
+          <span class="status-dot active"></span>
+          <span class="status-text">System Active</span>
+        </div>
+        <div class="header-time" id="header-time"></div>
+      </div>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <nav class="tab-navigation">
+      <button class="tab-btn active" data-tab="overview">
+        <span class="tab-icon">◉</span>
+        <span class="tab-label">Overview</span>
+      </button>
+      <button class="tab-btn" data-tab="activity">
+        <span class="tab-icon">◈</span>
+        <span class="tab-label">Activity</span>
+      </button>
+      <button class="tab-btn" data-tab="spaces">
+        <span class="tab-icon">▣</span>
+        <span class="tab-label">Spaces</span>
+      </button>
+      <button class="tab-btn" data-tab="logs">
+        <span class="tab-icon">☰</span>
+        <span class="tab-label">Logs</span>
+      </button>
+      <button class="tab-btn" data-tab="llm">
+        <span class="tab-icon">◇</span>
+        <span class="tab-label">LLM Usage</span>
+      </button>
+      <button class="tab-btn" data-tab="pipeline">
+        <span class="tab-icon">⬡</span>
+        <span class="tab-label">Pipeline</span>
+      </button>
+      <button class="tab-btn" data-tab="agent">
+        <span class="tab-icon">◎</span>
+        <span class="tab-label">Agent</span>
+      </button>
+      <button class="tab-btn" data-tab="broken">
+        <span class="tab-icon">⚠</span>
+        <span class="tab-label">Broken Items</span>
+      </button>
+      <button class="tab-btn" data-tab="settings">
+        <span class="tab-icon">⚙</span>
+        <span class="tab-label">Settings</span>
+      </button>
+    </nav>
+
+    <!-- Main Content Area -->
+    <main class="dashboard-content">
+      
+      <!-- Overview Tab -->
+      <section class="tab-panel active" id="panel-overview">
+        <div class="panel-grid overview-grid">
+          
+          <!-- Health Rings Card - Apple Health Style -->
+          <div class="card health-rings-card">
+            <h3 class="card-title">
+              <span class="title-icon">◎</span>
+              Today's Health
+              <span class="health-score-badge" id="overall-health-score">--</span>
+            </h3>
+            <div class="rings-container">
+              <div class="rings-visual">
+                <svg class="health-rings-svg" viewBox="0 0 200 200">
+                  <!-- Background rings -->
+                  <circle class="ring-bg" cx="100" cy="100" r="85" />
+                  <circle class="ring-bg" cx="100" cy="100" r="65" />
+                  <circle class="ring-bg" cx="100" cy="100" r="45" />
+                  
+                  <!-- Progress rings (will be animated via JS) -->
+                  <circle class="ring stability-ring" cx="100" cy="100" r="85" 
+                          stroke-dasharray="534" stroke-dashoffset="534" id="ring-stability" />
+                  <circle class="ring pipeline-ring" cx="100" cy="100" r="65" 
+                          stroke-dasharray="408" stroke-dashoffset="408" id="ring-pipeline" />
+                  <circle class="ring healing-ring" cx="100" cy="100" r="45" 
+                          stroke-dasharray="283" stroke-dashoffset="283" id="ring-healing" />
+                </svg>
+                <div class="rings-center">
+                  <span class="rings-emoji" id="health-emoji">💪</span>
+                </div>
+              </div>
+              <div class="rings-legend">
+                <div class="ring-legend-item">
+                  <span class="ring-dot stability"></span>
+                  <div class="ring-info">
+                    <span class="ring-name">Stability</span>
+                    <span class="ring-value" id="ring-stability-value">--%</span>
+                  </div>
+                  <span class="ring-detail" id="ring-stability-detail">Error-free ops</span>
+                </div>
+                <div class="ring-legend-item">
+                  <span class="ring-dot pipeline"></span>
+                  <div class="ring-info">
+                    <span class="ring-name">Pipeline</span>
+                    <span class="ring-value" id="ring-pipeline-value">--%</span>
+                  </div>
+                  <span class="ring-detail" id="ring-pipeline-detail">Assets processed</span>
+                </div>
+                <div class="ring-legend-item">
+                  <span class="ring-dot healing"></span>
+                  <div class="ring-info">
+                    <span class="ring-name">Healing</span>
+                    <span class="ring-value" id="ring-healing-value">--%</span>
+                  </div>
+                  <span class="ring-detail" id="ring-healing-detail">Issues auto-fixed</span>
+                </div>
+              </div>
+            </div>
+            <div class="rings-message" id="rings-message">
+              <span class="message-icon">✨</span>
+              <span class="message-text">Loading health data...</span>
+            </div>
+          </div>
+
+          <!-- App Status Card -->
+          <div class="card status-card">
+            <h3 class="card-title">
+              <span class="title-icon">●</span>
+              App Status
+            </h3>
+            <div class="status-content">
+              <div class="status-row">
+                <span class="status-label">Status</span>
+                <span class="status-value status-running">
+                  <span class="pulse-dot"></span>
+                  Running
+                </span>
+              </div>
+              <div class="status-row">
+                <span class="status-label">Uptime</span>
+                <span class="status-value" id="stat-uptime">--</span>
+              </div>
+              <div class="status-row">
+                <span class="status-label">Memory</span>
+                <span class="status-value" id="stat-memory">--</span>
+              </div>
+              <div class="status-row">
+                <span class="status-label">CPU</span>
+                <span class="status-value" id="stat-cpu">--</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Today's Summary Card -->
+          <div class="card summary-card">
+            <h3 class="card-title">
+              <span class="title-icon">◈</span>
+              Today's Summary
+            </h3>
+            <div class="summary-grid">
+              <div class="summary-item">
+                <span class="summary-value" id="stat-items-added">0</span>
+                <span class="summary-label">Items Added</span>
+              </div>
+              <div class="summary-item">
+                <span class="summary-value" id="stat-ai-ops">0</span>
+                <span class="summary-label">AI Operations</span>
+              </div>
+              <div class="summary-item">
+                <span class="summary-value" id="stat-errors">0</span>
+                <span class="summary-label">Errors</span>
+              </div>
+              <div class="summary-item">
+                <span class="summary-value highlight" id="stat-fixes">0</span>
+                <span class="summary-label">Auto-Fixed</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Spaces Health Card -->
+          <div class="card health-card">
+            <h3 class="card-title">
+              <span class="title-icon">▣</span>
+              Spaces Health
+            </h3>
+            <div class="health-content">
+              <div class="health-meter">
+                <div class="meter-bar">
+                  <div class="meter-fill" id="spaces-utilization" style="width: 0%"></div>
+                </div>
+                <span class="meter-label" id="spaces-utilization-text">0% utilized</span>
+              </div>
+              <div class="health-stats">
+                <div class="health-stat">
+                  <span class="stat-number" id="stat-spaces-count">0</span>
+                  <span class="stat-label">Active Spaces</span>
+                </div>
+                <div class="health-stat">
+                  <span class="stat-number" id="stat-total-items">0</span>
+                  <span class="stat-label">Total Items</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- LLM Costs Card -->
+          <div class="card cost-card">
+            <h3 class="card-title">
+              <span class="title-icon">◇</span>
+              LLM Costs (This Month)
+            </h3>
+            <div class="cost-content">
+              <div class="cost-row">
+                <span class="cost-provider">Claude</span>
+                <span class="cost-amount" id="cost-claude">$0.00</span>
+                <span class="cost-calls" id="cost-claude-calls">(0 calls)</span>
+              </div>
+              <div class="cost-row">
+                <span class="cost-provider">OpenAI</span>
+                <span class="cost-amount" id="cost-openai">$0.00</span>
+                <span class="cost-calls" id="cost-openai-calls">(0 calls)</span>
+              </div>
+              <div class="cost-total">
+                <span>Total:</span>
+                <span class="total-amount" id="cost-total">$0.00</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Recent Activity Feed -->
+          <div class="card activity-feed-card">
+            <h3 class="card-title">
+              <span class="title-icon">◎</span>
+              Recent Activity
+              <span class="live-indicator">LIVE</span>
+            </h3>
+            <div class="activity-feed" id="activity-feed">
+              <div class="activity-empty">No recent activity</div>
+            </div>
+          </div>
+
+          <!-- Agent Status Banner -->
+          <div class="card agent-banner">
+            <div class="agent-status">
+              <span class="agent-indicator" id="agent-indicator"></span>
+              <span class="agent-text" id="agent-status-text">Agent Initializing...</span>
+            </div>
+            <div class="agent-stats">
+              <span id="agent-last-scan">Last scan: --</span>
+              <span class="divider">|</span>
+              <span id="agent-fixes-today">Fixes today: 0</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Activity Tab -->
+      <section class="tab-panel" id="panel-activity">
+        <div class="panel-header">
+          <h2>Activity Log</h2>
+          <div class="panel-controls">
+            <select id="activity-filter-type" class="filter-select">
+              <option value="all">All Types</option>
+              <option value="add">Add</option>
+              <option value="ai">AI</option>
+              <option value="fix">Fix</option>
+              <option value="error">Error</option>
+            </select>
+            <select id="activity-filter-time" class="filter-select">
+              <option value="today">Today</option>
+              <option value="week">This Week</option>
+              <option value="month">This Month</option>
+            </select>
+            <input type="text" id="activity-search" class="search-input" placeholder="Search...">
+          </div>
+        </div>
+        <div class="table-container">
+          <table class="data-table" id="activity-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Type</th>
+                <th>Space</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody id="activity-table-body">
+              <tr><td colspan="4" class="empty-row">Loading activity...</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="table-footer">
+          <button class="btn-secondary" id="activity-export">Export CSV</button>
+          <span class="table-info" id="activity-info">Showing 0 items</span>
+        </div>
+      </section>
+
+      <!-- Spaces Tab -->
+      <section class="tab-panel" id="panel-spaces">
+        <div class="panel-header">
+          <h2>Spaces Overview</h2>
+        </div>
+        <div class="table-container">
+          <table class="data-table" id="spaces-table">
+            <thead>
+              <tr>
+                <th>Space</th>
+                <th>Items</th>
+                <th>Size</th>
+                <th>Last Used</th>
+                <th>Health</th>
+              </tr>
+            </thead>
+            <tbody id="spaces-table-body">
+              <tr><td colspan="5" class="empty-row">Loading spaces...</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="spaces-analytics">
+          <h3>Space Analytics</h3>
+          <div class="analytics-grid">
+            <div class="analytics-card">
+              <h4>Items by Type</h4>
+              <div class="chart-placeholder" id="chart-items-type">
+                <div class="chart-bar-container" id="items-type-chart"></div>
+              </div>
+            </div>
+            <div class="analytics-card">
+              <h4>Storage Distribution</h4>
+              <div class="chart-placeholder" id="chart-storage">
+                <div class="chart-bar-container" id="storage-chart"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Logs Tab -->
+      <section class="tab-panel" id="panel-logs">
+        <div class="panel-header">
+          <h2>Application Logs</h2>
+          <div class="panel-controls">
+            <label class="toggle-label">
+              <input type="checkbox" id="logs-auto-refresh" checked>
+              Auto-refresh
+            </label>
+            <select id="logs-filter-level" class="filter-select">
+              <option value="all">All Levels</option>
+              <option value="debug">Debug</option>
+              <option value="info">Info</option>
+              <option value="warn">Warning</option>
+              <option value="error">Error</option>
+            </select>
+            <input type="text" id="logs-search" class="search-input" placeholder="Search logs...">
+          </div>
+        </div>
+        <div class="logs-container">
+          <div class="log-entries" id="log-entries">
+            <div class="log-entry info">Loading logs...</div>
+          </div>
+        </div>
+        <div class="table-footer">
+          <button class="btn-secondary" id="logs-download">Download Logs</button>
+          <button class="btn-secondary" id="logs-clear">Clear Display</button>
+          <button class="btn-secondary" id="logs-folder">Open Log Folder</button>
+        </div>
+      </section>
+
+      <!-- LLM Usage Tab -->
+      <section class="tab-panel" id="panel-llm">
+        <div class="panel-header">
+          <h2>LLM Usage & Costs</h2>
+          <div class="panel-controls">
+            <select id="llm-period" class="filter-select">
+              <option value="month">This Month</option>
+              <option value="week">This Week</option>
+              <option value="today">Today</option>
+            </select>
+          </div>
+        </div>
+        
+        <div class="llm-overview">
+          <div class="llm-provider-card">
+            <div class="provider-header claude">
+              <span class="provider-icon">◇</span>
+              <span class="provider-name">CLAUDE</span>
+            </div>
+            <div class="provider-stats">
+              <div class="provider-stat">
+                <span class="stat-value" id="llm-claude-calls">0</span>
+                <span class="stat-label">Calls</span>
+              </div>
+              <div class="provider-stat">
+                <span class="stat-value" id="llm-claude-tokens">0</span>
+                <span class="stat-label">Tokens</span>
+              </div>
+              <div class="provider-stat highlight">
+                <span class="stat-value" id="llm-claude-cost">$0.00</span>
+                <span class="stat-label">Cost</span>
+              </div>
+              <div class="provider-stat">
+                <span class="stat-value" id="llm-claude-avg">$0.00</span>
+                <span class="stat-label">Avg/Call</span>
+              </div>
+            </div>
+          </div>
+          
+          <div class="llm-provider-card">
+            <div class="provider-header openai">
+              <span class="provider-icon">◈</span>
+              <span class="provider-name">OPENAI</span>
+            </div>
+            <div class="provider-stats">
+              <div class="provider-stat">
+                <span class="stat-value" id="llm-openai-calls">0</span>
+                <span class="stat-label">Calls</span>
+              </div>
+              <div class="provider-stat">
+                <span class="stat-value" id="llm-openai-tokens">0</span>
+                <span class="stat-label">Tokens</span>
+              </div>
+              <div class="provider-stat highlight">
+                <span class="stat-value" id="llm-openai-cost">$0.00</span>
+                <span class="stat-label">Cost</span>
+              </div>
+              <div class="provider-stat">
+                <span class="stat-value" id="llm-openai-avg">$0.00</span>
+                <span class="stat-label">Avg/Call</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="llm-breakdown">
+          <div class="breakdown-card">
+            <h3>Usage by Feature</h3>
+            <div class="feature-list" id="llm-features">
+              <div class="feature-item">
+                <span class="feature-name">Loading...</span>
+                <span class="feature-percent">--%</span>
+              </div>
+            </div>
+          </div>
+          
+          <div class="breakdown-card">
+            <h3>Recent Operations</h3>
+            <div class="operations-list" id="llm-operations">
+              <div class="operation-item">Loading...</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Pipeline Tab -->
+      <section class="tab-panel" id="panel-pipeline">
+        <div class="panel-header">
+          <h2>Asset Pipeline Health</h2>
+        </div>
+        
+        <div class="pipeline-stages">
+          <h3>Stage Success Rates (Last 24h)</h3>
+          <div class="stages-grid">
+            <div class="stage-card">
+              <div class="stage-name">Validation</div>
+              <div class="stage-rate" id="stage-validation">100%</div>
+              <div class="stage-bar"><div class="stage-fill" style="width: 100%"></div></div>
+            </div>
+            <div class="stage-card">
+              <div class="stage-name">Storage</div>
+              <div class="stage-rate" id="stage-storage">100%</div>
+              <div class="stage-bar"><div class="stage-fill" style="width: 100%"></div></div>
+            </div>
+            <div class="stage-card">
+              <div class="stage-name">Thumbnail</div>
+              <div class="stage-rate" id="stage-thumbnail">100%</div>
+              <div class="stage-bar"><div class="stage-fill" style="width: 100%"></div></div>
+            </div>
+            <div class="stage-card">
+              <div class="stage-name">Metadata</div>
+              <div class="stage-rate" id="stage-metadata">100%</div>
+              <div class="stage-bar"><div class="stage-fill" style="width: 100%"></div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="pipeline-runs">
+          <h3>Recent Pipeline Runs</h3>
+          <div class="table-container">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Asset</th>
+                  <th>Stages</th>
+                  <th>Checksum</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="pipeline-runs-body">
+                <tr><td colspan="5" class="empty-row">No recent pipeline runs</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="verification-summary">
+          <h3>Verification Summary</h3>
+          <div class="verification-stats">
+            <div class="verify-stat">
+              <span class="verify-label">Checksums Valid:</span>
+              <span class="verify-value" id="verify-checksums">--/--</span>
+            </div>
+            <div class="verify-stat">
+              <span class="verify-label">Index Integrity:</span>
+              <span class="verify-value ok" id="verify-index">OK</span>
+            </div>
+            <div class="verify-stat">
+              <span class="verify-label">Orphaned Files:</span>
+              <span class="verify-value" id="verify-orphans">0</span>
+            </div>
+          </div>
+          <button class="btn-primary" id="run-integrity-check">Run Full Integrity Check</button>
+        </div>
+      </section>
+
+      <!-- Agent Tab -->
+      <section class="tab-panel" id="panel-agent">
+        <div class="panel-header">
+          <h2>App Manager Agent</h2>
+          <div class="panel-controls">
+            <button class="btn-secondary" id="agent-pause">Pause</button>
+            <button class="btn-primary" id="agent-run-now">Run Now</button>
+          </div>
+        </div>
+
+        <div class="agent-status-card">
+          <div class="agent-main-status">
+            <span class="agent-big-indicator" id="agent-big-indicator"></span>
+            <div class="agent-status-info">
+              <span class="agent-status-title" id="agent-title">ACTIVE</span>
+              <span class="agent-status-sub" id="agent-subtitle">Monitoring system health</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="agent-config">
+          <h3>Configuration</h3>
+          <div class="config-grid">
+            <div class="config-item">
+              <label>Check Interval</label>
+              <select id="agent-interval" class="config-select">
+                <option value="30000">30 seconds</option>
+                <option value="60000">1 minute</option>
+                <option value="300000">5 minutes</option>
+              </select>
+            </div>
+            <div class="config-item">
+              <label>Auto-Fix Mode</label>
+              <select id="agent-mode" class="config-select">
+                <option value="aggressive">Aggressive</option>
+                <option value="conservative">Conservative</option>
+                <option value="report">Report Only</option>
+              </select>
+            </div>
+            <div class="config-item">
+              <label>LLM Provider</label>
+              <select id="agent-llm" class="config-select">
+                <option value="claude">Claude</option>
+                <option value="openai">OpenAI</option>
+              </select>
+            </div>
+            <div class="config-item">
+              <label>Notifications</label>
+              <label class="toggle">
+                <input type="checkbox" id="agent-notifications" checked>
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="agent-activity">
+          <h3>Today's Activity</h3>
+          <div class="agent-stats-grid">
+            <div class="agent-stat-card">
+              <span class="agent-stat-value" id="agent-scans">0</span>
+              <span class="agent-stat-label">Scans Completed</span>
+            </div>
+            <div class="agent-stat-card">
+              <span class="agent-stat-value" id="agent-issues">0</span>
+              <span class="agent-stat-label">Issues Detected</span>
+            </div>
+            <div class="agent-stat-card highlight">
+              <span class="agent-stat-value" id="agent-fixes">0</span>
+              <span class="agent-stat-label">Auto-Fixes Applied</span>
+            </div>
+            <div class="agent-stat-card warning">
+              <span class="agent-stat-value" id="agent-escalated">0</span>
+              <span class="agent-stat-label">Escalated (Manual)</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="agent-diagnoses">
+          <h3>Recent Diagnoses</h3>
+          <div class="diagnoses-list" id="diagnoses-list">
+            <div class="diagnosis-item">
+              <span class="diagnosis-empty">No recent diagnoses</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="agent-attention">
+          <h3>Issues Requiring Attention</h3>
+          <div class="attention-list" id="attention-list">
+            <div class="attention-empty">
+              <span class="attention-icon">✓</span>
+              <span>No issues requiring manual intervention</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Broken Items Tab -->
+      <section class="tab-panel" id="panel-broken">
+        <div class="panel-header">
+          <h2>Broken Items Registry</h2>
+          <div class="panel-controls">
+            <select id="broken-filter-status" class="filter-select">
+              <option value="all">All Status</option>
+              <option value="open">Open</option>
+              <option value="fixed">Fixed</option>
+              <option value="ignored">Ignored</option>
+            </select>
+            <button class="btn-secondary" id="broken-clear">Clear All (Archive)</button>
+          </div>
+        </div>
+
+        <div class="broken-summary">
+          <div class="broken-stat-card">
+            <span class="broken-stat-value" id="broken-total">0</span>
+            <span class="broken-stat-label">Total Issues</span>
+          </div>
+          <div class="broken-stat-card open">
+            <span class="broken-stat-value" id="broken-open">0</span>
+            <span class="broken-stat-label">Open</span>
+          </div>
+          <div class="broken-stat-card fixed">
+            <span class="broken-stat-value" id="broken-fixed">0</span>
+            <span class="broken-stat-label">Fixed</span>
+          </div>
+          <div class="broken-stat-card">
+            <span class="broken-stat-value" id="broken-version"></span>
+            <span class="broken-stat-label">Current Version</span>
+          </div>
+        </div>
+
+        <div class="broken-notice" id="broken-notice" style="display: none;">
+          <span class="notice-icon">ℹ</span>
+          <span class="notice-text">Items with a line through were from a previous version and are archived after update.</span>
+        </div>
+
+        <div class="broken-items-section">
+          <h3>Current Version Issues</h3>
+          <div class="broken-items-list" id="broken-items-list">
+            <div class="broken-empty">
+              <span class="empty-icon">✓</span>
+              <span>No broken items recorded for this version</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="broken-archives-section">
+          <h3>Archived Issues (Previous Versions)</h3>
+          <div class="archives-list" id="archives-list">
+            <div class="archive-empty">No archived issues from previous versions</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Settings Tab -->
+      <section class="tab-panel" id="panel-settings">
+        <div class="panel-header">
+          <h2>Dashboard Settings</h2>
+        </div>
+
+        <div class="settings-section">
+          <h3>General</h3>
+          <div class="setting-item">
+            <label>Auto-refresh interval</label>
+            <select id="setting-refresh" class="config-select">
+              <option value="5000">5 seconds</option>
+              <option value="10000">10 seconds</option>
+              <option value="30000">30 seconds</option>
+              <option value="60000">1 minute</option>
+            </select>
+          </div>
+          <div class="setting-item">
+            <label>Show notifications</label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-notifications" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3>Data Retention</h3>
+          <div class="setting-item">
+            <label>Activity history</label>
+            <select id="setting-activity-retention" class="config-select">
+              <option value="7">7 days</option>
+              <option value="30" selected>30 days</option>
+              <option value="90">90 days</option>
+            </select>
+          </div>
+          <div class="setting-item">
+            <label>Log retention</label>
+            <select id="setting-log-retention" class="config-select">
+              <option value="7" selected>7 days</option>
+              <option value="14">14 days</option>
+              <option value="30">30 days</option>
+            </select>
+          </div>
+          <div class="setting-item">
+            <label>LLM usage history</label>
+            <select id="setting-llm-retention" class="config-select">
+              <option value="30">30 days</option>
+              <option value="90" selected>90 days</option>
+              <option value="180">180 days</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3>Export</h3>
+          <div class="export-buttons">
+            <button class="btn-secondary" id="export-json">Export All Data as JSON</button>
+            <button class="btn-secondary" id="export-activity">Export Activity Report</button>
+            <button class="btn-secondary" id="export-llm">Export LLM Usage Report</button>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3>Maintenance</h3>
+          <div class="maintenance-buttons">
+            <button class="btn-primary" id="maintenance-integrity">Run Full Integrity Check</button>
+            <button class="btn-secondary" id="maintenance-clear-cache">Clear Activity Cache</button>
+            <button class="btn-secondary" id="maintenance-reset-stats">Reset Agent Statistics</button>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="dashboard-footer">
+      <span class="footer-version">Version <span id="app-version">1.0.0</span></span>
+      <span class="footer-refresh">Last refresh: <span id="last-refresh">--</span></span>
+    </footer>
+  </div>
+
+  <script src="app-health-dashboard.js"></script>
+</body>
+</html>
+

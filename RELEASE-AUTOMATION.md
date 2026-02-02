@@ -1,6 +1,6 @@
-# 🚀 Automated Release System
+# Automated Release System
 
-## ✨ Quick Start - One Command Release!
+## Quick Start - One Command Release!
 
 ### The Magic Command:
 ```bash
@@ -8,12 +8,47 @@ npm run release
 ```
 
 That's it! This single command will:
-1. ✅ Ask you for the new version
-2. ✅ Generate release notes automatically 
-3. ✅ Update your private source code
-4. ✅ Build the app for all Mac architectures
-5. ✅ Publish to your public releases repository
-6. ✅ Trigger auto-updates for all users
+1. Ask you for the new version
+2. Generate release notes automatically 
+3. Update your private source code
+4. Build the app (universal binary by default)
+5. Publish to your public releases repository
+6. Trigger auto-updates for all users
+
+## Build Modes (Optimized for Speed)
+
+The release script supports three build modes to optimize build time:
+
+### Default: Universal Binary (Recommended)
+```bash
+npm run release
+# or
+./scripts/release-master.sh --universal
+```
+- Builds a single binary that works on ALL Macs
+- ~50% faster than building separate architectures
+- Larger file size (~2x) but simpler releases
+- Users don't need to choose ARM64 vs Intel
+
+### Quick Release: ARM64 Only
+```bash
+npm run release:quick
+# or
+./scripts/release-master.sh --arm64-only
+```
+- Fastest build option (~5-7 minutes)
+- Only for Apple Silicon users (M1/M2/M3/M4)
+- Use when most users are on Apple Silicon
+- Good for urgent hotfixes
+
+### Legacy: Dual Architecture
+```bash
+./scripts/release-master.sh --dual-arch
+```
+- Builds ARM64 and x64 separately
+- Produces 4 files (2 DMG + 2 ZIP)
+- Slowest option but smallest individual file sizes
+- Use if universal binary has issues with native modules
 
 ## 🎯 How It Works
 
@@ -93,7 +128,7 @@ node -p "require('./package.json').version"
 - `1.0.5` → `1.1.0`: Added new feature
 - `1.1.0` → `2.0.0`: Major overhaul
 
-## 🔄 What Happens During Release
+## What Happens During Release
 
 ### Step 1: Version Update
 - You choose the new version
@@ -109,15 +144,17 @@ node -p "require('./package.json').version"
 - Pushed to your private GitHub repo
 - Source code stays private
 
-### Step 4: Build Process
-- Builds for Apple Silicon (M1/M2/M3)
-- Builds for Intel Macs
-- Creates DMG and ZIP for each
+### Step 4: Build Process (depends on mode)
+- **Universal (default)**: Single build for all Macs (~5-7 min)
+- **ARM64-only**: Fastest build, Apple Silicon only (~5-7 min)
+- **Dual-arch**: Separate builds for ARM64 + x64 (~10-14 min)
+- Creates DMG and ZIP files
+- Build cache preserved for faster subsequent builds
 
 ### Step 5: Public Release
 - Uploads only compiled apps to public repo
 - Creates GitHub release with notes
-- Updates the auto-update manifest
+- Updates the auto-update manifest (latest-mac.yml)
 
 ### Step 6: User Updates
 - All existing users get notification
@@ -227,25 +264,34 @@ Not recommended, but you can modify the script to skip confirmations.
 - Download instructions
 - No source code exposure
 
-## 💡 Quick Reference
+## Quick Reference
 
 | Command | What it does |
 |---------|--------------|
-| `npm run release` | Full interactive release process |
-| `./scripts/release-master.sh` | Same as above |
-| `npm run package:mac` | Build ARM64 only |
+| `npm run release` | Full release with universal binary (recommended) |
+| `npm run release:quick` | Quick release with ARM64 only |
+| `./scripts/release-master.sh --universal` | Universal binary build (default) |
+| `./scripts/release-master.sh --arm64-only` | ARM64 only (fastest) |
+| `./scripts/release-master.sh --dual-arch` | Separate ARM64 + x64 builds |
+| `npm run package:mac` | Build ARM64 without releasing |
+| `npm run package:mac:universal` | Build universal without releasing |
 | `git log --oneline -10` | See recent commits |
-| `gh release list --repo wilsr7000/onereach-desktop-releases` | List all releases |
+| `gh release list --repo wilsr7000/Onereach_Desktop_App` | List all releases |
 
-## 🎯 Summary
+## Summary
 
 **Just run `npm run release` and follow the prompts!**
 
 The system handles everything:
-- Version management ✅
-- Building for all Macs ✅
-- Publishing to public ✅
-- Auto-updates for users ✅
-- Keeping source private ✅
+- Version management
+- Building for all Macs (universal binary by default)
+- Publishing to public repository
+- Auto-updates for users
+- Keeping source private
 
-Your users will always have the latest version, and your code stays secure! 🎉
+**Build Time Comparison:**
+- Universal (default): ~5-7 minutes - works on all Macs
+- ARM64-only (--quick): ~5-7 minutes - Apple Silicon only
+- Dual-arch (legacy): ~10-14 minutes - separate builds
+
+Your users will always have the latest version, and your code stays secure!

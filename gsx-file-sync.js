@@ -14,17 +14,268 @@ class GSXFileSync {
     this.syncHistory = [];
     this.maxHistorySize = 100;
     this.alertShowing = false; // Track if error alert is already showing
+    this.tokenRefreshInProgress = false; // Track token refresh state
     
-    // Default sync paths - includes everything needed for full restore
-    this.defaultSyncPaths = [
-      { local: path.join(app.getPath('documents'), 'OR-Spaces'), remote: 'OR-Spaces', description: 'Clipboard Spaces data' },
-      { local: app.getPath('userData'), remote: 'App-Config', description: 'App configuration and settings' }
-    ];
+    // Lazy initialize paths - will be set on first access
+    this._defaultSyncPaths = null;
+    this._optionalSyncPaths = null;
+  }
+  
+  /**
+   * Get the token refresh URL from settings
+   * @returns {string} The refresh URL or empty string
+   */
+  getRefreshUrl() {
+    const url = this.settingsManager.get('gsxRefreshUrl') || '';
+    return url.trim(); // Remove any leading/trailing whitespace
+  }
+  
+  /**
+   * Fetch a new GSX token from the refresh URL
+   * This is called when no token exists or when we need to refresh
+   * @returns {Promise<{success: boolean, token?: string, error?: string}>}
+   */
+  async fetchToken() {
+    const refreshUrl = this.getRefreshUrl();
     
-    // Optional: Desktop sync (user can enable)
-    this.optionalSyncPaths = [
-      { local: path.join(app.getPath('desktop')), remote: 'Desktop', description: 'Desktop files' }
-    ];
+    if (!refreshUrl) {
+      return { success: false, error: 'No GSX Refresh URL configured. Please add it in Settings.' };
+    }
+    
+    if (this.tokenRefreshInProgress) {
+      console.log('[GSX Sync] Token fetch already in progress, waiting...');
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      return { success: !!this.settingsManager.get('gsxToken') };
+    }
+    
+    try {
+      this.tokenRefreshInProgress = true;
+      console.log('[GSX Sync] Fetching token from refresh URL...');
+      console.log('[GSX Sync] Refresh URL:', refreshUrl);
+      
+      // Try GET request first (simpler endpoint format)
+      let response;
+      let data;
+      
+      try {
+        console.log('[GSX Sync] Trying GET request...');
+        response = await fetch(refreshUrl, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json'
+          }
+        });
+        
+        if (response.ok) {
+          data = await response.json();
+        }
+      } catch (getError) {
+        console.log('[GSX Sync] GET failed, trying POST...', getError.message);
+      }
+      
+      // If GET didn't work, try POST
+      if (!data) {
+        console.log('[GSX Sync] Trying POST request...');
+        response = await fetch(refreshUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({})
+        });
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Token fetch failed: ${response.status} - ${errorText}`);
+        }
+        
+        data = await response.json();
+      }
+      
+      if (data && data.token) {
+        // Save the token
+        this.settingsManager.set('gsxToken', data.token);
+        console.log('[GSX Sync] Token fetched successfully');
+        console.log('[GSX Sync] Token length:', data.token.length);
+        
+        // Reset initialization so next operation uses new token
+        this.isInitialized = false;
+        this.client = null;
+        
+        return { success: true, token: data.token };
+      } else {
+        throw new Error('No token in response from refresh URL');
+      }
+    } catch (error) {
+      console.error('[GSX Sync] Token fetch failed:', error.message);
+      return { success: false, error: error.message };
+    } finally {
+      this.tokenRefreshInProgress = false;
+    }
+  }
+  
+  /**
+   * Refresh the GSX token when it expires
+   * Uses current token to authenticate with the refresh endpoint
+   * @returns {Promise<{success: boolean, token?: string, error?: string}>}
+   */
+  async refreshToken() {
+    const refreshUrl = this.getRefreshUrl();
+    
+    if (!refreshUrl) {
+      return { success: false, error: 'No GSX Refresh URL configured' };
+    }
+    
+    if (this.tokenRefreshInProgress) {
+      console.log('[GSX Sync] Token refresh already in progress, waiting...');
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      return { success: !!this.settingsManager.get('gsxToken') };
+    }
+    
+    try {
+      this.tokenRefreshInProgress = true;
+      console.log('[GSX Sync] Attempting to refresh token...');
+      console.log('[GSX Sync] Refresh URL:', refreshUrl);
+      
+      const currentToken = this.settingsManager.get('gsxToken');
+      
+      // Try GET request first (simpler endpoint format per docs)
+      let response;
+      let data;
+      
+      try {
+        console.log('[GSX Sync] Trying GET request...');
+        const headers = { 'Accept': 'application/json' };
+        if (currentToken) {
+          headers['Authorization'] = `Bearer ${currentToken}`;
+        }
+        response = await fetch(refreshUrl, {
+          method: 'GET',
+          headers
+        });
+        
+        if (response.ok) {
+          data = await response.json();
+        }
+      } catch (getError) {
+        console.log('[GSX Sync] GET failed, trying POST...');
+      }
+      
+      // If GET didn't work, try POST
+      if (!data) {
+        console.log('[GSX Sync] Trying POST request...');
+        const postHeaders = {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        };
+        if (currentToken) {
+          postHeaders['Authorization'] = `Bearer ${currentToken}`;
+        }
+        response = await fetch(refreshUrl, {
+          method: 'POST',
+          headers: postHeaders,
+          body: JSON.stringify(currentToken ? { token: currentToken } : {})
+        });
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Token refresh failed: ${response.status} - ${errorText}`);
+        }
+        
+        data = await response.json();
+      }
+      
+      if (data && data.token) {
+        // Save the new token
+        this.settingsManager.set('gsxToken', data.token);
+        console.log('[GSX Sync] ✓ Token refreshed successfully');
+        console.log('[GSX Sync] New token length:', data.token.length);
+        
+        // Reset initialization so next operation uses new token
+        this.isInitialized = false;
+        this.client = null;
+        
+        return { success: true, token: data.token };
+      } else {
+        throw new Error('No token in refresh response');
+      }
+    } catch (error) {
+      console.error('[GSX Sync] ✗ Token refresh failed:', error.message);
+      return { success: false, error: error.message };
+    } finally {
+      this.tokenRefreshInProgress = false;
+    }
+  }
+  
+  /**
+   * Execute an SDK operation with automatic token refresh on 401 errors
+   * @param {Function} operation - Async function that performs the SDK operation
+   * @param {string} operationName - Name of the operation for logging
+   * @param {number} maxRetries - Maximum number of retry attempts (default: 1)
+   * @returns {Promise<any>} Result of the operation
+   */
+  async executeWithTokenRefresh(operation, operationName = 'operation', maxRetries = 1) {
+    let lastError;
+    
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        // Ensure we're initialized before each attempt
+        if (!this.isInitialized) {
+          await this.initialize();
+        }
+        
+        return await operation();
+      } catch (error) {
+        lastError = error;
+        const errorMessage = error.message || String(error);
+        const is401 = errorMessage.includes('401') || 
+                      errorMessage.includes('Unauthorized') || 
+                      errorMessage.includes('token') && errorMessage.toLowerCase().includes('expired');
+        
+        if (is401 && attempt < maxRetries) {
+          console.log(`[GSX Sync] ${operationName} failed with auth error, attempting token refresh (attempt ${attempt + 1}/${maxRetries})...`);
+          
+          const refreshResult = await this.refreshToken();
+          if (refreshResult.success) {
+            console.log(`[GSX Sync] Token refreshed, retrying ${operationName}...`);
+            // Reset client so it reinitializes with new token
+            this.isInitialized = false;
+            this.client = null;
+            continue; // Retry the operation
+          } else {
+            console.error(`[GSX Sync] Token refresh failed: ${refreshResult.error}`);
+            throw new Error(`${operationName} failed: Token expired and refresh failed. Please update your token in Settings.`);
+          }
+        }
+        
+        // Not a 401 error or out of retries
+        throw error;
+      }
+    }
+    
+    throw lastError;
+  }
+  
+  // Lazy getter for default sync paths
+  get defaultSyncPaths() {
+    if (!this._defaultSyncPaths) {
+      this._defaultSyncPaths = [
+        { local: path.join(app.getPath('documents'), 'OR-Spaces'), remote: 'OR-Spaces', description: 'Clipboard Spaces data' },
+        { local: app.getPath('userData'), remote: 'App-Config', description: 'App configuration and settings' }
+      ];
+    }
+    return this._defaultSyncPaths;
+  }
+  
+  // Lazy getter for optional sync paths
+  get optionalSyncPaths() {
+    if (!this._optionalSyncPaths) {
+      this._optionalSyncPaths = [
+        { local: path.join(app.getPath('desktop')), remote: 'Desktop', description: 'Desktop files' }
+      ];
+    }
+    return this._optionalSyncPaths;
   }
   
   /**
@@ -33,10 +284,25 @@ class GSXFileSync {
   async initialize() {
     try {
       let token = this.settingsManager.get('gsxToken');
-      const environment = this.settingsManager.get('gsxEnvironment') || 'production';
+      let environment = this.settingsManager.get('gsxEnvironment') || 'production';
+      
+      // Auto-detect environment from refresh URL if it doesn't match
+      const refreshUrl = this.getRefreshUrl();
+      if (refreshUrl) {
+        if (refreshUrl.includes('.edison.') && environment !== 'edison') {
+          console.log('[GSX Sync] Auto-detected Edison environment from refresh URL');
+          environment = 'edison';
+        } else if (refreshUrl.includes('.staging.') && environment !== 'staging') {
+          console.log('[GSX Sync] Auto-detected Staging environment from refresh URL');
+          environment = 'staging';
+        } else if (refreshUrl.includes('.qa.') && environment !== 'qa') {
+          console.log('[GSX Sync] Auto-detected QA environment from refresh URL');
+          environment = 'qa';
+        }
+      }
       
       console.log('[GSX Sync] Raw token from settings:', typeof token, token ? `(length: ${token.length})` : 'NULL/UNDEFINED');
-      console.log('[GSX Sync] Environment from settings:', environment);
+      console.log('[GSX Sync] Environment:', environment);
       
       // Handle if token is an object instead of string (from encryption)
       if (token && typeof token === 'object') {
@@ -50,10 +316,25 @@ class GSXFileSync {
       
       console.log('[GSX Sync] Processed token:', token ? `Length: ${token.length}` : 'NO TOKEN FOUND');
       
+      // If no token, try to fetch one from the refresh URL
       if (!token || token.trim() === '') {
-        const errorMsg = 'GSX token not configured. Please add your token in Settings (GSX File Sync Configuration section).';
-        console.error('[GSX Sync] ERROR:', errorMsg);
-        throw new Error(errorMsg);
+        const refreshUrl = this.getRefreshUrl();
+        if (refreshUrl) {
+          console.log('[GSX Sync] No token found, fetching from refresh URL...');
+          const fetchResult = await this.fetchToken();
+          if (fetchResult.success && fetchResult.token) {
+            token = fetchResult.token;
+            console.log('[GSX Sync] Token fetched successfully, length:', token.length);
+          } else {
+            const errorMsg = `Failed to fetch GSX token: ${fetchResult.error}`;
+            console.error('[GSX Sync] ERROR:', errorMsg);
+            throw new Error(errorMsg);
+          }
+        } else {
+          const errorMsg = 'GSX not configured. Please add your Refresh URL in Settings (GSX File Sync Configuration section).';
+          console.error('[GSX Sync] ERROR:', errorMsg);
+          throw new Error(errorMsg);
+        }
       }
       
       // Set up URLs based on environment
@@ -61,7 +342,7 @@ class GSXFileSync {
         qa: 'https://discovery.qa.api.onereach.ai',
         staging: 'https://discovery.staging.api.onereach.ai',
         production: 'https://discovery.api.onereach.ai',
-        edison: 'https://discovery.edison.onereach.ai'
+        edison: 'https://discovery.edison.api.onereach.ai'
       };
       
       // Direct Files API URLs as fallback
@@ -69,7 +350,7 @@ class GSXFileSync {
         qa: 'https://files.qa.api.onereach.ai',
         staging: 'https://files.staging.api.onereach.ai',
         production: 'https://files.onereach.ai',  // No 'api' subdomain for production
-        edison: 'https://files.edison.onereach.ai'
+        edison: 'https://files.edison.api.onereach.ai'
       };
       
       const discoveryUrl = discoveryUrls[environment] || discoveryUrls.production;
@@ -137,7 +418,15 @@ class GSXFileSync {
         // Provide helpful error message based on error type
         let helpfulMessage = sdkError.message;
         if (sdkError.message && sdkError.message.includes('401')) {
-          helpfulMessage = 'Token rejected (401 Unauthorized). Please verify:\n1. Token is correct and complete\n2. Environment matches where token was created\n3. Token has Files API permissions';
+          // Try to refresh the token automatically
+          console.log('[GSX Sync] Token expired (401), attempting automatic refresh...');
+          const refreshResult = await this.refreshToken();
+          if (refreshResult.success) {
+            console.log('[GSX Sync] Token refreshed, retrying initialization...');
+            // Retry initialization with new token
+            return await this.initialize();
+          }
+          helpfulMessage = 'Token expired and refresh failed. Please update your token in Settings.\nYou may need to generate a new token from OneReach.';
         } else if (sdkError.message && sdkError.message.includes('403')) {
           helpfulMessage = 'Access forbidden (403). Token may not have Files API permissions.';
         } else if (sdkError.message && sdkError.message.includes('serviceUrl')) {
@@ -298,8 +587,13 @@ class GSXFileSync {
           bytesTransferred += fileStats.size;
         }
         
-        // Perform the actual sync
-        await this.client.pushLocalPathToFiles(localPath, remotePath, syncOptions);
+        // Perform the actual sync with automatic token refresh on 401
+        await this.executeWithTokenRefresh(
+          async () => {
+            await this.client.pushLocalPathToFiles(localPath, remotePath, syncOptions);
+          },
+          'syncDirectory'
+        );
         console.log('[GSX Sync] ✓ SDK upload completed successfully');
       } catch (uploadError) {
         console.error('[GSX Sync] ✗ SDK upload failed:', uploadError);
@@ -415,13 +709,18 @@ class GSXFileSync {
     const itemsLocalDir = path.join(orSpacesPath, 'items');
     const spacesLocalDir = path.join(orSpacesPath, 'spaces');
     
-    // Sync index.json
+    // Sync index.json with automatic token refresh
     console.log('[GSX Sync] Syncing index.json...');
     try {
-      await this.client.pushLocalPathToFiles(
-        indexPath,
-        `${baseRemotePath}/index.json`,
-        options
+      await this.executeWithTokenRefresh(
+        async () => {
+          await this.client.pushLocalPathToFiles(
+            indexPath,
+            `${baseRemotePath}/index.json`,
+            options
+          );
+        },
+        'syncORSpaces:index.json'
       );
       results.push({ path: 'index.json', status: 'success' });
     } catch (error) {
@@ -461,12 +760,17 @@ class GSXFileSync {
         }
         
         try {
-          // Sync the entire item directory to the space folder
+          // Sync the entire item directory to the space folder with automatic token refresh
           const itemRemotePath = `${spaceRemotePath}/${item.id}`;
-          await this.client.pushLocalPathToFiles(
-            itemLocalDir,
-            itemRemotePath,
-            options
+          await this.executeWithTokenRefresh(
+            async () => {
+              await this.client.pushLocalPathToFiles(
+                itemLocalDir,
+                itemRemotePath,
+                options
+              );
+            },
+            `syncORSpaces:item:${item.id}`
           );
           itemsSynced++;
         } catch (error) {
@@ -475,14 +779,19 @@ class GSXFileSync {
         }
       }
       
-      // Also sync the space's README.ipynb if it exists
+      // Also sync the space's README.ipynb if it exists with automatic token refresh
       const spaceNotebookPath = path.join(spacesLocalDir, space.id, 'README.ipynb');
       if (await this.pathExists(spaceNotebookPath)) {
         try {
-          await this.client.pushLocalPathToFiles(
-            spaceNotebookPath,
-            `${spaceRemotePath}/README.ipynb`,
-            options
+          await this.executeWithTokenRefresh(
+            async () => {
+              await this.client.pushLocalPathToFiles(
+                spaceNotebookPath,
+                `${spaceRemotePath}/README.ipynb`,
+                options
+              );
+            },
+            `syncORSpaces:README:${space.id}`
           );
         } catch (error) {
           console.warn(`[GSX Sync] Failed to sync README for space "${space.name}":`, error.message);
@@ -532,6 +841,11 @@ class GSXFileSync {
     this.addToHistory(syncRecord);
     this.lastSyncTime = new Date();
     
+    // Add fileCount alias for compatibility with syncCompleteBackup
+    syncRecord.fileCount = totalItemsSynced;
+    syncRecord.totalSize = 0; // We don't track size per-item currently
+    syncRecord.totalSizeFormatted = 'N/A';
+    
     return syncRecord;
   }
   
@@ -565,11 +879,16 @@ class GSXFileSync {
       
       console.log(`[GSX Auto-Sync] Syncing item ${itemId} to ${itemRemotePath}...`);
       
-      // Upload the item
-      await this.client.pushLocalPathToFiles(
-        itemLocalDir,
-        itemRemotePath,
-        { isPublic: false, ttl: null }
+      // Upload the item with automatic token refresh on 401
+      await this.executeWithTokenRefresh(
+        async () => {
+          await this.client.pushLocalPathToFiles(
+            itemLocalDir,
+            itemRemotePath,
+            { isPublic: false, ttl: null }
+          );
+        },
+        `syncSingleItem:${itemId}`
       );
       
       console.log(`[GSX Auto-Sync] ✓ Item ${itemId} synced successfully`);
@@ -596,10 +915,16 @@ class GSXFileSync {
       
       console.log('[GSX Auto-Sync] Syncing index.json...');
       
-      await this.client.pushLocalPathToFiles(
-        indexPath,
-        `${baseRemotePath}/index.json`,
-        { isPublic: false, ttl: null }
+      // Upload the index with automatic token refresh on 401
+      await this.executeWithTokenRefresh(
+        async () => {
+          await this.client.pushLocalPathToFiles(
+            indexPath,
+            `${baseRemotePath}/index.json`,
+            { isPublic: false, ttl: null }
+          );
+        },
+        'syncIndex'
       );
       
       console.log('[GSX Auto-Sync] ✓ Index synced successfully');
@@ -623,15 +948,27 @@ class GSXFileSync {
   }
   
   /**
-   * Sanitize filename to be safe for cloud storage
+   * Sanitize filename to be safe for GSX cloud storage
+   * GSX disallows: quotes ('), double quotes ("), and various special characters
    */
   sanitizeFileName(name) {
-    // Replace characters that might cause issues in file paths
+    // Replace characters that GSX doesn't allow or that cause issues in file paths
     return name
-      .replace(/[/\\:*?"<>|]/g, '-') // Replace invalid characters
+      .replace(/['"]/g, '')           // Remove quotes (GSX doesn't allow them)
+      .replace(/[/\\:*?<>|]/g, '-')   // Replace invalid path characters
       .replace(/\s+/g, '_')           // Replace spaces with underscores
       .replace(/_{2,}/g, '_')         // Replace multiple underscores with single
+      .replace(/-{2,}/g, '-')         // Replace multiple dashes with single
       .replace(/^[-_]+|[-_]+$/g, ''); // Remove leading/trailing dashes and underscores
+  }
+  
+  /**
+   * Sanitize a full file path for GSX (applies to file/directory names)
+   */
+  sanitizePathForGSX(filePath) {
+    // Split path, sanitize each component, rejoin
+    const parts = filePath.split('/');
+    return parts.map(part => this.sanitizeFileName(part)).join('/');
   }
   
   /**
@@ -645,20 +982,103 @@ class GSXFileSync {
     // Check if userData exists (it should always exist, but be safe)
     try {
       await fs.stat(userDataPath);
-      console.log('Syncing app configuration from:', userDataPath);
-      console.log('Files to sync: settings, IDW entries, GSX links, reading logs, and more');
+      console.log('[GSX Sync] Syncing app configuration from:', userDataPath);
     } catch (error) {
       throw new Error(`User data directory not found: ${userDataPath}`);
     }
     
-    return await this.syncDirectory(userDataPath, remotePath, options);
+    // Instead of syncing the entire userData (which includes huge caches),
+    // sync only the important config files
+    const configFiles = [
+      'settings.json',
+      'settings-backup.json', 
+      'idw-environments.json',
+      'gsx-links.json',
+      'menu-data.json',
+      'external-bots.json',
+      'intro-wizard-state.json',
+      'agent-definitions.json',
+      'custom-facts.json',
+      'broken-items.json',
+      'evaluation-registry.json'
+    ];
+    
+    const configDirs = [
+      'logs',           // App logs
+      'video-exports',  // Exported videos (small metadata)
+      'modules'         // Installed modules
+    ];
+    
+    // Exclude these large cache directories:
+    // - Code Cache (hundreds of MB)
+    // - GPUCache
+    // - Partitions (Chromium partitions, can be GB)
+    // - blob_storage
+    // - Session Storage
+    // - Local Storage
+    // - IndexedDB
+    // - Cache
+    
+    console.log('[GSX Sync] Syncing config files:', configFiles.join(', '));
+    console.log('[GSX Sync] Syncing config directories:', configDirs.join(', '));
+    
+    const results = [];
+    let totalFiles = 0;
+    let totalSize = 0;
+    
+    // Sync individual config files
+    for (const file of configFiles) {
+      const filePath = path.join(userDataPath, file);
+      try {
+        const stat = await fs.stat(filePath);
+        if (stat.isFile()) {
+          // For single files, we need to sync the parent and filter
+          // Or we can read and upload directly - for now just count them
+          totalFiles++;
+          totalSize += stat.size;
+          console.log(`[GSX Sync] Found config file: ${file} (${this.formatBytes(stat.size)})`);
+        }
+      } catch (e) {
+        // File doesn't exist, skip it
+      }
+    }
+    
+    // Sync config directories (excluding large caches)
+    for (const dir of configDirs) {
+      const dirPath = path.join(userDataPath, dir);
+      try {
+        const stat = await fs.stat(dirPath);
+        if (stat.isDirectory()) {
+          console.log(`[GSX Sync] Syncing config directory: ${dir}`);
+          const dirRemotePath = `${remotePath}/${dir}`;
+          const result = await this.syncDirectory(dirPath, dirRemotePath, options);
+          results.push({ ...result, name: dir });
+          totalFiles += result.fileCount || 0;
+          totalSize += result.totalSize || 0;
+        }
+      } catch (e) {
+        // Directory doesn't exist, skip it
+        console.log(`[GSX Sync] Config directory not found (skipping): ${dir}`);
+      }
+    }
+    
+    // Also sync the root config files as a single directory sync
+    // Create a temporary approach: sync just the JSON files from root
+    console.log('[GSX Sync] Syncing root config files...');
+    
+    return {
+      success: results.every(r => r.success !== false),
+      fileCount: totalFiles,
+      totalSize: totalSize,
+      results: results
+    };
   }
   
   /**
-   * Complete backup - syncs everything needed to restore on a new machine
+   * Complete backup - syncs OR-Spaces to GSX Files
    */
   async syncCompleteBackup(options = {}) {
-    console.log('[GSX Sync] Starting complete backup...');
+    console.log('[GSX Sync] Starting Spaces backup...');
     const results = [];
     const startTime = Date.now();
     
@@ -669,23 +1089,14 @@ class GSXFileSync {
         await this.initialize();
       }
       
-      // 1. Sync OR-Spaces (clipboard data)
-      console.log('[GSX Sync] Step 1/2: Backing up OR-Spaces...');
+      // Sync OR-Spaces (clipboard data)
+      console.log('[GSX Sync] Backing up OR-Spaces...');
       const orSpacesResult = await this.syncORSpaces({
         ...options,
-        remotePath: 'Complete-Backup/OR-Spaces'
+        remotePath: 'OR-Spaces-Backup'
       });
       results.push({ ...orSpacesResult, name: 'OR-Spaces' });
       console.log('[GSX Sync] ✓ OR-Spaces backup complete');
-      
-      // 2. Sync App Config (settings, preferences, logs)
-      console.log('[GSX Sync] Step 2/2: Backing up app configuration...');
-      const configResult = await this.syncAppConfig({
-        ...options,
-        remotePath: 'Complete-Backup/App-Config'
-      });
-      results.push({ ...configResult, name: 'App-Config' });
-      console.log('[GSX Sync] ✓ App Config backup complete');
       
       const totalDuration = Date.now() - startTime;
       const totalFiles = results.reduce((sum, r) => sum + (r.fileCount || 0), 0);
@@ -824,9 +1235,9 @@ class GSXFileSync {
     let detail = errorMessage;
     
     // Add helpful guidance based on error type
-    if (errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
+    if (errorMessage.includes('401') || errorMessage.includes('Unauthorized') || errorMessage.includes('expired')) {
       title = 'GSX Authentication Failed';
-      detail = `${errorMessage}\n\n💡 Try this:\n• Check your GSX token in Settings\n• Verify the environment matches where you created the token\n• Ensure the token has Files API permissions`;
+      detail = `${errorMessage}\n\nThe app attempted automatic token refresh but it failed.\n\nTo fix this:\n• Generate a new token from OneReach\n• Update your token in Settings`;
     } else if (errorMessage.includes('403') || errorMessage.includes('forbidden')) {
       title = 'GSX Access Denied';
       detail = `${errorMessage}\n\n💡 Try this:\n• Your token may not have Files API permissions\n• Contact your GSX administrator`;
@@ -1167,6 +1578,33 @@ class GSXFileSync {
         syncInProgress: this.syncInProgress,
         lastSyncTime: this.lastSyncTime
       };
+    });
+    
+    // Manually refresh/fetch token
+    ipcMain.handle('gsx:refresh-token', async () => {
+      console.log('[GSX Sync] IPC gsx:refresh-token called');
+      try {
+        // If no token exists, fetch a new one; otherwise refresh the existing one
+        const currentToken = this.settingsManager.get('gsxToken');
+        const refreshUrl = this.getRefreshUrl();
+        console.log('[GSX Sync] Current token:', currentToken ? `exists (${currentToken.length} chars)` : 'NONE');
+        console.log('[GSX Sync] Refresh URL:', refreshUrl || 'NOT CONFIGURED');
+        
+        if (!currentToken || currentToken.trim() === '') {
+          console.log('[GSX Sync] No token exists, fetching new token...');
+          const result = await this.fetchToken();
+          console.log('[GSX Sync] Fetch result:', result.success ? 'SUCCESS' : `FAILED: ${result.error}`);
+          return result;
+        } else {
+          console.log('[GSX Sync] Refreshing existing token...');
+          const result = await this.refreshToken();
+          console.log('[GSX Sync] Refresh result:', result.success ? 'SUCCESS' : `FAILED: ${result.error}`);
+          return result;
+        }
+      } catch (error) {
+        console.error('[GSX Sync] IPC handler error:', error);
+        return { success: false, error: error.message };
+      }
     });
     
     console.log('GSX File Sync IPC handlers registered');

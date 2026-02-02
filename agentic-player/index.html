@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agentic Video Player</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <span class="logo-icon">🤖</span>
+        <span class="logo-text">Agentic Player</span>
+      </div>
+      <div class="session-info" id="sessionInfo">
+        <span class="session-status" id="sessionStatus">Ready</span>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- Video Player Section -->
+      <div class="player-section">
+        <div class="video-container" id="videoContainer">
+          <video id="videoPlayer" playsinline>
+            Your browser does not support video playback.
+          </video>
+          <div class="video-overlay" id="videoOverlay">
+            <div class="overlay-content">
+              <div class="overlay-icon">🤖</div>
+              <div class="overlay-text">Enter a prompt to begin</div>
+            </div>
+          </div>
+          <!-- Scene Info Overlay -->
+          <div class="scene-info-overlay hidden" id="sceneInfoOverlay">
+            <div class="current-scene-badge">
+              <span class="scene-number" id="currentSceneNumber">1</span>
+              <span class="scene-name" id="currentSceneName">Scene Name</span>
+            </div>
+          </div>
+          <!-- AI Thinking Overlay -->
+          <div class="ai-thinking-overlay hidden" id="aiThinkingOverlay">
+            <div class="thinking-content">
+              <div class="thinking-spinner"></div>
+              <div class="thinking-text">AI selecting next scene...</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Video Controls -->
+        <div class="video-controls">
+          <div class="progress-container">
+            <div class="scene-markers" id="sceneMarkers"></div>
+            <div class="progress-bar" id="progressBar">
+              <div class="progress-played" id="progressPlayed"></div>
+            </div>
+          </div>
+          <div class="controls-row">
+            <div class="controls-left">
+              <button class="control-btn" id="playPauseBtn" onclick="player.togglePlay()">▶️</button>
+              <span class="time-display">
+                <span id="currentTime">0:00</span> / <span id="totalTime">0:00</span>
+              </span>
+            </div>
+            <div class="controls-center">
+              <span class="scenes-progress">
+                Scene <span id="sceneIndex">0</span> of <span id="totalScenes">0</span>
+              </span>
+            </div>
+            <div class="controls-right">
+              <button class="control-btn" onclick="player.skipClip()" title="Skip to next clip">⏭️</button>
+              <button class="control-btn" onclick="player.toggleMute()" id="muteBtn">🔊</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sidebar -->
+      <aside class="sidebar">
+        <!-- Session Setup -->
+        <div class="sidebar-section" id="setupSection">
+          <div class="section-title">🎯 Session Goal</div>
+          <div class="prompt-input-container">
+            <textarea id="sessionPrompt" class="prompt-input" rows="3" 
+              placeholder="What would you like to see?&#10;e.g., 'Give me a 3-minute product overview' or 'Show me the key highlights'"></textarea>
+          </div>
+          <div class="session-options">
+            <div class="option-row">
+              <label>Time limit:</label>
+              <select id="timeLimit">
+                <option value="0">No limit</option>
+                <option value="60">1 minute</option>
+                <option value="120">2 minutes</option>
+                <option value="300" selected>5 minutes</option>
+                <option value="600">10 minutes</option>
+              </select>
+            </div>
+            <div class="option-row">
+              <label>
+                <input type="checkbox" id="showReasoning" checked>
+                Show AI reasoning
+              </label>
+            </div>
+          </div>
+          <button class="start-btn" id="startBtn" onclick="player.startSession()">
+            🚀 Start Session
+          </button>
+        </div>
+
+        <!-- Now Playing -->
+        <div class="sidebar-section hidden" id="nowPlayingSection">
+          <div class="section-title">▶️ Now Playing</div>
+          <div class="now-playing-card" id="nowPlayingCard">
+            <div class="np-scene-name" id="npSceneName">-</div>
+            <div class="np-scene-time" id="npSceneTime">0:00 - 0:00</div>
+            <div class="np-description" id="npDescription"></div>
+          </div>
+        </div>
+
+        <!-- AI Reasoning -->
+        <div class="sidebar-section hidden" id="reasoningSection">
+          <div class="section-title">🤖 AI Reasoning</div>
+          <div class="reasoning-log" id="reasoningLog">
+            <!-- AI decisions will appear here -->
+          </div>
+        </div>
+
+        <!-- Playlist Queue -->
+        <div class="sidebar-section" id="queueSection">
+          <div class="section-title">
+            📋 Scene Queue
+            <span class="queue-count" id="queueCount">0</span>
+          </div>
+          <div class="queue-list" id="queueList">
+            <div class="queue-empty">AI will build the queue as you watch</div>
+          </div>
+        </div>
+
+        <!-- Session Controls -->
+        <div class="sidebar-section hidden" id="sessionControls">
+          <button class="btn btn-secondary" onclick="player.endSession('User ended session')" style="width: 100%;">
+            ⏹️ End Session
+          </button>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <!-- 
+    ╔══════════════════════════════════════════════════════════════╗
+    ║                    AGENTIC PLAYER CONFIG                      ║
+    ╠══════════════════════════════════════════════════════════════╣
+    ║  Set your API endpoint below. The player will:               ║
+    ║  1. POST to your API with prompt + session context           ║
+    ║  2. Receive batches of clips with video URLs                 ║
+    ║  3. Play seamlessly, pre-fetching before queue empties       ║
+    ║  4. Stop when API returns done: true                         ║
+    ╚══════════════════════════════════════════════════════════════╝
+    
+    REQUEST (POST):
+    {
+      "prompt": "Show me the highlights",
+      "sessionId": "session_123_abc",
+      "watchedIds": [1, 2, 3],
+      "timeWatched": 120,
+      "timeLimit": 300,
+      "queueLength": 1,
+      "context": { ...your custom data... }
+    }
+    
+    RESPONSE:
+    {
+      "scenes": [
+        {
+          "id": "clip-1",
+          "name": "Introduction",
+          "videoUrl": "https://cdn.example.com/intro.mp4",
+          "inTime": 0,
+          "outTime": 30,
+          "description": "Welcome overview"
+        }
+      ],
+      "reasoning": "Starting with the intro",
+      "done": false
+    }
+    
+    END PLAYBACK:
+    {
+      "scenes": [],
+      "done": true,
+      "endMessage": "You've seen all the highlights!"
+    }
+  -->
+  <script>
+    window.AGENTIC_PLAYER_CONFIG = {
+      // REQUIRED: Your playlist API endpoint
+      apiEndpoint: null,  // e.g., 'https://api.yoursite.com/playlist'
+      
+      // Optional: API authentication
+      apiKey: null,
+      
+      // Optional: Additional headers
+      apiHeaders: {},
+      
+      // Optional: Custom context sent with each request
+      context: {},
+      
+      // Optional: Pre-fetch when this many clips remain (default: 2)
+      prefetchWhenRemaining: 2,
+      
+      // Optional: Seconds before clip ends to check queue (default: 5)
+      prefetchThreshold: 5
+    };
+  </script>
+  <script src="player.js"></script>
+</body>
+</html>
+

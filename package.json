@@ -1,11 +1,12 @@
 {
-  "name": "onereach-ai",
+  "name": "gsx-power-user",
   "productName": "Onereach.ai",
-  "version": "1.6.30",
-  "description": "Onereach.ai Desktop Application",
+  "version": "3.12.0",
+  "description": "GSX Power User Desktop Application",
   "main": "main.js",
   "icon": "assets/icon.icns",
   "scripts": {
+    "postinstall": "node scripts/download-claude-code.js",
     "start": "electron .",
     "dev": "NODE_ENV=development npx electron .",
     "dev:win": "set NODE_ENV=development && npx electron .",
@@ -17,34 +18,71 @@
     "package:win:arm64": "npx electron-builder build --win arm64 --publish never",
     "package:win:x64": "npx electron-builder build --win x64 --publish never",
     "package:universal": "npx electron-builder build --mac universal --win arm64,x64 --publish never",
+    "package:mac:universal": "npx electron-builder build --mac --universal --publish never",
     "publish": "npx electron-builder build --mac --win --publish always",
     "publish:mac": "npx electron-builder build --mac --publish always",
     "publish:win": "npx electron-builder build --win --publish always",
     "publish:github": "npx electron-builder build --mac --win --publish always --publish-config publish.json",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:unit": "vitest run --exclude='**/*.eval.*'",
+    "test:evals": "vitest run --include='**/*.eval.*'",
+    "test:e2e": "playwright test",
+    "test:e2e:ai-conversation": "TEST_MODE=true playwright test test/e2e/ai-conversation-capture.spec.js",
+    "test:e2e:ai-conversation:headed": "TEST_MODE=true playwright test test/e2e/ai-conversation-capture.spec.js --headed",
+    "test:e2e:ai-conversation:debug": "TEST_MODE=true PWDEBUG=1 playwright test test/e2e/ai-conversation-capture.spec.js",
+    "test:e2e:ai-conversation:smoke": "TEST_MODE=true playwright test test/e2e/ai-conversation-smoke.spec.js",
+    "test:coverage": "vitest run --coverage",
+    "test:all": "npm run test && npm run test:e2e",
+    "test:bidding": "vitest run test/unit/distributed-bidding.test.js",
+    "test:bidding:watch": "vitest watch test/unit/distributed-bidding.test.js",
+    "test:corpus": "node test/corpus/bidding-test-corpus.js",
+    "test:corpus:llm": "node test/corpus/llm-bidding-test-corpus.js",
     "test:wizard": "electron test/setup-wizard-test-suite.js",
     "test:external-ai": "electron test/external-ai-test-suite.js",
     "test:external-ai-interactive": "electron test/external-ai-interactive-test.js",
     "test:idw": "electron test/run-idw-tests.js",
     "test:gsx-sync": "node test/test-gsx-sync.js",
     "test:blackhole": "node test-black-hole.js",
+    "test:metadata": "node test/test-metadata-generation.js",
+    "test:metadata-api": "node test/test-metadata-api-integration.js",
     "dist": "electron-builder",
+    "download-claude": "node scripts/download-claude-code.js",
+    "download-claude:all": "node scripts/download-claude-code.js --all",
     "build:signed": "./scripts/build-signed.sh",
     "build:signed:skip-notarize": "./scripts/build-signed.sh --skip-notarize",
     "release": "./scripts/release-master.sh",
     "release:quick": "./scripts/release-master.sh --quick"
   },
   "build": {
-    "appId": "com.onereach.app",
+    "appId": "com.gsx.poweruser",
     "productName": "Onereach.ai",
+    "asarUnpack": [
+      "aider_bridge/**/*"
+    ],
     "files": [
       "**/*",
       "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
       "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}",
       "!**/node_modules/*.d.ts",
       "!**/node_modules/.bin",
-      "!**/.{idea,git,github,vscode}/**",
-      "!**/{.DS_Store,.git,.gitignore,.npmignore}"
+      "!**/.{idea,git,github,vscode,cursor}/**",
+      "!**/{.DS_Store,.git,.gitignore,.npmignore}",
+      "!test/**/*",
+      "!test-black-hole*.js",
+      "!test-api-*.js",
+      "!test-electron-*.js",
+      "!test-elevenlabs-*.js",
+      "!test-idw-*.js",
+      "!test-multimodal-*.js",
+      "!test-onereach-*.js",
+      "!test-sync-*.js",
+      "!test-token-*.js",
+      "!test-local-*.sh",
+      "!*.sh",
+      "!api-*.json",
+      "!example-module/**/*",
+      "!test-update-server/**/*"
     ],
     "mac": {
       "category": "public.app-category.productivity",
@@ -58,8 +96,9 @@
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
-      "notarize": false
+      "notarize": true
     },
+    "afterSign": "scripts/notarize.js",
     "win": {
       "icon": "assets/tray-icon.png",
       "target": [
@@ -94,11 +133,20 @@
     "directories": {
       "output": "dist"
     },
+    "extraResources": [
+      {
+        "from": "resources/claude-code/${platform}-${arch}",
+        "to": "claude-code/${platform}-${arch}",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
     "publish": [
       {
         "provider": "github",
         "owner": "wilsr7000",
-        "repo": "onereach_desktop",
+        "repo": "Onereach_Desktop_App",
         "releaseType": "release"
       }
     ]
@@ -108,7 +156,7 @@
     "onereach",
     "ai"
   ],
-  "author": "",
+  "author": "Onereach.ai",
   "license": "ISC",
   "repository": {
     "type": "git",
@@ -116,19 +164,39 @@
   },
   "devDependencies": {
     "@electron/notarize": "^3.0.1",
-    "electron": "^35.1.2",
-    "electron-builder": "^24.9.1"
+    "@playwright/test": "^1.57.0",
+    "@vitest/coverage-v8": "^4.0.16",
+    "electron": "39.2.7",
+    "electron-builder": "^24.9.1",
+    "husky": "^9.1.7",
+    "promptfoo": "^0.120.11",
+    "vitest": "^4.0.16",
+    "vitest-evals": "^0.5.0"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.0",
+    "@duckdb/node-api": "^1.4.2-r.1",
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "@ffprobe-installer/ffprobe": "^2.1.2",
     "@or-sdk/files-sync-node": "^0.0.4",
+    "7zip-bin": "^5.2.0",
     "archiver": "^7.0.1",
-    "electron-clipboard-extended": "^1.1.1",
+    "docx": "^9.5.1",
     "electron-log": "^5.3.3",
     "electron-updater": "^6.6.2",
+    "exceljs": "^4.4.0",
+    "fluent-ffmpeg": "^2.1.3",
+    "jsqr": "^1.4.0",
+    "keytar": "^7.9.0",
+    "mammoth": "^1.11.0",
+    "node-pty": "^1.1.0",
+    "otplib": "^13.2.1",
     "playwright": "^1.40.1",
-    "plist": "^3.1.0",
-    "simple-peer": "^9.11.1",
+    "pptxgenjs": "^4.0.1",
+    "puppeteer": "^24.31.0",
     "unzipper": "^0.10.14",
-    "ws": "^8.17.0"
+    "xterm": "^5.3.0",
+    "xterm-addon-fit": "^0.8.0",
+    "youtube-dl-exec": "^3.0.10"
   }
 }

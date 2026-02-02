@@ -2,6 +2,861 @@ const { app, Menu, shell, BrowserWindow, globalShortcut, ipcMain } = require('el
 const fs = require('fs');
 const path = require('path');
 
+// ============================================
+// GSX WINDOW TRACKING
+// ============================================
+// Track all GSX windows to ensure proper cleanup on quit
+const gsxWindows = [];
+
+/**
+ * Register a GSX window for tracking
+ * @param {BrowserWindow} window - The window to track
+ * @param {string} title - Window title for debugging
+ */
+function registerGSXWindow(window, title) {
+  gsxWindows.push({ window, title, created: Date.now() });
+  console.log(`[GSX Windows] Registered: ${title} (Total: ${gsxWindows.length})`);
+  
+  // Remove from tracking when closed
+  window.once('closed', () => {
+    const index = gsxWindows.findIndex(w => w.window === window);
+    if (index !== -1) {
+      gsxWindows.splice(index, 1);
+      console.log(`[GSX Windows] Unregistered: ${title} (Remaining: ${gsxWindows.length})`);
+    }
+  });
+}
+
+/**
+ * Force close all tracked GSX windows
+ * Used during app quit to prevent zombie windows
+ */
+function closeAllGSXWindows() {
+  console.log(`[GSX Windows] Force closing ${gsxWindows.length} windows`);
+  
+  gsxWindows.forEach(({ window, title }) => {
+    if (!window.isDestroyed()) {
+      console.log(`[GSX Windows] Destroying: ${title}`);
+      try {
+        window.destroy();
+      } catch (error) {
+        console.error(`[GSX Windows] Error destroying ${title}:`, error);
+      }
+    }
+  });
+  
+  gsxWindows.length = 0; // Clear array
+}
+
+// ============================================
+// PERFORMANCE: Menu data caching
+// ============================================
+// Cache menu configuration data to avoid repeated file I/O
+const menuCache = {
+  idwEnvironments: null,
+  gsxLinks: null,
+  externalBots: null,
+  imageCreators: null,
+  videoCreators: null,
+  audioGenerators: null,
+  uiDesignTools: null,
+  userPrefs: null,
+  lastLoaded: 0,
+  cacheValidMs: 60000, // Cache valid for 60 seconds
+  
+  // Check if cache is still valid
+  isValid() {
+    return this.lastLoaded > 0 && (Date.now() - this.lastLoaded) < this.cacheValidMs;
+  },
+  
+  // Invalidate cache (call when files are updated)
+  invalidate() {
+    this.lastLoaded = 0;
+    console.log('[Menu Cache] Cache invalidated');
+  },
+  
+  // Load all menu data with caching
+  loadAll() {
+    if (this.isValid()) {
+      console.log('[Menu Cache] Using cached menu data');
+      return {
+        idwEnvironments: this.idwEnvironments || [],
+        gsxLinks: this.gsxLinks || [],
+        externalBots: this.externalBots || [],
+        imageCreators: this.imageCreators || [],
+        videoCreators: this.videoCreators || [],
+        audioGenerators: this.audioGenerators || [],
+        uiDesignTools: this.uiDesignTools || [],
+        userPrefs: this.userPrefs || {}
+      };
+    }
+    
+    console.log('[Menu Cache] Loading menu data from files...');
+    const startTime = Date.now();
+    
+    try {
+      const electronApp = require('electron').app;
+      const userDataPath = electronApp.getPath('userData');
+      
+      // Load all files
+      this.idwEnvironments = this._loadJsonFile(path.join(userDataPath, 'idw-entries.json'), []);
+      this.gsxLinks = this._loadJsonFile(path.join(userDataPath, 'gsx-links.json'), []);
+      this.externalBots = this._loadJsonFile(path.join(userDataPath, 'external-bots.json'), []);
+      this.imageCreators = this._loadJsonFile(path.join(userDataPath, 'image-creators.json'), []);
+      this.videoCreators = this._loadJsonFile(path.join(userDataPath, 'video-creators.json'), []);
+      this.audioGenerators = this._loadJsonFile(path.join(userDataPath, 'audio-generators.json'), []);
+      this.uiDesignTools = this._loadJsonFile(path.join(userDataPath, 'ui-design-tools.json'), []);
+      this.userPrefs = this._loadJsonFile(path.join(userDataPath, 'user-preferences.json'), {});
+      
+      this.lastLoaded = Date.now();
+      console.log(`[Menu Cache] Loaded all menu data in ${Date.now() - startTime}ms`);
+      
+    } catch (error) {
+      console.error('[Menu Cache] Error loading menu data:', error);
+    }
+    
+    return {
+      idwEnvironments: this.idwEnvironments || [],
+      gsxLinks: this.gsxLinks || [],
+      externalBots: this.externalBots || [],
+      imageCreators: this.imageCreators || [],
+      videoCreators: this.videoCreators || [],
+      audioGenerators: this.audioGenerators || [],
+      uiDesignTools: this.uiDesignTools || [],
+      userPrefs: this.userPrefs || {}
+    };
+  },
+  
+  // Helper to load a JSON file with default value
+  _loadJsonFile(filePath, defaultValue) {
+    try {
+      if (fs.existsSync(filePath)) {
+        const data = fs.readFileSync(filePath, 'utf8');
+        return JSON.parse(data);
+      }
+    } catch (error) {
+      console.error(`[Menu Cache] Error loading ${filePath}:`, error.message);
+    }
+    return defaultValue;
+  }
+};
+
+// ============================================
+// RESILIENT AUTO-LOGIN SYSTEM
+// ============================================
+
+/**
+ * Custom error for window destruction during async operations
+ */
+class WindowDestroyedError extends Error {
+  constructor(message = 'Window was closed') {
+    super(message);
+    this.name = 'WindowDestroyedError';
+  }
+}
+
+/**
+ * Sleep utility for async delays
+ * @param {number} ms - Milliseconds to sleep
+ */
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Rate limit tracking for login attempts per environment
+ */
+const loginAttempts = new Map(); // environment -> { count, lastAttempt, lastSuccess }
+
+/**
+ * Check if we can attempt login (rate limit protection)
+ * @param {string} environment - The IDW environment
+ * @returns {{ allowed: boolean, waitMs?: number }}
+ */
+function canAttemptLogin(environment) {
+  const record = loginAttempts.get(environment) || { count: 0, lastAttempt: 0, lastSuccess: 0 };
+  
+  // Reset count if last success was recent (within 5 minutes)
+  if (record.lastSuccess > 0 && Date.now() - record.lastSuccess < 300000) {
+    return { allowed: true };
+  }
+  
+  // Exponential backoff: 5s, 10s, 15s, 20s, 25s, 30s (max)
+  const cooldown = Math.min(record.count * 5000, 30000);
+  
+  if (record.count > 0 && Date.now() - record.lastAttempt < cooldown) {
+    const waitMs = cooldown - (Date.now() - record.lastAttempt);
+    console.log(`[AutoLogin] Rate limited for ${environment}, wait ${Math.ceil(waitMs/1000)}s`);
+    return { allowed: false, waitMs };
+  }
+  return { allowed: true };
+}
+
+/**
+ * Record a login attempt
+ * @param {string} environment - The IDW environment
+ * @param {boolean} success - Whether the attempt succeeded
+ */
+function recordLoginAttempt(environment, success) {
+  const record = loginAttempts.get(environment) || { count: 0, lastAttempt: 0, lastSuccess: 0 };
+  
+  if (success) {
+    // Reset on success
+    loginAttempts.set(environment, { count: 0, lastAttempt: Date.now(), lastSuccess: Date.now() });
+  } else {
+    // Increment failure count
+    loginAttempts.set(environment, { 
+      count: record.count + 1, 
+      lastAttempt: Date.now(),
+      lastSuccess: record.lastSuccess 
+    });
+  }
+}
+
+/**
+ * Safe execution wrapper for executeJavaScript calls
+ * Handles window destruction, timeouts, and retries
+ * 
+ * @param {BrowserWindow} gsxWindow - The window to execute in
+ * @param {string} script - JavaScript to execute
+ * @param {Object} options - Options: timeout (ms), retries (count)
+ * @returns {Promise<any>} Result of script execution
+ * @throws {WindowDestroyedError} If window is closed
+ */
+async function safeExecute(gsxWindow, script, options = {}) {
+  const { timeout = 5000, retries = 1 } = options;
+  
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    // Check if window still exists
+    if (!gsxWindow || gsxWindow.isDestroyed()) {
+      throw new WindowDestroyedError('Window closed during operation');
+    }
+    
+    try {
+      // Race between execution and timeout
+      const result = await Promise.race([
+        gsxWindow.webContents.executeJavaScript(script),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Script execution timeout')), timeout)
+        )
+      ]);
+      return result;
+    } catch (err) {
+      // Check if window was destroyed during execution
+      if (gsxWindow.isDestroyed()) {
+        throw new WindowDestroyedError('Window closed during script execution');
+      }
+      
+      // If this was our last retry, throw the error
+      if (attempt === retries) {
+        console.error(`[SafeExecute] Failed after ${retries + 1} attempts:`, err.message);
+        throw err;
+      }
+      
+      // Wait briefly before retry
+      console.log(`[SafeExecute] Attempt ${attempt + 1} failed, retrying...`);
+      await sleep(100);
+    }
+  }
+}
+
+/**
+ * Safe execution wrapper for frame.executeJavaScript calls
+ * Similar to safeExecute but works with webFrameMain
+ * 
+ * @param {BrowserWindow} gsxWindow - The parent window (for destruction check)
+ * @param {WebFrameMain} frame - The frame to execute in
+ * @param {string} script - JavaScript to execute
+ * @param {Object} options - Options: timeout (ms), retries (count)
+ * @returns {Promise<any>} Result of script execution
+ */
+async function safeFrameExecute(gsxWindow, frame, script, options = {}) {
+  const { timeout = 5000, retries = 1 } = options;
+  
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    // Check if window still exists
+    if (!gsxWindow || gsxWindow.isDestroyed()) {
+      throw new WindowDestroyedError('Window closed during operation');
+    }
+    
+    // Check if frame is still valid
+    if (!frame || !frame.url) {
+      throw new Error('Frame is no longer valid');
+    }
+    
+    try {
+      const result = await Promise.race([
+        frame.executeJavaScript(script),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Frame script execution timeout')), timeout)
+        )
+      ]);
+      return result;
+    } catch (err) {
+      if (gsxWindow.isDestroyed()) {
+        throw new WindowDestroyedError('Window closed during frame script execution');
+      }
+      
+      if (attempt === retries) {
+        console.error(`[SafeFrameExecute] Failed after ${retries + 1} attempts:`, err.message);
+        throw err;
+      }
+      
+      console.log(`[SafeFrameExecute] Attempt ${attempt + 1} failed, retrying...`);
+      await sleep(100);
+    }
+  }
+}
+
+/**
+ * Update the status overlay in the GSX window
+ * @param {BrowserWindow} gsxWindow - The window
+ * @param {string} status - Status message to display
+ * @param {string} type - Type: 'loading', 'success', 'error', 'waiting'
+ * @param {Object} extra - Extra options: countdown, showRetry, showManual
+ */
+async function updateStatusOverlay(gsxWindow, status, type = 'loading', extra = {}) {
+  if (!gsxWindow || gsxWindow.isDestroyed()) return;
+  
+  const { countdown, showRetry, showManual } = extra;
+  
+  try {
+    await gsxWindow.webContents.executeJavaScript(`
+      (function() {
+        let overlay = document.getElementById('gsx-loading-overlay');
+        if (!overlay) {
+          // Create overlay if it doesn't exist
+          overlay = document.createElement('div');
+          overlay.id = 'gsx-loading-overlay';
+          document.body.appendChild(overlay);
+        }
+        
+        // Remove fade-out class if present
+        overlay.classList.remove('gsx-fade-out');
+        
+        const type = ${JSON.stringify(type)};
+        const status = ${JSON.stringify(status)};
+        const countdown = ${countdown || 'null'};
+        const showRetry = ${!!showRetry};
+        const showManual = ${!!showManual};
+        
+        let iconHtml = '';
+        if (type === 'loading' || type === 'waiting') {
+          iconHtml = '<div id="gsx-loading-spinner"></div>';
+        } else if (type === 'success') {
+          iconHtml = '<div style="font-size:48px;margin-bottom:20px;">&#10003;</div>';
+        } else if (type === 'error') {
+          iconHtml = '<div style="font-size:48px;margin-bottom:20px;color:#ff6b6b;">&#9888;</div>';
+        }
+        
+        let buttonsHtml = '';
+        if (showRetry || showManual) {
+          buttonsHtml = '<div style="display:flex;gap:12px;margin-top:20px;">';
+          if (showRetry) {
+            buttonsHtml += '<button onclick="window.__gsxRetryLogin && window.__gsxRetryLogin()" style="background:#4f8cff;color:white;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-size:14px;font-weight:500;">Try Again</button>';
+          }
+          if (showManual) {
+            buttonsHtml += '<button onclick="document.getElementById(\\'gsx-loading-overlay\\').classList.add(\\'gsx-fade-out\\')" style="background:transparent;color:rgba(255,255,255,0.7);border:1px solid rgba(255,255,255,0.3);padding:10px 24px;border-radius:6px;cursor:pointer;font-size:14px;">Login Manually</button>';
+          }
+          buttonsHtml += '</div>';
+        }
+        
+        let countdownHtml = '';
+        if (countdown !== null) {
+          countdownHtml = '<div style="margin-top:8px;font-size:24px;font-weight:600;">' + countdown + 's</div>';
+        }
+        
+        overlay.innerHTML = iconHtml + 
+          '<div id="gsx-loading-text">' + status + '</div>' +
+          '<div id="gsx-loading-status">' + (countdown !== null ? 'Fresh code in' : '') + '</div>' +
+          countdownHtml +
+          buttonsHtml;
+        
+        // Apply type-specific styling
+        const textEl = overlay.querySelector('#gsx-loading-text');
+        if (textEl) {
+          if (type === 'error') {
+            textEl.style.color = '#ff6b6b';
+          } else if (type === 'success') {
+            textEl.style.color = '#6bff8a';
+          } else {
+            textEl.style.color = 'rgba(255,255,255,0.9)';
+          }
+        }
+      })();
+    `);
+  } catch (err) {
+    // Silently ignore - overlay update is non-critical
+  }
+}
+
+/**
+ * Hide the status overlay with fade animation
+ * @param {BrowserWindow} gsxWindow - The window
+ * @param {boolean} showSuccess - Whether to briefly show success state first
+ */
+async function hideStatusOverlay(gsxWindow, showSuccess = false) {
+  if (!gsxWindow || gsxWindow.isDestroyed()) return;
+  
+  try {
+    if (showSuccess) {
+      await updateStatusOverlay(gsxWindow, 'Signed in!', 'success');
+      await sleep(800);
+    }
+    
+    await gsxWindow.webContents.executeJavaScript(`
+      const overlay = document.getElementById('gsx-loading-overlay');
+      if (overlay) {
+        overlay.classList.add('gsx-fade-out');
+        setTimeout(() => overlay.remove(), 300);
+      }
+    `);
+  } catch (err) {
+    // Silently ignore
+  }
+}
+
+/**
+ * Attempt auto-login for GSX windows with full resilience
+ * @param {BrowserWindow} gsxWindow - The GSX window
+ * @param {string} url - The current URL
+ * @param {Object} state - Auto-login state tracker
+ * @param {string} environment - The IDW environment
+ */
+async function attemptGSXAutoLogin(gsxWindow, url, state, environment) {
+  const credentialManager = require('./credential-manager');
+  const { TOTPManager } = require('./lib/totp-manager');
+  
+  console.log('[GSX AutoLogin] Attempting login for:', url);
+  
+  try {
+    // Check for window destruction
+    if (!gsxWindow || gsxWindow.isDestroyed()) {
+      console.log('[GSX AutoLogin] Window destroyed, aborting');
+      return;
+    }
+    
+    // Check rate limiting
+    const rateCheck = canAttemptLogin(environment);
+    if (!rateCheck.allowed) {
+      console.log(`[GSX AutoLogin] Rate limited, waiting ${Math.ceil(rateCheck.waitMs/1000)}s`);
+      await updateStatusOverlay(gsxWindow, `Please wait ${Math.ceil(rateCheck.waitMs/1000)}s...`, 'waiting');
+      await sleep(rateCheck.waitMs);
+    }
+    
+    // Get stored credentials
+    const credentials = await credentialManager.getOneReachCredentials();
+    if (!credentials || !credentials.email || !credentials.password) {
+      console.log('[GSX AutoLogin] No credentials stored, showing manual login option');
+      await updateStatusOverlay(gsxWindow, 'No saved credentials', 'error', { 
+        showManual: true 
+      });
+      state.inProgress = false;
+      return;
+    }
+    
+    // Update status
+    await updateStatusOverlay(gsxWindow, 'Signing in...', 'loading');
+    
+    // Check if window is still valid
+    if (gsxWindow.isDestroyed()) {
+      throw new WindowDestroyedError();
+    }
+    
+    // Find auth frame
+    const mainFrame = gsxWindow.webContents.mainFrame;
+    const allFrames = [mainFrame, ...mainFrame.framesInSubtree];
+    
+    let authFrame = null;
+    for (const frame of allFrames) {
+      if (frame.url && frame.url.includes('auth.') && frame.url.includes('onereach.ai')) {
+        authFrame = frame;
+        break;
+      }
+    }
+    
+    if (!authFrame) {
+      console.log('[GSX AutoLogin] No auth frame found');
+      state.inProgress = false;
+      await hideStatusOverlay(gsxWindow);
+      return;
+    }
+    
+    console.log('[GSX AutoLogin] Found auth frame:', authFrame.url);
+    
+    // Check what type of page we're on (login or 2FA)
+    const pageType = await safeFrameExecute(gsxWindow, authFrame, `
+      (function() {
+        const totpInput = document.querySelector('input[name="totp"], input[type="number"][maxlength="6"], input[autocomplete="one-time-code"]');
+        const emailInput = document.querySelector('input[type="email"], input[name="email"], input[autocomplete="email"]');
+        const passwordInput = document.querySelector('input[type="password"]');
+        
+        if (totpInput) {
+          return { is2FAPage: true, reason: 'totp_input_found' };
+        } else if (emailInput && passwordInput) {
+          return { isLoginPage: true, reason: 'login_form_found' };
+        } else if (emailInput) {
+          return { isLoginPage: true, reason: 'email_only' };
+        }
+        return { isLoginPage: false, is2FAPage: false, reason: 'no_form_found' };
+      })()
+    `);
+    
+    console.log('[GSX AutoLogin] Page type:', pageType);
+    
+    if (pageType.isLoginPage) {
+      // Fill login form
+      const result = await safeFrameExecute(gsxWindow, authFrame, `
+        (function() {
+          const email = ${JSON.stringify(credentials.email)};
+          const password = ${JSON.stringify(credentials.password)};
+          
+          const emailInput = document.querySelector('input[type="email"], input[name="email"], input[autocomplete="email"]');
+          const passwordInput = document.querySelector('input[type="password"]');
+          
+          if (emailInput) {
+            emailInput.value = email;
+            emailInput.dispatchEvent(new Event('input', { bubbles: true }));
+            emailInput.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          
+          if (passwordInput) {
+            passwordInput.value = password;
+            passwordInput.dispatchEvent(new Event('input', { bubbles: true }));
+            passwordInput.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          
+          // Find and click submit button
+          const submitBtn = document.querySelector('button[type="submit"], input[type="submit"]');
+          if (submitBtn) {
+            setTimeout(() => submitBtn.click(), 100);
+          } else {
+            // Try finding button by text
+            const buttons = document.querySelectorAll('button');
+            for (const btn of buttons) {
+              const text = btn.textContent.toLowerCase();
+              if (text.includes('sign in') || text.includes('log in') || text.includes('continue')) {
+                setTimeout(() => btn.click(), 100);
+                break;
+              }
+            }
+          }
+          
+          return { success: true, emailFound: !!emailInput, passwordFound: !!passwordInput };
+        })()
+      `);
+      
+      console.log('[GSX AutoLogin] Login form fill result:', result);
+      
+      // Wait for 2FA page and handle it
+      await sleep(1500);
+      
+      // Check window still exists before continuing
+      if (!gsxWindow.isDestroyed()) {
+        await handleGSX2FA(gsxWindow, state, environment, 0);
+      }
+      
+    } else if (pageType.is2FAPage) {
+      await handleGSX2FA(gsxWindow, state, environment, 0);
+    } else {
+      console.log('[GSX AutoLogin] No actionable form found');
+      state.inProgress = false;
+      await hideStatusOverlay(gsxWindow);
+    }
+    
+  } catch (err) {
+    if (err instanceof WindowDestroyedError) {
+      console.log('[GSX AutoLogin] Window closed during login, aborting silently');
+      return;
+    }
+    
+    console.error('[GSX AutoLogin] Error:', err.message);
+    recordLoginAttempt(environment, false);
+    
+    // Show error with retry option
+    if (gsxWindow && !gsxWindow.isDestroyed()) {
+      await updateStatusOverlay(gsxWindow, 'Login failed', 'error', { 
+        showRetry: true, 
+        showManual: true 
+      });
+      
+      // Setup retry handler
+      try {
+        await gsxWindow.webContents.executeJavaScript(`
+          window.__gsxRetryLogin = function() {
+            window.electronAPI && window.electronAPI.retryAutoLogin && window.electronAPI.retryAutoLogin();
+          };
+        `);
+      } catch (e) {
+        // Ignore - retry button just won't work
+      }
+    }
+    
+    state.inProgress = false;
+  }
+}
+
+/**
+ * Handle 2FA for GSX windows with full resilience
+ * Includes TOTP timing awareness, error detection, and smart retry
+ */
+async function handleGSX2FA(gsxWindow, state, environment, attempt = 0) {
+  const credentialManager = require('./credential-manager');
+  const { TOTPManager } = require('./lib/totp-manager');
+  
+  const MAX_ATTEMPTS = 5;
+  
+  try {
+    // Check window destruction
+    if (!gsxWindow || gsxWindow.isDestroyed()) {
+      throw new WindowDestroyedError();
+    }
+    
+    if (attempt >= MAX_ATTEMPTS) {
+      console.log('[GSX AutoLogin] Max 2FA attempts reached');
+      recordLoginAttempt(environment, false);
+      await updateStatusOverlay(gsxWindow, '2FA verification failed', 'error', {
+        showRetry: true,
+        showManual: true
+      });
+      state.inProgress = false;
+      return;
+    }
+    
+    console.log(`[GSX AutoLogin] 2FA attempt ${attempt + 1}/${MAX_ATTEMPTS}`);
+    
+    // Update status
+    await updateStatusOverlay(gsxWindow, 'Verifying 2FA...', 'loading');
+    
+    // Find auth frame
+    const mainFrame = gsxWindow.webContents.mainFrame;
+    const allFrames = [mainFrame, ...mainFrame.framesInSubtree];
+    
+    let authFrame = null;
+    for (const frame of allFrames) {
+      if (frame.url && frame.url.includes('auth.') && frame.url.includes('onereach.ai')) {
+        authFrame = frame;
+        break;
+      }
+    }
+    
+    if (!authFrame) {
+      console.log('[GSX AutoLogin] Auth frame lost, login may have completed');
+      recordLoginAttempt(environment, true);
+      await hideStatusOverlay(gsxWindow, true);
+      state.complete = true;
+      state.inProgress = false;
+      return;
+    }
+    
+    // Check if 2FA input exists
+    const formCheck = await safeFrameExecute(gsxWindow, authFrame, `
+      (function() {
+        const totpInput = document.querySelector('input[name="totp"], input[type="number"][maxlength="6"], input[autocomplete="one-time-code"], input[inputmode="numeric"]');
+        const errorEl = document.querySelector('.error, .alert-error, [class*="error-message"]');
+        const bodyText = document.body?.innerText?.toLowerCase() || '';
+        
+        return {
+          has2FA: !!totpInput,
+          hasError: !!errorEl || bodyText.includes('invalid code') || bodyText.includes('incorrect code'),
+          errorMessage: errorEl?.textContent || '',
+          hasRateLimit: bodyText.includes('too many') || bodyText.includes('try again later')
+        };
+      })()
+    `);
+    
+    // Handle rate limiting from server
+    if (formCheck.hasRateLimit) {
+      console.log('[GSX AutoLogin] Server rate limit detected');
+      recordLoginAttempt(environment, false);
+      await updateStatusOverlay(gsxWindow, 'Too many attempts - please wait', 'error', {
+        showManual: true
+      });
+      state.inProgress = false;
+      return;
+    }
+    
+    // Handle invalid code error - retry with fresh code
+    if (formCheck.hasError && attempt > 0) {
+      console.log('[GSX AutoLogin] Invalid code detected, will retry with fresh code');
+      // Wait for fresh TOTP window
+      const totpManager = new TOTPManager();
+      const timeRemaining = totpManager.getTimeRemaining();
+      
+      await updateStatusOverlay(gsxWindow, 'Code expired, waiting for new code...', 'waiting', {
+        countdown: timeRemaining + 1
+      });
+      
+      // Wait for fresh code
+      await sleep((timeRemaining + 1) * 1000);
+      
+      // Retry with fresh code
+      if (!gsxWindow.isDestroyed()) {
+        await handleGSX2FA(gsxWindow, state, environment, attempt + 1);
+      }
+      return;
+    }
+    
+    if (!formCheck.has2FA) {
+      console.log('[GSX AutoLogin] No 2FA input found, retrying...');
+      await sleep(500);
+      if (!gsxWindow.isDestroyed()) {
+        await handleGSX2FA(gsxWindow, state, environment, attempt + 1);
+      }
+      return;
+    }
+    
+    // Get TOTP secret
+    const totpSecret = await credentialManager.getTOTPSecret();
+    if (!totpSecret) {
+      console.log('[GSX AutoLogin] No TOTP secret stored');
+      await updateStatusOverlay(gsxWindow, 'No 2FA secret configured', 'error', {
+        showManual: true
+      });
+      state.inProgress = false;
+      return;
+    }
+    
+    // TOTP TIMING CHECK - Wait for fresh code if near expiration
+    const totpManager = new TOTPManager();
+    let timeRemaining = totpManager.getTimeRemaining();
+    
+    if (timeRemaining < 5) {
+      console.log(`[GSX AutoLogin] TOTP expires in ${timeRemaining}s, waiting for fresh code`);
+      await updateStatusOverlay(gsxWindow, 'Waiting for fresh code...', 'waiting', {
+        countdown: timeRemaining + 1
+      });
+      
+      // Wait for fresh code with countdown
+      while (timeRemaining > 0 && !gsxWindow.isDestroyed()) {
+        await sleep(1000);
+        timeRemaining = totpManager.getTimeRemaining();
+        if (timeRemaining > 25) break; // Fresh code is ready
+        await updateStatusOverlay(gsxWindow, 'Waiting for fresh code...', 'waiting', {
+          countdown: timeRemaining
+        });
+      }
+      
+      await updateStatusOverlay(gsxWindow, 'Verifying 2FA...', 'loading');
+    }
+    
+    // Generate TOTP code
+    let totpCode;
+    try {
+      totpCode = totpManager.generateCode(totpSecret);
+      console.log('[GSX AutoLogin] Generated TOTP code');
+    } catch (err) {
+      console.error('[GSX AutoLogin] Failed to generate TOTP:', err.message);
+      await updateStatusOverlay(gsxWindow, 'Invalid 2FA secret', 'error', {
+        showManual: true
+      });
+      state.inProgress = false;
+      return;
+    }
+    
+    // Fill 2FA form
+    const result = await safeFrameExecute(gsxWindow, authFrame, `
+      (function() {
+        const code = ${JSON.stringify(totpCode)};
+        const totpInput = document.querySelector('input[name="totp"], input[type="number"][maxlength="6"], input[autocomplete="one-time-code"], input[inputmode="numeric"]');
+        
+        if (totpInput) {
+          // Clear existing value first
+          totpInput.value = '';
+          totpInput.dispatchEvent(new Event('input', { bubbles: true }));
+          
+          // Set new value
+          totpInput.value = code;
+          totpInput.dispatchEvent(new Event('input', { bubbles: true }));
+          totpInput.dispatchEvent(new Event('change', { bubbles: true }));
+          
+          // Find and click submit/verify button
+          const buttons = document.querySelectorAll('button');
+          let clicked = false;
+          for (const btn of buttons) {
+            const text = btn.textContent.toLowerCase();
+            if (text.includes('verify') || text.includes('submit') || text.includes('continue') || btn.type === 'submit') {
+              setTimeout(() => btn.click(), 100);
+              clicked = true;
+              break;
+            }
+          }
+          
+          // Fallback: try form submit
+          if (!clicked) {
+            const form = totpInput.closest('form');
+            if (form) setTimeout(() => form.submit(), 100);
+          }
+          
+          return { success: true };
+        }
+        return { success: false, reason: 'totp_input_not_found' };
+      })()
+    `);
+    
+    console.log('[GSX AutoLogin] 2FA fill result:', result);
+    
+    // Wait a moment then check for errors
+    await sleep(1500);
+    
+    // Check if we're still on auth page (indicates failure)
+    if (!gsxWindow.isDestroyed()) {
+      const stillOnAuth = await safeFrameExecute(gsxWindow, authFrame, `
+        (function() {
+          const totpInput = document.querySelector('input[name="totp"], input[type="number"][maxlength="6"], input[autocomplete="one-time-code"], input[inputmode="numeric"]');
+          const errorEl = document.querySelector('.error, .alert-error, [class*="error"]');
+          const bodyText = document.body?.innerText?.toLowerCase() || '';
+          
+          return {
+            stillOnPage: !!totpInput,
+            hasError: !!errorEl || bodyText.includes('invalid') || bodyText.includes('incorrect') || bodyText.includes('expired')
+          };
+        })()
+      `).catch(() => ({ stillOnPage: false, hasError: false }));
+      
+      if (stillOnAuth.stillOnPage && stillOnAuth.hasError) {
+        console.log('[GSX AutoLogin] 2FA error detected, retrying with fresh code');
+        await handleGSX2FA(gsxWindow, state, environment, attempt + 1);
+        return;
+      }
+    }
+    
+    // Success!
+    console.log('[GSX AutoLogin] 2FA completed successfully');
+    recordLoginAttempt(environment, true);
+    await hideStatusOverlay(gsxWindow, true);
+    state.complete = true;
+    state.inProgress = false;
+    
+  } catch (err) {
+    if (err instanceof WindowDestroyedError) {
+      console.log('[GSX AutoLogin] Window closed during 2FA, aborting silently');
+      return;
+    }
+    
+    console.error('[GSX AutoLogin] 2FA error:', err.message);
+    
+    // Retry on transient errors
+    if (attempt < MAX_ATTEMPTS - 1 && !gsxWindow.isDestroyed()) {
+      console.log('[GSX AutoLogin] Retrying after error...');
+      await sleep(500);
+      await handleGSX2FA(gsxWindow, state, environment, attempt + 1);
+      return;
+    }
+    
+    // Show error on final failure
+    if (gsxWindow && !gsxWindow.isDestroyed()) {
+      recordLoginAttempt(environment, false);
+      await updateStatusOverlay(gsxWindow, '2FA failed', 'error', {
+        showRetry: true,
+        showManual: true
+      });
+    }
+    
+    state.inProgress = false;
+  }
+}
+
 /**
  * Helper function to open GSX content in a large app window
  * @param {string} url The URL to load
@@ -12,6 +867,9 @@ const path = require('path');
  * @returns {BrowserWindow} The created window
  */
 function openGSXLargeWindow(url, title, windowTitle, loadingMessage = 'Loading...', idwEnvironment = null) {
+  // #region agent log
+  try{require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log',JSON.stringify({location:'menu.js:869',message:'openGSXLargeWindow ENTRY',data:{url,title,idwEnvironment,providedEnv:!!idwEnvironment},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1,H3'})+'\n');}catch(e){}
+  // #endregion
   const getLogger = require('./event-logger');
   const logger = getLogger();
   
@@ -35,6 +893,9 @@ function openGSXLargeWindow(url, title, windowTitle, loadingMessage = 'Loading..
       idwEnvironment = hostParts.find(part => 
         ['staging', 'edison', 'production', 'store'].includes(part)
       ) || 'default';
+      // #region agent log
+      try{require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log',JSON.stringify({location:'menu.js:893',message:'Environment extracted from URL',data:{url,hostname:urlObj.hostname,hostParts,extractedEnv:idwEnvironment},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})+'\n');}catch(e){}
+      // #endregion
     } catch (err) {
       console.error('Error parsing GSX URL to extract environment:', err);
       idwEnvironment = 'default';
@@ -44,9 +905,25 @@ function openGSXLargeWindow(url, title, windowTitle, loadingMessage = 'Loading..
   // Create session partition name based ONLY on the IDW environment
   // This allows all GSX windows in the same IDW group to share cookies
   // while keeping different IDW groups sandboxed from each other
-  const partitionName = `gsx-${idwEnvironment}`;
+  const partitionName = idwEnvironment ? `gsx-${idwEnvironment}` : `gsx-tool-${Date.now()}`;
+  const fullPartition = `persist:${partitionName}`;
   
   console.log(`[Menu] Using shared session partition for IDW group: ${partitionName}`);
+  
+  // Only register with multi-tenant store if idwEnvironment is set (actual GSX windows)
+  if (idwEnvironment) {
+    const multiTenantStore = require('./multi-tenant-store');
+    // #region agent log
+    const hasToken = multiTenantStore.hasValidToken(idwEnvironment);
+    const token = multiTenantStore.getToken(idwEnvironment);
+    try{require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log',JSON.stringify({location:'menu.js:910',message:'GSX token check BEFORE register',data:{idwEnvironment,fullPartition,hasToken,tokenExists:!!token,tokenValue:token?token.value?.substring(0,20)+'...':null},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2,H4'})+'\n');}catch(e){}
+    // #endregion
+    multiTenantStore.registerPartition(idwEnvironment, fullPartition);
+    multiTenantStore.attachCookieListener(fullPartition);
+    // #region agent log
+    try{require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log',JSON.stringify({location:'menu.js:916',message:'GSX partition registered - NO TOKEN INJECTION',data:{idwEnvironment,fullPartition,note:'Missing token injection code here'},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})+'\n');}catch(e){}
+    // #endregion
+  }
   
   const gsxWindow = new BrowserWindow({
     width: 1600,
@@ -56,7 +933,7 @@ function openGSXLargeWindow(url, title, windowTitle, loadingMessage = 'Loading..
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
-      partition: `persist:${partitionName}`,  // Session partitioning for cookie isolation
+      partition: fullPartition,  // Session partitioning for cookie isolation
       sandbox: false,
       webSecurity: true,
       webviewTag: false
@@ -65,155 +942,364 @@ function openGSXLargeWindow(url, title, windowTitle, loadingMessage = 'Loading..
     show: false
   });
   
-  // Show loading indicator with a unique class
+  // PERFORMANCE: Show responsive animated loading indicator immediately
   let loadingIndicatorInserted = false;
   gsxWindow.webContents.on('did-start-loading', () => {
     if (!loadingIndicatorInserted) {
       loadingIndicatorInserted = true;
       gsxWindow.webContents.insertCSS(`
-        body::before {
-          content: '${loadingMessage}';
-          position: fixed;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
-          font-size: 24px;
-          color: #666;
-          z-index: 99999;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          background: rgba(255, 255, 255, 0.95);
-          padding: 20px 40px;
-          border-radius: 8px;
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        @keyframes gsx-pulse {
+          0%, 100% { opacity: 0.6; transform: translate(-50%, -50%) scale(1); }
+          50% { opacity: 1; transform: translate(-50%, -50%) scale(1.02); }
         }
-        body.gsx-loaded::before {
-          display: none !important;
+        @keyframes gsx-spin {
+          to { transform: rotate(360deg); }
+        }
+        #gsx-loading-overlay {
+          position: fixed;
+          top: 0; left: 0; right: 0; bottom: 0;
+          background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+          z-index: 99999;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          transition: opacity 0.3s ease-out;
+        }
+        #gsx-loading-overlay.gsx-fade-out {
+          opacity: 0;
+          pointer-events: none;
+        }
+        #gsx-loading-spinner {
+          width: 48px;
+          height: 48px;
+          border: 3px solid rgba(255, 255, 255, 0.1);
+          border-top-color: #4f8cff;
+          border-radius: 50%;
+          animation: gsx-spin 0.8s linear infinite;
+          margin-bottom: 20px;
+        }
+        #gsx-loading-text {
+          color: rgba(255, 255, 255, 0.9);
+          font-size: 18px;
+          font-weight: 500;
+          animation: gsx-pulse 2s ease-in-out infinite;
+        }
+        #gsx-loading-status {
+          color: rgba(255, 255, 255, 0.5);
+          font-size: 12px;
+          margin-top: 8px;
         }
       `);
+      // Inject overlay HTML immediately
+      gsxWindow.webContents.executeJavaScript(`
+        if (!document.getElementById('gsx-loading-overlay')) {
+          const overlay = document.createElement('div');
+          overlay.id = 'gsx-loading-overlay';
+          overlay.innerHTML = '<div id="gsx-loading-spinner"></div><div id="gsx-loading-text">${loadingMessage}</div><div id="gsx-loading-status">Connecting...</div>';
+          document.body.appendChild(overlay);
+        }
+      `).catch(() => {});
     }
   });
   
-  // Inject minimal toolbar after page loads
+  // PERFORMANCE: Single consolidated did-finish-load handler
   gsxWindow.webContents.on('did-finish-load', () => {
-    // Add class to hide the loading indicator
-    gsxWindow.webContents.executeJavaScript(`
-      document.body.classList.add('gsx-loaded');
-    `).catch(err => console.error('[GSX Window] Error hiding loading indicator:', err));
-    
-    // Inject the minimal toolbar
+    // Single executeJavaScript call with all UI setup
     gsxWindow.webContents.executeJavaScript(`
       (function() {
-        // Check if toolbar already exists
-        if (document.getElementById('gsx-minimal-toolbar')) return;
-        
-        // Create toolbar
-        const toolbar = document.createElement('div');
-        toolbar.id = 'gsx-minimal-toolbar';
-        toolbar.innerHTML = \`
-          <button id="gsx-back" title="Back">◀</button>
-          <button id="gsx-forward" title="Forward">▶</button>
-          <button id="gsx-refresh" title="Refresh">↻</button>
-          <button id="gsx-mission-control" title="Show All Windows">⊞</button>
-        \`;
-        
-        // Add styles
-        const style = document.createElement('style');
-        style.textContent = \`
-          #gsx-minimal-toolbar {
-            position: fixed;
-            bottom: 0;
-            left: 50%;
-            transform: translateX(-50%);
-            z-index: 999999;
-            background: rgba(0, 0, 0, 0.6);
-            backdrop-filter: blur(8px);
-            padding: 4px 8px;
-            display: flex;
-            gap: 4px;
-            border-radius: 8px 8px 0 0;
-            opacity: 0.4;
-            transition: opacity 0.3s, padding 0.2s;
-          }
-          
-          #gsx-minimal-toolbar:hover {
-            opacity: 1;
-            padding: 6px 10px;
-          }
-          
-          #gsx-minimal-toolbar button {
-            background: transparent;
-            border: none;
-            color: rgba(255, 255, 255, 0.7);
-            width: 28px;
-            height: 28px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.2s;
-          }
-          
-          #gsx-minimal-toolbar button:hover {
-            background: rgba(255, 255, 255, 0.15);
-            color: rgba(255, 255, 255, 1);
-            transform: scale(1.1);
-          }
-          
-          #gsx-minimal-toolbar button:active {
-            transform: scale(0.95);
-          }
-          
-          #gsx-minimal-toolbar button:disabled {
-            opacity: 0.3;
-            cursor: not-allowed;
-          }
-        \`;
-        
-        document.head.appendChild(style);
-        document.body.appendChild(toolbar);
-        
-        // Add event listeners
-        document.getElementById('gsx-back').addEventListener('click', () => {
-          window.history.back();
-        });
-        
-        document.getElementById('gsx-forward').addEventListener('click', () => {
-          window.history.forward();
-        });
-        
-        document.getElementById('gsx-refresh').addEventListener('click', () => {
-          window.location.reload();
-        });
-        
-        document.getElementById('gsx-mission-control').addEventListener('click', () => {
-          // This will be handled by IPC
-          if (window.electronAPI && window.electronAPI.triggerMissionControl) {
-            window.electronAPI.triggerMissionControl();
-          }
-        });
-        
-        // Update button states based on history
-        function updateNavigationButtons() {
-          const backBtn = document.getElementById('gsx-back');
-          const forwardBtn = document.getElementById('gsx-forward');
-          
-          if (backBtn) backBtn.disabled = !window.history.length || window.history.length <= 1;
-          if (forwardBtn) forwardBtn.disabled = false; // Can't easily check forward history
+        // Hide loading overlay with animation
+        const overlay = document.getElementById('gsx-loading-overlay');
+        if (overlay) {
+          overlay.classList.add('gsx-fade-out');
+          setTimeout(() => overlay.remove(), 300);
         }
         
-        updateNavigationButtons();
-        window.addEventListener('popstate', updateNavigationButtons);
+        // Skip if already initialized
+        if (window.__gsxUIInitialized) return;
+        window.__gsxUIInitialized = true;
+        
+        // ===== TOOLBAR =====
+        if (!document.getElementById('gsx-minimal-toolbar')) {
+          const toolbar = document.createElement('div');
+          toolbar.id = 'gsx-minimal-toolbar';
+          toolbar.innerHTML = '<button id="gsx-back" title="Back">&#9664;</button><button id="gsx-forward" title="Forward">&#9654;</button><button id="gsx-refresh" title="Refresh">&#8635;</button><button id="gsx-mission-control" title="Show All Windows">&#8862;</button><button id="gsx-close" title="Close Window">&times;</button>';
+          
+          const style = document.createElement('style');
+          style.textContent = '#gsx-minimal-toolbar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);z-index:999999;background:rgba(0,0,0,0.6);backdrop-filter:blur(8px);padding:4px 8px;display:flex;gap:4px;border-radius:8px 8px 0 0;opacity:0.4;transition:opacity 0.3s,padding 0.2s}#gsx-minimal-toolbar:hover{opacity:1;padding:6px 10px}#gsx-minimal-toolbar button{background:transparent;border:none;color:rgba(255,255,255,0.7);width:28px;height:28px;border-radius:4px;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;transition:all 0.2s}#gsx-minimal-toolbar button:hover{background:rgba(255,255,255,0.15);color:#fff;transform:scale(1.1)}#gsx-minimal-toolbar button:active{transform:scale(0.95)}#gsx-minimal-toolbar button:disabled{opacity:0.3;cursor:not-allowed}#gsx-minimal-toolbar button#gsx-close{margin-left:8px;border-left:1px solid rgba(255,255,255,0.1);padding-left:12px}#gsx-minimal-toolbar button#gsx-close:hover{background:rgba(255,59,48,0.2);color:#ff3b30}';
+          document.head.appendChild(style);
+          document.body.appendChild(toolbar);
+          
+          document.getElementById('gsx-back').onclick = () => history.back();
+          document.getElementById('gsx-forward').onclick = () => history.forward();
+          document.getElementById('gsx-refresh').onclick = () => window.electronAPI?.clearCacheAndReload?.() || location.reload();
+          document.getElementById('gsx-mission-control').onclick = () => window.electronAPI?.triggerMissionControl?.();
+          document.getElementById('gsx-close').onclick = () => window.close();
+        }
+        
+        // ===== KEEP-ALIVE (lazy loaded after 5 seconds) =====
+        setTimeout(() => {
+          if (window.__gsxKeepAliveInitialized) return;
+          window.__gsxKeepAliveInitialized = true;
+          
+          let lastPong = Date.now();
+          let lastActivity = Date.now();
+          let emergencyUIShown = false;
+          
+          if (window.electronAPI?.onPong) {
+            window.electronAPI.onPong(() => { lastPong = Date.now(); });
+          }
+          
+          // Backup ping only when idle for 4 minutes
+          setInterval(() => {
+            if (Date.now() - lastActivity > 240000 && window.electronAPI?.ping) {
+              window.electronAPI.ping();
+            }
+          }, 60000);
+          
+          // Detect zombie state (no pong for 10 minutes)
+          setInterval(() => {
+            if (Date.now() - lastPong > 600000 && !emergencyUIShown) {
+              emergencyUIShown = true;
+              const banner = document.createElement('div');
+              banner.innerHTML = '<div style="display:flex;align-items:center;gap:12px"><span style="font-size:20px">Warning</span><div style="flex:1"><div style="font-weight:600;margin-bottom:4px">Window Connection Lost</div><div style="font-size:12px;opacity:0.9">Close button may not work. Use Cmd+Q to quit the app.</div></div><button onclick="window.close()" style="background:rgba(255,59,48,0.2);border:1px solid #ff3b30;color:#ff3b30;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:600;font-size:12px">Try Close</button></div>';
+              banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999999;background:rgba(255,165,0,0.95);color:white;padding:16px 24px;box-shadow:0 4px 12px rgba(0,0,0,0.3);font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:14px';
+              document.body.appendChild(banner);
+            }
+          }, 30000);
+          
+          // Track activity
+          if (window.electronAPI) {
+            const orig = window.electronAPI;
+            window.electronAPI = new Proxy(orig, {
+              get(t, p) {
+                if (typeof t[p] === 'function' && p !== 'onPong') {
+                  return (...a) => { lastActivity = Date.now(); return t[p](...a); };
+                }
+                return t[p];
+              }
+            });
+          }
+        }, 5000); // Lazy load keep-alive after 5 seconds
       })();
-    `).catch(err => console.error('[GSX Window] Error injecting toolbar:', err));
+    `).catch(err => console.error('[GSX Window] Error injecting UI:', err));
   });
   
-  // Also remove on did-stop-loading as a fallback
-  gsxWindow.webContents.on('did-stop-loading', () => {
-    gsxWindow.webContents.executeJavaScript(`
-      document.body.classList.add('gsx-loaded');
-    `).catch(err => console.error('[GSX Window] Error hiding loading indicator:', err));
+  // Auto-login handling for GSX windows - ONLY when idwEnvironment is explicitly set
+  // This prevents auto-login for non-GSX tools or when user wants manual login
+  if (idwEnvironment) {
+    const gsxAutoLoginState = { inProgress: false, complete: false };
+
+    // Handle full page navigation (for auth redirects from GSX apps)
+    gsxWindow.webContents.on('did-navigate', async (event, navUrl) => {
+      console.log(`[GSX Window] Full navigation: ${navUrl}`);
+
+      // Auto-login for auth pages (when GSX redirects to auth.*.onereach.ai)
+      if (navUrl && navUrl.includes('auth.') && navUrl.includes('onereach.ai')) {
+        if (gsxAutoLoginState.inProgress || gsxAutoLoginState.complete) {
+          console.log('[GSX AutoLogin] Skipping - already in progress or complete');
+          return;
+        }
+        gsxAutoLoginState.inProgress = true;
+        console.log('[GSX AutoLogin] Auth page detected via redirect, starting auto-login...');
+        
+        // Update loading status to show auto-login in progress
+        gsxWindow.webContents.executeJavaScript(`
+          const status = document.getElementById('gsx-loading-status');
+          if (status) status.textContent = 'Signing in...';
+        `).catch(() => {});
+
+        // PERFORMANCE: Reduced from 1500ms to 500ms - form is usually ready faster
+        setTimeout(async () => {
+          try {
+            await attemptGSXAutoLogin(gsxWindow, navUrl, gsxAutoLoginState, idwEnvironment);
+          } catch (err) {
+            console.error('[GSX AutoLogin] Error:', err.message);
+            gsxAutoLoginState.inProgress = false;
+          }
+        }, 500);
+      }
+    });
+  }
+  
+  // Error handling - show helpful messages for access issues
+  gsxWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+    console.log(`[GSX Window] Load failed: ${errorCode} - ${errorDescription} for ${validatedURL}`);
+    
+    const errorPage = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #e0e0e0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+          }
+          .error-container {
+            max-width: 500px;
+            text-align: center;
+            background: rgba(255,255,255,0.05);
+            padding: 40px;
+            border-radius: 16px;
+            border: 1px solid rgba(255,255,255,0.1);
+          }
+          h1 { color: #ff6b6b; margin-bottom: 16px; font-size: 24px; }
+          .error-code { color: #888; font-size: 14px; margin-bottom: 24px; }
+          p { line-height: 1.6; margin-bottom: 16px; }
+          .suggestions { text-align: left; background: rgba(0,0,0,0.2); padding: 20px; border-radius: 8px; margin-top: 20px; }
+          .suggestions h3 { margin-top: 0; color: #4ecdc4; }
+          .suggestions ul { margin: 0; padding-left: 20px; }
+          .suggestions li { margin-bottom: 8px; }
+          .btn { display: inline-block; padding: 12px 24px; background: #4ecdc4; color: #1a1a2e; border-radius: 8px; text-decoration: none; margin-top: 20px; font-weight: 600; cursor: pointer; border: none; }
+          .btn:hover { background: #45b7aa; }
+          .url { word-break: break-all; font-size: 12px; color: #666; margin-top: 16px; }
+        </style>
+      </head>
+      <body>
+        <div class="error-container">
+          <h1>Unable to Load GSX</h1>
+          <p class="error-code">Error: ${errorDescription || 'Connection failed'} (${errorCode})</p>
+          <p>The GSX application couldn't be loaded. This might be a temporary issue or an access problem.</p>
+          
+          <div class="suggestions">
+            <h3>Possible Solutions</h3>
+            <ul>
+              <li><strong>Check your internet connection</strong> - Make sure you're connected to the network</li>
+              <li><strong>Verify access permissions</strong> - You may need to request access from your administrator</li>
+              <li><strong>Guest users</strong> - If you only have guest access, you may need to upgrade to user access for GSX tools</li>
+              <li><strong>VPN required</strong> - Some environments require VPN connection</li>
+              <li><strong>Try again later</strong> - The service might be temporarily unavailable</li>
+            </ul>
+          </div>
+          
+          <button class="btn" onclick="location.reload()">Try Again</button>
+          <p class="url">URL: ${validatedURL}</p>
+        </div>
+      </body>
+      </html>
+    `;
+    
+    gsxWindow.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(errorPage)}`);
+  });
+  
+  // Detect access denied errors from page content
+  gsxWindow.webContents.on('did-finish-load', async () => {
+    // Check for common access error patterns after page loads
+    try {
+      const accessCheck = await gsxWindow.webContents.executeJavaScript(`
+        (function() {
+          const body = document.body ? document.body.innerText : '';
+          const title = document.title || '';
+          
+          // Check for common access error patterns
+          const accessDenied = /access denied|unauthorized|forbidden|not authorized|permission denied|403|401/i;
+          const noAccount = /unexpected account|account not found|invalid account|no access/i;
+          const needsAccess = /request access|contact administrator|upgrade.*account/i;
+          
+          if (accessDenied.test(body) || accessDenied.test(title)) {
+            return { error: true, type: 'access_denied', message: body.substring(0, 500) };
+          }
+          if (noAccount.test(body)) {
+            return { error: true, type: 'wrong_account', message: body.substring(0, 500) };
+          }
+          if (needsAccess.test(body)) {
+            return { error: true, type: 'needs_access', message: body.substring(0, 500) };
+          }
+          return { error: false };
+        })()
+      `);
+      
+      if (accessCheck.error) {
+        console.log(`[GSX Window] Access issue detected: ${accessCheck.type}`);
+        
+        const errorMessages = {
+          access_denied: {
+            title: 'Access Denied',
+            desc: 'You do not have permission to access this GSX tool.',
+            tip: 'Contact your administrator to request access to this account.'
+          },
+          wrong_account: {
+            title: 'Account Mismatch',
+            desc: 'This GSX tool is configured for a different account than you have access to.',
+            tip: 'The account ID in the URL may not match your permissions. Contact your administrator.'
+          },
+          needs_access: {
+            title: 'Access Required',
+            desc: 'Additional permissions are needed to use this tool.',
+            tip: 'You may have guest access only. Request user-level access from your administrator.'
+          }
+        };
+        
+        const errInfo = errorMessages[accessCheck.type] || errorMessages.access_denied;
+        
+        const accessErrorPage = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <style>
+              body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+                color: #e0e0e0;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100vh;
+                margin: 0;
+                padding: 20px;
+                box-sizing: border-box;
+              }
+              .error-container {
+                max-width: 550px;
+                text-align: center;
+                background: rgba(255,255,255,0.05);
+                padding: 40px;
+                border-radius: 16px;
+                border: 1px solid rgba(255,255,255,0.1);
+              }
+              h1 { color: #feca57; margin-bottom: 16px; font-size: 24px; }
+              p { line-height: 1.6; margin-bottom: 16px; }
+              .tip { background: rgba(78, 205, 196, 0.1); border-left: 3px solid #4ecdc4; padding: 16px; text-align: left; border-radius: 4px; margin: 20px 0; }
+              .tip strong { color: #4ecdc4; }
+              .actions { margin-top: 24px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+              .btn { padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; cursor: pointer; border: none; }
+              .btn-primary { background: #4ecdc4; color: #1a1a2e; }
+              .btn-secondary { background: rgba(255,255,255,0.1); color: #e0e0e0; }
+              .btn:hover { opacity: 0.9; }
+            </style>
+          </head>
+          <body>
+            <div class="error-container">
+              <h1>${errInfo.title}</h1>
+              <p>${errInfo.desc}</p>
+              
+              <div class="tip">
+                <strong>Tip:</strong> ${errInfo.tip}
+              </div>
+              
+              <div class="actions">
+                <button class="btn btn-primary" onclick="location.reload()">Try Again</button>
+                <button class="btn btn-secondary" onclick="window.close()">Close Window</button>
+              </div>
+            </div>
+          </body>
+          </html>
+        `;
+        
+        gsxWindow.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(accessErrorPage)}`);
+      }
+    } catch (err) {
+      // Ignore errors from checking - page might be navigating
+    }
   });
   
   // Load the URL
@@ -235,6 +1321,36 @@ function openGSXLargeWindow(url, title, windowTitle, loadingMessage = 'Loading..
   gsxWindow.once('ready-to-show', () => {
     gsxWindow.show();
   });
+  
+  // Add forced close handler to prevent zombie windows
+  let isClosing = false;
+  gsxWindow.on('close', (event) => {
+    if (isClosing) return; // Already closing, don't interfere
+    
+    console.log(`[GSX Window] Close requested: ${title}`);
+    isClosing = true;
+    
+    // Prevent default to control the shutdown
+    event.preventDefault();
+    
+    // Try to notify renderer
+    try {
+      gsxWindow.webContents.send('window-closing');
+    } catch (e) {
+      console.log(`[GSX Window] Could not send closing signal: ${e.message}`);
+    }
+    
+    // Force destroy after short delay (500ms for state save)
+    setTimeout(() => {
+      if (!gsxWindow.isDestroyed()) {
+        console.log(`[GSX Window] Force destroying: ${title}`);
+        gsxWindow.destroy();
+      }
+    }, 500);
+  });
+  
+  // Register for tracking
+  registerGSXWindow(gsxWindow, title);
   
   return gsxWindow;
 }
@@ -310,6 +1426,31 @@ function openLearningWindow(url, title = 'Agentic University') {
     learningWindow.webContents.executeJavaScript(`
       document.body.classList.add('learning-loaded');
     `).catch(err => console.error('[Learning Window] Error hiding loading indicator:', err));
+    
+    // Apply custom CSS for Wiser Method site (fix dark text on dark bg)
+    if (url.includes('wisermethod.com')) {
+      learningWindow.webContents.insertCSS(`
+        /* Fix text visibility on Wiser Method */
+        body, p, span, div, h1, h2, h3, h4, h5, h6, li, a, td, th, label {
+          color: #e0e0e0 !important;
+        }
+        a {
+          color: #7eb3ff !important;
+        }
+        a:hover {
+          color: #aaccff !important;
+        }
+        /* Keep buttons and specific elements readable */
+        button, input, select, textarea {
+          color: #333 !important;
+          background-color: #fff !important;
+        }
+        /* Ensure headings stand out */
+        h1, h2, h3 {
+          color: #ffffff !important;
+        }
+      `).catch(err => console.error('[Learning Window] Error injecting Wiser Method CSS:', err));
+    }
   });
   
   // Also remove on did-stop-loading as a fallback
@@ -363,189 +1504,56 @@ function openLearningWindow(url, title = 'Agentic University') {
 function createMenu(showTestMenu = false, idwEnvironments = []) {
   console.log('[Menu] Creating application menu...');
   const isMac = process.platform === 'darwin';
+  const startTime = Date.now();
   
-  // --- IDW Environment Loading ---
-  console.log('[Menu] Attempting to load IDW environments...');
+  
+  // PERFORMANCE: Use cached menu data instead of reading files every time
+  const cachedData = menuCache.loadAll();
+  
+  // Use passed IDW environments or fall back to cache
   if (!idwEnvironments || !idwEnvironments.length) {
-    console.log('[Menu] No IDW environments passed as argument, attempting to load from file.');
-    try {
-      // Explicitly require app here if not available globally
-      const electronApp = require('electron').app; 
-      const userDataPath = electronApp.getPath('userData');
-      const idwConfigPath = path.join(userDataPath, 'idw-entries.json');
-      console.log(`[Menu] Checking for IDW config at: ${idwConfigPath}`);
-      
-      if (fs.existsSync(idwConfigPath)) {
-        console.log('[Menu] Found idw-entries.json.');
-        try {
-          const data = fs.readFileSync(idwConfigPath, 'utf8');
-          idwEnvironments = JSON.parse(data);
-          console.log('[Menu] Successfully parsed idw-entries.json:', JSON.stringify(idwEnvironments, null, 2));
-        } catch (error) {
-          console.error('[Menu] Error parsing idw-entries.json:', error);
-          idwEnvironments = []; // Reset to empty if parsing fails
-        }
-      } else {
-        console.log('[Menu] idw-entries.json not found.');
-        idwEnvironments = [];
-      }
-    } catch (error) {
-      console.error('[Menu] Error reading IDW environments from file:', error);
-      idwEnvironments = [];
-    }
-  } else {
-    console.log('[Menu] Using IDW environments passed as argument:', JSON.stringify(idwEnvironments, null, 2));
+    idwEnvironments = cachedData.idwEnvironments;
+    console.log(`[Menu] Using cached IDW environments: ${idwEnvironments.length} items`);
   }
   
-  // --- GSX Link Loading ---
-  let allGsxLinks = [];
-  try {
-    const electronApp = require('electron').app;
-    const userDataPath = electronApp.getPath('userData');
-    const gsxConfigPath = path.join(userDataPath, 'gsx-links.json');
-    console.log(`[Menu] Checking for GSX config at: ${gsxConfigPath}`);
-    if (fs.existsSync(gsxConfigPath)) {
-      console.log('[Menu] Found gsx-links.json.');
+  // Use cached data for other menu items
+  let allGsxLinks = cachedData.gsxLinks;
+  let externalBots = cachedData.externalBots;
+  let imageCreators = cachedData.imageCreators;
+  let videoCreators = cachedData.videoCreators;
+  let audioGenerators = cachedData.audioGenerators;
+  let uiDesignTools = cachedData.uiDesignTools;
+  
+  // Generate default GSX links if none exist
+  if (allGsxLinks.length === 0 && idwEnvironments.length > 0) {
+    console.log('[Menu] No GSX links found, generating defaults');
+    const gsxAccountId = cachedData.userPrefs.gsxAccountId || '';
+    allGsxLinks = generateDefaultGSXLinks(idwEnvironments, gsxAccountId);
+    
+    // Save generated links
+    if (allGsxLinks.length) {
       try {
-        const data = fs.readFileSync(gsxConfigPath, 'utf8');
-        allGsxLinks = JSON.parse(data);
-        console.log('[Menu] Successfully parsed gsx-links.json:', JSON.stringify(allGsxLinks, null, 2));
-        
-        // DEBUG: Check if GSX link URLs contain the expected environment names
-        console.log('[Menu] Checking if GSX URLs contain environment names from IDW environments:');
-        if (idwEnvironments && idwEnvironments.length > 0) {
-          idwEnvironments.forEach(env => {
-            if (env.environment) {
-              console.log(`[Menu] IDW environment '${env.label}' has environment name: '${env.environment}'`);
-              
-              // Check each GSX link against this environment
-              allGsxLinks.forEach(link => {
-                if (link.url) {
-                  try {
-                    const url = new URL(link.url);
-                    const hostname = url.hostname;
-                    const matches = hostname.includes(env.environment);
-                    console.log(`[Menu] GSX URL '${hostname}' includes '${env.environment}'? ${matches}`);
-                  } catch (e) {
-                    console.warn(`[Menu] Invalid GSX URL: ${link.url}`);
-                  }
-                }
-              });
-            } else {
-              console.warn(`[Menu] IDW environment '${env.label}' does not have an environment property`);
-            }
-          });
-        }
-      } catch (error) {
-        console.error('[Menu] Error parsing gsx-links.json:', error);
-        allGsxLinks = [];
-      }
-    } else {
-      console.log('[Menu] gsx-links.json not found – generating default links');
-      
-      // Load user preferences to get GSX account ID
-      let gsxAccountId = '';
-      try {
-        const prefsPath = path.join(userDataPath, 'user-preferences.json');
-        if (fs.existsSync(prefsPath)) {
-          const prefsData = fs.readFileSync(prefsPath, 'utf8');
-          const userPrefs = JSON.parse(prefsData);
-          if (userPrefs.gsxAccountId) {
-            gsxAccountId = userPrefs.gsxAccountId;
-            console.log('[Menu] Found GSX Account ID in user preferences:', gsxAccountId);
-          }
-        }
-      } catch (error) {
-        console.error('[Menu] Error loading user preferences for GSX account ID:', error);
-      }
-      
-      allGsxLinks = generateDefaultGSXLinks(idwEnvironments, gsxAccountId);
-      if (allGsxLinks.length) {
-        try {
-          fs.writeFileSync(gsxConfigPath, JSON.stringify(allGsxLinks, null, 2));
-          console.log(`[Menu] Wrote ${allGsxLinks.length} default GSX links to`, gsxConfigPath);
-        } catch (err) {
-          console.error('[Menu] Failed to write default GSX links:', err);
-        }
+        const electronApp = require('electron').app;
+        const userDataPath = electronApp.getPath('userData');
+        const gsxConfigPath = path.join(userDataPath, 'gsx-links.json');
+        fs.writeFileSync(gsxConfigPath, JSON.stringify(allGsxLinks, null, 2));
+        console.log(`[Menu] Wrote ${allGsxLinks.length} default GSX links`);
+        menuCache.gsxLinks = allGsxLinks;
+      } catch (err) {
+        console.error('[Menu] Failed to write default GSX links:', err);
       }
     }
-  } catch (error) {
-    console.error('[Menu] Error reading GSX links from file:', error);
-    allGsxLinks = [];
   }
+  
+  console.log(`[Menu] Data loading took ${Date.now() - startTime}ms`);
 
   // --- Menu Item Creation ---
   const idwMenuItems = [];
   const gsxMenuItems = [];
   
-  // Get userDataPath for loading external bots
+  // Get userDataPath for any needed operations
   const electronApp = require('electron').app;
   const userDataPath = electronApp.getPath('userData');
-  
-  // Load external bots
-  let externalBots = [];
-  try {
-    const botsPath = path.join(userDataPath, 'external-bots.json');
-    if (fs.existsSync(botsPath)) {
-      const botsData = fs.readFileSync(botsPath, 'utf8');
-      externalBots = JSON.parse(botsData);
-      console.log(`[Menu] Loaded ${externalBots.length} external bots`);
-    }
-  } catch (error) {
-    console.error('[Menu] Error loading external bots:', error);
-  }
-  
-  // Load image creators
-  let imageCreators = [];
-  try {
-    const creatorsPath = path.join(userDataPath, 'image-creators.json');
-    if (fs.existsSync(creatorsPath)) {
-      const creatorsData = fs.readFileSync(creatorsPath, 'utf8');
-      imageCreators = JSON.parse(creatorsData);
-      console.log(`[Menu] Loaded ${imageCreators.length} image creators`);
-    }
-  } catch (error) {
-    console.error('[Menu] Error loading image creators:', error);
-  }
-  
-  // Load video creators
-  let videoCreators = [];
-  try {
-    const videoCreatorsPath = path.join(userDataPath, 'video-creators.json');
-    if (fs.existsSync(videoCreatorsPath)) {
-      const videoCreatorsData = fs.readFileSync(videoCreatorsPath, 'utf8');
-      videoCreators = JSON.parse(videoCreatorsData);
-      console.log(`[Menu] Loaded ${videoCreators.length} video creators`);
-    }
-  } catch (error) {
-    console.error('[Menu] Error loading video creators:', error);
-  }
-  
-  // Load audio generators
-  let audioGenerators = [];
-  try {
-    const audioGeneratorsPath = path.join(userDataPath, 'audio-generators.json');
-    if (fs.existsSync(audioGeneratorsPath)) {
-      const audioGeneratorsData = fs.readFileSync(audioGeneratorsPath, 'utf8');
-      audioGenerators = JSON.parse(audioGeneratorsData);
-      console.log(`[Menu] Loaded ${audioGenerators.length} audio generators`);
-    }
-  } catch (error) {
-    console.error('[Menu] Error loading audio generators:', error);
-  }
-  
-  // === NEW: Load UI Design tools ===
-  let uiDesignTools = [];
-  try {
-    const uiDesignToolsPath = path.join(userDataPath, 'ui-design-tools.json');
-    if (fs.existsSync(uiDesignToolsPath)) {
-      const uiDesignToolsData = fs.readFileSync(uiDesignToolsPath, 'utf8');
-      uiDesignTools = JSON.parse(uiDesignToolsData);
-      console.log(`[Menu] Loaded ${uiDesignTools.length} UI design tools`);
-    }
-  } catch (error) {
-    console.error('[Menu] Error loading UI design tools:', error);
-  }
   
   console.log('[Menu] Processing IDW environments to create menu items...');
   if (idwEnvironments && idwEnvironments.length > 0) {
@@ -1822,6 +2830,32 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
               }
             }
           ]
+        },
+        { type: 'separator' },
+        {
+          label: 'AI Run Times',
+          click: () => {
+            const aiWindow = new BrowserWindow({
+              width: 1200,
+              height: 800,
+              webPreferences: {
+                nodeIntegration: false,
+                contextIsolation: true,
+                webSecurity: true,
+                preload: path.join(__dirname, 'Flipboard-IDW-Feed/preload.js')
+              }
+            });
+            
+            // Load the UXmag.html file
+            aiWindow.loadFile('Flipboard-IDW-Feed/uxmag.html');
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Wiser Method',
+          click: () => {
+            openLearningWindow('https://www.wisermethod.com/', 'Wiser Method');
+          }
         }
       ]
     },
@@ -1999,21 +3033,173 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
         ...(global.moduleManager ? global.moduleManager.getWebToolMenuItems() : []),
         ...(global.moduleManager && global.moduleManager.getWebTools().length > 0 ? [{ type: 'separator' }] : []),
         {
-          label: 'AI Run Times',
+          label: 'Black Hole (Paste to Spaces)',
+          accelerator: 'CommandOrControl+Shift+B',
           click: () => {
-            const aiWindow = new BrowserWindow({
-              width: 1200,
-              height: 800,
+            if (global.clipboardManager) {
+              // Position near center of screen
+              const { screen } = require('electron');
+              const primaryDisplay = screen.getPrimaryDisplay();
+              const { width, height } = primaryDisplay.workAreaSize;
+              const position = {
+                x: Math.round(width / 2 - 75),
+                y: Math.round(height / 2 - 75)
+              };
+              global.clipboardManager.createBlackHoleWindow(position, true);
+            }
+          }
+        },
+        {
+          label: 'Toggle Voice Orb',
+          accelerator: 'CommandOrControl+Shift+O',
+          click: () => {
+            try {
+              const main = require('./main');
+              if (main.toggleOrbWindow) {
+                main.toggleOrbWindow();
+              } else {
+                console.log('[Menu] Voice Orb not initialized - enable in Settings');
+              }
+            } catch (error) {
+              console.error('[Menu] Voice Orb toggle error:', error);
+            }
+          }
+        },
+        {
+          label: 'Manage Agents...',
+          click: () => {
+            try {
+              const main = require('./main');
+              if (main.createAgentManagerWindow) {
+                main.createAgentManagerWindow();
+              }
+            } catch (error) {
+              console.error('[Menu] Agent Manager error:', error);
+            }
+          }
+        },
+        {
+          label: 'Create Agent with AI...',
+          accelerator: 'CmdOrCtrl+Shift+G',
+          click: () => {
+            try {
+              const main = require('./main');
+              if (main.createClaudeCodeWindow) {
+                main.createClaudeCodeWindow();
+              }
+            } catch (error) {
+              console.error('[Menu] Claude Code error:', error);
+            }
+          }
+        },
+        {
+          label: 'Claude Code Status...',
+          click: async () => {
+            try {
+              const { dialog } = require('electron');
+              const claudeCode = require('./lib/claude-code-runner');
+              
+              const authStatus = await claudeCode.isAuthenticated();
+              
+              if (authStatus.authenticated) {
+                dialog.showMessageBox({
+                  type: 'info',
+                  title: 'Claude Code',
+                  message: 'Authenticated',
+                  detail: 'Claude Code is ready to use with your Anthropic API key.',
+                  buttons: ['OK']
+                });
+              } else {
+                const result = await dialog.showMessageBox({
+                  type: 'warning',
+                  title: 'Claude Code',
+                  message: 'Not Configured',
+                  detail: authStatus.error || 'Please add your Anthropic API key in Settings.',
+                  buttons: ['Open Settings', 'Cancel'],
+                  defaultId: 0,
+                });
+                
+                if (result.response === 0) {
+                  const main = require('./main');
+                  if (main.openSetupWizard) {
+                    main.openSetupWizard();
+                  }
+                }
+              }
+            } catch (error) {
+              console.error('[Menu] Claude Code status error:', error);
+            }
+          }
+        },
+        {
+          label: 'Claude Code Login...',
+          click: () => {
+            try {
+              const main = require('./main');
+              if (main.createClaudeTerminalWindow) {
+                main.createClaudeTerminalWindow();
+              } else {
+                console.error('[Menu] createClaudeTerminalWindow not found in main');
+              }
+            } catch (error) {
+              console.error('[Menu] Claude Terminal error:', error);
+            }
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'GSX Create',
+          accelerator: 'CommandOrControl+Shift+A',
+          click: () => {
+            // Get screen dimensions for larger window
+            const { screen } = require('electron');
+            const primaryDisplay = screen.getPrimaryDisplay();
+            const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
+            
+            const aiderWindow = new BrowserWindow({
+              width: Math.min(1800, screenWidth - 100),
+              height: Math.min(1100, screenHeight - 100),
+              title: 'GSX Create',
               webPreferences: {
                 nodeIntegration: false,
                 contextIsolation: true,
-                webSecurity: true,
-                preload: path.join(__dirname, 'Flipboard-IDW-Feed/preload.js')
+                preload: path.join(__dirname, 'preload.js')
               }
             });
             
-            // Load the UXmag.html file
-            aiWindow.loadFile('Flipboard-IDW-Feed/uxmag.html');
+            aiderWindow.loadFile('aider-ui.html');
+          }
+        },
+        {
+          label: 'Video Editor',
+          accelerator: 'CommandOrControl+Shift+V',
+          click: () => {
+            const videoEditorWindow = new BrowserWindow({
+              width: 1400,
+              height: 900,
+              title: 'Video Editor',
+              webPreferences: {
+                nodeIntegration: false,
+                contextIsolation: true,
+                devTools: true,
+                preload: path.join(__dirname, 'preload-video-editor.js')
+              }
+            });
+            
+            videoEditorWindow.loadFile('video-editor.html');
+
+            // Enable dev tools keyboard shortcut (Cmd+Option+I / Ctrl+Shift+I)
+            videoEditorWindow.webContents.on('before-input-event', (event, input) => {
+              if ((input.meta && input.alt && input.key === 'i') || 
+                  (input.control && input.shift && input.key === 'I')) {
+                videoEditorWindow.webContents.toggleDevTools();
+              }
+            });
+            
+            // Setup video editor IPC for this window
+            if (global.videoEditor) {
+              global.videoEditor.setupIPC(videoEditorWindow);
+            }
           }
         },
         { type: 'separator' },
@@ -2078,38 +3264,10 @@ Right-click anywhere: Paste to Black Hole`;
             dialog.showMessageBox(focusedWindow, {
               type: 'info',
               title: 'Keyboard Shortcuts',
-              message: 'OneReach.ai Keyboard Shortcuts',
+              message: 'GSX Power User Keyboard Shortcuts',
               detail: shortcutsMessage,
               buttons: ['OK']
             });
-          }
-        },
-        { type: 'separator' },
-        {
-          label: 'Debug: Open Setup Wizard',
-          click: async () => {
-            console.log('Debug: Opening setup wizard directly');
-            const { BrowserWindow } = require('electron');
-            const path = require('path');
-            const fs = require('fs');
-            
-            // Create the setup wizard window directly
-            const wizardWindow = new BrowserWindow({
-              width: 1000, 
-              height: 700,
-              webPreferences: {
-                nodeIntegration: false,
-                contextIsolation: true,
-                preload: path.join(__dirname, 'preload.js'),
-                webSecurity: true,
-                enableRemoteModule: false,
-                sandbox: false
-              }
-            });
-            
-            // Load the setup wizard directly
-            console.log('Loading setup-wizard.html directly');
-            wizardWindow.loadFile('setup-wizard.html');
           }
         },
         {
@@ -2118,6 +3276,29 @@ Right-click anywhere: Paste to Black Hole`;
             await shell.openExternal('https://onereach.ai');
           }
         },
+        { type: 'separator' },
+        {
+          label: 'Browser Extension Setup',
+          click: () => {
+            const { BrowserWindow } = require('electron');
+            const path = require('path');
+            
+            // Create extension setup window
+            const setupWindow = new BrowserWindow({
+              width: 600,
+              height: 700,
+              backgroundColor: '#0d0d14',
+              webPreferences: {
+                nodeIntegration: false,
+                contextIsolation: true,
+                preload: path.join(__dirname, 'preload-minimal.js')
+              }
+            });
+            
+            setupWindow.loadFile('extension-setup.html');
+          }
+        },
+        { type: 'separator' },
         {
           label: 'Documentation',
           submenu: [
@@ -2182,6 +3363,37 @@ Right-click anywhere: Paste to Black Hole`;
               label: 'Online Documentation',
               click: async () => {
                 await shell.openExternal('https://onereach.ai/docs');
+              }
+            }
+          ]
+        },
+        {
+          label: 'Developer Docs',
+          submenu: [
+            {
+              label: 'Spaces API Guide',
+              click: () => {
+                const { BrowserWindow } = require('electron');
+                const path = require('path');
+                
+                // Create Spaces API documentation window
+                const apiDocWindow = new BrowserWindow({
+                  width: 1100,
+                  height: 900,
+                  webPreferences: {
+                    nodeIntegration: false,
+                    contextIsolation: true,
+                    preload: path.join(__dirname, 'preload.js'),
+                    webSecurity: true
+                  }
+                });
+                
+                // Load the Spaces API guide HTML file
+                try {
+                  apiDocWindow.loadFile('docs-spaces-api.html');
+                } catch (error) {
+                  console.error('Error loading Spaces API documentation:', error);
+                }
               }
             }
           ]
@@ -2355,7 +3567,7 @@ END OF AUTOMATED REPORT
               
               if (result.response === 0) {
                 // Open GitHub issues page with pre-filled title
-                const issueTitle = `Bug Report ${reportId} - Onereach.ai v${systemInfo.app_version}`;
+                const issueTitle = `Bug Report ${reportId} - GSX Power User v${systemInfo.app_version}`;
                 const encodedTitle = encodeURIComponent(issueTitle);
                 const encodedBody = encodeURIComponent(emailBody);
                 
@@ -2374,7 +3586,7 @@ END OF AUTOMATED REPORT
                 
               } else if (result.response === 1) {
                 // Open email client with everything pre-filled
-                const subject = `Bug Report ${reportId} - Onereach.ai v${systemInfo.app_version}`;
+                const subject = `Bug Report ${reportId} - GSX Power User v${systemInfo.app_version}`;
                 const encodedSubject = encodeURIComponent(subject);
                 const encodedBody = encodeURIComponent(emailBody);
                 
@@ -2636,6 +3848,19 @@ END OF AUTOMATED REPORT
             }
           ]
         },
+        { type: 'separator' },
+        {
+          label: '◎ App Health Dashboard',
+          accelerator: 'CmdOrCtrl+Shift+H',
+          click: () => {
+            console.log("[Menu] Opening App Health Dashboard");
+            if (global.openDashboardWindow) {
+              global.openDashboardWindow();
+            } else {
+              console.error('[Menu] Dashboard window function not available');
+            }
+          }
+        },
         // Conditionally add test menu items if showTestMenu is true
         ...(showTestMenu ? [
           { type: 'separator' },
@@ -2717,6 +3942,122 @@ END OF AUTOMATED REPORT
               
               logWindow.loadFile('log-viewer.html');
             }
+          },
+          {
+            label: '🧪 Test ElevenLabs APIs',
+            click: async () => {
+              console.log('[Menu] Testing ElevenLabs APIs...');
+              const { dialog, BrowserWindow } = require('electron');
+              const focusedWindow = BrowserWindow.getFocusedWindow();
+              
+              try {
+                // Get the video editor service
+                const { VideoEditor } = require('./src/video/index.js');
+                const videoEditor = new VideoEditor();
+                
+                const results = { passed: [], failed: [] };
+                
+                // Test 1: List Models
+                try {
+                  const models = await videoEditor.elevenLabsService.listModels();
+                  results.passed.push(`List Models: Found ${models?.length || 0} models`);
+                } catch (e) {
+                  results.failed.push(`List Models: ${e.message}`);
+                }
+                
+                // Test 2: List Voices
+                try {
+                  const voices = await videoEditor.elevenLabsService.listVoices();
+                  results.passed.push(`List Voices: Found ${voices.voices?.length || 0} voices`);
+                } catch (e) {
+                  results.failed.push(`List Voices: ${e.message}`);
+                }
+                
+                // Test 3: List Studio Projects
+                try {
+                  const projects = await videoEditor.elevenLabsService.listStudioProjects();
+                  results.passed.push(`List Studio Projects: Found ${projects?.length || 0} projects`);
+                } catch (e) {
+                  results.failed.push(`List Studio Projects: ${e.message}`);
+                }
+                
+                // Test 4: Get History
+                try {
+                  const history = await videoEditor.elevenLabsService.getHistory({ pageSize: 5 });
+                  results.passed.push(`Get History: Found ${history.history?.length || 0} items`);
+                } catch (e) {
+                  results.failed.push(`Get History: ${e.message}`);
+                }
+                
+                // Test 5: Get User Info
+                try {
+                  const user = await videoEditor.elevenLabsService.getUserInfo();
+                  results.passed.push(`Get User Info: ${user.first_name || 'OK'}`);
+                } catch (e) {
+                  results.failed.push(`Get User Info: ${e.message}`);
+                }
+                
+                // Test 6: Get Subscription
+                try {
+                  const sub = await videoEditor.elevenLabsService.getUserSubscription();
+                  results.passed.push(`Get Subscription: ${sub.tier || 'OK'}`);
+                } catch (e) {
+                  results.failed.push(`Get Subscription: ${e.message}`);
+                }
+                
+                // Show results
+                const message = [
+                  `✅ Passed: ${results.passed.length}`,
+                  `❌ Failed: ${results.failed.length}`,
+                  '',
+                  '--- Passed ---',
+                  ...results.passed,
+                  '',
+                  '--- Failed ---',
+                  ...results.failed
+                ].join('\n');
+                
+                console.log('[Menu] ElevenLabs Test Results:\n' + message);
+                
+                dialog.showMessageBox(focusedWindow, {
+                  type: results.failed.length > 0 ? 'warning' : 'info',
+                  title: 'ElevenLabs API Test Results',
+                  message: `Passed: ${results.passed.length} | Failed: ${results.failed.length}`,
+                  detail: message,
+                  buttons: ['OK']
+                });
+              } catch (error) {
+                console.error('[Menu] ElevenLabs test error:', error);
+                dialog.showErrorBox('ElevenLabs Test Error', error.message);
+              }
+            }
+          },
+          {
+            label: '🔧 Debug: Open Setup Wizard',
+            click: async () => {
+              console.log('Debug: Opening setup wizard directly');
+              const { BrowserWindow } = require('electron');
+              const path = require('path');
+              const fs = require('fs');
+              
+              // Create the setup wizard window directly
+              const wizardWindow = new BrowserWindow({
+                width: 1000, 
+                height: 700,
+                webPreferences: {
+                  nodeIntegration: false,
+                  contextIsolation: true,
+                  preload: path.join(__dirname, 'preload.js'),
+                  webSecurity: true,
+                  enableRemoteModule: false,
+                  sandbox: false
+                }
+              });
+              
+              // Load the setup wizard directly
+              console.log('Loading setup-wizard.html directly');
+              wizardWindow.loadFile('setup-wizard.html');
+            }
           }
         ] : [])
       ]
@@ -2746,8 +4087,8 @@ END OF AUTOMATED REPORT
           click: () => {
             console.log('[Share] Share via Email clicked');
             const { shell } = require('electron');
-            const subject = encodeURIComponent('Check out Onereach.ai Desktop');
-            const body = encodeURIComponent('I\'m using Onereach.ai Desktop - a powerful app for AI productivity. Download it here: https://github.com/wilsr7000/onereach_desktop/releases/latest');
+            const subject = encodeURIComponent('Check out GSX Power User');
+            const body = encodeURIComponent('I\'m using GSX Power User - a powerful app for AI productivity. Download it here: https://github.com/wilsr7000/onereach_desktop/releases/latest');
             shell.openExternal(`mailto:?subject=${subject}&body=${body}`);
           }
         },
@@ -2870,6 +4211,10 @@ function registerTestMenuShortcut() {
  */
 function refreshGSXLinks() {
   console.log('[Menu] Refreshing GSX links from file system');
+  
+  // PERFORMANCE: Invalidate cache so fresh data is loaded
+  menuCache.invalidate();
+  
   try {
     // Get current IDW environments first
     let idwEnvironments = [];
@@ -3005,14 +4350,46 @@ function refreshGSXLinks() {
 }
 
 // Helper: generate default GSX links for all IDWs ----------------------------
-function generateDefaultGSXLinks(idwEnvironments=[], accountId='') {
+function generateDefaultGSXLinks(idwEnvironments=[], defaultAccountId='') {
   if (!Array.isArray(idwEnvironments) || idwEnvironments.length === 0) return [];
   const links = [];
-  const withAccount = url => accountId ? `${url}?accountId=${accountId}` : url;
+  
   idwEnvironments.forEach(env => {
     const envName = env.environment;
     const idwId   = env.id;
     if (!envName || !idwId) return; // skip incomplete entries
+    
+    // Extract accountId - priority order:
+    // 1. Explicit gsxAccountId field (if user configured it)
+    // 2. accountId query param in chatUrl or url
+    // 3. UUID in /chat/ path (this is actually chatId but used as fallback)
+    // 4. Default accountId
+    let accountId = defaultAccountId;
+    const urlToCheck = env.chatUrl || env.url || '';
+    
+    // First check explicit gsxAccountId
+    if (env.gsxAccountId) {
+      accountId = env.gsxAccountId;
+      console.log(`[Menu] Using configured gsxAccountId ${accountId} for IDW ${idwId}`);
+    } else if (urlToCheck) {
+      // Try query parameter first (most reliable)
+      let urlMatch = urlToCheck.match(/accountId=([a-f0-9-]+)/i);
+      if (urlMatch) {
+        accountId = urlMatch[1];
+        console.log(`[Menu] Extracted accountId ${accountId} from query param for IDW ${idwId}`);
+      } else {
+        // Try extracting UUID from path (e.g., /chat/05bd3c92-5d3c-4dc5-a95d-0c584695cea4)
+        // NOTE: This is actually the chatId/botId, not accountId - but used as fallback
+        urlMatch = urlToCheck.match(/\/chat\/([a-f0-9-]{36})/i);
+        if (urlMatch) {
+          accountId = urlMatch[1];
+          console.log(`[Menu] Using chatId ${accountId} as accountId fallback for IDW ${idwId} (may not be correct)`);
+        }
+      }
+    }
+    
+    const withAccount = url => accountId ? `${url}?accountId=${accountId}` : url;
+    
     links.push(
       { id:`hitl-${envName}-${idwId}`,       label:'HITL',       url: withAccount(`https://hitl.${envName}.onereach.ai/`),              environment: envName, idwId },
       { id:`actiondesk-${envName}-${idwId}`, label:'Action Desk',url: withAccount(`https://actiondesk.${envName}.onereach.ai/dashboard/`), environment: envName, idwId },
@@ -3048,10 +4425,354 @@ function refreshApplicationMenu() {
   setApplicationMenu(idwEnvironments);
 }
 
+/**
+ * Get all openable menu items for voice/agent access
+ * Returns a flat list of items the agent can open
+ */
+function getOpenableItems() {
+  const cachedData = menuCache.loadAll();
+  const items = [];
+  
+  // App features (built-in windows/features)
+  // Note: Spaces is handled by the dedicated Spaces Agent for smart summaries
+  const appFeatures = [
+    { name: 'Video Editor', type: 'app-feature', action: 'open-video-editor', keywords: ['video', 'editor', 'edit video', 'video edit'] },
+    { name: 'GSX Create', type: 'app-feature', action: 'open-gsx-create', keywords: ['gsx', 'create', 'aider', 'coding', 'development'] },
+    { name: 'Settings', type: 'app-feature', action: 'open-settings', keywords: ['settings', 'preferences', 'options', 'config'] },
+    { name: 'Budget Manager', type: 'app-feature', action: 'open-budget', keywords: ['budget', 'cost', 'spending', 'money', 'usage'] },
+    { name: 'App Health', type: 'app-feature', action: 'open-app-health', keywords: ['health', 'status', 'errors', 'diagnostics'] },
+    { name: 'Agent Manager', type: 'app-feature', action: 'open-agent-manager', keywords: ['agents', 'manage agents', 'custom agents'] },
+  ];
+  
+  items.push(...appFeatures);
+  
+  // External AI bots (ChatGPT, Claude, etc.)
+  if (cachedData.externalBots) {
+    cachedData.externalBots.forEach(bot => {
+      items.push({
+        name: bot.name,
+        type: 'external-bot',
+        url: bot.chatUrl,
+        keywords: [bot.name.toLowerCase(), ...(bot.name.toLowerCase().split(' '))]
+      });
+    });
+  }
+  
+  // Image creators (Midjourney, DALL-E, etc.)
+  if (cachedData.imageCreators) {
+    cachedData.imageCreators.forEach(creator => {
+      items.push({
+        name: creator.name,
+        type: 'image-creator',
+        url: creator.chatUrl || creator.url,
+        keywords: [creator.name.toLowerCase(), 'image', 'art', ...(creator.name.toLowerCase().split(' '))]
+      });
+    });
+  }
+  
+  // Video creators (Runway, Veo3, etc.)
+  if (cachedData.videoCreators) {
+    cachedData.videoCreators.forEach(creator => {
+      items.push({
+        name: creator.name,
+        type: 'video-creator',
+        url: creator.chatUrl || creator.url,
+        keywords: [creator.name.toLowerCase(), 'video', ...(creator.name.toLowerCase().split(' '))]
+      });
+    });
+  }
+  
+  // Audio generators (ElevenLabs, etc.)
+  if (cachedData.audioGenerators) {
+    cachedData.audioGenerators.forEach(generator => {
+      items.push({
+        name: generator.name,
+        type: 'audio-generator',
+        url: generator.chatUrl || generator.url,
+        keywords: [generator.name.toLowerCase(), 'audio', 'voice', ...(generator.name.toLowerCase().split(' '))]
+      });
+    });
+  }
+  
+  // IDW environments
+  if (cachedData.idwEnvironments) {
+    cachedData.idwEnvironments.forEach(env => {
+      items.push({
+        name: env.label || env.name,
+        type: 'idw-environment',
+        url: env.chatUrl || env.url,  // IDW environments use chatUrl
+        keywords: [(env.label || env.name || '').toLowerCase(), 'idw', 'environment']
+      });
+    });
+  }
+  
+  // Tools menu items (modules and web tools)
+  // Note: LLM uses item names for matching, no keywords needed
+  if (global.moduleManager) {
+    // Installed modules
+    const modules = global.moduleManager.getInstalledModules();
+    if (modules && modules.length > 0) {
+      modules.forEach(mod => {
+        items.push({
+          name: mod.name || mod.id,
+          type: 'tool-module',
+          action: 'open-module',
+          moduleId: mod.id,
+          keywords: [] // LLM matches by name
+        });
+      });
+    }
+    
+    // Web tools
+    const webTools = global.moduleManager.getWebTools();
+    if (webTools && webTools.length > 0) {
+      webTools.forEach(tool => {
+        items.push({
+          name: tool.name,
+          type: 'web-tool',
+          action: 'open-web-tool',
+          url: tool.url,
+          keywords: [] // LLM matches by name
+        });
+      });
+    }
+  }
+  
+  // Built-in tools
+  const builtInTools = [
+    { name: 'Black Hole', type: 'tool', action: 'open-black-hole', keywords: [] },
+    { name: 'Clipboard Viewer', type: 'tool', action: 'open-clipboard-viewer', keywords: [] },
+  ];
+  items.push(...builtInTools);
+  
+  return items;
+}
+
+/**
+ * Get OpenAI API key from app settings
+ */
+function getOpenAIApiKey() {
+  if (global.settingsManager) {
+    const openaiKey = global.settingsManager.get('openaiApiKey');
+    if (openaiKey) return openaiKey;
+    
+    const provider = global.settingsManager.get('llmProvider');
+    const llmKey = global.settingsManager.get('llmApiKey');
+    if (provider === 'openai' && llmKey) return llmKey;
+  }
+  return process.env.OPENAI_API_KEY;
+}
+
+/**
+ * Use LLM to find the best matching menu item for a user's request
+ * @param {string} userRequest - What the user said
+ * @returns {Promise<Object|null>} - Matching menu item or null
+ */
+async function findMenuItemWithLLM(userRequest) {
+  const items = getOpenableItems();
+  
+  if (items.length === 0) {
+    console.log('[Menu] No menu items available');
+    return null;
+  }
+  
+  const apiKey = getOpenAIApiKey();
+  if (!apiKey) {
+    console.log('[Menu] No OpenAI API key, falling back to simple matching');
+    return findMenuItemSimple(userRequest);
+  }
+  
+  // Build the list of available items for the LLM
+  const itemList = items.map((item, i) => `${i + 1}. "${item.name}" (${item.type})`).join('\n');
+  
+  const prompt = `You are a voice command interpreter matching garbled speech-to-text to menu items.
+
+AVAILABLE MENU ITEMS:
+${itemList}
+
+USER SAID: "${userRequest}"
+
+CRITICAL: Voice transcription is often VERY WRONG. Common errors:
+- "OpenGLAD" or "open glad" = "Open Claude" 
+- "OpenCLoud" or "open cloud" = "Open Claude"
+- "chat GBT" or "chat GPT" = "ChatGPT"
+- "mid journey" or "mid jerky" = "Midjourney"
+- "dolly" or "dally" = "DALL-E"
+- "eleven lab" = "ElevenLabs"
+- "Jim and I" or "gem in eye" = "Gemini"
+- "run way" = "Runway"
+- "perplexing" = "Perplexity"
+- Words often merged: "openclaude" "opengpt" "launchgemini"
+
+Your task: Find the INTENDED menu item despite transcription errors.
+- Look for phonetic similarity (sounds like)
+- Look for partial matches
+- Assume "open" or "launch" at the start means they want to open something
+- Be generous - if it COULD be a match, it probably is
+
+Respond with JSON only:
+{
+  "matchIndex": <1-based index of matching item, or 0 if truly no match>,
+  "confidence": <0.0-1.0>,
+  "reasoning": "<brief explanation>"
+}`;
+
+  try {
+    const { getBudgetManager } = require('./budget-manager');
+    const budgetManager = getBudgetManager();
+    
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.1,
+        max_tokens: 150
+      })
+    });
+    
+    if (!response.ok) {
+      console.error('[Menu] LLM API error:', response.status);
+      return findMenuItemSimple(userRequest);
+    }
+    
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || '';
+    
+    // Track usage
+    if (budgetManager && data.usage) {
+      budgetManager.trackUsage({
+        model: 'gpt-4o-mini',
+        inputTokens: data.usage.prompt_tokens || 0,
+        outputTokens: data.usage.completion_tokens || 0,
+        source: 'menu-matcher'
+      });
+    }
+    
+    // Parse JSON response
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      console.log('[Menu] LLM returned invalid JSON');
+      return findMenuItemSimple(userRequest);
+    }
+    
+    const result = JSON.parse(jsonMatch[0]);
+    console.log(`[Menu] LLM match result:`, result);
+    
+    if (result.matchIndex > 0 && result.matchIndex <= items.length && result.confidence >= 0.3) {
+      const matchedItem = items[result.matchIndex - 1];
+      console.log(`[Menu] LLM matched "${userRequest}" to "${matchedItem.name}" (confidence: ${result.confidence})`);
+      return matchedItem;
+    }
+    
+    // LLM didn't match - try phonetic fallback for common cases
+    console.log(`[Menu] LLM found no match, trying phonetic fallback for "${userRequest}"`);
+    return findMenuItemPhonetic(userRequest, items);
+    
+  } catch (error) {
+    console.error('[Menu] LLM matching error:', error.message);
+    return findMenuItemSimple(userRequest);
+  }
+}
+
+/**
+ * Phonetic/fuzzy fallback for common transcription errors
+ */
+function findMenuItemPhonetic(query, items) {
+  const lower = query.toLowerCase().replace(/[^a-z]/g, ''); // Remove non-letters
+  
+  // Common phonetic patterns: what it sounds like → what they meant
+  const phoneticMap = {
+    // Claude variations
+    'glad': 'claude', 'cloud': 'claude', 'clod': 'claude', 'claud': 'claude',
+    'claw': 'claude', 'clawed': 'claude', 'klad': 'claude',
+    // ChatGPT variations  
+    'gpt': 'chatgpt', 'gbt': 'chatgpt', 'chatgbt': 'chatgpt', 'chargpt': 'chatgpt',
+    'chatgp': 'chatgpt', 'chegg': 'chatgpt',
+    // Gemini variations
+    'gemini': 'gemini', 'jimini': 'gemini', 'jiminy': 'gemini', 'jemini': 'gemini',
+    // Midjourney variations
+    'journey': 'midjourney', 'midjerky': 'midjourney', 'midjourny': 'midjourney',
+    // DALL-E variations
+    'dolly': 'dall-e', 'dally': 'dall-e', 'dalle': 'dall-e', 'dali': 'dall-e',
+    // Perplexity variations
+    'perplexity': 'perplexity', 'perplexing': 'perplexity', 'perplex': 'perplexity',
+    // Runway variations
+    'runway': 'runway', 'runaway': 'runway',
+    // ElevenLabs variations
+    'elevenlabs': 'elevenlabs', 'elevenlab': 'elevenlabs', 'eleven': 'elevenlabs',
+    // Grok variations
+    'grok': 'grok', 'grock': 'grok', 'grawl': 'grok',
+  };
+  
+  // Check each phonetic pattern
+  for (const [sound, target] of Object.entries(phoneticMap)) {
+    if (lower.includes(sound)) {
+      // Find item matching the target
+      const match = items.find(item => 
+        item.name.toLowerCase().includes(target) ||
+        item.keywords.some(kw => kw.includes(target))
+      );
+      if (match) {
+        console.log(`[Menu] Phonetic match: "${sound}" in "${query}" → "${match.name}"`);
+        return match;
+      }
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Simple fallback matching (when LLM is unavailable)
+ */
+function findMenuItemSimple(query) {
+  const items = getOpenableItems();
+  const lower = query.toLowerCase();
+  
+  // Try exact name match
+  let match = items.find(item => item.name.toLowerCase() === lower);
+  if (match) return match;
+  
+  // Try contains
+  match = items.find(item => 
+    lower.includes(item.name.toLowerCase()) || 
+    item.name.toLowerCase().includes(lower)
+  );
+  if (match) return match;
+  
+  // Try keywords
+  match = items.find(item => 
+    item.keywords.some(kw => lower.includes(kw) || kw.includes(lower))
+  );
+  
+  return match || null;
+}
+
+/**
+ * Find menu item - uses LLM when available, falls back to simple matching
+ * @param {string} query - User's request
+ * @returns {Promise<Object|null>}
+ */
+async function findMenuItem(query) {
+  return findMenuItemWithLLM(query);
+}
+
 module.exports = {
   createMenu,
   setApplicationMenu,
   registerTestMenuShortcut,
   refreshGSXLinks,
-  refreshApplicationMenu
+  refreshApplicationMenu,
+  // PERFORMANCE: Expose cache invalidation for when menu data files are updated
+  invalidateMenuCache: () => menuCache.invalidate(),
+  // Window management for app quit
+  closeAllGSXWindows,
+  // For agent/voice access
+  getOpenableItems,
+  findMenuItem
 }; 

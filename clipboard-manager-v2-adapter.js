@@ -2,7 +2,11 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const ClipboardStorageV2 = require('./clipboard-storage-v2');
+const { getSharedStorage } = require('./clipboard-storage-v2');
 const AppContextCapture = require('./app-context-capture');
+const getLogger = require('./event-logger');
+const { getContentIngestionService, ValidationError, retryOperation } = require('./content-ingestion');
+const { getSpacesAPI } = require('./spaces-api');
 
 // Handle Electron imports gracefully
 let BrowserWindow, ipcMain, globalShortcut, screen, app, clipboard, nativeImage;
@@ -29,16 +33,22 @@ class ClipboardManagerV2 {
     // Check if migration is needed
     this.checkAndMigrate();
     
-    // Initialize new storage
-    this.storage = new ClipboardStorageV2();
+    // Use shared storage singleton to ensure consistency with SpacesAPI
+    // This fixes issues where items added via ClipboardManager weren't
+    // visible to SpacesAPI (and vice versa) due to separate in-memory indexes
+    this.storage = getSharedStorage();
     
     // Initialize app context capture
     this.contextCapture = new AppContextCapture();
     
-    // Load data from storage
-    this.history = [];
-    this.spaces = [];
-    this.loadFromStorage();
+    // Track active YouTube downloads for cancellation
+    this.activeDownloads = new Map(); // Map<placeholderId, { controller: AbortController, progress: number }>
+    
+    // PERFORMANCE: Defer loading history until first access
+    // This speeds up initial startup significantly
+    this.history = null; // Will be loaded lazily
+    this.spaces = null;  // Will be loaded lazily
+    this._historyLoaded = false;
     
     // Compatibility properties
     this.maxHistorySize = 1000;
@@ -51,22 +61,256 @@ class ClipboardManagerV2 {
     this.screenshotWatcher = null;
     this.processedScreenshots = new Set();
     
-    // Load preferences
+    // Load preferences (lightweight, do immediately)
     this.loadPreferences();
     
-    // Set up screenshot monitoring if enabled
-    if (this.screenshotCaptureEnabled) {
-      this.setupScreenshotWatcher();
-    }
+    // Migrate existing web monitor items BEFORE IPC handlers (so clients get correct data)
+    this.migrateWebMonitorItems();
     
-    // Set up website monitoring periodic checks
-    this.startWebsiteMonitoring();
-    
-    // Set up IPC handlers
+    // Set up IPC handlers (needed immediately for IPC)
     this.setupIPC();
+    
+    // Log feature initialization
+    const logger = getLogger();
+    logger.logFeatureUsed('clipboard-manager', { 
+      status: 'initialized',
+      spacesEnabled: this.spacesEnabled,
+      screenshotCaptureEnabled: this.screenshotCaptureEnabled
+    });
+    
+    // PERFORMANCE: Defer heavy initialization to next tick
+    setImmediate(() => {
+      // Clean up orphaned downloading items from crashes
+      this.cleanupOrphanedDownloads();
+      
+      // Set up screenshot monitoring if enabled
+      if (this.screenshotCaptureEnabled) {
+        this.setupScreenshotWatcher();
+      }
+      
+      // Set up website monitoring periodic checks
+      this.startWebsiteMonitoring();
+      
+      // Subscribe to SpacesAPI events to keep in-memory history in sync
+      // This ensures Spaces Manager UI stays updated when changes happen via API
+      this._subscribeToSpacesAPIEvents();
+    });
+  }
+  
+  /**
+   * Subscribe to SpacesAPI events to keep in-memory history synchronized
+   * This fixes sync issues where API changes weren't reflected in UI until reboot
+   */
+  _subscribeToSpacesAPIEvents() {
+    try {
+      const spacesAPI = getSpacesAPI();
+      
+      // When an item is deleted via API, remove from our in-memory history
+      spacesAPI.on('item:deleted', ({ spaceId, itemId }) => {
+        console.log('[Clipboard] SpacesAPI item:deleted event received:', itemId);
+        const beforeCount = this.history?.length || 0;
+        if (this.history) {
+          this.history = this.history.filter(h => h.id !== itemId);
+        }
+        this.pinnedItems.delete(itemId);
+        const afterCount = this.history?.length || 0;
+        
+        if (beforeCount !== afterCount) {
+          console.log('[Clipboard] Removed item from history, notifying UI');
+          this.updateSpaceCounts();
+          this.notifyHistoryUpdate();
+        }
+      });
+      
+      // When an item is added via API, add to our in-memory history
+      spacesAPI.on('item:added', ({ spaceId, item }) => {
+        console.log('[Clipboard] SpacesAPI item:added event received:', item?.id);
+        this.ensureHistoryLoaded();
+        
+        // Only add if not already in history (avoid duplicates)
+        if (item && !this.history.find(h => h.id === item.id)) {
+          // Format item for history array
+          const historyItem = {
+            id: item.id,
+            type: item.type,
+            content: item.content || '',
+            preview: item.preview || '',
+            timestamp: item.timestamp || Date.now(),
+            spaceId: item.spaceId || 'unclassified',
+            pinned: item.pinned || false,
+            thumbnail: item.thumbnail,
+            metadata: item.metadata || {},
+            fileName: item.fileName,
+            fileSize: item.fileSize,
+            _needsContent: true
+          };
+          
+          this.history.unshift(historyItem);
+          if (item.pinned) {
+            this.pinnedItems.add(item.id);
+          }
+          
+          console.log('[Clipboard] Added item to history, notifying UI');
+          this.updateSpaceCounts();
+          this.notifyHistoryUpdate();
+        }
+      });
+      
+      // When an item is updated via API, update our in-memory history
+      spacesAPI.on('item:updated', ({ spaceId, itemId, data }) => {
+        console.log('[Clipboard] SpacesAPI item:updated event received:', itemId, Object.keys(data || {}));
+        this.ensureHistoryLoaded();
+        
+        const item = this.history.find(h => h.id === itemId);
+        if (item && data) {
+          Object.assign(item, data);
+          
+          // Handle pinned state changes
+          if (data.pinned !== undefined) {
+            if (data.pinned) {
+              this.pinnedItems.add(itemId);
+            } else {
+              this.pinnedItems.delete(itemId);
+            }
+          }
+          
+          console.log('[Clipboard] Updated item in history, notifying UI');
+          this.notifyHistoryUpdate();
+        }
+      });
+      
+      // When an item is moved between spaces via API
+      spacesAPI.on('item:moved', ({ itemId, fromSpaceId, toSpaceId }) => {
+        console.log('[Clipboard] SpacesAPI item:moved event received:', itemId, fromSpaceId, '->', toSpaceId);
+        this.ensureHistoryLoaded();
+        
+        const item = this.history.find(h => h.id === itemId);
+        if (item) {
+          item.spaceId = toSpaceId;
+          console.log('[Clipboard] Updated item space, notifying UI');
+          this.updateSpaceCounts();
+          this.notifyHistoryUpdate();
+        }
+      });
+      
+      console.log('[Clipboard] Subscribed to SpacesAPI events for sync');
+    } catch (error) {
+      console.error('[Clipboard] Failed to subscribe to SpacesAPI events:', error.message);
+      // Non-fatal - app will still work, just without real-time sync
+    }
+  }
+  
+  // PERFORMANCE: Lazy load history on first access
+  ensureHistoryLoaded() {
+    if (!this._historyLoaded) {
+      console.log('[Clipboard] Lazy loading history...');
+      this.loadFromStorage();
+      this._historyLoaded = true;
+      console.log('[Clipboard] History loaded:', this.history.length, 'items');
+    }
+  }
+  
+  /**
+   * Detect JSON subtype from content
+   * Returns: 'style-guide', 'journey-map', or null for generic JSON
+   * @param {string|object} jsonContent - JSON string or parsed object
+   * @returns {string|null} - Detected subtype or null
+   */
+  detectJsonSubtype(jsonContent) {
+    try {
+      const data = typeof jsonContent === 'string' ? JSON.parse(jsonContent) : jsonContent;
+      
+      // Journey Map detection (check first - more specific structure)
+      // Matches exported journey maps from Journey Editor
+      if (data.journeyData && data.metadata?.exportVersion) {
+        console.log('[JsonSubtype] Detected journey-map (export format)');
+        return 'journey-map';
+      }
+      if (data.journeyData?.persona?.journeys?.[0]?.stages) {
+        console.log('[JsonSubtype] Detected journey-map (stages format)');
+        return 'journey-map';
+      }
+      // Journey map template format (from templates/export/)
+      if (data.prompt && data.systemPrompt && data.htmlTemplate && data.styling) {
+        console.log('[JsonSubtype] Detected journey-map (template format)');
+        return 'journey-map';
+      }
+      
+      // Style Guide / Design System detection
+      // Matches style guides with colors + typography + design tokens
+      if (data.colors && data.typography) {
+        const hasColorTokens = data.colors.primary || data.colors.secondary || 
+                               data.colors.accent || data.colors.neutral ||
+                               data.colors.text || data.colors.backgrounds;
+        const hasTypographyTokens = data.typography.fontFamilies || data.typography.scale ||
+                                    data.typography.fonts || data.typography.headings || 
+                                    data.typography.body;
+        const hasDesignTokens = data.spacing || data.borderRadius || data.shadows ||
+                                data.borders || data.animations;
+        
+        if (hasColorTokens && hasTypographyTokens) {
+          console.log('[JsonSubtype] Detected style-guide');
+          return 'style-guide';
+        }
+      }
+      
+      // Chatbot Conversation detection
+      // Matches AI conversations with messages array + AI service metadata
+      if (data.messages && Array.isArray(data.messages)) {
+        const hasAIMetadata = data.aiService || data.conversationId;
+        const hasMessageStructure = data.messages.some(m => 
+          m.role && m.content && (m.role === 'user' || m.role === 'assistant')
+        );
+        
+        if (hasAIMetadata && hasMessageStructure) {
+          console.log('[JsonSubtype] Detected chatbot-conversation');
+          return 'chatbot-conversation';
+        }
+      }
+      
+      // No specific subtype detected
+      return null;
+    } catch (e) {
+      console.warn('[JsonSubtype] Error parsing JSON for subtype detection:', e.message);
+      return null;
+    }
+  }
+  
+  /**
+   * Read JSON file content and detect subtype
+   * @param {string} filePath - Path to JSON file
+   * @returns {string|null} - Detected subtype or null
+   */
+  detectJsonSubtypeFromFile(filePath) {
+    try {
+      if (!filePath || !fs.existsSync(filePath)) {
+        return null;
+      }
+      const content = fs.readFileSync(filePath, 'utf8');
+      return this.detectJsonSubtype(content);
+    } catch (e) {
+      console.warn('[JsonSubtype] Error reading file for subtype detection:', e.message);
+      return null;
+    }
+  }
+  
+  // NOTE: getHistory() is defined below with content loading logic
+  
+  // Getter for spaces that ensures lazy loading
+  getSpaces() {
+    this.ensureHistoryLoaded();
+    return this.spaces;
   }
   
   loadFromStorage() {
+    // Initialize arrays if null (for lazy loading support)
+    if (this.history === null) {
+      this.history = [];
+    }
+    if (this.spaces === null) {
+      this.spaces = [];
+    }
+    
     // Load all items (without content for performance)
     const items = this.storage.getAllItems();
     
@@ -94,6 +338,12 @@ class ClipboardManagerV2 {
         historyItem.fileExt = item.fileExt;
         historyItem.isScreenshot = item.isScreenshot;
         historyItem.filePath = item.filePath; // This will be updated when content is loaded
+      }
+      
+      // Preserve jsonSubtype for ALL item types (style-guide, journey-map)
+      // This is needed for both file and text items
+      if (item.jsonSubtype) {
+        historyItem.jsonSubtype = item.jsonSubtype;
       }
       
       return historyItem;
@@ -126,7 +376,129 @@ class ClipboardManagerV2 {
   // Main methods that need adaptation
   
   async addToHistory(item) {
-    console.log('[V2] Adding item to history:', item.type);
+    // Ensure history is loaded before adding
+    this.ensureHistoryLoaded();
+    
+    const logger = getLogger();
+    
+    // ========================================
+    // INPUT VALIDATION
+    // ========================================
+    
+    // Validate item exists
+    if (!item) {
+      logger.error('addToHistory called with null/undefined item');
+      throw new Error('Item is required');
+    }
+    
+    // Validate type
+    const validTypes = ['text', 'html', 'image', 'file', 'code'];
+    const type = item.type || 'text';
+    if (!validTypes.includes(type)) {
+      logger.warn('Invalid item type, defaulting to text', { providedType: item.type });
+      item.type = 'text';
+    }
+    
+    // Validate content exists for content-based types
+    if (['text', 'code'].includes(type)) {
+      if (!item.content && item.content !== '') {
+        logger.error('Content is required for text/code items');
+        throw new Error('Content is required for text/code items');
+      }
+      if (typeof item.content === 'string' && item.content.trim().length === 0) {
+        logger.error('Content cannot be empty for text/code items');
+        throw new Error('Content cannot be empty');
+      }
+    }
+    
+    // Validate file items
+    if (type === 'file') {
+      if (!item.filePath && !item.fileData && !item.content) {
+        logger.error('File path, file data, or content is required for file items');
+        throw new Error('File path, file data, or content is required for file items');
+      }
+    }
+    
+    // Validate spaceId exists (if specified and not 'unclassified')
+    const requestedSpaceId = item.spaceId || this.currentSpace || 'unclassified';
+    if (requestedSpaceId && requestedSpaceId !== 'unclassified') {
+      const spaceExists = this.storage.index?.spaces?.some(s => s.id === requestedSpaceId);
+      if (!spaceExists) {
+        logger.warn('Space not found, defaulting to unclassified', { spaceId: requestedSpaceId });
+        item.spaceId = 'unclassified';
+      }
+    }
+    
+    // ========================================
+    // END VALIDATION
+    // ========================================
+    
+    // ========================================
+    // WEB MONITORS: URL DETECTION & MONITORING
+    // ========================================
+    const targetSpaceId = item.spaceId || this.currentSpace || 'unclassified';
+    if (targetSpaceId === 'web-monitors') {
+      const content = item.content || item.preview || '';
+      
+      // Skip SVG-only content (likely UI elements, not user content)
+      const trimmedContent = content.trim();
+      if (trimmedContent.startsWith('<svg') && trimmedContent.endsWith('</svg>')) {
+        console.log('[WebMonitors] Skipping SVG-only content (likely UI element)');
+        return null;
+      }
+      
+      // Check if content contains a URL
+      const url = this.extractURL(content);
+      console.log('[WebMonitors] Content received:', content.substring(0, 100));
+      console.log('[WebMonitors] Extracted URL:', url);
+      
+      if (url) {
+        console.log('[WebMonitors] URL detected, creating website monitor...');
+        
+        try {
+          // Try to create a full website monitor with scanning
+          const result = await this.createWebsiteMonitorFromURL(url);
+          if (result) {
+            console.log('[WebMonitors] Monitor created successfully:', result.id);
+            return result;
+          }
+        } catch (error) {
+          console.error('[WebMonitors] Failed to create monitor:', error.message);
+          console.log('[WebMonitors] Falling back to simple URL item');
+          
+          // Notify user of the failure
+          const { BrowserWindow } = require('electron');
+          BrowserWindow.getAllWindows().forEach(window => {
+            window.webContents.send('show-notification', {
+              title: 'Web Monitor Partial Setup',
+              body: `Saved URL, but monitoring disabled: ${error.message}`,
+              type: 'warning'
+            });
+          });
+          
+          // Fall back to simple URL item
+          item.type = 'url';
+          item.url = url;
+          item.content = url;
+          try {
+            const hostname = new URL(url).hostname;
+            item.preview = `URL (not monitored): ${hostname}`;
+          } catch (e) {
+            item.preview = `URL: ${url}`;
+          }
+        }
+      } else {
+        console.log('[WebMonitors] No URL found in content, adding as regular item');
+      }
+    }
+    // ========================================
+    // END WEB MONITORS
+    // ========================================
+    
+    logger.logClipboardOperation('add', item.type, { 
+      hasMetadata: !!item.metadata,
+      spaceId: this.currentSpace
+    });
     
     // Capture app context if not already provided
     let context = item.context;
@@ -135,7 +507,11 @@ class ClipboardManagerV2 {
         context = await this.contextCapture.getFullContext();
         console.log('[V2] Captured context:', context);
       } catch (error) {
-        console.error('[V2] Error capturing context:', error);
+        const logger = getLogger();
+        logger.warn('Clipboard context capture failed', {
+          error: error.message,
+          operation: 'addToHistory'
+        });
       }
     }
     
@@ -159,6 +535,29 @@ class ClipboardManagerV2 {
           contextDisplay: this.contextCapture.formatContextDisplay(context)
         }
       };
+    }
+    
+    // Generate thumbnail for image items if not already provided
+    // This ensures images added via SpacesAPI get thumbnails
+    if (item.type === 'image' && !item.thumbnail) {
+      const imageData = item.content || item.dataUrl;
+      if (imageData && typeof imageData === 'string' && imageData.startsWith('data:image/')) {
+        try {
+          // For smaller images, use the full image as thumbnail
+          // For larger images (>100KB), generate a smaller thumbnail
+          if (imageData.length > 100000) {
+            item.thumbnail = this.generateImageThumbnail(imageData);
+            console.log('[addToHistory] Generated thumbnail for large image');
+          } else {
+            item.thumbnail = imageData;
+            console.log('[addToHistory] Using full image as thumbnail (small image)');
+          }
+        } catch (thumbError) {
+          console.error('[addToHistory] Error generating image thumbnail:', thumbError);
+          // Fallback: use the content as thumbnail
+          item.thumbnail = imageData;
+        }
+      }
     }
     
     // Add to new storage
@@ -192,6 +591,42 @@ class ClipboardManagerV2 {
     // Update space counts
     this.updateSpaceCounts();
     
+    // Update lastUsed timestamp for the space
+    const itemSpaceId = indexEntry.spaceId;
+    if (itemSpaceId && itemSpaceId !== 'unclassified') {
+      this.updateSpaceLastUsed(itemSpaceId);
+    }
+    
+    // Sync to unified space-metadata.json if item belongs to a space
+    if (itemSpaceId) {
+      try {
+        const spaceMeta = this.storage.getSpaceMetadata(itemSpaceId);
+        if (spaceMeta) {
+          const fileKey = item.fileName || `item-${indexEntry.id}`;
+          spaceMeta.files[fileKey] = {
+            itemId: indexEntry.id,
+            fileName: item.fileName,
+            type: item.type,
+            fileType: item.fileType,
+            fileCategory: item.fileCategory,
+            preview: item.preview,
+            source: item.source,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          };
+          this.storage.updateSpaceMetadata(itemSpaceId, { files: spaceMeta.files });
+          console.log('[Clipboard] Synced new item to space-metadata.json:', fileKey);
+        }
+      } catch (syncError) {
+        const logger = getLogger();
+        logger.error('Clipboard space sync failed', {
+          error: syncError.message,
+          operation: 'syncNewItem',
+          spaceId: this.currentSpace
+        });
+      }
+    }
+    
     // Notify renderer
     this.notifyHistoryUpdate();
     
@@ -207,57 +642,293 @@ class ClipboardManagerV2 {
         });
       }
     }
+    
+    // Auto-generate AI metadata if enabled (run async, don't block)
+    // Pass fileType for proper categorization of image files
+    this.maybeAutoGenerateMetadata(indexEntry.id, item.type, item.isScreenshot, item.fileType);
+  }
+  
+  /**
+   * Check settings and auto-generate AI metadata if enabled
+   * This runs asynchronously so it doesn't block clipboard capture
+   */
+  async maybeAutoGenerateMetadata(itemId, itemType, isScreenshot, fileType = null) {
+    try {
+      const { getSettingsManager } = require('./settings-manager');
+      const settingsManager = getSettingsManager();
+      
+      // Check if auto AI metadata is enabled
+      const autoAIMetadata = settingsManager.get('autoAIMetadata');
+      const autoAIMetadataTypes = settingsManager.get('autoAIMetadataTypes') || ['all'];
+      const apiKey = settingsManager.get('llmApiKey');
+      
+      // Also check legacy screenshot setting for backward compatibility
+      const autoGenerateScreenshotMetadata = settingsManager.get('autoGenerateScreenshotMetadata');
+      
+      // Check if this is an image file (type=file but fileType=image-file)
+      const isImageFile = itemType === 'file' && fileType === 'image-file';
+      
+      
+      console.log(`[Auto AI] Settings check for item ${itemId}:`, {
+        itemType,
+        fileType,
+        isScreenshot,
+        isImageFile,
+        autoAIMetadata,
+        autoAIMetadataTypes,
+        hasApiKey: !!apiKey,
+        autoGenerateScreenshotMetadata
+      });
+      
+      if (!apiKey) {
+        console.log('[Auto AI] No API key configured, skipping metadata generation');
+        return; // No API key configured
+      }
+      
+      // Determine if we should generate metadata for this item
+      let shouldGenerate = false;
+      
+      if (autoAIMetadata) {
+        // New setting: check if this type is in the allowed list
+        if (autoAIMetadataTypes.includes('all')) {
+          shouldGenerate = true;
+        } else if (isScreenshot && autoAIMetadataTypes.includes('screenshot')) {
+          shouldGenerate = true;
+        } else if ((itemType === 'image' || isImageFile) && autoAIMetadataTypes.includes('image')) {
+          // Include image files (type=file, fileType=image-file) when 'image' is enabled
+          shouldGenerate = true;
+        } else if (itemType === 'text' && autoAIMetadataTypes.includes('text')) {
+          shouldGenerate = true;
+        } else if (itemType === 'html' && autoAIMetadataTypes.includes('html')) {
+          shouldGenerate = true;
+        } else if (itemType === 'file' && autoAIMetadataTypes.includes('file')) {
+          shouldGenerate = true;
+        } else if (itemType === 'code' && autoAIMetadataTypes.includes('code')) {
+          shouldGenerate = true;
+        } else if (autoAIMetadataTypes.includes(itemType)) {
+          // Fallback: check if type directly matches any setting
+          shouldGenerate = true;
+        }
+      } else if (autoGenerateScreenshotMetadata && isScreenshot) {
+        // Legacy setting: only screenshots
+        shouldGenerate = true;
+      }
+      
+      if (!shouldGenerate) {
+        console.log(`[Auto AI] Skipping metadata generation for ${itemType} (not in enabled types: ${autoAIMetadataTypes.join(', ')})`);
+        return;
+      }
+      
+      console.log(`[Auto AI] Generating metadata for ${itemType} item: ${itemId}`);
+      
+      // Generate metadata using NEW specialized system
+      const MetadataGenerator = require('./metadata-generator');
+      const metadataGen = new MetadataGenerator(this);
+      
+      
+      const result = await metadataGen.generateMetadataForItem(itemId, apiKey);
+      
+      
+      if (result.success) {
+        console.log(`[Auto AI] Successfully generated specialized metadata for ${itemType}: ${itemId}`);
+        
+        // Notify UI to refresh this item
+        this.notifyHistoryUpdate();
+        
+        // Send notification about AI analysis completion
+        if (BrowserWindow) {
+          BrowserWindow.getAllWindows().forEach(window => {
+            window.webContents.send('show-notification', {
+              title: '✨ AI Analysis Complete',
+              body: result.metadata.description ? result.metadata.description.substring(0, 50) + '...' : 'Metadata generated'
+            });
+          });
+        }
+      } else {
+        console.error(`[Auto AI] Failed to generate metadata for item ${itemId}:`, result.error);
+      }
+    } catch (error) {
+      const logger = getLogger();
+      logger.error('Clipboard auto AI metadata generation failed', {
+        error: error.message,
+        stack: error.stack,
+        operation: 'autoGenerateMetadata'
+      });
+    }
   }
   
   getHistory() {
-    // Load content on demand for items that need it
+    // Ensure history is loaded (lazy loading)
+    this.ensureHistoryLoaded();
+    
+    // Load content and metadata on demand for items that need it
     return this.history.map(item => {
-      if (item._needsContent) {
+      if (item._needsContent || !item.metadata || Object.keys(item.metadata || {}).length < 3) {
         try {
           const fullItem = this.storage.loadItem(item.id);
           item.content = fullItem.content;
           item.thumbnail = fullItem.thumbnail;
           item._needsContent = false;
           
+          // Merge metadata from storage
+          if (fullItem.metadata) {
+            item.metadata = { ...item.metadata, ...fullItem.metadata };
+            
+            // Update fileSize from metadata if not set
+            if (!item.fileSize && fullItem.metadata.fileSize) {
+              item.fileSize = fullItem.metadata.fileSize;
+            }
+          }
+          
           // For files, update the filePath to the stored location
           if (item.type === 'file' && fullItem.content) {
             item.filePath = fullItem.content; // Storage returns the actual file path
+            
+            // Get file size if not set
+            if (!item.fileSize && fullItem.content) {
+              try {
+                const fs = require('fs');
+                const stats = fs.statSync(fullItem.content);
+                item.fileSize = stats.size;
+              } catch (e) {}
+            }
           }
+          
         } catch (error) {
-          console.error('Error loading item content:', error);
+          const logger = getLogger();
+          logger.warn('Clipboard item content load failed', {
+            error: error.message,
+            itemId: item.id
+          });
         }
       }
+      
+      // Detect jsonSubtype SEPARATELY for items that don't have it yet
+      // This runs even for items with metadata already loaded
+      if (!item.jsonSubtype && (item.type === 'text' || (item.type === 'file' && item.fileExt === '.json'))) {
+        try {
+          let detectedSubtype = null;
+          
+          // For text items, check if content is JSON
+          if (item.type === 'text') {
+            // Load content if not already loaded
+            if (!item.content) {
+              const fullItem = this.storage.loadItem(item.id);
+              item.content = fullItem.content;
+            }
+            const content = typeof item.content === 'string' ? item.content : null;
+            if (content && (content.trim().startsWith('{') || content.trim().startsWith('['))) {
+              detectedSubtype = this.detectJsonSubtype(content);
+            }
+          }
+          
+          // For file items with .json extension
+          if (item.type === 'file' && item.fileExt === '.json') {
+            // Load content (file path) if not already loaded
+            if (!item.content) {
+              const fullItem = this.storage.loadItem(item.id);
+              item.content = fullItem.content;
+            }
+            if (item.content) {
+              detectedSubtype = this.detectJsonSubtypeFromFile(item.content);
+            }
+          }
+          
+          if (detectedSubtype) {
+            item.jsonSubtype = detectedSubtype;
+            // Update the storage index for future loads
+            const indexEntry = this.storage.index.items.find(i => i.id === item.id);
+            if (indexEntry && !indexEntry.jsonSubtype) {
+              indexEntry.jsonSubtype = detectedSubtype;
+              this.storage.saveIndex();
+              console.log(`[ClipboardManager] Detected and saved jsonSubtype: ${detectedSubtype} for item ${item.id}`);
+            }
+          }
+        } catch (e) {
+          // Ignore detection errors
+        }
+      }
+      
       return item;
     });
   }
   
   async deleteItem(id) {
+    console.log('[Clipboard] deleteItem called for:', id);
+    
+    // Ensure history is loaded
+    this.ensureHistoryLoaded();
+    
     // If we have a manager instance, wait for any pending operations
     if (this.manager && this.manager.pendingOperations) {
       const pendingOps = this.manager.pendingOperations.get(id);
       if (pendingOps && pendingOps.size > 0) {
-        console.log(`Waiting for ${pendingOps.size} pending operations to complete before deleting item ${id}`);
+        console.log(`[Clipboard] Waiting for ${pendingOps.size} pending operations to complete before deleting item ${id}`);
         try {
           await Promise.race([
             Promise.all(Array.from(pendingOps)),
             new Promise((resolve) => setTimeout(resolve, 5000)) // 5 second timeout
           ]);
         } catch (e) {
-          console.error('Error waiting for pending operations:', e);
+          console.error('[Clipboard] Error waiting for pending operations:', e);
         }
       }
     }
     
+    // Get item info before deletion for space metadata cleanup
+    const item = this.history.find(h => h.id === id);
+    const spaceId = item ? item.spaceId : null;
+    const fileName = item ? item.fileName : null;
+    
+    console.log('[Clipboard] Attempting storage delete for:', id, 'spaceId:', spaceId);
     const success = this.storage.deleteItem(id);
-    if (success) {
-      this.history = this.history.filter(h => h.id !== id);
-      this.pinnedItems.delete(id);
-      if (this.manager && this.manager.pendingOperations) {
-        this.manager.pendingOperations.delete(id); // Clean up pending operations
+    console.log('[Clipboard] Storage delete result:', success);
+    
+    if (!success) {
+      // Item might still be in history but not in storage index - clean up history anyway
+      const historyIndex = this.history.findIndex(h => h.id === id);
+      if (historyIndex !== -1) {
+        console.log('[Clipboard] Item not in storage index but found in history, removing from history');
+        this.history.splice(historyIndex, 1);
+        this.pinnedItems.delete(id);
+        this.updateSpaceCounts();
+        this.notifyHistoryUpdate();
+        return; // Consider this a success - item is gone from UI
       }
-      this.updateSpaceCounts();
-      this.notifyHistoryUpdate();
+      throw new Error(`Item ${id} not found in storage or history`);
     }
+    
+    // Remove from unified space-metadata.json
+    if (spaceId) {
+      try {
+        const spaceMeta = this.storage.getSpaceMetadata(spaceId);
+        if (spaceMeta) {
+          const fileKey = fileName || `item-${id}`;
+          if (spaceMeta.files && spaceMeta.files[fileKey]) {
+            delete spaceMeta.files[fileKey];
+            this.storage.updateSpaceMetadata(spaceId, { files: spaceMeta.files });
+            console.log('[Clipboard] Removed from space-metadata.json:', fileKey);
+          }
+        }
+      } catch (syncError) {
+        const logger = getLogger();
+        logger.error('Clipboard remove from space failed', {
+          error: syncError.message,
+          operation: 'removeFromSpace',
+          itemId: id
+        });
+        // Don't throw - the main delete succeeded, this is just metadata cleanup
+      }
+    }
+    
+    this.history = this.history.filter(h => h.id !== id);
+    this.pinnedItems.delete(id);
+    if (this.manager && this.manager.pendingOperations) {
+      this.manager.pendingOperations.delete(id); // Clean up pending operations
+    }
+    this.updateSpaceCounts();
+    this.notifyHistoryUpdate();
+    console.log('[Clipboard] Delete completed successfully for:', id);
   }
   
   async clearHistory() {
@@ -325,13 +996,56 @@ class ClipboardManagerV2 {
   }
   
   moveItemToSpace(itemId, spaceId) {
+    // Get item before moving to know old space
+    const item = this.history.find(h => h.id === itemId);
+    const oldSpaceId = item ? item.spaceId : null;
+    
     const success = this.storage.moveItem(itemId, spaceId);
     
     if (success) {
       // Update in-memory history
-      const item = this.history.find(h => h.id === itemId);
       if (item) {
         item.spaceId = spaceId;
+      }
+      
+      // Sync with unified space-metadata.json
+      try {
+        const fullItem = this.storage.loadItem(itemId);
+        const fileKey = fullItem.fileName || `item-${itemId}`;
+        
+        // Remove from old space's metadata
+        if (oldSpaceId) {
+          const oldMeta = this.storage.getSpaceMetadata(oldSpaceId);
+          if (oldMeta && oldMeta.files[fileKey]) {
+            delete oldMeta.files[fileKey];
+            this.storage.updateSpaceMetadata(oldSpaceId, { files: oldMeta.files });
+          }
+        }
+        
+        // Add to new space's metadata
+        if (spaceId) {
+          const newMeta = this.storage.getSpaceMetadata(spaceId);
+          if (newMeta) {
+            newMeta.files[fileKey] = {
+              itemId: itemId,
+              fileName: fullItem.fileName,
+              type: fullItem.type,
+              fileType: fullItem.fileType,
+              preview: fullItem.preview,
+              movedAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            };
+            this.storage.updateSpaceMetadata(spaceId, { files: newMeta.files });
+            console.log('[Clipboard] Synced move to space-metadata.json:', fileKey, '->', spaceId);
+          }
+        }
+      } catch (syncError) {
+        const logger = getLogger();
+        logger.error('Clipboard move to space sync failed', {
+          error: syncError.message,
+          operation: 'moveToSpace',
+          targetSpaceId: spaceId
+        });
       }
       
       this.updateSpaceCounts();
@@ -344,11 +1058,25 @@ class ClipboardManagerV2 {
   // Space management
   
   getSpaces() {
+    // Ensure history/spaces are loaded before returning
+    // This was causing null to be returned if Video Editor opened before Clipboard Viewer
+    this.ensureHistoryLoaded();
     return this.spaces;
   }
   
   createSpace(space) {
-    const newSpace = this.storage.createSpace(space);
+    
+    // Add lastUsed timestamp when creating a space
+    const spaceWithTimestamp = {
+      ...space,
+      lastUsed: Date.now(),
+      createdAt: Date.now()
+    };
+    
+    
+    const newSpace = this.storage.createSpace(spaceWithTimestamp);
+    
+    
     // Reload spaces from storage to stay in sync
     this.spaces = [...(this.storage.index.spaces || [])];
     this.notifySpacesUpdate();
@@ -365,6 +1093,20 @@ class ClipboardManagerV2 {
     }
     
     return { success };
+  }
+  
+  // Update lastUsed timestamp for a space (called when space is selected or item added)
+  updateSpaceLastUsed(spaceId) {
+    if (!spaceId) return;
+    
+    const spaceIndex = this.storage.index.spaces.findIndex(s => s.id === spaceId);
+    if (spaceIndex !== -1) {
+      this.storage.index.spaces[spaceIndex].lastUsed = Date.now();
+      this.storage.saveIndex();
+      
+      // Reload in-memory spaces
+      this.spaces = [...(this.storage.index.spaces || [])];
+    }
   }
   
   deleteSpace(id) {
@@ -390,15 +1132,94 @@ class ClipboardManagerV2 {
       
       return { success: true };
     } catch (error) {
-      console.error('Error deleting space:', error);
+      const logger = getLogger();
+      logger.error('Space deletion failed', {
+        error: error.message,
+        stack: error.stack,
+        operation: 'deleteSpace'
+      });
       return { success: false };
     }
   }
   
   getSpaceItems(spaceId) {
-    return this.history.filter(item => 
+    // Query directly from storage index (source of truth) instead of potentially stale history
+    const indexItems = this.storage.index.items || [];
+    
+    console.log(`[getSpaceItems] Querying spaceId: "${spaceId}", index items: ${indexItems.length}`);
+    
+    // Debug: show all unique spaceIds in index
+    const uniqueSpaceIds = [...new Set(indexItems.map(item => item.spaceId))];
+    console.log(`[getSpaceItems] Unique spaceIds in index:`, uniqueSpaceIds);
+    
+    // Filter items by space from the storage index
+    const filteredItems = indexItems.filter(item => 
       spaceId === null ? true : item.spaceId === spaceId
     );
+    
+    console.log(`[getSpaceItems] Found ${filteredItems.length} items for spaceId "${spaceId}"`);
+    
+    // Load content and thumbnails on demand
+    return filteredItems.map(item => {
+      const historyItem = {
+        id: item.id,
+        type: item.type,
+        content: null,
+        thumbnail: null,
+        preview: item.preview,
+        timestamp: item.timestamp,
+        pinned: item.pinned,
+        spaceId: item.spaceId,
+        fileName: item.fileName,
+        fileSize: item.fileSize,
+        fileType: item.fileType,
+        fileCategory: item.fileCategory,
+        fileExt: item.fileExt,
+        isScreenshot: item.isScreenshot,
+        filePath: item.filePath,
+        jsonSubtype: item.jsonSubtype,
+        // Web monitor fields (from index)
+        url: item.url,
+        name: item.name,
+        monitorId: item.monitorId,
+        lastChecked: item.lastChecked,
+        status: item.status,
+        changeCount: item.changeCount,
+        timeline: item.timeline,
+        settings: item.settings,
+        _needsContent: true
+      };
+      
+      // Load full content
+      try {
+        const fullItem = this.storage.loadItem(item.id);
+        historyItem.content = fullItem.content;
+        historyItem.thumbnail = fullItem.thumbnail;
+        historyItem._needsContent = false;
+        
+        // Merge metadata from storage
+        if (fullItem.metadata) {
+          historyItem.metadata = { ...historyItem.metadata, ...fullItem.metadata };
+          
+          // Update fileSize from metadata if not set
+          if (!historyItem.fileSize && fullItem.metadata.fileSize) {
+            historyItem.fileSize = fullItem.metadata.fileSize;
+          }
+          
+          // For web-monitor items, also check metadata for updated values
+          if (item.type === 'web-monitor') {
+            if (fullItem.metadata.lastChecked) historyItem.lastChecked = fullItem.metadata.lastChecked;
+            if (fullItem.metadata.status) historyItem.status = fullItem.metadata.status;
+            if (fullItem.metadata.changeCount !== undefined) historyItem.changeCount = fullItem.metadata.changeCount;
+            if (fullItem.metadata.timeline) historyItem.timeline = fullItem.metadata.timeline;
+          }
+        }
+      } catch (error) {
+        console.warn('[getSpaceItems] Failed to load content for item:', item.id, error.message);
+      }
+      
+      return historyItem;
+    });
   }
   
   updateSpaceCounts() {
@@ -427,6 +1248,11 @@ class ClipboardManagerV2 {
   setActiveSpace(spaceId) {
     this.currentSpace = spaceId;
     this.savePreferences();
+    
+    // Update lastUsed timestamp for this space
+    if (spaceId) {
+      this.updateSpaceLastUsed(spaceId);
+    }
     
     let spaceName = 'All Items';
     if (spaceId) {
@@ -561,6 +1387,762 @@ class ClipboardManagerV2 {
     }
   }
   
+  // Generate AI metadata for video content
+  async generateVideoMetadata({ transcript, originalTitle, uploader, description, duration }) {
+    console.log('[AI-Metadata] Generating video metadata...');
+    
+    const { getSettingsManager } = require('./settings-manager');
+    const settingsManager = getSettingsManager();
+    const apiKey = settingsManager.get('llmApiKey');
+    
+    if (!apiKey) {
+      console.log('[AI-Metadata] No API key configured');
+      return null;
+    }
+    
+    // Truncate transcript for API (keep first 8000 chars)
+    const truncatedTranscript = transcript.length > 8000 
+      ? transcript.substring(0, 8000) + '...[truncated]'
+      : transcript;
+    
+    const prompt = `Analyze this video transcript and extract the key information.
+
+VIDEO INFO:
+- Original Title: ${originalTitle || 'Unknown'}
+- Creator/Channel: ${uploader || 'Unknown'}
+- Duration: ${duration || 'Unknown'}
+
+TRANSCRIPT:
+${truncatedTranscript}
+
+Generate a JSON response with these fields:
+{
+  "title": "A clear, descriptive title that captures the main topic (max 80 chars)",
+  "shortDescription": "One sentence capturing the core topic/thesis (max 150 chars)",
+  "longDescription": "A structured summary with the following format (plain text only, no markdown):\n\nOVERVIEW: One paragraph explaining what this content is about and why it matters.\n\nKEY POINTS:\n• Point 1 - explanation\n• Point 2 - explanation\n• Point 3 - explanation\n• Point 4 - explanation\n• Point 5 - explanation\n(Include 5-8 key points)\n\nMAIN TAKEAWAYS: One paragraph summarizing the most important insights or conclusions.",
+  "topics": ["topic1", "topic2", "topic3", "topic4", "topic5"],
+  "speakers": ["Full Name 1", "Full Name 2"] - identify speakers by name if mentioned, otherwise use descriptive labels like "Host", "Guest Expert", "Interviewer",
+  "storyBeats": [
+    "Key insight or argument 1",
+    "Key insight or argument 2", 
+    "Key insight or argument 3",
+    "Key insight or argument 4",
+    "Key insight or argument 5",
+    "Key insight or argument 6",
+    "Key insight or argument 7"
+  ]
+}
+
+IMPORTANT RULES:
+1. Focus ONLY on the actual content and ideas discussed - ignore any sponsor messages, ads, promotional content, or calls to action
+2. Extract substantive points, arguments, and insights - not surface-level observations
+3. The longDescription should be informative and useful - someone reading it should understand the key ideas without watching
+4. Use bullet points (•) for the KEY POINTS section but no other markdown
+5. Story beats should be the most important ideas, arguments, or insights - not timestamps or structural markers
+6. Be specific and concrete in descriptions - avoid vague summaries
+
+Respond ONLY with valid JSON, no other text.`;
+
+    try {
+      const isClaudeKey = apiKey.startsWith('sk-ant-');
+      
+      if (isClaudeKey) {
+        // Use Claude API
+        const https = require('https');
+        
+        const response = await new Promise((resolve, reject) => {
+          const postData = JSON.stringify({
+            model: 'claude-sonnet-4-5-20250929',
+            max_tokens: 1500,
+            messages: [{ role: 'user', content: prompt }]
+          });
+          
+          const options = {
+            hostname: 'api.anthropic.com',
+            port: 443,
+            path: '/v1/messages',
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': apiKey,
+              'anthropic-version': '2023-06-01',
+              'Content-Length': Buffer.byteLength(postData)
+            },
+            timeout: 60000
+          };
+          
+          const req = https.request(options, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+              try {
+                const parsed = JSON.parse(data);
+                if (parsed.content && parsed.content[0] && parsed.content[0].text) {
+                  resolve(parsed.content[0].text);
+                } else if (parsed.error) {
+                  reject(new Error(parsed.error.message));
+                } else {
+                  reject(new Error('Unexpected response format'));
+                }
+              } catch (e) {
+                reject(e);
+              }
+            });
+          });
+          
+          req.on('error', reject);
+          req.on('timeout', () => reject(new Error('Request timeout')));
+          req.write(postData);
+          req.end();
+        });
+        
+        // Parse JSON from response
+        const jsonMatch = response.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          return JSON.parse(jsonMatch[0]);
+        }
+        
+      } else {
+        // Use OpenAI API
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: [{ role: 'user', content: prompt }],
+            max_tokens: 1500,
+            temperature: 0.3
+          })
+        });
+        
+        const data = await response.json();
+        if (data.choices && data.choices[0] && data.choices[0].message) {
+          const content = data.choices[0].message.content;
+          const jsonMatch = content.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            return JSON.parse(jsonMatch[0]);
+          }
+        }
+      }
+    } catch (err) {
+      const logger = getLogger();
+      logger.error('AI metadata generation failed', {
+        error: err.message,
+        operation: 'generateAIMetadata'
+      });
+    }
+    
+    return null;
+  }
+  
+  /**
+   * Clean up orphaned downloading items on startup
+   * Handles items stuck in "downloading" state from app crashes
+   */
+  cleanupOrphanedDownloads() {
+    try {
+      console.log('[Cleanup] Checking for orphaned downloads...');
+      
+      const allItems = this.storage.getAllItems();
+      let cleaned = 0;
+      
+      for (const item of allItems) {
+        // Load full metadata to check download status
+        try {
+          const metaPath = path.join(this.storage.itemsDir, item.id, 'metadata.json');
+          if (!fs.existsSync(metaPath)) continue;
+          
+          const metadata = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+          
+          // Check if stuck in downloading state
+          if (metadata.downloadStatus === 'downloading') {
+            console.log('[Cleanup] Found orphaned download:', item.id, metadata.title || 'Unknown');
+            
+            // Check if video file actually exists (download completed but state not updated)
+            const itemDir = path.join(this.storage.itemsDir, item.id);
+            const files = fs.readdirSync(itemDir);
+            const videoFile = files.find(f => f.endsWith('.mp4') && !f.startsWith('.'));
+            
+            if (videoFile) {
+              // Download completed but state wasn't updated - fix it
+              console.log('[Cleanup] Found completed video file, updating state...');
+              const stats = fs.statSync(path.join(itemDir, videoFile));
+              const title = videoFile.replace(/-[a-zA-Z0-9_-]{11}\.mp4$/, '');
+              
+              // Update metadata
+              metadata.downloadStatus = 'complete';
+              metadata.downloadProgress = 100;
+              metadata.title = title;
+              fs.writeFileSync(metaPath, JSON.stringify(metadata, null, 2));
+              
+              // Update index
+              this.storage.updateItemIndex(item.id, {
+                preview: title,
+                fileName: videoFile,
+                fileSize: stats.size,
+                metadata: {
+                  title: title,
+                  downloadStatus: 'complete',
+                  downloadProgress: 100
+                }
+              });
+              
+              console.log('[Cleanup] ✅ Fixed completed download:', title);
+              cleaned++;
+            } else {
+              // Download never completed - mark as failed
+              console.log('[Cleanup] No video file found, marking as failed...');
+              
+              metadata.downloadStatus = 'error';
+              metadata.downloadError = 'Download interrupted (app crash or restart)';
+              fs.writeFileSync(metaPath, JSON.stringify(metadata, null, 2));
+              
+              this.storage.updateItemIndex(item.id, {
+                preview: `❌ Download interrupted: ${metadata.title || 'Video'}`,
+                metadata: {
+                  downloadStatus: 'error',
+                  downloadError: 'Download interrupted'
+                }
+              });
+              
+              console.log('[Cleanup] ❌ Marked as failed:', metadata.title || item.id);
+              cleaned++;
+            }
+          }
+        } catch (err) {
+          console.error('[Cleanup] Error processing item:', item.id, err.message);
+        }
+      }
+      
+      if (cleaned > 0) {
+        console.log(`[Cleanup] Cleaned up ${cleaned} orphaned downloads`);
+        // Reload history to reflect changes
+        if (this._historyLoaded) {
+          this._ensureHistoryLoaded();
+          this.notifyHistoryUpdate();
+        }
+      } else {
+        console.log('[Cleanup] No orphaned downloads found');
+      }
+    } catch (error) {
+      console.error('[Cleanup] Error cleaning orphaned downloads:', error);
+    }
+  }
+  
+  /**
+   * Cancel an active YouTube download
+   * @param {string} placeholderId - ID of the item being downloaded
+   * @returns {boolean} Success status
+   */
+  cancelDownload(placeholderId) {
+    const download = this.activeDownloads.get(placeholderId);
+    
+    if (!download) {
+      console.log('[Cancel] No active download found for:', placeholderId);
+      return false;
+    }
+    
+    try {
+      // Abort the download
+      if (download.controller) {
+        download.controller.abort();
+      }
+      
+      // Clear from active downloads
+      this.activeDownloads.delete(placeholderId);
+      
+      // Update the item to show cancellation
+      const historyItem = this.history?.find(h => h.id === placeholderId);
+      if (historyItem) {
+        historyItem.preview = '🚫 Download cancelled';
+        if (historyItem.metadata) {
+          historyItem.metadata.downloadStatus = 'cancelled';
+          historyItem.metadata.downloadError = 'Cancelled by user';
+        }
+      }
+      
+      // Update metadata file
+      try {
+        const metaPath = path.join(this.storage.itemsDir, placeholderId, 'metadata.json');
+        if (fs.existsSync(metaPath)) {
+          const metadata = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+          metadata.downloadStatus = 'cancelled';
+          metadata.downloadError = 'Cancelled by user';
+          fs.writeFileSync(metaPath, JSON.stringify(metadata, null, 2));
+        }
+      } catch (err) {
+        console.error('[Cancel] Error updating metadata:', err);
+      }
+      
+      // Update index
+      this.storage.updateItemIndex(placeholderId, {
+        preview: '🚫 Download cancelled',
+        metadata: {
+          downloadStatus: 'cancelled'
+        }
+      });
+      
+      this.notifyHistoryUpdate();
+      
+      console.log('[Cancel] ✅ Download cancelled:', placeholderId);
+      return true;
+      
+    } catch (error) {
+      console.error('[Cancel] Error cancelling download:', error);
+      return false;
+    }
+  }
+  
+  // Background YouTube download - creates placeholder immediately, downloads in background
+  async downloadYouTubeInBackground(url, spaceId, placeholderId, sender) {
+    const { Notification } = require('electron');
+    
+    console.log('[YouTube-BG] Starting background download for:', url, 'placeholder:', placeholderId);
+    
+    // Create abort controller for cancellation
+    const abortController = new AbortController();
+    
+    // Track this download
+    this.activeDownloads.set(placeholderId, {
+      controller: abortController,
+      progress: 0,
+      url: url,
+      startTime: Date.now()
+    });
+    
+    let progressInterval;
+    
+    try {
+      // Get the downloader instance
+      const { YouTubeDownloader } = require('./youtube-downloader');
+      const dl = new YouTubeDownloader();
+      
+      // Set up progress callback - update UI on every progress report
+      const progressCallback = (percent, status) => {
+        // Check if cancelled
+        if (abortController.signal.aborted) {
+          throw new Error('Download cancelled by user');
+        }
+        
+        console.log('[YouTube-BG] Progress:', percent, '%', status);
+        
+        // Update progress tracking
+        const download = this.activeDownloads.get(placeholderId);
+        if (download) {
+          download.progress = percent;
+        }
+        
+        // Update progress in memory
+        const historyItem = this.history.find(h => h.id === placeholderId);
+        if (historyItem && historyItem.metadata) {
+          historyItem.metadata.downloadProgress = percent;
+          historyItem.metadata.downloadStatusText = status;
+        }
+        
+        // Notify UI on every progress update
+        this.notifyHistoryUpdate();
+        
+        // Send to specific sender if still valid
+        if (sender && !sender.isDestroyed()) {
+          sender.send('youtube:download-progress', { percent, status, url, placeholderId });
+        }
+      };
+      
+      // Start a simulated progress indicator while downloading
+      let simulatedProgress = 10;
+      progressInterval = setInterval(() => {
+        // Check if cancelled
+        if (abortController.signal.aborted) {
+          clearInterval(progressInterval);
+          return;
+        }
+        
+        if (simulatedProgress < 85) {
+          simulatedProgress += Math.random() * 5 + 2; // Random increment 2-7%
+          const historyItem = this.history.find(h => h.id === placeholderId);
+          if (historyItem && historyItem.metadata && historyItem.metadata.downloadStatus === 'downloading') {
+            historyItem.metadata.downloadProgress = Math.min(85, Math.round(simulatedProgress));
+            this.notifyHistoryUpdate();
+          }
+        }
+      }, 2000); // Update every 2 seconds
+      
+      // Download the file only (don't add to storage - we already have placeholder)
+      const result = await dl.download(url, { quality: 'high' }, progressCallback);
+      
+      // Stop the simulated progress
+      clearInterval(progressInterval);
+      
+      // Check if cancelled during download
+      if (abortController.signal.aborted) {
+        throw new Error('Download cancelled by user');
+      }
+      
+      console.log('[YouTube-BG] Download completed:', JSON.stringify(result));
+      
+      // Try to fetch transcript
+      let transcript = null;
+      if (result.success) {
+        try {
+          console.log('[YouTube-BG] Fetching transcript...');
+          const transcriptResult = await dl.getTranscript(url, 'en');
+          if (transcriptResult.success) {
+            transcript = {
+              text: transcriptResult.transcript,
+              segments: transcriptResult.segments,
+              language: transcriptResult.language,
+              isAutoGenerated: transcriptResult.isAutoGenerated,
+            };
+            console.log('[YouTube-BG] Transcript fetched:', transcript.language);
+          }
+        } catch (e) {
+          console.log('[YouTube-BG] Could not fetch transcript:', e.message);
+        }
+      }
+      
+      if (result.success) {
+        const fs = require('fs');
+        const videoInfo = result.videoInfo || {};
+        const title = videoInfo.title || 'YouTube Video';
+        
+        // Copy the downloaded file to the placeholder's storage directory
+        const itemDir = path.join(this.storage.itemsDir, placeholderId);
+        const destFilePath = path.join(itemDir, result.fileName);
+        
+        try {
+          // Ensure directory exists
+          if (!fs.existsSync(itemDir)) {
+            fs.mkdirSync(itemDir, { recursive: true });
+          }
+          
+          // Copy file
+          fs.copyFileSync(result.filePath, destFilePath);
+          console.log('[YouTube-BG] Copied video to:', destFilePath);
+          
+          // Clean up temp file
+          try { fs.unlinkSync(result.filePath); } catch (e) {}
+          
+        } catch (copyErr) {
+          console.error('[YouTube-BG] Error copying file:', copyErr);
+        }
+        
+        // Update the placeholder with actual data
+        const historyItem = this.history.find(h => h.id === placeholderId);
+        if (historyItem) {
+          historyItem.preview = title;
+          historyItem.fileName = result.fileName;
+          historyItem.content = destFilePath;
+          historyItem.filePath = destFilePath;
+          historyItem.fileSize = result.fileSize;
+          historyItem.thumbnail = videoInfo.thumbnail;
+          historyItem._needsContent = false;
+          
+          if (historyItem.metadata) {
+            historyItem.metadata.downloadStatus = 'complete';
+            historyItem.metadata.downloadProgress = 100;
+            historyItem.metadata.filePath = destFilePath;
+            historyItem.metadata.fileSize = result.fileSize;
+            historyItem.metadata.title = title;
+            historyItem.metadata.description = videoInfo.description;
+            historyItem.metadata.uploader = videoInfo.uploader;
+            historyItem.metadata.duration = videoInfo.duration;
+            historyItem.metadata.thumbnail = videoInfo.thumbnail;
+            if (transcript) {
+              historyItem.metadata.transcript = transcript.text;
+              historyItem.metadata.transcriptSegments = transcript.segments;
+              historyItem.metadata.transcriptLanguage = transcript.language;
+            }
+          }
+        }
+        
+        // Extract thumbnail from video
+        let thumbnailPath = null;
+        try {
+          console.log('[YouTube-BG] Extracting thumbnail...');
+          const ffmpeg = require('fluent-ffmpeg');
+          const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+          ffmpeg.setFfmpegPath(ffmpegPath);
+          
+          thumbnailPath = path.join(itemDir, 'thumbnail.jpg');
+          
+          await new Promise((resolve, reject) => {
+            ffmpeg(destFilePath)
+              .screenshots({
+                timestamps: ['10%'], // Take screenshot at 10% into the video
+                filename: 'thumbnail.jpg',
+                folder: itemDir,
+                size: '480x270' // 16:9 aspect ratio thumbnail
+              })
+              .on('end', () => {
+                console.log('[YouTube-BG] Thumbnail extracted to:', thumbnailPath);
+                resolve();
+              })
+              .on('error', (err) => {
+                console.error('[YouTube-BG] Thumbnail extraction error:', err);
+                reject(err);
+              });
+          });
+        } catch (thumbErr) {
+          console.error('[YouTube-BG] Thumbnail extraction failed:', thumbErr.message);
+          thumbnailPath = null;
+        }
+        
+        // Extract audio file
+        let audioPath = null;
+        try {
+          console.log('[YouTube-BG] Extracting audio...');
+          const ffmpeg = require('fluent-ffmpeg');
+          const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+          ffmpeg.setFfmpegPath(ffmpegPath);
+          
+          const audioFileName = path.parse(result.fileName).name + '.mp3';
+          audioPath = path.join(itemDir, audioFileName);
+          
+          await new Promise((resolve, reject) => {
+            ffmpeg(destFilePath)
+              .noVideo()
+              .audioCodec('libmp3lame')
+              .audioBitrate('128k')
+              .format('mp3')
+              .output(audioPath)
+              .on('end', () => {
+                console.log('[YouTube-BG] Audio extracted to:', audioPath);
+                resolve();
+              })
+              .on('error', (err) => {
+                console.error('[YouTube-BG] Audio extraction error:', err);
+                reject(err);
+              })
+              .run();
+          });
+        } catch (audioErr) {
+          console.error('[YouTube-BG] Audio extraction failed:', audioErr.message);
+          audioPath = null;
+        }
+        
+        // Generate AI metadata if we have transcript
+        let aiMetadata = null;
+        if (transcript && transcript.text && transcript.text.length > 100) {
+          try {
+            console.log('[YouTube-BG] Generating AI metadata...');
+            aiMetadata = await this.generateVideoMetadata({
+              transcript: transcript.text,
+              originalTitle: title,
+              uploader: videoInfo.uploader,
+              description: videoInfo.description,
+              duration: videoInfo.duration
+            });
+            console.log('[YouTube-BG] AI metadata generated:', aiMetadata ? 'success' : 'failed');
+          } catch (aiErr) {
+            console.error('[YouTube-BG] AI metadata generation failed:', aiErr.message);
+          }
+        }
+        
+        // Update storage metadata file
+        try {
+          const metadataPath = path.join(itemDir, 'metadata.json');
+          let metadata = {};
+          if (fs.existsSync(metadataPath)) {
+            metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+          }
+          metadata.downloadStatus = 'complete';
+          metadata.downloadProgress = 100;
+          metadata.filePath = destFilePath;
+          metadata.fileSize = result.fileSize;
+          metadata.originalTitle = title;
+          metadata.uploader = videoInfo.uploader;
+          metadata.duration = videoInfo.duration;
+          metadata.thumbnail = videoInfo.thumbnail;
+          metadata.youtubeDescription = videoInfo.description;
+          
+          // Use AI-generated metadata if available, fallback to YouTube data
+          if (aiMetadata) {
+            metadata.title = aiMetadata.title || title;
+            metadata.shortDescription = aiMetadata.shortDescription || '';
+            metadata.longDescription = aiMetadata.longDescription || videoInfo.description || '';
+            metadata.aiSummary = aiMetadata.longDescription || ''; // Use AI-generated summary for Overview tab
+            metadata.topics = aiMetadata.topics || [];
+            metadata.speakers = aiMetadata.speakers || [];
+            metadata.storyBeats = aiMetadata.storyBeats || [];
+          } else {
+            metadata.title = title;
+            metadata.shortDescription = videoInfo.description ? videoInfo.description.substring(0, 150) : '';
+            metadata.longDescription = videoInfo.description || '';
+            metadata.storyBeats = [];
+          }
+          
+          if (transcript) {
+            metadata.transcript = transcript.text;
+            metadata.transcriptSegments = transcript.segments;
+            metadata.transcriptLanguage = transcript.language;
+          }
+          
+          if (audioPath) {
+            metadata.audioPath = audioPath;
+          }
+          
+          if (thumbnailPath && fs.existsSync(thumbnailPath)) {
+            metadata.localThumbnail = thumbnailPath;
+          }
+          
+          fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+          
+          // Also save transcript as separate file for easy access
+          if (transcript && transcript.text) {
+            const transcriptPath = path.join(itemDir, 'transcript.txt');
+            fs.writeFileSync(transcriptPath, transcript.text);
+            console.log('[YouTube-BG] Transcript saved to:', transcriptPath);
+          }
+          
+          // Update in-memory history with new metadata
+          if (historyItem && historyItem.metadata) {
+            historyItem.metadata.downloadStatus = 'complete';
+            historyItem.metadata.downloadProgress = 100;
+            historyItem.metadata.downloadStatusText = 'Complete!';
+            historyItem.metadata.title = metadata.title;
+            historyItem.metadata.shortDescription = metadata.shortDescription;
+            historyItem.metadata.longDescription = metadata.longDescription;
+            historyItem.metadata.audioPath = audioPath;
+            
+            // Update the main item preview with the final title
+            historyItem.preview = metadata.title;
+          }
+          
+          // CRITICAL FIX: Update the storage index entry with the completed metadata
+          // This ensures the item shows correctly in Spaces menu after app restart
+          this.storage.updateItemIndex(placeholderId, {
+            preview: metadata.title,  // Change from "🎬 Downloading..." to actual title
+            fileName: result.fileName,
+            fileSize: result.fileSize,
+            metadata: {
+              title: metadata.title,
+              downloadStatus: 'complete',
+              downloadProgress: 100
+            }
+          });
+          
+        } catch (err) {
+          console.error('[YouTube-BG] Error updating metadata:', err);
+        }
+        
+        // Remove from active downloads
+        this.activeDownloads.delete(placeholderId);
+        
+        // Save the updated index to persist changes
+        this.storage.saveIndexSync();  // Use sync save to ensure persistence
+        console.log('[YouTube-BG] Index saved with updated metadata');
+        
+        // Notify UI
+        this.notifyHistoryUpdate();
+        
+        // Show system notification
+        if (Notification.isSupported()) {
+          const notification = new Notification({
+            title: '✅ YouTube Download Complete',
+            body: title,
+            silent: false
+          });
+          notification.show();
+        }
+        
+        // Send completion to renderer
+        if (BrowserWindow) {
+          BrowserWindow.getAllWindows().forEach(window => {
+            window.webContents.send('youtube:download-complete', {
+              success: true,
+              placeholderId,
+              title: title,
+              filePath: destFilePath,
+              fileSize: result.fileSize
+            });
+          });
+        }
+        
+      } else {
+        // Download failed - update placeholder to show error
+        const historyItem = this.history.find(h => h.id === placeholderId);
+        if (historyItem) {
+          historyItem.preview = `❌ Download failed: ${historyItem.metadata?.title || 'Video'}`;
+          if (historyItem.metadata) {
+            historyItem.metadata.downloadStatus = 'error';
+            historyItem.metadata.downloadError = result.error;
+          }
+        }
+        
+        // Remove from active downloads
+        this.activeDownloads.delete(placeholderId);
+        
+        this.notifyHistoryUpdate();
+        
+        // Show error notification
+        if (Notification.isSupported()) {
+          const notification = new Notification({
+            title: '❌ YouTube Download Failed',
+            body: result.error || 'Unknown error occurred',
+            silent: false
+          });
+          notification.show();
+        }
+        
+        // Send error to renderer
+        if (BrowserWindow) {
+          BrowserWindow.getAllWindows().forEach(window => {
+            window.webContents.send('youtube:download-complete', {
+              success: false,
+              placeholderId,
+              error: result.error
+            });
+          });
+        }
+      }
+      
+    } catch (error) {
+      const logger = getLogger();
+      logger.error('YouTube background download failed', {
+        error: error.message,
+        stack: error.stack,
+        operation: 'backgroundDownload'
+      });
+      
+      // Make sure to clear the progress interval
+      if (progressInterval) {
+        clearInterval(progressInterval);
+      }
+      
+      // Remove from active downloads
+      this.activeDownloads.delete(placeholderId);
+      
+      // Update placeholder with error
+      const historyItem = this.history.find(h => h.id === placeholderId);
+      if (historyItem) {
+        const isCancelled = error.message && error.message.includes('cancelled');
+        historyItem.preview = isCancelled 
+          ? '🚫 Download cancelled' 
+          : `❌ Download error: ${historyItem.metadata?.title || 'Video'}`;
+        if (historyItem.metadata) {
+          historyItem.metadata.downloadStatus = isCancelled ? 'cancelled' : 'error';
+          historyItem.metadata.downloadError = error.message;
+        }
+      }
+      
+      this.notifyHistoryUpdate();
+      
+      // Show error notification
+      const { Notification } = require('electron');
+      if (Notification.isSupported()) {
+        const notification = new Notification({
+          title: '❌ YouTube Download Failed',
+          body: error.message,
+          silent: false
+        });
+        notification.show();
+      }
+    }
+  }
+  
   // Window management (same as original)
   
   // CRITICAL: For clipboard viewer window (NOT black hole widget)
@@ -604,14 +2186,23 @@ class ClipboardManagerV2 {
       }
     });
     
-    // Handle load errors
-    this.clipboardWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
-      console.error('[ClipboardManager] Failed to load:', errorCode, errorDescription);
-      const { dialog } = require('electron');
-      dialog.showErrorBox('Error', `Failed to load clipboard manager: ${errorDescription}`);
-      if (this.clipboardWindow && !this.clipboardWindow.isDestroyed()) {
-        this.clipboardWindow.close();
+    // Handle load errors - only close for critical main frame failures
+    this.clipboardWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      console.warn('[ClipboardManager] Load failed:', { errorCode, errorDescription, validatedURL, isMainFrame });
+      
+      // Only show error and close for main frame failures with real errors
+      // Error codes: -3 = ABORTED (user action), -6 = CONNECTION_FAILED, etc.
+      // See: https://source.chromium.org/chromium/chromium/src/+/main:net/base/net_error_list.h
+      if (isMainFrame && errorCode !== -3) {
+        // Main frame failed to load (not just aborted)
+        console.error('[ClipboardManager] Critical load failure - main frame failed');
+        const { dialog } = require('electron');
+        dialog.showErrorBox('Error', `Failed to load clipboard manager: ${errorDescription || 'Unknown error'}`);
+        if (this.clipboardWindow && !this.clipboardWindow.isDestroyed()) {
+          this.clipboardWindow.close();
+        }
       }
+      // For sub-frame/sub-resource failures, just log - don't close the window
     });
     
     // Show window when ready
@@ -620,7 +2211,13 @@ class ClipboardManagerV2 {
       this.clipboardWindow.show();
     });
     
-    this.clipboardWindow.loadFile('clipboard-viewer.html');
+    // Add cache-busting query string to force fresh load
+    this.clipboardWindow.loadFile('clipboard-viewer.html', {
+      query: { t: Date.now() }
+    });
+    
+    // Clear cache to ensure fresh HTML loads
+    this.clipboardWindow.webContents.session.clearCache();
     
     // Add debug logging
     this.clipboardWindow.webContents.on('did-finish-load', () => {
@@ -639,14 +2236,19 @@ class ClipboardManagerV2 {
   // CRITICAL: Black hole widget window - DO NOT DUPLICATE THIS METHOD!
   // If broken, check TEST-BLACKHOLE.md for troubleshooting
   // Must use app.getAppPath() for preload, NOT __dirname
-  createBlackHoleWindow(position, startExpanded = false) {
+  createBlackHoleWindow(position, startExpanded = false, clipboardData = null) {
     if (this.blackHoleWindow && !this.blackHoleWindow.isDestroyed()) {
       this.blackHoleWindow.focus();
+      // If we have new clipboard data, send it
+      if (clipboardData) {
+        this.blackHoleWindow.webContents.send('paste-clipboard-data', clipboardData);
+      }
       return;
     }
     
-    const width = startExpanded ? 600 : 150;
-    const height = startExpanded ? 800 : 150;
+    // For paste operations, always start expanded with modal showing
+    const width = (startExpanded || clipboardData) ? 600 : 150;
+    const height = (startExpanded || clipboardData) ? 800 : 150;
     
     console.log('[BlackHole] Creating window:', { position, width, height, startExpanded });
     
@@ -684,7 +2286,10 @@ class ClipboardManagerV2 {
     
     this.blackHoleWindow = new BrowserWindow(windowConfig);
     
-    this.blackHoleWindow.loadFile('black-hole.html');
+    // Pass startExpanded via query parameter so it's available immediately
+    this.blackHoleWindow.loadFile('black-hole.html', {
+      query: { startExpanded: startExpanded ? 'true' : 'false' }
+    });
     
     // Check for preload errors
     this.blackHoleWindow.webContents.on('preload-error', (event, preloadPath, error) => {
@@ -695,6 +2300,18 @@ class ClipboardManagerV2 {
       // Position is already set in the config, just show the window
       this.blackHoleWindow.show();
       console.log('[BlackHole] Window shown at position:', this.blackHoleWindow.getBounds());
+    });
+    
+    // Send startExpanded flag and clipboard data to the window after it loads
+    this.blackHoleWindow.webContents.on('did-finish-load', () => {
+      const hasClipboardData = !!clipboardData;
+      console.log('[BlackHole] Window loaded, startExpanded:', startExpanded, 'hasClipboardData:', hasClipboardData);
+      
+      // Send init with clipboard data if available
+      this.blackHoleWindow.webContents.send('black-hole:init', { 
+        startExpanded: startExpanded || hasClipboardData,
+        clipboardData: clipboardData 
+      });
     });
     
     this.blackHoleWindow.on('closed', () => {
@@ -792,7 +2409,11 @@ class ClipboardManagerV2 {
         }
       });
     } catch (error) {
-      console.error('Error checking existing screenshots:', error);
+      const logger = getLogger();
+      logger.warn('Screenshot check failed', {
+        error: error.message,
+        operation: 'checkExistingScreenshots'
+      });
     }
   }
   
@@ -917,12 +2538,15 @@ class ClipboardManagerV2 {
       if (settings?.autoGenerateScreenshotMetadata && settings?.llmApiKey) {
         console.log('Auto-generating AI metadata for screenshot...');
         
-        // Trigger AI metadata generation in the background
+        // Trigger AI metadata generation using specialized system
         setTimeout(async () => {
           try {
-            const result = await this.generateAIMetadata(item.id, settings.llmApiKey, 'Analyze this screenshot and describe what you see in detail.');
+            const MetadataGenerator = require('./metadata-generator');
+            const metadataGen = new MetadataGenerator(this);
+            const result = await metadataGen.generateMetadataForItem(item.id, settings.llmApiKey);
+            
             if (result.success) {
-              console.log('AI metadata generated successfully for screenshot');
+              console.log('AI metadata generated successfully for screenshot using specialized prompts');
               
               // Send notification about AI analysis completion
               if (BrowserWindow) {
@@ -940,7 +2564,12 @@ class ClipboardManagerV2 {
         }, 1000); // Small delay to ensure item is fully saved
       }
     } catch (error) {
-      console.error('Error handling screenshot:', error);
+      const logger = getLogger();
+      logger.error('Screenshot handling failed', {
+        error: error.message,
+        stack: error.stack,
+        operation: 'handleScreenshot'
+      });
     }
   }
   
@@ -991,6 +2620,31 @@ class ClipboardManagerV2 {
       console.log('IPC not available in non-Electron environment');
       return;
     }
+    
+    // Prevent duplicate IPC registration (memory leak prevention)
+    if (ClipboardManagerV2._ipcRegistered) {
+      console.warn('[ClipboardManager] IPC handlers already registered - skipping to prevent memory leak');
+      return;
+    }
+    ClipboardManagerV2._ipcRegistered = true;
+    
+    // Helper to safely register IPC handlers - skips if handler already exists
+    // This prevents "Attempted to register a second handler" errors when handlers
+    // are registered elsewhere (e.g., main.js fallback handlers)
+    const safeHandle = (channel, handler) => {
+      try {
+        ipcMain.handle(channel, handler);
+      } catch (err) {
+        if (err.message && err.message.includes('second handler')) {
+          console.log(`[ClipboardManager] Handler for '${channel}' already exists, skipping`);
+        } else {
+          throw err; // Re-throw unexpected errors
+        }
+      }
+    };
+    
+    // Store handler references for cleanup
+    this._ipcOnHandlers = [];
     
     // Black hole window handlers
     ipcMain.on('black-hole:resize-window', (event, { width, height }) => {
@@ -1058,25 +2712,110 @@ class ClipboardManagerV2 {
     });
     
     // History management
-    ipcMain.handle('clipboard:get-history', () => {
+    safeHandle('clipboard:get-history', () => {
       return this.getHistory();
     });
     
-    ipcMain.handle('clipboard:clear-history', async () => {
+    safeHandle('clipboard:clear-history', async () => {
       await this.clearHistory();
       return { success: true };
     });
     
-    ipcMain.handle('clipboard:delete-item', async (event, id) => {
-      await this.deleteItem(id);
-      return { success: true };
+    safeHandle('clipboard:delete-item', async (event, id) => {
+      try {
+        await this.deleteItem(id);
+        console.log('[Clipboard] Deleted item:', id);
+        return { success: true };
+      } catch (error) {
+        console.error('[Clipboard] Failed to delete item:', id, error);
+        return { success: false, error: error.message };
+      }
+    });
+
+    safeHandle('clipboard:delete-items', async (event, itemIds) => {
+      try {
+        if (!Array.isArray(itemIds) || itemIds.length === 0) {
+          return { success: false, error: 'No items provided' };
+        }
+        
+        const results = {
+          success: true,
+          deleted: 0,
+          failed: 0,
+          errors: []
+        };
+        
+        for (const id of itemIds) {
+          try {
+            await this.deleteItem(id);
+            results.deleted++;
+            console.log('[Clipboard] Deleted item:', id);
+          } catch (error) {
+            results.failed++;
+            results.errors.push(`Failed to delete ${id}: ${error.message}`);
+            console.error('[Clipboard] Failed to delete item:', id, error);
+          }
+        }
+        
+        results.success = results.deleted > 0;
+        console.log('[Clipboard] Bulk delete completed:', results);
+        
+        return results;
+      } catch (error) {
+        console.error('[Clipboard] Failed to delete items:', error);
+        return { success: false, error: error.message, deleted: 0, failed: itemIds.length };
+      }
+    });
+
+    safeHandle('clipboard:move-items', async (event, itemIds, toSpaceId) => {
+      try {
+        if (!Array.isArray(itemIds) || itemIds.length === 0) {
+          return { success: false, error: 'No items provided' };
+        }
+        
+        if (!toSpaceId) {
+          return { success: false, error: 'No target space provided' };
+        }
+        
+        const results = {
+          success: true,
+          moved: 0,
+          failed: 0,
+          errors: []
+        };
+        
+        for (const id of itemIds) {
+          try {
+            const success = this.storage.moveItem(id, toSpaceId);
+            if (success) {
+              results.moved++;
+              console.log('[Clipboard] Moved item:', id, 'to space:', toSpaceId);
+            } else {
+              results.failed++;
+              results.errors.push(`Failed to move ${id}`);
+            }
+          } catch (error) {
+            results.failed++;
+            results.errors.push(`Failed to move ${id}: ${error.message}`);
+            console.error('[Clipboard] Failed to move item:', id, error);
+          }
+        }
+        
+        results.success = results.moved > 0;
+        console.log('[Clipboard] Bulk move completed:', results);
+        
+        return results;
+      } catch (error) {
+        console.error('[Clipboard] Failed to move items:', error);
+        return { success: false, error: error.message, moved: 0, failed: itemIds.length };
+      }
     });
     
-    ipcMain.handle('clipboard:toggle-pin', (event, id) => {
+    safeHandle('clipboard:toggle-pin', (event, id) => {
       return this.togglePin(id);
     });
     
-    ipcMain.handle('clipboard:paste-item', (event, id) => {
+    safeHandle('clipboard:paste-item', (event, id) => {
       const item = this.history.find(h => h.id === id);
       if (!item) return { success: false };
       
@@ -1157,11 +2896,11 @@ class ClipboardManagerV2 {
       return { success: true };
     });
     
-    ipcMain.handle('clipboard:search', (event, query) => {
+    safeHandle('clipboard:search', (event, query) => {
       return this.searchHistory(query);
     });
     
-    ipcMain.handle('clipboard:get-stats', () => {
+    safeHandle('clipboard:get-stats', () => {
       return {
         totalItems: this.history.length,
         pinnedItems: this.pinnedItems.size,
@@ -1171,45 +2910,51 @@ class ClipboardManagerV2 {
     });
     
     // Space management
-    ipcMain.handle('clipboard:get-spaces', () => {
+    safeHandle('clipboard:get-spaces', () => {
       return this.getSpaces();
     });
     
-    ipcMain.handle('clipboard:create-space', (event, space) => {
-      return this.createSpace(space);
+    safeHandle('clipboard:create-space', (event, space) => {
+      try {
+        const result = this.createSpace(space);
+        return result;
+      } catch (error) {
+        throw error;
+      }
     });
     
-    ipcMain.handle('clipboard:update-space', (event, id, updates) => {
+    safeHandle('clipboard:update-space', (event, id, updates) => {
       return this.updateSpace(id, updates);
     });
     
-    ipcMain.handle('clipboard:delete-space', (event, id) => {
+    safeHandle('clipboard:delete-space', (event, id) => {
       return this.deleteSpace(id);
     });
     
-    ipcMain.handle('clipboard:set-current-space', (event, spaceId) => {
+    safeHandle('clipboard:set-current-space', (event, spaceId) => {
       this.setActiveSpace(spaceId);
       return { success: true };
     });
     
-    ipcMain.handle('clipboard:move-to-space', (event, itemId, spaceId) => {
+    safeHandle('clipboard:move-to-space', (event, itemId, spaceId) => {
       return this.moveItemToSpace(itemId, spaceId);
     });
     
-    ipcMain.handle('clipboard:get-space-items', (event, spaceId) => {
-      return this.getSpaceItems(spaceId);
+    safeHandle('clipboard:get-space-items', (event, spaceId) => {
+      const items = this.getSpaceItems(spaceId);
+      return { success: true, items: items || [] };
     });
     
-    ipcMain.handle('clipboard:get-spaces-enabled', () => {
+    safeHandle('clipboard:get-spaces-enabled', () => {
       return this.spacesEnabled;
     });
     
-    ipcMain.handle('clipboard:toggle-spaces', (event, enabled) => {
+    safeHandle('clipboard:toggle-spaces', (event, enabled) => {
       this.toggleSpaces(enabled);
       return { success: true };
     });
     
-    ipcMain.handle('clipboard:get-active-space', () => {
+    safeHandle('clipboard:get-active-space', () => {
       return {
         spaceId: this.currentSpace,
         spaceName: this.getSpaceName(this.currentSpace)
@@ -1217,13 +2962,13 @@ class ClipboardManagerV2 {
     });
     
     // File system operations
-    ipcMain.handle('clipboard:open-storage-directory', () => {
+    safeHandle('clipboard:open-storage-directory', () => {
       const { shell } = require('electron');
       shell.openPath(this.storage.storageRoot);
       return { success: true };
     });
     
-    ipcMain.handle('clipboard:open-space-directory', (event, spaceId) => {
+    safeHandle('clipboard:open-space-directory', (event, spaceId) => {
       const { shell } = require('electron');
       const spaceDir = path.join(this.storage.spacesDir, spaceId);
       if (fs.existsSync(spaceDir)) {
@@ -1232,26 +2977,214 @@ class ClipboardManagerV2 {
       return { success: true };
     });
     
+    // Native file drag for external apps/web pages
+    safeHandle('clipboard:start-native-drag', (event, itemId) => {
+      try {
+        const item = this.storage.loadItem(itemId);
+        if (!item || !item.contentPath) {
+          console.error('[NativeDrag] Item not found or no content path:', itemId);
+          return { success: false, error: 'Item not found' };
+        }
+        
+        const filePath = path.join(this.storage.storageRoot, item.contentPath);
+        console.log('[NativeDrag] Starting drag for:', filePath);
+        
+        if (!fs.existsSync(filePath)) {
+          console.error('[NativeDrag] File not found:', filePath);
+          return { success: false, error: 'File not found' };
+        }
+        
+        // Get icon for drag (use thumbnail if available, otherwise generate one)
+        let iconPath = null;
+        if (item.thumbnailPath) {
+          const thumbPath = path.join(this.storage.storageRoot, item.thumbnailPath);
+          if (fs.existsSync(thumbPath)) {
+            iconPath = thumbPath;
+          }
+        }
+        
+        // Start native drag operation
+        event.sender.startDrag({
+          file: filePath,
+          icon: iconPath || undefined
+        });
+        
+        return { success: true, filePath };
+      } catch (error) {
+        console.error('[NativeDrag] Error:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Float card for dragging items to external apps
+    safeHandle('clipboard:float-item', (event, itemId) => {
+      try {
+        const item = this.storage.loadItem(itemId);
+        if (!item) {
+          console.error('[FloatCard] Item not found:', itemId);
+          return { success: false, error: 'Item not found' };
+        }
+        
+        console.log('[FloatCard] Creating float card for:', itemId);
+        
+        // Close existing float card if any
+        if (this.floatCardWindow && !this.floatCardWindow.isDestroyed()) {
+          this.floatCardWindow.close();
+        }
+        
+        // Get mouse position for placement
+        const { screen } = require('electron');
+        const mousePos = screen.getCursorScreenPoint();
+        
+        // Create float card window
+        this.floatCardWindow = new BrowserWindow({
+          width: 100,
+          height: 110,
+          x: mousePos.x - 50,
+          y: mousePos.y - 55,
+          transparent: true,
+          frame: false,
+          alwaysOnTop: true,
+          resizable: false,
+          minimizable: false,
+          maximizable: false,
+          hasShadow: true,
+          skipTaskbar: true,
+          webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            preload: path.join(__dirname, 'preload.js')
+          }
+        });
+        
+        this.floatCardWindow.loadFile('float-card.html');
+        
+        // Send item data when window is ready
+        this.floatCardWindow.webContents.on('did-finish-load', () => {
+          const itemData = {
+            id: itemId,
+            type: item.type,
+            fileType: item.fileType,
+            fileName: item.fileName,
+            thumbnail: item.thumbnail,
+            preview: item.preview
+          };
+          this.floatCardWindow.webContents.send('float-card:init', itemData);
+        });
+        
+        // Handle close request from float card - store reference to this for callbacks
+        const self = this;
+        if (!this._floatCardCloseHandler) {
+          this._floatCardCloseHandler = true;
+          ipcMain.on('float-card:close', () => {
+            console.log('[FloatCard] Close requested');
+            if (self.floatCardWindow && !self.floatCardWindow.isDestroyed()) {
+              self.floatCardWindow.close();
+              self.floatCardWindow = null;
+              console.log('[FloatCard] Window closed');
+            }
+          });
+          
+          ipcMain.on('float-card:ready', () => {
+            console.log('[FloatCard] Window ready');
+          });
+          
+          ipcMain.on('float-card:start-drag', (event, itemId) => {
+            // Forward native drag request
+            if (self.floatCardWindow && !self.floatCardWindow.isDestroyed()) {
+              const item = self.storage.loadItem(itemId);
+              if (item && item.contentPath) {
+                const filePath = path.join(self.storage.storageRoot, item.contentPath);
+                if (fs.existsSync(filePath)) {
+                  event.sender.startDrag({
+                    file: filePath,
+                    icon: item.thumbnailPath ? path.join(self.storage.storageRoot, item.thumbnailPath) : undefined
+                  });
+                }
+              }
+            }
+          });
+        }
+        
+        // Store reference to this window for later closing
+        this.floatCardWindow.on('closed', () => {
+          this.floatCardWindow = null;
+        });
+        
+        return { success: true };
+      } catch (error) {
+        console.error('[FloatCard] Error:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    safeHandle('clipboard:close-float', () => {
+      if (this.floatCardWindow && !this.floatCardWindow.isDestroyed()) {
+        this.floatCardWindow.close();
+        this.floatCardWindow = null;
+      }
+      return { success: true };
+    });
+    
     // Metadata operations
-    ipcMain.handle('clipboard:update-metadata', (event, itemId, updates) => {
+    safeHandle('clipboard:update-metadata', (event, itemId, updates) => {
       try {
         const item = this.storage.loadItem(itemId);
         if (!item) return { success: false };
         
+        // Update item's individual metadata file
         const metadataPath = path.join(this.storage.storageRoot, item.metadataPath);
         const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
         
         Object.assign(metadata, updates);
         fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
         
+        // Also sync to unified space-metadata.json if item belongs to a space
+        if (item.spaceId) {
+          try {
+            const spaceMetadata = this.storage.getSpaceMetadata(item.spaceId);
+            if (spaceMetadata) {
+              // Create a file key based on item ID or filename
+              const fileKey = item.fileName || `item-${itemId}`;
+              spaceMetadata.files[fileKey] = {
+                ...spaceMetadata.files[fileKey],
+                itemId: itemId,
+                type: item.type,
+                fileType: item.fileType,
+                description: updates.description || metadata.description,
+                tags: updates.tags || metadata.tags,
+                notes: updates.notes || metadata.notes,
+                instructions: updates.instructions || metadata.instructions,
+                source: updates.source || metadata.source,
+                ai_generated: updates.ai_generated || metadata.ai_generated,
+                ai_assisted: updates.ai_assisted || metadata.ai_assisted,
+                ai_model: updates.ai_model || metadata.ai_model,
+                ai_provider: updates.ai_provider || metadata.ai_provider,
+                // Video scenes for agentic player
+                scenes: updates.scenes || metadata.scenes || [],
+                updatedAt: new Date().toISOString()
+              };
+              this.storage.updateSpaceMetadata(item.spaceId, { files: spaceMetadata.files });
+              console.log('[Clipboard] Synced metadata to space-metadata.json for:', fileKey);
+            }
+          } catch (syncError) {
+            console.error('[Clipboard] Error syncing to space metadata:', syncError);
+            // Don't fail the operation if sync fails
+          }
+        }
+        
         return { success: true };
       } catch (error) {
-        console.error('Error updating metadata:', error);
+        const logger = getLogger();
+        logger.error('Metadata update failed', {
+          error: error.message,
+          operation: 'updateMetadata'
+        });
         return { success: false, error: error.message };
       }
     });
     
-    ipcMain.handle('clipboard:get-metadata', (event, itemId) => {
+    safeHandle('clipboard:get-metadata', (event, itemId) => {
       try {
         const item = this.storage.loadItem(itemId);
         if (!item) return { success: false, error: 'Item not found' };
@@ -1286,7 +3219,9 @@ class ClipboardManagerV2 {
           isScreenshot: item.isScreenshot,
           // Type info
           type: item.type,
-          preview: item.preview
+          preview: item.preview,
+          // Video scenes for agentic player
+          scenes: item.metadata?.scenes || []
         };
         
         return { success: true, metadata };
@@ -1294,9 +3229,2250 @@ class ClipboardManagerV2 {
         return { success: false, error: error.message };
       }
     });
+
+    // ==================== VIDEO SCENES FOR AGENTIC PLAYER ====================
+    
+    // Get scenes for a video item
+    safeHandle('clipboard:get-video-scenes', (event, itemId) => {
+      try {
+        const item = this.storage.loadItem(itemId);
+        if (!item) return { success: false, error: 'Item not found' };
+        
+        // Check if it's a video
+        if (item.type !== 'file' || !item.fileType?.startsWith('video/')) {
+          return { success: false, error: 'Item is not a video file' };
+        }
+        
+        // Get scenes from metadata
+        const metadataPath = path.join(this.storage.storageRoot, item.metadataPath);
+        let metadata = {};
+        if (fs.existsSync(metadataPath)) {
+          metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+        }
+        
+        return { 
+          success: true, 
+          scenes: metadata.scenes || [],
+          videoUrl: item.content, // Path to the video file
+          fileName: item.fileName,
+          fileType: item.fileType
+        };
+      } catch (error) {
+        const logger = getLogger();
+        logger.error('Get video scenes failed', {
+          error: error.message,
+          operation: 'getVideoScenes'
+        });
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Update scenes for a video item
+    safeHandle('clipboard:update-video-scenes', (event, itemId, scenes) => {
+      try {
+        const item = this.storage.loadItem(itemId);
+        if (!item) return { success: false, error: 'Item not found' };
+        
+        // Validate scenes array
+        if (!Array.isArray(scenes)) {
+          return { success: false, error: 'Scenes must be an array' };
+        }
+        
+        // Validate each scene has required fields
+        for (const scene of scenes) {
+          if (scene.id === undefined || scene.inTime === undefined || scene.outTime === undefined) {
+            return { success: false, error: 'Each scene must have id, inTime, and outTime' };
+          }
+        }
+        
+        // Update metadata file
+        const metadataPath = path.join(this.storage.storageRoot, item.metadataPath);
+        let metadata = {};
+        if (fs.existsSync(metadataPath)) {
+          metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+        }
+        
+        metadata.scenes = scenes;
+        metadata.scenesUpdatedAt = new Date().toISOString();
+        
+        fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+        
+        // Sync to space metadata if applicable
+        if (item.spaceId) {
+          try {
+            const spaceMetadata = this.storage.getSpaceMetadata(item.spaceId);
+            if (spaceMetadata) {
+              const fileKey = item.fileName || `item-${itemId}`;
+              spaceMetadata.files[fileKey] = {
+                ...spaceMetadata.files[fileKey],
+                scenes: scenes,
+                scenesUpdatedAt: metadata.scenesUpdatedAt
+              };
+              this.storage.updateSpaceMetadata(item.spaceId, { files: spaceMetadata.files });
+              console.log('[Clipboard] Synced video scenes to space-metadata.json:', fileKey);
+            }
+          } catch (syncError) {
+            console.error('[Clipboard] Error syncing scenes to space metadata:', syncError);
+          }
+        }
+        
+        console.log(`[Clipboard] Updated ${scenes.length} scenes for video:`, item.fileName);
+        return { success: true, scenesCount: scenes.length };
+      } catch (error) {
+        const logger = getLogger();
+        logger.error('Update video scenes failed', {
+          error: error.message,
+          operation: 'updateVideoScenes'
+        });
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Add a single scene to a video
+    safeHandle('clipboard:add-video-scene', (event, itemId, scene) => {
+      try {
+        const item = this.storage.loadItem(itemId);
+        if (!item) return { success: false, error: 'Item not found' };
+        
+        // Read existing metadata
+        const metadataPath = path.join(this.storage.storageRoot, item.metadataPath);
+        let metadata = {};
+        if (fs.existsSync(metadataPath)) {
+          metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+        }
+        
+        // Ensure scenes array exists
+        if (!metadata.scenes) metadata.scenes = [];
+        
+        // Generate ID if not provided
+        if (scene.id === undefined) {
+          scene.id = metadata.scenes.length > 0 
+            ? Math.max(...metadata.scenes.map(s => s.id)) + 1 
+            : 1;
+        }
+        
+        // Add scene
+        metadata.scenes.push(scene);
+        metadata.scenesUpdatedAt = new Date().toISOString();
+        
+        fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+        
+        console.log(`[Clipboard] Added scene "${scene.name}" to video:`, item.fileName);
+        return { success: true, scene, totalScenes: metadata.scenes.length };
+      } catch (error) {
+        const logger = getLogger();
+        logger.error('Add video scene failed', {
+          error: error.message,
+          operation: 'addVideoScene'
+        });
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Delete a scene from a video
+    safeHandle('clipboard:delete-video-scene', (event, itemId, sceneId) => {
+      try {
+        const item = this.storage.loadItem(itemId);
+        if (!item) return { success: false, error: 'Item not found' };
+        
+        const metadataPath = path.join(this.storage.storageRoot, item.metadataPath);
+        let metadata = {};
+        if (fs.existsSync(metadataPath)) {
+          metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+        }
+        
+        if (!metadata.scenes) return { success: false, error: 'No scenes found' };
+        
+        const initialLength = metadata.scenes.length;
+        metadata.scenes = metadata.scenes.filter(s => s.id !== sceneId);
+        
+        if (metadata.scenes.length === initialLength) {
+          return { success: false, error: 'Scene not found' };
+        }
+        
+        metadata.scenesUpdatedAt = new Date().toISOString();
+        fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+        
+        console.log(`[Clipboard] Deleted scene ${sceneId} from video:`, item.fileName);
+        return { success: true, remainingScenes: metadata.scenes.length };
+      } catch (error) {
+        const logger = getLogger();
+        logger.error('Delete video scene failed', {
+          error: error.message,
+          operation: 'deleteVideoScene'
+        });
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Get all videos with scenes (for agentic player)
+    safeHandle('clipboard:get-videos-with-scenes', (event, spaceId = null) => {
+      try {
+        // Filter items to videos
+        let items = this.storage.index.items.filter(item => 
+          item.type === 'file' && item.fileType?.startsWith('video/')
+        );
+        
+        // Filter by space if specified
+        if (spaceId) {
+          items = items.filter(item => item.spaceId === spaceId);
+        }
+        
+        // Load scenes for each video
+        const videosWithScenes = items.map(item => {
+          let scenes = [];
+          try {
+            const metadataPath = path.join(this.storage.storageRoot, item.metadataPath);
+            if (fs.existsSync(metadataPath)) {
+              const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+              scenes = metadata.scenes || [];
+            }
+          } catch (e) {
+            console.error('Error loading scenes for video:', item.fileName, e);
+          }
+          
+          return {
+            id: item.id,
+            fileName: item.fileName,
+            fileType: item.fileType,
+            spaceId: item.spaceId,
+            videoUrl: path.join(this.storage.storageRoot, item.contentPath),
+            scenes: scenes,
+            sceneCount: scenes.length
+          };
+        });
+        
+        return { 
+          success: true, 
+          videos: videosWithScenes,
+          totalVideos: videosWithScenes.length,
+          videosWithScenes: videosWithScenes.filter(v => v.sceneCount > 0).length
+        };
+      } catch (error) {
+        console.error('Error getting videos with scenes:', error);
+        return { success: false, error: error.message };
+      }
+    });
+
+    // ==================== END VIDEO SCENES ====================
+    
+    // Get item content (for preview/edit)
+    safeHandle('clipboard:get-item-content', (event, itemId) => {
+      try {
+        const item = this.storage.loadItem(itemId);
+        if (!item) return { success: false, error: 'Item not found' };
+        
+        // Return the full content
+        let content = item.content || '';
+        
+        // For HTML items, return HTML content
+        if (item.type === 'html' || item.metadata?.type === 'generated-document') {
+          content = item.html || item.content || '';
+        }
+        
+        // For files, try to read content based on file type
+        if (item.type === 'file' && item.content) {
+          const textExtensions = ['.txt', '.md', '.log', '.csv', '.json', '.xml', '.yaml', '.yml', 
+                                  '.js', '.ts', '.jsx', '.tsx', '.py', '.java', '.cpp', '.c', '.h', 
+                                  '.css', '.scss', '.html', '.htm', '.rb', '.go', '.rs', '.php'];
+          const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.ico',
+                                   '.tiff', '.tif', '.heic', '.heif', '.avif', '.jfif', '.apng'];
+          
+          if (item.fileExt && textExtensions.includes(item.fileExt.toLowerCase())) {
+            try {
+              // item.content should be the file path for files
+              if (fs.existsSync(item.content)) {
+                content = fs.readFileSync(item.content, 'utf8');
+              }
+            } catch (readError) {
+              console.error('Error reading file content:', readError);
+              content = item.preview || '';
+            }
+          } else if (item.fileType === 'image-file' || (item.fileExt && imageExtensions.includes(item.fileExt.toLowerCase()))) {
+            // For image files, return full-resolution image as data URL
+            try {
+              const filePath = item.content;
+              if (fs.existsSync(filePath)) {
+                const buffer = fs.readFileSync(filePath);
+                // Detect actual MIME type from magic bytes
+                const mimeType = this.detectImageMimeType(buffer);
+                content = `data:${mimeType};base64,${buffer.toString('base64')}`;
+                console.log('[getItemContent] Loaded full-resolution image:', item.fileName, 'size:', buffer.length);
+              }
+            } catch (readError) {
+              console.error('Error reading image file:', readError);
+              content = item.thumbnail || '';
+            }
+          }
+        }
+        
+        return { 
+          success: true, 
+          content,
+          type: item.type,
+          fileType: item.fileType,
+          fileExt: item.fileExt
+        };
+      } catch (error) {
+        console.error('Error getting item content:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Update item content (for editing)
+    safeHandle('clipboard:update-item-content', (event, itemId, newContent) => {
+      try {
+        // Get the index entry to find the original content path
+        const indexEntry = this.storage.index.items.find(i => i.id === itemId);
+        if (!indexEntry) return { success: false, error: 'Item not found in index' };
+        
+        const item = this.storage.loadItem(itemId);
+        if (!item) return { success: false, error: 'Item not found' };
+        
+        // Helper to check if content is actual HTML
+        const looksLikeHtml = (content) => {
+          if (!content || typeof content !== 'string') return false;
+          const htmlPattern = /<\s*(html|head|body|div|span|p|a|img|table|ul|ol|li|h[1-6]|script|style|link|meta|form|input|button|header|footer|nav|section|article)[^>]*>/i;
+          return htmlPattern.test(content);
+        };
+        
+        // Determine where to save - use the ORIGINAL content path
+        let contentPath;
+        
+        if (item.type === 'file' && item.content && fs.existsSync(item.content)) {
+          // For files, update the actual file
+          const textExtensions = ['.txt', '.md', '.log', '.json', '.xml', '.yaml', '.yml', 
+                                  '.js', '.ts', '.jsx', '.tsx', '.py', '.css', '.html', '.htm'];
+          if (item.fileExt && textExtensions.includes(item.fileExt.toLowerCase())) {
+            contentPath = item.content;
+          } else {
+            return { success: false, error: 'This file type cannot be edited' };
+          }
+        } else if (indexEntry.contentPath) {
+          // Use the original content path from the index
+          contentPath = path.join(this.storage.storageRoot, indexEntry.contentPath);
+          
+          // If it's a .txt file and content is plain text, convert to .md
+          if (contentPath.endsWith('.txt') && !looksLikeHtml(newContent)) {
+            const mdPath = contentPath.replace(/\.txt$/, '.md');
+            // If we're converting, update the index contentPath
+            if (fs.existsSync(contentPath)) {
+              // Delete old .txt file after saving to .md
+              fs.unlinkSync(contentPath);
+            }
+            contentPath = mdPath;
+            // Update index with new path
+            const relativePath = path.relative(this.storage.storageRoot, mdPath);
+            indexEntry.contentPath = relativePath;
+          }
+        } else {
+          // Fallback: construct path based on type
+          const itemDir = path.join(this.storage.itemsDir, itemId);
+          if (item.metadata?.type === 'generated-document' || looksLikeHtml(newContent)) {
+            contentPath = path.join(itemDir, 'content.html');
+          } else {
+            // Use .md for plain text
+            contentPath = path.join(itemDir, 'content.md');
+          }
+        }
+        
+        // Ensure directory exists
+        const dir = path.dirname(contentPath);
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+        
+        // Write the content
+        fs.writeFileSync(contentPath, newContent, 'utf8');
+        console.log(`[Clipboard] Saved content to: ${contentPath}`);
+        
+        // Update preview in index (strip HTML tags if present)
+        const preview = newContent.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').substring(0, 200).trim();
+        this.storage.updateItemIndex(itemId, { preview });
+        
+        // Clear cache to force reload
+        this.storage.cache.delete(itemId);
+        
+        // Update the in-memory history item
+        const historyItem = this.history.find(h => h.id === itemId);
+        if (historyItem) {
+          historyItem.preview = preview;
+          historyItem._needsContent = true; // Force reload on next access
+        }
+        
+        // Notify UI of update
+        this.notifyHistoryUpdate();
+        
+        console.log(`[Clipboard] Updated content for item: ${itemId}`);
+        return { success: true };
+      } catch (error) {
+        console.error('Error updating item content:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Convert DOCX to HTML for preview/editing
+    safeHandle('clipboard:convert-docx-to-html', async (event, filePath) => {
+      try {
+        if (!filePath) {
+          return { success: false, error: 'No file path provided' };
+        }
+        
+        // Verify file exists
+        if (!fs.existsSync(filePath)) {
+          return { success: false, error: 'File not found: ' + filePath };
+        }
+        
+        // Check if it's a docx file
+        const ext = path.extname(filePath).toLowerCase();
+        if (ext !== '.docx') {
+          return { success: false, error: 'Only .docx files are supported' };
+        }
+        
+        // Use mammoth to convert
+        const mammoth = require('mammoth');
+        const result = await mammoth.convertToHtml({ path: filePath });
+        
+        console.log(`[Clipboard] Converted DOCX to HTML: ${filePath}`);
+        if (result.messages && result.messages.length > 0) {
+          console.log('[Clipboard] Mammoth messages:', result.messages);
+        }
+        
+        return { 
+          success: true, 
+          html: result.value,
+          messages: result.messages || []
+        };
+      } catch (error) {
+        console.error('Error converting DOCX to HTML:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Open file in system default application
+    safeHandle('clipboard:open-in-system', async (event, filePath) => {
+      try {
+        if (!filePath) {
+          return { success: false, error: 'No file path provided' };
+        }
+        
+        // Verify file exists
+        if (!fs.existsSync(filePath)) {
+          return { success: false, error: 'File not found: ' + filePath };
+        }
+        
+        // Use Electron shell to open file in default app
+        const { shell } = require('electron');
+        const result = await shell.openPath(filePath);
+        
+        // shell.openPath returns empty string on success, error message on failure
+        if (result === '') {
+          console.log(`[Clipboard] Opened file: ${filePath}`);
+          return { success: true };
+        } else {
+          console.error(`[Clipboard] Failed to open file: ${result}`);
+          return { success: false, error: result };
+        }
+      } catch (error) {
+        console.error('Error opening file in system:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // AI Image editing using OpenAI DALL-E
+    safeHandle('clipboard:edit-image-ai', async (event, options) => {
+      try {
+        const { itemId, imageData, prompt } = options;
+        
+        // Get settings to check for OpenAI API key
+        const { getSettingsManager } = require('./settings-manager');
+        const settingsManager = getSettingsManager();
+        const openaiKey = settingsManager.get('openaiApiKey');
+        const anthropicKey = settingsManager.get('llmApiKey');
+        
+        if (!imageData) {
+          return { success: false, error: 'No image data provided' };
+        }
+        
+        console.log('[AI Image Edit] Processing edit request:', prompt);
+        
+        // Extract base64 data
+        let base64Data = imageData;
+        let mediaType = 'image/png';
+        
+        if (imageData.startsWith('data:')) {
+          const matches = imageData.match(/^data:([^;]+);base64,(.+)$/);
+          if (matches) {
+            mediaType = matches[1];
+            base64Data = matches[2];
+          }
+        }
+        
+        // Use OpenAI gpt-image-1 for true image editing
+        if (openaiKey) {
+          console.log('[AI Image Edit] Using OpenAI gpt-image-1 for image editing');
+          const https = require('https');
+          
+          try {
+            // Convert base64 to buffer for OpenAI
+            const imageBuffer = Buffer.from(base64Data, 'base64');
+            
+            // Create multipart form data
+            const boundary = '----FormBoundary' + Math.random().toString(36).substr(2);
+            
+            // Build multipart body parts
+            const parts = [];
+            
+            // Add image file
+            parts.push(Buffer.from(
+              `--${boundary}\r\n` +
+              `Content-Disposition: form-data; name="image"; filename="image.png"\r\n` +
+              `Content-Type: image/png\r\n\r\n`, 'utf-8'
+            ));
+            parts.push(imageBuffer);
+            parts.push(Buffer.from('\r\n', 'utf-8'));
+            
+            // Add prompt
+            parts.push(Buffer.from(
+              `--${boundary}\r\n` +
+              `Content-Disposition: form-data; name="prompt"\r\n\r\n` +
+              `${prompt}\r\n`, 'utf-8'
+            ));
+            
+            // Add model - gpt-image-1
+            parts.push(Buffer.from(
+              `--${boundary}\r\n` +
+              `Content-Disposition: form-data; name="model"\r\n\r\n` +
+              `gpt-image-1\r\n`, 'utf-8'
+            ));
+            
+            // Add closing boundary
+            parts.push(Buffer.from(`--${boundary}--\r\n`, 'utf-8'));
+            
+            const fullBody = Buffer.concat(parts);
+            
+            console.log('[AI Image Edit] Sending image to gpt-image-1 edits endpoint...');
+            
+            const response = await new Promise((resolve, reject) => {
+              const req = https.request({
+                hostname: 'api.openai.com',
+                path: '/v1/images/edits',
+                method: 'POST',
+                headers: {
+                  'Content-Type': `multipart/form-data; boundary=${boundary}`,
+                  'Content-Length': fullBody.length,
+                  'Authorization': `Bearer ${openaiKey}`
+                }
+              }, (res) => {
+                let data = '';
+                res.on('data', chunk => data += chunk);
+                res.on('end', () => {
+                  try {
+                    resolve(JSON.parse(data));
+                  } catch (e) {
+                    reject(new Error('Failed to parse response: ' + data));
+                  }
+                });
+              });
+              
+              req.on('error', reject);
+              req.write(fullBody);
+              req.end();
+            });
+            
+            if (response.error) {
+              console.error('[AI Image Edit] gpt-image-1 API error:', response.error);
+              throw new Error(response.error.message);
+            }
+            
+            if (response.data && response.data[0]) {
+              let editedImageData;
+              
+              if (response.data[0].b64_json) {
+                editedImageData = `data:image/png;base64,${response.data[0].b64_json}`;
+              } else if (response.data[0].url) {
+                // Download the image from URL
+                console.log('[AI Image Edit] Downloading edited image from URL...');
+                const imageUrl = response.data[0].url;
+                const imageResponse = await new Promise((resolve, reject) => {
+                  https.get(imageUrl, (res) => {
+                    const chunks = [];
+                    res.on('data', chunk => chunks.push(chunk));
+                    res.on('end', () => resolve(Buffer.concat(chunks)));
+                    res.on('error', reject);
+                  }).on('error', reject);
+                });
+                editedImageData = `data:image/png;base64,${imageResponse.toString('base64')}`;
+              }
+              
+              if (editedImageData) {
+                console.log('[AI Image Edit] Successfully edited image with gpt-image-1');
+                return { 
+                  success: true, 
+                  editedImage: editedImageData
+                };
+              }
+            }
+            
+            throw new Error('No image data in response');
+            
+          } catch (editError) {
+            console.error('[AI Image Edit] gpt-image-1 error:', editError.message);
+            // Fall through to Claude analysis
+          }
+        }
+        
+        // Fallback: Use Claude to analyze and describe the edits
+        if (anthropicKey) {
+          console.log('[AI Image Edit] Using Claude for image analysis (no OpenAI key or DALL-E failed)');
+          
+          const ClaudeAPI = require('./claude-api');
+          const claudeAPI = new ClaudeAPI();
+          
+          const requestData = JSON.stringify({
+            model: 'claude-sonnet-4-5-20250929',
+            max_tokens: 1000,
+            messages: [{
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text: `I want to edit this image with the following changes: "${prompt}"
+
+Please analyze the image and describe:
+1. What you see in the current image
+2. What specific changes would be made based on my request
+3. How the final result would look
+
+Respond in a helpful, conversational way.`
+                },
+                {
+                  type: 'image',
+                  source: {
+                    type: 'base64',
+                    media_type: mediaType,
+                    data: base64Data
+                  }
+                }
+              ]
+            }]
+          });
+          
+          const response = await claudeAPI.makeRequest('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-API-Key': anthropicKey,
+              'anthropic-version': '2023-06-01'
+            }
+          }, requestData);
+          
+          const description = response.content[0].text;
+          
+          return { 
+            success: false, 
+            error: `To edit images, please add your OpenAI API key in Settings.\n\nAI Analysis of your request:\n${description}`,
+            description: description,
+            needsOpenAIKey: true
+          };
+        }
+        
+        return { 
+          success: false, 
+          error: 'No API key configured. Please add your OpenAI API key in Settings to enable image editing.' 
+        };
+        
+      } catch (error) {
+        console.error('[AI Image Edit] Error:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Update item image (save edited image)
+    safeHandle('clipboard:update-item-image', async (event, itemId, imageData) => {
+      try {
+        const item = this.storage.loadItem(itemId);
+        if (!item) return { success: false, error: 'Item not found' };
+        
+        // Extract base64 data
+        let base64Data = imageData;
+        if (imageData.startsWith('data:')) {
+          const matches = imageData.match(/^data:[^;]+;base64,(.+)$/);
+          if (matches) {
+            base64Data = matches[1];
+          }
+        }
+        
+        // Determine the content path
+        const indexEntry = this.storage.index.items.find(i => i.id === itemId);
+        if (!indexEntry) return { success: false, error: 'Item not found in index' };
+        
+        const contentPath = path.join(this.storage.storageRoot, indexEntry.contentPath);
+        
+        // Write the image data
+        fs.writeFileSync(contentPath, Buffer.from(base64Data, 'base64'));
+        
+        // Also update thumbnail if it exists
+        if (indexEntry.thumbnailPath) {
+          const thumbnailPath = path.join(this.storage.storageRoot, indexEntry.thumbnailPath);
+          // Generate a smaller thumbnail from the edited image
+          // For simplicity, we'll use the same image as thumbnail
+          fs.writeFileSync(thumbnailPath, Buffer.from(base64Data, 'base64'));
+        }
+        
+        // Clear cache
+        this.storage.cache.delete(itemId);
+        
+        // Update in-memory item
+        const historyItem = this.history.find(h => h.id === itemId);
+        if (historyItem) {
+          historyItem._needsContent = true;
+          historyItem.thumbnail = imageData; // Update thumbnail
+        }
+        
+        // Notify UI
+        this.notifyHistoryUpdate();
+        
+        console.log(`[Clipboard] Updated image for item: ${itemId}`);
+        return { success: true };
+      } catch (error) {
+        console.error('Error updating item image:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Save image as new clipboard item
+    safeHandle('clipboard:save-image-as-new', async (event, imageData, options = {}) => {
+      try {
+        // Extract base64 data
+        let base64Data = imageData;
+        let mediaType = 'image/png';
+        
+        if (imageData.startsWith('data:')) {
+          const matches = imageData.match(/^data:([^;]+);base64,(.+)$/);
+          if (matches) {
+            mediaType = matches[1];
+            base64Data = matches[2];
+          }
+        }
+        
+        // Create image buffer
+        const imageBuffer = Buffer.from(base64Data, 'base64');
+        
+        // Create a new clipboard item
+        const newItem = {
+          type: 'image',
+          timestamp: Date.now(),
+          image: imageBuffer,
+          preview: options.description || 'AI-edited image',
+          metadata: {
+            source: 'ai-edit',
+            sourceItemId: options.sourceItemId,
+            description: options.description || 'AI-edited image'
+          }
+        };
+        
+        // Save using the storage system (addItem is the correct method)
+        const savedItem = this.storage.addItem(newItem);
+        
+        // Add to history
+        this.history.unshift({
+          ...savedItem,
+          thumbnail: imageData
+        });
+        
+        // Notify UI
+        this.notifyHistoryUpdate();
+        
+        console.log(`[Clipboard] Saved new image item: ${savedItem.id}`);
+        return { success: true, itemId: savedItem.id };
+      } catch (error) {
+        console.error('Error saving image as new:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Text-to-Speech using OpenAI TTS HD
+    safeHandle('clipboard:generate-speech', async (event, options) => {
+      try {
+        const { text, voice = 'nova' } = options;
+        
+        if (!text || text.trim().length === 0) {
+          return { success: false, error: 'No text provided' };
+        }
+        
+        // Get OpenAI API key from settings
+        const { getSettingsManager } = require('./settings-manager');
+        const settingsManager = getSettingsManager();
+        const openaiKey = settingsManager.get('openaiApiKey');
+        
+        if (!openaiKey) {
+          return { success: false, error: 'OpenAI API key not configured. Please add it in Settings.' };
+        }
+        
+        console.log(`[TTS] Generating speech with voice: ${voice}, text length: ${text.length}`);
+        
+        const https = require('https');
+        
+        // OpenAI TTS has a 4096 character limit - split long texts into chunks
+        const MAX_CHUNK_SIZE = 4000; // Leave some margin
+        const textChunks = [];
+        
+        if (text.length <= MAX_CHUNK_SIZE) {
+          textChunks.push(text);
+        } else {
+          // Split at sentence boundaries to avoid cutting words
+          let remaining = text;
+          while (remaining.length > 0) {
+            if (remaining.length <= MAX_CHUNK_SIZE) {
+              textChunks.push(remaining);
+              break;
+            }
+            
+            // Find a good break point (sentence end) within the limit
+            let breakPoint = MAX_CHUNK_SIZE;
+            const lastPeriod = remaining.lastIndexOf('. ', MAX_CHUNK_SIZE);
+            const lastQuestion = remaining.lastIndexOf('? ', MAX_CHUNK_SIZE);
+            const lastExclaim = remaining.lastIndexOf('! ', MAX_CHUNK_SIZE);
+            const bestBreak = Math.max(lastPeriod, lastQuestion, lastExclaim);
+            
+            if (bestBreak > MAX_CHUNK_SIZE * 0.5) {
+              breakPoint = bestBreak + 1; // Include the punctuation
+            }
+            
+            textChunks.push(remaining.substring(0, breakPoint).trim());
+            remaining = remaining.substring(breakPoint).trim();
+          }
+          console.log(`[TTS] Split text into ${textChunks.length} chunks`);
+        }
+        
+        // Generate audio for each chunk
+        const audioBuffers = [];
+        
+        for (let i = 0; i < textChunks.length; i++) {
+          const chunk = textChunks[i];
+          console.log(`[TTS] Generating chunk ${i + 1}/${textChunks.length}, length: ${chunk.length}`);
+          
+          const requestBody = JSON.stringify({
+            model: 'tts-1-hd',
+            input: chunk,
+            voice: voice,
+            response_format: 'mp3'
+          });
+          
+          const chunkAudio = await new Promise((resolve, reject) => {
+            const req = https.request({
+              hostname: 'api.openai.com',
+              path: '/v1/audio/speech',
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${openaiKey}`
+              }
+            }, (res) => {
+              const chunks = [];
+              
+              res.on('data', chunk => chunks.push(chunk));
+              res.on('end', () => {
+                if (res.statusCode !== 200) {
+                  const errorText = Buffer.concat(chunks).toString();
+                  try {
+                    const errorJson = JSON.parse(errorText);
+                    reject(new Error(errorJson.error?.message || `HTTP ${res.statusCode}`));
+                  } catch {
+                    reject(new Error(`HTTP ${res.statusCode}: ${errorText}`));
+                  }
+                  return;
+                }
+                
+                resolve(Buffer.concat(chunks));
+              });
+            });
+            
+            req.on('error', reject);
+            req.write(requestBody);
+            req.end();
+          });
+          
+          audioBuffers.push(chunkAudio);
+        }
+        
+        // Combine all audio buffers
+        const combinedBuffer = Buffer.concat(audioBuffers);
+        const audioData = combinedBuffer.toString('base64');
+        
+        console.log(`[TTS] Successfully generated audio, ${textChunks.length} chunks, total size: ${combinedBuffer.length} bytes`);
+        
+        return { success: true, audioData };
+        
+      } catch (error) {
+        console.error('[TTS] Error generating speech:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Create audio script from article content using GPT
+    safeHandle('clipboard:create-audio-script', async (event, options) => {
+      try {
+        const { title, content } = options;
+        
+        if (!content || content.trim().length === 0) {
+          return { success: false, error: 'No content provided' };
+        }
+        
+        // Get OpenAI API key from settings
+        const { getSettingsManager } = require('./settings-manager');
+        const settingsManager = getSettingsManager();
+        const openaiKey = settingsManager.get('openaiApiKey');
+        
+        if (!openaiKey) {
+          return { success: false, error: 'OpenAI API key not configured. Please add it in Settings.' };
+        }
+        
+        console.log(`[AudioScript] Creating audio script for: ${title}, content length: ${content.length}`);
+        
+        const https = require('https');
+        
+        // Call OpenAI Chat Completions API with GPT-4o (gpt-5.1 doesn't exist yet, using gpt-4o)
+        const requestBody = JSON.stringify({
+          model: 'gpt-4o',
+          messages: [
+            {
+              role: 'system',
+              content: `You are an expert audio content producer. Your task is to transform written articles into engaging audio scripts optimized for text-to-speech narration.
+
+Guidelines:
+- Maintain ALL key points, insights, and important details from the original article
+- Do NOT summarize or condense - the audio version should be comprehensive
+- Write in a natural, conversational tone suitable for listening
+- Remove visual references like "as shown above" or "see the image below"
+- Convert bullet points and lists into flowing prose
+- Add natural transitions between sections
+- Remove URLs, citations in brackets, and author bylines
+- Keep technical terms but explain them briefly if complex
+- Start with the article title as an introduction
+- Add brief pauses (indicated by "...") between major sections
+- End with a brief conclusion or takeaway
+
+Output ONLY the audio script text, nothing else.`
+            },
+            {
+              role: 'user',
+              content: `Please create an audio script for this article:
+
+Title: ${title}
+
+Content:
+${content}`
+            }
+          ],
+          temperature: 0.7,
+          max_tokens: 8000
+        });
+        
+        const scriptText = await new Promise((resolve, reject) => {
+          const req = https.request({
+            hostname: 'api.openai.com',
+            path: '/v1/chat/completions',
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${openaiKey}`
+            }
+          }, (res) => {
+            const chunks = [];
+            
+            res.on('data', chunk => chunks.push(chunk));
+            res.on('end', () => {
+              const responseText = Buffer.concat(chunks).toString();
+              
+              if (res.statusCode !== 200) {
+                try {
+                  const errorJson = JSON.parse(responseText);
+                  reject(new Error(errorJson.error?.message || `HTTP ${res.statusCode}`));
+                } catch {
+                  reject(new Error(`HTTP ${res.statusCode}: ${responseText}`));
+                }
+                return;
+              }
+              
+              try {
+                const response = JSON.parse(responseText);
+                const script = response.choices?.[0]?.message?.content;
+                if (script) {
+                  resolve(script);
+                } else {
+                  reject(new Error('No script generated'));
+                }
+              } catch (e) {
+                reject(new Error('Failed to parse response'));
+              }
+            });
+          });
+          
+          req.on('error', reject);
+          req.write(requestBody);
+          req.end();
+        });
+        
+        console.log(`[AudioScript] Successfully created script, length: ${scriptText.length}`);
+        
+        return { success: true, script: scriptText };
+        
+      } catch (error) {
+        console.error('[AudioScript] Error creating audio script:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Save TTS audio - attach to source item or create new
+    safeHandle('clipboard:save-tts-audio', async (event, options) => {
+      try {
+        const { audioData, voice, sourceItemId, sourceText, attachToSource } = options;
+        
+        if (!audioData) {
+          return { success: false, error: 'No audio data provided' };
+        }
+        
+        // Create audio buffer
+        const audioBuffer = Buffer.from(audioData, 'base64');
+        const timestamp = Date.now();
+        const filename = `tts-${voice}-${timestamp}.mp3`;
+        
+        // If attaching to source item
+        if (attachToSource && sourceItemId) {
+          console.log(`[TTS] Attaching audio to source item: ${sourceItemId}`);
+          
+          // Find the source item
+          const sourceItem = this.history.find(h => h.id === sourceItemId);
+          if (sourceItem) {
+            // Get the item directory
+            const itemDir = path.join(this.storage.itemsDir, sourceItemId);
+            console.log(`[TTS] Item directory: ${itemDir}`);
+            
+            if (!fs.existsSync(itemDir)) {
+              console.log(`[TTS] Creating directory: ${itemDir}`);
+              fs.mkdirSync(itemDir, { recursive: true });
+            }
+            
+            // Save audio in the item's directory
+            const audioPath = path.join(itemDir, 'tts-audio.mp3');
+            console.log(`[TTS] Writing ${audioBuffer.length} bytes to: ${audioPath}`);
+            fs.writeFileSync(audioPath, audioBuffer);
+            
+            // Verify file was written
+            if (fs.existsSync(audioPath)) {
+              const stats = fs.statSync(audioPath);
+              console.log(`[TTS] File verified, size: ${stats.size} bytes`);
+            } else {
+              console.error(`[TTS] ERROR: File was not written!`);
+            }
+            
+            // Update item metadata to include TTS audio reference
+            const metadataPath = path.join(itemDir, 'metadata.json');
+            let metadata = {};
+            if (fs.existsSync(metadataPath)) {
+              metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+            }
+            
+            metadata.ttsAudio = {
+              path: 'tts-audio.mp3',
+              voice: voice,
+              generatedAt: timestamp,
+              fileSize: audioBuffer.length
+            };
+            
+            fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+            console.log(`[TTS] Metadata updated with ttsAudio reference`);
+            
+            // Update the index entry
+            this.storage.updateItemIndex(sourceItemId, {
+              hasTTSAudio: true,
+              ttsVoice: voice
+            });
+            
+            console.log(`[TTS] Successfully attached audio to item ${sourceItemId}`);
+            return { success: true, itemId: sourceItemId, attached: true };
+          } else {
+            console.error(`[TTS] Source item not found in history: ${sourceItemId}`);
+          }
+        }
+        
+        // Create as new item (fallback or explicit)
+        const preview = sourceText 
+          ? `🔊 TTS: "${sourceText.substring(0, 50)}${sourceText.length > 50 ? '...' : ''}"`
+          : `🔊 TTS Audio (${voice})`;
+        
+        const newItem = {
+          type: 'file',
+          fileType: 'audio',
+          fileCategory: 'audio',
+          fileExt: '.mp3',
+          fileName: filename,
+          timestamp: timestamp,
+          preview: preview,
+          spaceId: this.currentSpace || 'unclassified',
+          metadata: {
+            source: 'tts-generation',
+            voice: voice,
+            sourceItemId: sourceItemId,
+            sourceText: sourceText,
+            generatedAt: timestamp
+          }
+        };
+        
+        const itemId = `item-${timestamp}-${Math.random().toString(36).substr(2, 9)}`;
+        const audioDir = path.join(this.storage.storageRoot, 'files', itemId);
+        
+        if (!fs.existsSync(audioDir)) {
+          fs.mkdirSync(audioDir, { recursive: true });
+        }
+        
+        const audioPath = path.join(audioDir, filename);
+        fs.writeFileSync(audioPath, audioBuffer);
+        
+        newItem.filePath = audioPath;
+        newItem.fileSize = audioBuffer.length;
+        
+        const indexEntry = this.storage.addItem({
+          ...newItem,
+          id: itemId
+        });
+        
+        this.history.unshift({
+          ...newItem,
+          id: indexEntry.id
+        });
+        
+        this.updateSpaceCounts();
+        this.notifyHistoryUpdate();
+        
+        console.log(`[TTS] Saved audio as new item: ${audioPath}`);
+        return { success: true, itemId: indexEntry.id, attached: false };
+        
+      } catch (error) {
+        console.error('[TTS] Error saving audio:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Get TTS audio for an item (if attached)
+    safeHandle('clipboard:get-tts-audio', async (event, itemId) => {
+      try {
+        console.log(`[TTS] Getting audio for item: ${itemId}`);
+        const itemDir = path.join(this.storage.itemsDir, itemId);
+        const audioPath = path.join(itemDir, 'tts-audio.mp3');
+        
+        console.log(`[TTS] Checking path: ${audioPath}`);
+        console.log(`[TTS] File exists: ${fs.existsSync(audioPath)}`);
+        
+        if (fs.existsSync(audioPath)) {
+          const stats = fs.statSync(audioPath);
+          console.log(`[TTS] File size: ${stats.size} bytes`);
+          
+          const audioData = fs.readFileSync(audioPath);
+          const base64 = audioData.toString('base64');
+          console.log(`[TTS] Base64 length: ${base64.length}`);
+          
+          // Get voice from metadata
+          const metadataPath = path.join(itemDir, 'metadata.json');
+          let voice = 'nova';
+          if (fs.existsSync(metadataPath)) {
+            const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+            voice = metadata.ttsAudio?.voice || 'nova';
+          }
+          
+          return { 
+            success: true, 
+            audioData: base64,
+            voice: voice,
+            hasAudio: true
+          };
+        }
+        
+        console.log(`[TTS] No audio file found for item: ${itemId}`);
+        return { success: true, hasAudio: false };
+      } catch (error) {
+        console.error('[TTS] Error getting audio:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Extract audio from video file
+    safeHandle('clipboard:extract-audio', async (event, itemId) => {
+      try {
+        console.log('[AudioExtract] Extracting audio for item:', itemId);
+        
+        // Get item from storage
+        const item = this.history.find(h => h.id === itemId);
+        if (!item) {
+          return { success: false, error: 'Item not found' };
+        }
+        
+        // Get file path
+        let videoPath = item.filePath || item.content;
+        if (!videoPath) {
+          const itemDir = path.join(this.storage.itemsDir, itemId);
+          const files = fs.readdirSync(itemDir);
+          const videoFile = files.find(f => /\.(mp4|mov|avi|mkv|webm)$/i.test(f));
+          if (videoFile) {
+            videoPath = path.join(itemDir, videoFile);
+          }
+        }
+        
+        if (!videoPath || !fs.existsSync(videoPath)) {
+          return { success: false, error: 'Video file not found' };
+        }
+        
+        // Extract audio using ffmpeg
+        const ffmpeg = require('fluent-ffmpeg');
+        const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+        ffmpeg.setFfmpegPath(ffmpegPath);
+        
+        const itemDir = path.join(this.storage.itemsDir, itemId);
+        const audioFileName = path.basename(videoPath, path.extname(videoPath)) + '.mp3';
+        const audioPath = path.join(itemDir, audioFileName);
+        
+        console.log('[AudioExtract] Starting ffmpeg extraction from:', videoPath);
+        console.log('[AudioExtract] Output path:', audioPath);
+        
+        await new Promise((resolve, reject) => {
+          ffmpeg(videoPath)
+            .noVideo()
+            .audioCodec('libmp3lame')
+            .audioBitrate('192k')
+            .format('mp3')
+            .output(audioPath)
+            .on('start', (cmd) => {
+              console.log('[AudioExtract] FFmpeg command:', cmd);
+              // Send initial progress
+              if (event.sender && !event.sender.isDestroyed()) {
+                event.sender.send('audio-extract-progress', { itemId, percent: 0, status: 'Starting...' });
+              }
+            })
+            .on('progress', (progress) => {
+              const percent = progress.percent ? Math.round(progress.percent) : 0;
+              console.log('[AudioExtract] Progress:', percent + '%');
+              // Send progress to renderer
+              if (event.sender && !event.sender.isDestroyed()) {
+                event.sender.send('audio-extract-progress', { itemId, percent, status: `Extracting: ${percent}%` });
+              }
+            })
+            .on('end', () => {
+              console.log('[AudioExtract] FFmpeg completed successfully');
+              if (event.sender && !event.sender.isDestroyed()) {
+                event.sender.send('audio-extract-progress', { itemId, percent: 100, status: 'Complete!' });
+              }
+              resolve();
+            })
+            .on('error', (err) => {
+              console.error('[AudioExtract] FFmpeg error:', err.message);
+              if (event.sender && !event.sender.isDestroyed()) {
+                event.sender.send('audio-extract-progress', { itemId, percent: 0, status: 'Error: ' + err.message });
+              }
+              reject(err);
+            })
+            .run();
+        });
+        
+        console.log('[AudioExtract] Audio extracted to:', audioPath);
+        
+        // Update metadata
+        const metadataPath = path.join(itemDir, 'metadata.json');
+        if (fs.existsSync(metadataPath)) {
+          const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+          metadata.audioPath = audioPath;
+          metadata.audioFileName = audioFileName;
+          fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+        }
+        
+        return { 
+          success: true, 
+          audioPath, 
+          audioFileName,
+          audioSize: fs.statSync(audioPath).size
+        };
+      } catch (error) {
+        console.error('[AudioExtract] Error:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Audio/Video Transcription using unified TranscriptionService (ElevenLabs Scribe)
+    safeHandle('clipboard:transcribe-audio', async (event, options) => {
+      try {
+        const { itemId, language, diarize = true } = options;
+        
+        // Load the audio item
+        const item = this.storage.loadItem(itemId);
+        if (!item) {
+          return { success: false, error: 'Item not found' };
+        }
+        
+        // Get the audio file path
+        let audioPath = item.filePath;
+        if (!audioPath || !fs.existsSync(audioPath)) {
+          // Try to find it in the item's content path
+          const indexEntry = this.storage.index.items.find(i => i.id === itemId);
+          if (indexEntry?.contentPath) {
+            audioPath = path.join(this.storage.storageRoot, indexEntry.contentPath);
+          }
+        }
+        
+        if (!audioPath || !fs.existsSync(audioPath)) {
+          return { success: false, error: 'Audio file not found' };
+        }
+        
+        console.log(`[Transcription] Transcribing file: ${audioPath}`);
+        
+        // Check if it's a video file - need to extract audio first
+        const fileExt = path.extname(audioPath).toLowerCase().replace('.', '') || 'mp3';
+        const videoFormats = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'flv', 'wmv', 'm4v'];
+        const isVideo = videoFormats.includes(fileExt) || 
+                       (item.fileType && item.fileType.startsWith('video/')) ||
+                       item.fileCategory === 'video';
+        
+        let transcribePath = audioPath;
+        let tempAudioPath = null;
+        
+        if (isVideo) {
+          console.log(`[Transcription] Video file detected, extracting audio...`);
+          
+          // Extract audio from video using ffmpeg
+          try {
+            const ffmpeg = require('fluent-ffmpeg');
+            const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+            ffmpeg.setFfmpegPath(ffmpegPath);
+            
+            // Create temp file for extracted audio
+            const { app } = require('electron');
+            tempAudioPath = path.join(app.getPath('temp'), `transcribe_${Date.now()}.mp3`);
+            
+            await new Promise((resolve, reject) => {
+              ffmpeg(audioPath)
+                .noVideo()
+                .audioCodec('libmp3lame')
+                .audioBitrate('128k')
+                .format('mp3')
+                .output(tempAudioPath)
+                .on('end', resolve)
+                .on('error', reject)
+                .run();
+            });
+            
+            console.log(`[Transcription] Audio extracted to: ${tempAudioPath}`);
+            transcribePath = tempAudioPath;
+          } catch (ffmpegError) {
+            console.error('[Transcription] FFmpeg error:', ffmpegError);
+            return { success: false, error: 'Failed to extract audio from video. Make sure ffmpeg is installed.' };
+          }
+        }
+        
+        // Use unified TranscriptionService (ElevenLabs Scribe)
+        const { getTranscriptionService } = await import('./src/transcription/index.js');
+        const service = getTranscriptionService();
+        
+        // Check if service is available
+        const isAvailable = await service.isAvailable();
+        if (!isAvailable) {
+          if (tempAudioPath && fs.existsSync(tempAudioPath)) {
+            fs.unlinkSync(tempAudioPath);
+          }
+          return { success: false, error: 'ElevenLabs API key not configured. Please add it in Settings.' };
+        }
+        
+        const result = await service.transcribe(transcribePath, {
+          language: language || null,
+          diarize  // Enable speaker identification
+        });
+        
+        console.log(`[Transcription] Successfully transcribed: ${result.wordCount} words, ${result.speakerCount} speakers`);
+        
+        // Cleanup temp file if exists
+        if (tempAudioPath && fs.existsSync(tempAudioPath)) {
+          fs.unlinkSync(tempAudioPath);
+        }
+        
+        // Return in compatible format
+        return { 
+          success: result.success, 
+          transcription: result.text,
+          text: result.text,
+          words: result.words,
+          speakers: result.speakers,
+          speakerCount: result.speakerCount,
+          language: result.language,
+          source: result.source,
+          error: result.error
+        };
+        
+      } catch (error) {
+        console.error('[Transcription] Error:', error);
+        // Cleanup temp file on error too
+        if (typeof tempAudioPath !== 'undefined' && tempAudioPath && fs.existsSync(tempAudioPath)) {
+          try { fs.unlinkSync(tempAudioPath); } catch (e) {}
+        }
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Save transcription - attach to source item or create new
+    safeHandle('clipboard:save-transcription', async (event, options) => {
+      try {
+        const { transcription, sourceItemId, sourceFileName, attachToSource } = options;
+        
+        if (!transcription) {
+          return { success: false, error: 'No transcription provided' };
+        }
+        
+        const timestamp = Date.now();
+        
+        // If attaching to source item
+        if (attachToSource && sourceItemId) {
+          const itemDir = path.join(this.storage.itemsDir, sourceItemId);
+          
+          if (!fs.existsSync(itemDir)) {
+            fs.mkdirSync(itemDir, { recursive: true });
+          }
+          
+          // Save transcription as text file
+          const transcriptionPath = path.join(itemDir, 'transcription.txt');
+          fs.writeFileSync(transcriptionPath, transcription, 'utf8');
+          
+          // Update metadata
+          const metadataPath = path.join(itemDir, 'metadata.json');
+          let metadata = {};
+          if (fs.existsSync(metadataPath)) {
+            metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+          }
+          
+          metadata.transcription = {
+            path: 'transcription.txt',
+            transcribedAt: timestamp,
+            length: transcription.length
+          };
+          
+          fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+          
+          // Update index
+          this.storage.updateItemIndex(sourceItemId, {
+            hasTranscription: true
+          });
+          
+          console.log(`[Transcription] Attached to item ${sourceItemId}`);
+          return { success: true, itemId: sourceItemId, attached: true };
+        }
+        
+        // Create as new item (fallback)
+        const preview = `📝 Transcription: "${transcription.substring(0, 50)}${transcription.length > 50 ? '...' : ''}"`;
+        
+        const newItem = {
+          type: 'text',
+          content: transcription,
+          preview: preview,
+          timestamp: timestamp,
+          spaceId: this.currentSpace || 'unclassified',
+          metadata: {
+            source: 'transcription',
+            sourceItemId: sourceItemId,
+            sourceFileName: sourceFileName,
+            transcribedAt: timestamp
+          }
+        };
+        
+        const indexEntry = this.storage.addItem(newItem);
+        
+        this.history.unshift({
+          ...newItem,
+          id: indexEntry.id
+        });
+        
+        this.updateSpaceCounts();
+        this.notifyHistoryUpdate();
+        
+        console.log(`[Transcription] Saved as new item: ${indexEntry.id}`);
+        return { success: true, itemId: indexEntry.id, attached: false };
+        
+      } catch (error) {
+        console.error('[Transcription] Error saving:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Helper: Convert HH:MM:SS to seconds
+    const timeToSeconds = (timeStr) => {
+      const parts = timeStr.split(':').map(Number);
+      if (parts.length === 3) {
+        return parts[0] * 3600 + parts[1] * 60 + parts[2];
+      } else if (parts.length === 2) {
+        return parts[0] * 60 + parts[1];
+      }
+      return parseFloat(timeStr) || 0;
+    };
+    
+    // Helper: Parse speaker transcription format
+    // Format: "Speaker A [00:00:00 - 00:00:05]: text"
+    const parseSpeakerTranscription = (content) => {
+      const lines = content.split('\n').filter(l => l.trim());
+      const segments = [];
+      
+      // Regex to match: Speaker X [HH:MM:SS - HH:MM:SS]: text
+      const regex = /^(Speaker \w+)\s*\[(\d{2}:\d{2}:\d{2})\s*-\s*(\d{2}:\d{2}:\d{2})\]:\s*(.+)$/;
+      
+      for (const line of lines) {
+        const match = line.match(regex);
+        if (match) {
+          const [, speaker, startTime, endTime, text] = match;
+          segments.push({
+            speaker: speaker,
+            start: timeToSeconds(startTime),
+            end: timeToSeconds(endTime),
+            text: text.trim()
+          });
+        }
+      }
+      
+      return segments.length > 0 ? segments : null;
+    };
+
+    // Get transcription for an item (if attached)
+    safeHandle('clipboard:get-transcription', async (event, itemId) => {
+      try {
+        const itemDir = path.join(this.storage.itemsDir, itemId);
+        const metadataPath = path.join(itemDir, 'metadata.json');
+        
+        // PRIORITY 1: Check metadata FIRST for Whisper transcription (user-generated, most accurate)
+        // This takes priority over YouTube/file transcripts because the user explicitly ran Whisper
+        if (fs.existsSync(metadataPath)) {
+          const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+          
+          // If metadata has Whisper transcription, use it (highest priority)
+          if (metadata.transcriptionSource === 'whisper' && metadata.transcriptSegments && metadata.transcriptSegments.length > 0) {
+            const transcriptText = typeof metadata.transcript === 'string' 
+              ? metadata.transcript 
+              : metadata.transcriptSegments.map(s => s.text).join(' ');
+            
+            console.log('[Transcription] Using Whisper transcription from metadata:', metadata.transcriptSegments.length, 'segments');
+            return {
+              success: true,
+              transcription: transcriptText,
+              hasTranscription: true,
+              source: 'whisper',
+              language: metadata.transcriptLanguage,
+              segments: metadata.transcriptSegments
+            };
+          }
+        }
+
+        // PRIORITY 2: Check for transcription-speakers.txt (has timed segments from AssemblyAI)
+        const speakersPath = path.join(itemDir, 'transcription-speakers.txt');
+        let segments = null;
+
+        if (fs.existsSync(speakersPath)) {
+          try {
+            const speakersContent = fs.readFileSync(speakersPath, 'utf8');
+            // Parse speaker transcription format: "Speaker A [00:00:00 - 00:00:05]: text"
+            segments = parseSpeakerTranscription(speakersContent);
+            console.log('[Transcription] Parsed', segments?.length || 0, 'segments from speakers file');
+          } catch (e) {
+            console.warn('[Transcription] Could not parse speakers file:', e.message);
+          }
+        }
+
+        // PRIORITY 3: Check for plain text transcription files
+        const transcriptionFiles = [
+          { path: path.join(itemDir, 'transcription.txt'), source: 'whisper' },
+          { path: path.join(itemDir, 'transcript.txt'), source: 'transcript' },
+        ];
+
+        for (const file of transcriptionFiles) {
+          if (fs.existsSync(file.path)) {
+            const transcription = fs.readFileSync(file.path, 'utf8');
+            return {
+              success: true,
+              transcription: transcription,
+              hasTranscription: true,
+              source: file.source,
+              segments: segments // Include parsed segments if available
+            };
+          }
+        }
+
+        // PRIORITY 4: Check metadata for YouTube/other transcript segments
+        if (fs.existsSync(metadataPath)) {
+          const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+
+          // Check for transcript segments directly in metadata (YouTube downloads)
+          if (metadata.transcriptSegments && metadata.transcriptSegments.length > 0) {
+            const transcriptText = typeof metadata.transcript === 'string' 
+              ? metadata.transcript 
+              : metadata.transcriptSegments.map(s => s.text).join(' ');
+            
+            const source = metadata.transcriptionSource || 'youtube';
+            console.log('[Transcription] Found', metadata.transcriptSegments.length, 'segments in metadata (source:', source + ')');
+            return {
+              success: true,
+              transcription: transcriptText,
+              hasTranscription: true,
+              source: source,
+              language: metadata.transcriptLanguage,
+              segments: metadata.transcriptSegments
+            };
+          }
+
+          // Check for YouTube transcript object format (legacy)
+          if (metadata.transcript && typeof metadata.transcript === 'object' && metadata.transcript.text) {
+            return {
+              success: true,
+              transcription: metadata.transcript.text,
+              hasTranscription: true,
+              source: 'youtube',
+              language: metadata.transcript.language,
+              isAutoGenerated: metadata.transcript.isAutoGenerated,
+              segments: metadata.transcript.segments || segments
+            };
+          }
+          
+          // Check for plain string transcript (no segments)
+          if (metadata.transcript && typeof metadata.transcript === 'string') {
+            return {
+              success: true,
+              transcription: metadata.transcript,
+              hasTranscription: true,
+              source: 'metadata',
+              segments: segments  // May be null if no speakers file
+            };
+          }
+        }
+
+        return { success: true, hasTranscription: false };
+      } catch (error) {
+        console.error('[Transcription] Error getting:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // AI Summary Generation - create a summary from transcript
+    safeHandle('clipboard:generate-summary', async (event, options) => {
+      console.log('[AISummary] ====== Handler called ======');
+      try {
+        const { itemId, transcript, title } = options;
+        console.log('[AISummary] Starting summary generation for item:', itemId);
+        console.log('[AISummary] Transcript length:', transcript?.length || 0);
+        
+        if (!transcript || transcript.length < 100) {
+          return { success: false, error: 'Transcript is too short to summarize' };
+        }
+        
+        // Get API key from settings
+        const { getSettingsManager } = require('./settings-manager');
+        const settingsManager = getSettingsManager();
+        const apiKey = settingsManager.get('llmApiKey');
+        
+        if (!apiKey) {
+          return { success: false, error: 'No LLM API key configured. Please set your API key in Settings.' };
+        }
+        
+        // Truncate transcript if too long (use first 30000 chars for summary)
+        const truncatedTranscript = transcript.length > 30000 
+          ? transcript.substring(0, 30000) + '\n\n[Transcript truncated...]'
+          : transcript;
+        
+        // Detect API type
+        const isAnthropicKey = apiKey.startsWith('sk-ant-');
+        
+        console.log('[AISummary] Using API:', isAnthropicKey ? 'Claude' : 'OpenAI');
+        
+        let summary = '';
+        
+        if (isAnthropicKey) {
+          // Use Claude API
+          const https = require('https');
+          
+          const requestBody = JSON.stringify({
+            model: 'claude-sonnet-4-5-20250929',
+            max_tokens: 2000,
+            messages: [{
+              role: 'user',
+              content: `You are a skilled content summarizer. Given the following transcript${title ? ` from "${title}"` : ''}, write a comprehensive but concise summary.
+
+Create a structured summary with this format:
+
+OVERVIEW: One paragraph explaining what this content is about and why it matters.
+
+KEY POINTS:
+• Point 1 - explanation
+• Point 2 - explanation
+• Point 3 - explanation
+• Point 4 - explanation
+• Point 5 - explanation
+(Include 5-8 substantive key points)
+
+MAIN TAKEAWAYS: One paragraph summarizing the most important insights or conclusions.
+
+IMPORTANT RULES:
+1. Focus ONLY on actual content - ignore sponsor messages, ads, and promotional content
+2. Extract substantive arguments and insights, not surface-level observations
+3. Be specific and concrete - someone reading should understand the key ideas
+4. Use bullet points (•) for KEY POINTS only, no other formatting
+
+TRANSCRIPT:
+${truncatedTranscript}
+
+Write the structured summary now:`
+            }]
+          });
+          
+          const response = await new Promise((resolve, reject) => {
+            const req = https.request({
+              hostname: 'api.anthropic.com',
+              path: '/v1/messages',
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': apiKey,
+                'anthropic-version': '2023-06-01'
+              }
+            }, (res) => {
+              let data = '';
+              res.on('data', chunk => data += chunk);
+              res.on('end', () => {
+                try {
+                  resolve({ statusCode: res.statusCode, body: JSON.parse(data) });
+                } catch (e) {
+                  reject(new Error('Invalid JSON response'));
+                }
+              });
+            });
+            req.on('error', reject);
+            req.write(requestBody);
+            req.end();
+          });
+          
+          if (response.statusCode !== 200) {
+            throw new Error(`Claude API error: ${response.statusCode} - ${JSON.stringify(response.body)}`);
+          }
+          
+          summary = response.body.content?.[0]?.text || '';
+          
+        } else {
+          // Use OpenAI API
+          const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+              model: 'gpt-4o-mini',
+              messages: [{
+                role: 'user',
+                content: `You are a skilled content summarizer. Given the following transcript${title ? ` from "${title}"` : ''}, write a comprehensive but concise summary.
+
+Create a structured summary with this format:
+
+OVERVIEW: One paragraph explaining what this content is about and why it matters.
+
+KEY POINTS:
+• Point 1 - explanation
+• Point 2 - explanation
+• Point 3 - explanation
+• Point 4 - explanation
+• Point 5 - explanation
+(Include 5-8 substantive key points)
+
+MAIN TAKEAWAYS: One paragraph summarizing the most important insights or conclusions.
+
+IMPORTANT RULES:
+1. Focus ONLY on actual content - ignore sponsor messages, ads, and promotional content
+2. Extract substantive arguments and insights, not surface-level observations
+3. Be specific and concrete - someone reading should understand the key ideas
+4. Use bullet points (•) for KEY POINTS only, no other formatting
+
+TRANSCRIPT:
+${truncatedTranscript}
+
+Write the structured summary now:`
+              }],
+              max_tokens: 2000
+            })
+          });
+          
+          if (!response.ok) {
+            const errorBody = await response.text();
+            throw new Error(`OpenAI API error: ${response.status} - ${errorBody}`);
+          }
+          
+          const result = await response.json();
+          summary = result.choices?.[0]?.message?.content || '';
+        }
+        
+        if (!summary) {
+          return { success: false, error: 'Failed to generate summary' };
+        }
+        
+        console.log('[AISummary] Generated summary length:', summary.length);
+        
+        // Save to metadata
+        const itemDir = path.join(this.storage.itemsDir, itemId);
+        const metadataPath = path.join(itemDir, 'metadata.json');
+        if (fs.existsSync(metadataPath)) {
+          const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+          metadata.aiSummary = summary;
+          metadata.aiSummaryGeneratedAt = new Date().toISOString();
+          fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+          
+          // Update in-memory item
+          const historyItem = this.history.find(h => h.id === itemId);
+          if (historyItem && historyItem.metadata) {
+            historyItem.metadata.aiSummary = summary;
+            historyItem.metadata.aiSummaryGeneratedAt = metadata.aiSummaryGeneratedAt;
+          }
+        }
+        
+        return { success: true, summary };
+        
+      } catch (error) {
+        console.error('[AISummary] Error:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // AI Speaker Identification - analyze transcript and assign speakers
+    safeHandle('clipboard:identify-speakers', async (event, options) => {
+      console.log('[SpeakerID] ====== Handler called ======');
+      try {
+        const { itemId, transcript, contextHint } = options;
+        console.log('[SpeakerID] Starting speaker identification for item:', itemId);
+        console.log('[SpeakerID] Transcript length:', transcript?.length || 0);
+        
+        // Get API key from settings
+        const { getSettingsManager } = require('./settings-manager');
+        const settingsManager = getSettingsManager();
+        
+        // Get API keys - try multiple field names
+        const llmApiKey = settingsManager.get('llmApiKey') || '';
+        const claudeApiKey = settingsManager.get('claudeApiKey') || '';
+        const openaiApiKey = settingsManager.get('openaiApiKey') || '';
+        
+        console.log('[SpeakerID] Raw keys - llmApiKey:', !!llmApiKey, 'claudeApiKey:', !!claudeApiKey, 'openaiApiKey:', !!openaiApiKey);
+        
+        // Auto-detect key type by prefix (more reliable than provider setting)
+        let claudeKey = null;
+        let openaiKey = null;
+        
+        // Check llmApiKey first
+        if (llmApiKey.startsWith('sk-ant-')) {
+          claudeKey = llmApiKey;
+        } else if (llmApiKey.startsWith('sk-')) {
+          openaiKey = llmApiKey;
+        }
+        
+        // Check dedicated claudeApiKey field
+        if (!claudeKey && claudeApiKey && claudeApiKey.startsWith('sk-ant-')) {
+          claudeKey = claudeApiKey;
+        }
+        
+        // Also check dedicated openaiApiKey field
+        if (!openaiKey && openaiApiKey && openaiApiKey.startsWith('sk-')) {
+          openaiKey = openaiApiKey;
+        }
+        
+        console.log('[SpeakerID] Key detection - Claude:', !!claudeKey, 'OpenAI:', !!openaiKey);
+        if (claudeKey) console.log('[SpeakerID] Claude key prefix:', claudeKey.substring(0, 15) + '...');
+        
+        if (!claudeKey && !openaiKey) {
+          return { success: false, error: 'No AI API key configured. Please add a Claude or OpenAI API key in Settings.' };
+        }
+        
+        // Get model from settings (defaults to Claude Sonnet 4.5 or GPT-4o)
+        const llmModel = settingsManager.get('llmModel') || (claudeKey ? 'claude-sonnet-4-5-20250929' : 'gpt-4o');
+        console.log('[SpeakerID] Using model:', llmModel);
+        
+        // Try to get timecoded segments from metadata for better analysis
+        let formattedTranscript = transcript;
+        if (itemId) {
+          try {
+            const itemDir = path.join(this.storage.itemsDir, itemId);
+            const metadataPath = path.join(itemDir, 'metadata.json');
+            if (fs.existsSync(metadataPath)) {
+              const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+              if (metadata.transcript?.segments?.length > 0) {
+                // Format with timecodes for better speaker detection
+                formattedTranscript = metadata.transcript.segments.map(seg => 
+                  `[${seg.startFormatted || formatTime(seg.start)}] ${seg.text}`
+                ).join('\n');
+                console.log('[SpeakerID] Using timecoded segments:', metadata.transcript.segments.length, 'segments');
+              }
+            }
+          } catch (e) {
+            console.log('[SpeakerID] Could not load segments, using plain transcript');
+          }
+        }
+        
+        // Truncate transcript if too long (keep first 100k chars for context)
+        const maxChars = 100000;
+        const truncatedTranscript = formattedTranscript.length > maxChars 
+          ? formattedTranscript.substring(0, maxChars) + '\n\n[... transcript truncated for processing ...]'
+          : formattedTranscript;
+        
+        // Helper function to format seconds to timecode
+        function formatTime(seconds) {
+          const h = Math.floor(seconds / 3600);
+          const m = Math.floor((seconds % 3600) / 60);
+          const s = Math.floor(seconds % 60);
+          const ms = Math.floor((seconds % 1) * 1000);
+          return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${ms.toString().padStart(3, '0')}`;
+        }
+        
+        const systemPrompt = `You are an expert at analyzing conversation transcripts and identifying different speakers.
+
+Your task is to take a transcript (which may include timecodes) and add speaker labels to identify who is speaking.
+
+IMPORTANT: You will receive CONTEXT INFORMATION about the video/audio that should help you identify the speakers by name. USE THIS CONTEXT to figure out:
+- Who the host/interviewer is (often the channel owner/uploader)
+- Who the guest(s) are (often mentioned in the title or description)
+- The format of the conversation (interview, podcast, lecture, etc.)
+
+Guidelines:
+1. FIRST, analyze the context (title, description, uploader) to identify speaker names
+2. The transcript may have timecodes in format [HH:MM:SS.mmm] - PRESERVE these
+3. Use speaker patterns to assign dialogue:
+   - Interviewers ask questions, guests give long answers
+   - Hosts often introduce topics and guests
+   - The channel owner is usually the host/interviewer
+4. Look for first-person references that reveal identity:
+   - "At my company SSI..." = the person who founded SSI
+   - "When I interviewed..." = the interviewer
+   - "My research shows..." = likely the expert guest
+5. USE ACTUAL NAMES when you can identify them from context
+6. Format as:
+
+   **[Actual Name]:**
+   [00:00:00.000] Their dialogue...
+   
+   **[Other Name]:**
+   [00:00:10.000] Their response...
+
+7. Group consecutive lines from the same speaker
+8. Only use "Speaker 1/2" if names cannot be determined from context
+9. Preserve ALL original text exactly - only add speaker labels`;
+
+        const userPrompt = `Please analyze this transcript and identify the speakers by name.
+
+${contextHint ? `=== VIDEO/AUDIO CONTEXT ===
+${contextHint}
+=== END CONTEXT ===
+
+Use the above context to identify the actual names of the speakers. The channel/uploader is typically the host/interviewer.
+
+` : ''}=== TRANSCRIPT TO ANALYZE ===
+${truncatedTranscript}`;
+
+        let result;
+        
+        // Process in chunks if transcript is very large (>10K chars)
+        // Smaller chunks = faster API responses and incremental results
+        const chunkSize = 10000;
+        const needsChunking = truncatedTranscript.length > chunkSize;
+        
+        console.log('[SpeakerID] Transcript length:', truncatedTranscript.length, 'needsChunking:', needsChunking);
+        
+        async function callClaude(prompt, systemMsg) {
+          console.log('[SpeakerID] Calling Claude API, prompt length:', prompt.length);
+          console.log('[SpeakerID] Using model:', llmModel);
+          console.log('[SpeakerID] Using key:', claudeKey ? claudeKey.substring(0, 15) + '...' : 'NONE');
+          
+          // Use Node's https module for more reliable requests in Electron
+          const https = require('https');
+          
+          return new Promise((resolve, reject) => {
+            const requestBody = JSON.stringify({
+              model: llmModel,
+              max_tokens: 8000,
+              system: systemMsg,
+              messages: [{ role: 'user', content: prompt }]
+            });
+            
+            const options = {
+              hostname: 'api.anthropic.com',
+              port: 443,
+              path: '/v1/messages',
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(requestBody),
+                'x-api-key': claudeKey,
+                'anthropic-version': '2023-06-01'
+              },
+              timeout: 120000
+            };
+            
+            console.log('[SpeakerID] Sending https request...');
+            
+            const req = https.request(options, (res) => {
+              console.log('[SpeakerID] ✅ Response received! Status:', res.statusCode);
+              let data = '';
+              let totalReceived = 0;
+              
+              res.on('data', (chunk) => {
+                totalReceived += chunk.length;
+                console.log('[SpeakerID] 📦 Received chunk, size:', chunk.length, 'Total so far:', totalReceived);
+                data += chunk;
+              });
+              
+              res.on('end', () => {
+                console.log('[SpeakerID] Response complete, data length:', data.length);
+                
+                if (res.statusCode !== 200) {
+                  console.error('[SpeakerID] ====== API ERROR ======');
+                  console.error('[SpeakerID] Status:', res.statusCode);
+                  console.error('[SpeakerID] Response:', data);
+                  
+                  // Try to parse error from response
+                  let errorMsg = `Claude API returned status ${res.statusCode}`;
+                  try {
+                    const errorData = JSON.parse(data);
+                    if (errorData.error?.message) {
+                      errorMsg = errorData.error.message;
+                    }
+                  } catch (e) {
+                    // Couldn't parse error, use raw data
+                    errorMsg += `: ${data.substring(0, 200)}`;
+                  }
+                  
+                  reject(new Error(errorMsg));
+                  return;
+                }
+                
+                try {
+                  const parsed = JSON.parse(data);
+                  const text = parsed.content?.[0]?.text || '';
+                  console.log('[SpeakerID] ✅ Successfully parsed response, text length:', text.length);
+                  resolve(text);
+                } catch (e) {
+                  console.error('[SpeakerID] Failed to parse response:', e.message);
+                  reject(new Error('Failed to parse Claude response: ' + e.message));
+                }
+              });
+            });
+            
+            req.on('error', (e) => {
+              console.error('[SpeakerID] ====== REQUEST ERROR ======');
+              console.error('[SpeakerID] Error:', e.message);
+              console.error('[SpeakerID] Error code:', e.code);
+              console.error('[SpeakerID] Stack:', e.stack);
+              reject(new Error(`Network error: ${e.message} (${e.code || 'Unknown'})`));
+            });
+            
+            req.on('timeout', () => {
+              console.error('[SpeakerID] ====== REQUEST TIMEOUT ======');
+              console.error('[SpeakerID] Request timed out after 2 minutes!');
+              req.destroy();
+              reject(new Error('Request timed out after 2 minutes. The transcript may be too long or Claude API is slow.'));
+            });
+            
+            console.log('[SpeakerID] Writing request body, size:', Buffer.byteLength(requestBody));
+            req.write(requestBody);
+            console.log('[SpeakerID] Ending request...');
+            req.end();
+            console.log('[SpeakerID] Request sent, waiting for response...');
+          });
+        }
+        
+        async function callOpenAI(prompt, systemMsg) {
+          console.log('[SpeakerID] Calling OpenAI API, prompt length:', prompt.length);
+          console.log('[SpeakerID] Using model:', llmModel);
+          
+          const https = require('https');
+          
+          return new Promise((resolve, reject) => {
+            const requestBody = JSON.stringify({
+              model: llmModel,
+              messages: [
+                { role: 'system', content: systemMsg },
+                { role: 'user', content: prompt }
+              ],
+              max_tokens: 8000
+            });
+            
+            const options = {
+              hostname: 'api.openai.com',
+              port: 443,
+              path: '/v1/chat/completions',
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(requestBody),
+                'Authorization': `Bearer ${openaiKey}`
+              },
+              timeout: 120000
+            };
+            
+            const req = https.request(options, (res) => {
+              console.log('[SpeakerID] OpenAI response status:', res.statusCode);
+              let data = '';
+              
+              res.on('data', (chunk) => {
+                data += chunk;
+              });
+              
+              res.on('end', () => {
+                if (res.statusCode !== 200) {
+                  reject(new Error(`OpenAI API error: ${res.statusCode} - ${data.substring(0, 500)}`));
+                  return;
+                }
+                
+                try {
+                  const parsed = JSON.parse(data);
+                  resolve(parsed.choices[0].message.content);
+                } catch (e) {
+                  reject(new Error('Failed to parse OpenAI response: ' + e.message));
+                }
+              });
+            });
+            
+            req.on('error', (e) => reject(e));
+            req.on('timeout', () => {
+              req.destroy();
+              reject(new Error('Request timed out after 2 minutes'));
+            });
+            
+            req.write(requestBody);
+            req.end();
+          });
+        }
+        
+        const callAI = claudeKey ? callClaude : callOpenAI;
+        
+        // Helper to send progress to renderer
+        const sendProgress = (status, chunk = null, total = null, partialResult = null) => {
+          if (event.sender && !event.sender.isDestroyed()) {
+            event.sender.send('speaker-id:progress', { status, chunk, total, partialResult });
+          }
+        };
+        
+        if (needsChunking) {
+          // Split transcript into chunks by character count (simpler and more reliable)
+          const chunks = [];
+          for (let i = 0; i < truncatedTranscript.length; i += chunkSize) {
+            chunks.push(truncatedTranscript.substring(i, i + chunkSize));
+          }
+          
+          console.log('[SpeakerID] Processing', chunks.length, 'chunks');
+          sendProgress(`Starting analysis: ${chunks.length} chunks to process...`, 0, chunks.length);
+          
+          // Process each chunk
+          const processedChunks = [];
+          let speakerContext = '';
+          
+          for (let i = 0; i < chunks.length; i++) {
+            console.log('[SpeakerID] Processing chunk', i + 1, 'of', chunks.length);
+            sendProgress(`Processing chunk ${i + 1} of ${chunks.length}...`, i + 1, chunks.length);
+            
+            // Include context in first chunk, speaker names in subsequent chunks
+            let chunkPrompt;
+            if (i === 0 && contextHint) {
+              chunkPrompt = `=== VIDEO/AUDIO CONTEXT ===
+${contextHint}
+=== END CONTEXT ===
+
+Use the above context to identify speakers by their actual names.
+
+This is part ${i + 1} of ${chunks.length} of the transcript.
+
+=== TRANSCRIPT CHUNK ===
+${chunks[i]}`;
+            } else {
+              chunkPrompt = `${speakerContext ? `Speakers identified so far: ${speakerContext}\n\n` : ''}This is part ${i + 1} of ${chunks.length} of the transcript. Continue using the same speaker names consistently.\n\n=== TRANSCRIPT CHUNK ===\n${chunks[i]}`;
+            }
+            
+            const chunkResult = await callAI(chunkPrompt, systemPrompt);
+            processedChunks.push(chunkResult);
+            
+            // Extract speaker names for context in next chunk
+            const speakerMatches = chunkResult.match(/\*\*\[([^\]]+)\]\*\*/g) || [];
+            const uniqueSpeakers = [...new Set(speakerMatches.map(m => m.replace(/\*\*\[|\]\*\*/g, '')))];
+            speakerContext = uniqueSpeakers.join(', ');
+            
+            // Send partial results to frontend
+            const partialResult = processedChunks.join('\n\n---\n\n');
+            sendProgress(
+              `Chunk ${i + 1}/${chunks.length} complete. Speakers found: ${uniqueSpeakers.join(', ') || 'analyzing...'}`,
+              i + 1,
+              chunks.length,
+              partialResult
+            );
+          }
+          
+          result = processedChunks.join('\n\n---\n\n');
+          sendProgress('Analysis complete!', chunks.length, chunks.length);
+        } else {
+          // Process in one go
+          console.log('[SpeakerID] Processing in single request');
+          result = await callAI(userPrompt, systemPrompt);
+        }
+        
+        console.log('[SpeakerID] Successfully identified speakers, result length:', result.length);
+        
+        // Save the speaker-identified transcript
+        if (itemId) {
+          const itemDir = path.join(this.storage.itemsDir, itemId);
+          const speakerTranscriptPath = path.join(itemDir, 'transcription-speakers.txt');
+          fs.writeFileSync(speakerTranscriptPath, result, 'utf8');
+          console.log('[SpeakerID] Saved speaker transcript to:', speakerTranscriptPath);
+          
+          // Update metadata - replace transcript with speaker-identified version
+          const metadataPath = path.join(itemDir, 'metadata.json');
+          if (fs.existsSync(metadataPath)) {
+            const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+            
+            // Backup original transcript if not already backed up
+            if (!metadata.originalTranscript && metadata.transcript) {
+              metadata.originalTranscript = metadata.transcript;
+            }
+            
+            // Replace transcript with speaker-identified version
+            metadata.transcript = result;
+            metadata.speakersIdentified = true;
+            metadata.speakersIdentifiedAt = new Date().toISOString();
+            metadata.speakersIdentifiedModel = llmModel;
+            
+            fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+            console.log('[SpeakerID] Updated metadata.transcript with speaker-identified version');
+            
+            // Also update in-memory history item
+            const historyItem = this.history.find(h => h.id === itemId);
+            if (historyItem && historyItem.metadata) {
+              if (!historyItem.metadata.originalTranscript) {
+                historyItem.metadata.originalTranscript = historyItem.metadata.transcript;
+              }
+              historyItem.metadata.transcript = result;
+              historyItem.metadata.speakersIdentified = true;
+              historyItem.metadata.speakersIdentifiedAt = metadata.speakersIdentifiedAt;
+              historyItem.metadata.speakersIdentifiedModel = llmModel;
+            }
+          }
+        }
+        
+        return { 
+          success: true, 
+          transcript: result,
+          model: llmModel
+        };
+      } catch (error) {
+        console.error('[SpeakerID] ====== ERROR ======');
+        console.error('[SpeakerID] Error message:', error.message);
+        console.error('[SpeakerID] Error stack:', error.stack);
+        return { 
+          success: false, 
+          error: error.message || 'Unknown error occurred during speaker identification'
+        };
+      }
+    });
     
     // Advanced search
-    ipcMain.handle('clipboard:search-by-tags', (event, tags) => {
+    safeHandle('clipboard:search-by-tags', (event, tags) => {
       const results = this.history.filter(item => {
         if (item._needsContent) {
           const fullItem = this.storage.loadItem(item.id);
@@ -1307,7 +5483,7 @@ class ClipboardManagerV2 {
       return results;
     });
     
-    ipcMain.handle('clipboard:search-ai-content', (event, options = {}) => {
+    safeHandle('clipboard:search-ai-content', (event, options = {}) => {
       const results = this.history.filter(item => {
         if (item._needsContent) {
           const fullItem = this.storage.loadItem(item.id);
@@ -1326,7 +5502,7 @@ class ClipboardManagerV2 {
     });
     
     // Utility operations
-    ipcMain.handle('clipboard:diagnose', () => {
+    safeHandle('clipboard:diagnose', () => {
       return {
         historyCount: this.history.length,
         spacesCount: this.spaces.length,
@@ -1336,44 +5512,422 @@ class ClipboardManagerV2 {
       };
     });
     
-    ipcMain.handle('clipboard:force-resume', () => {
+    safeHandle('clipboard:force-resume', () => {
       // Not needed in V2
       return { success: true };
     });
     
-    ipcMain.handle('clipboard:manual-check', () => {
+    safeHandle('clipboard:manual-check', () => {
       // Not needed in V2
       return { success: true };
     });
     
-    ipcMain.handle('clipboard:show-item-in-finder', async (event, itemId) => {
+    safeHandle('clipboard:show-item-in-finder', async (event, itemId) => {
       return this.showItemInFinder(itemId);
     });
     
-    ipcMain.handle('clipboard:get-current-user', () => {
+    // ========================================
+    // WEB MONITOR IPC HANDLERS
+    // ========================================
+    
+    safeHandle('clipboard:check-monitor-now', async (event, itemId) => {
+      console.log('[WebMonitor] Check now requested for:', itemId);
+      try {
+        // Find the monitor item - check both history and storage
+        let item = this.history.find(h => h.id === itemId);
+        if (!item) {
+          // Try loading from storage
+          const storageItem = this.storage.index.items.find(i => i.id === itemId);
+          if (storageItem) {
+            try {
+              item = this.storage.loadItem(itemId);
+            } catch (e) {
+              console.error('[WebMonitor] Failed to load item from storage:', e);
+            }
+          }
+        }
+        
+        if (!item || item.type !== 'web-monitor') {
+          return { success: false, error: 'Item not found or not a monitor' };
+        }
+        
+        // Initialize website monitor if needed
+        if (!this.websiteMonitor) {
+          const WebsiteMonitor = require('./website-monitor');
+          this.websiteMonitor = new WebsiteMonitor();
+          await this.websiteMonitor.initialize();
+        }
+        
+        // Get the actual monitor ID (without 'monitor-' prefix if present)
+        let monitorId = item.monitorId;
+        if (!monitorId && item.id.startsWith('monitor-')) {
+          monitorId = item.id.replace('monitor-', '');
+        }
+        console.log('[WebMonitor] Using monitorId:', monitorId);
+        
+        // Ensure the monitor is registered in WebsiteMonitor
+        // (monitors are lost when app restarts since they're in-memory)
+        if (!this.websiteMonitor.monitors.has(monitorId)) {
+          console.log('[WebMonitor] Re-registering monitor from item data...');
+          // Re-add the monitor to WebsiteMonitor's in-memory list
+          this.websiteMonitor.monitors.set(monitorId, {
+            id: monitorId,
+            url: item.url,
+            name: item.name,
+            selector: item.selector || 'body',
+            includeScreenshot: true,
+            lastChecked: item.lastChecked,
+            lastContentHash: null,
+            spaceId: 'web-monitors'
+          });
+        }
+        
+        // Run the check
+        const result = await this.websiteMonitor.checkWebsite(monitorId);
+        
+        // Get current timeline
+        const currentTimeline = item.timeline || [];
+        const now = new Date().toISOString();
+        
+        // If timeline is empty, create a baseline entry
+        if (currentTimeline.length === 0 && result && result.snapshot) {
+          console.log('[WebMonitor] Creating baseline entry for existing monitor...');
+          
+          const baselineEntry = {
+            id: `baseline-${Date.now()}`,
+            timestamp: now,
+            type: 'baseline',
+            summary: 'Initial baseline captured',
+            screenshotPath: result.snapshot.screenshot || null,
+            textLength: result.snapshot.textContent?.length || 0
+          };
+          
+          // Update item with baseline
+          item.timeline = [baselineEntry];
+          item.lastChecked = now;
+          
+          // Update in history array
+          const historyIndex = this.history.findIndex(h => h.id === itemId);
+          if (historyIndex >= 0) {
+            this.history[historyIndex].timeline = [baselineEntry];
+            this.history[historyIndex].lastChecked = now;
+          }
+          
+          // Update in storage
+          await this.updateItemMetadata(itemId, { 
+            timeline: [baselineEntry],
+            lastChecked: now 
+          });
+          
+          // Notify UI to refresh
+          this.notifyHistoryUpdate();
+          
+          return { success: true, changed: false, baseline: true };
+        }
+        
+        // Update item if changed
+        if (result && result.changed) {
+          await this.handleWebsiteChange(result);
+        }
+        
+        // Update last checked time on the item
+        item.lastChecked = now;
+        
+        // Update in history array
+        const historyIndex = this.history.findIndex(h => h.id === itemId);
+        if (historyIndex >= 0) {
+          this.history[historyIndex].lastChecked = now;
+        }
+        
+        // Update in storage
+        await this.updateItemMetadata(itemId, { lastChecked: now });
+        
+        // Notify UI to refresh
+        this.notifyHistoryUpdate();
+        
+        return { success: true, changed: result?.changed || false };
+      } catch (error) {
+        console.error('[WebMonitor] Check now failed:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    safeHandle('clipboard:set-monitor-status', async (event, itemId, status) => {
+      console.log('[WebMonitor] Set status:', itemId, status);
+      try {
+        const item = this.history.find(h => h.id === itemId);
+        if (!item || item.type !== 'web-monitor') {
+          return { success: false, error: 'Item not found or not a monitor' };
+        }
+        
+        item.status = status;
+        item.pauseReason = status === 'paused' ? 'user' : null;
+        
+        // Update in WebsiteMonitor too
+        if (this.websiteMonitor && item.monitorId) {
+          if (status === 'paused') {
+            await this.websiteMonitor.pauseMonitor(item.monitorId);
+          } else {
+            await this.websiteMonitor.resumeMonitor(item.monitorId);
+          }
+        }
+        
+        await this.updateItemMetadata(itemId, { status, pauseReason: item.pauseReason });
+        this.notifyHistoryUpdate();
+        
+        return { success: true };
+      } catch (error) {
+        console.error('[WebMonitor] Set status failed:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    safeHandle('clipboard:set-monitor-ai-enabled', async (event, itemId, enabled) => {
+      console.log('[WebMonitor] Set AI enabled:', itemId, enabled);
+      try {
+        const item = this.history.find(h => h.id === itemId);
+        if (!item || item.type !== 'web-monitor') {
+          return { success: false, error: 'Item not found or not a monitor' };
+        }
+        
+        if (!item.settings) item.settings = {};
+        item.settings.aiDescriptions = enabled;
+        
+        await this.updateItemMetadata(itemId, { settings: item.settings });
+        
+        return { success: true };
+      } catch (error) {
+        console.error('[WebMonitor] Set AI enabled failed:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    safeHandle('clipboard:set-monitor-check-interval', async (event, itemId, minutes) => {
+      console.log('[WebMonitor] Set check interval:', itemId, minutes, 'minutes');
+      try {
+        const item = this.history.find(h => h.id === itemId);
+        if (!item || item.type !== 'web-monitor') {
+          return { success: false, error: 'Item not found or not a monitor' };
+        }
+        
+        if (!item.settings) item.settings = {};
+        item.settings.checkInterval = minutes;
+        
+        // Update in WebsiteMonitor too if it's running
+        if (this.websiteMonitor && item.monitorId) {
+          const monitor = this.websiteMonitor.monitors.get(item.monitorId);
+          if (monitor) {
+            monitor.checkInterval = minutes;
+          }
+        }
+        
+        await this.updateItemMetadata(itemId, { settings: item.settings });
+        
+        return { success: true };
+      } catch (error) {
+        console.error('[WebMonitor] Set check interval failed:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // ========================================
+    // END WEB MONITOR IPC HANDLERS
+    // ========================================
+    
+    // Get video file path from item ID (with optional scenes from metadata)
+    safeHandle('clipboard:get-video-path', async (event, itemId) => {
+      try {
+        console.log('[ClipboardManager] Getting video path for item:', itemId);
+        
+        // First check the index entry's contentPath (most reliable)
+        const indexEntry = this.storage.index.items.find(i => i.id === itemId);
+        console.log('[ClipboardManager] Index entry:', indexEntry ? { contentPath: indexEntry.contentPath, fileName: indexEntry.fileName } : 'null');
+        
+        // Helper to load scenes from metadata
+        const loadScenes = (itemId) => {
+          try {
+            const metadataPath = path.join(this.storage.itemsDir, itemId, 'metadata.json');
+            if (fs.existsSync(metadataPath)) {
+              const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+              return metadata.scenes || [];
+            }
+          } catch (e) {
+            console.error('[ClipboardManager] Error loading scenes:', e);
+          }
+          return [];
+        };
+        
+        if (indexEntry?.contentPath) {
+          const contentPath = path.join(this.storage.storageRoot, indexEntry.contentPath);
+          console.log('[ClipboardManager] Checking contentPath:', contentPath);
+          if (fs.existsSync(contentPath)) {
+            console.log('[ClipboardManager] Found video at contentPath:', contentPath);
+            const scenes = loadScenes(itemId);
+            return { 
+              success: true, 
+              filePath: contentPath, 
+              fileName: indexEntry.fileName,
+              scenes: scenes
+            };
+          } else {
+            console.log('[ClipboardManager] contentPath file does not exist');
+          }
+        }
+        
+        // Try to get from item directly
+        const item = this.history.find(h => h.id === itemId);
+        if (item?.filePath && fs.existsSync(item.filePath)) {
+          console.log('[ClipboardManager] Found filePath on item:', item.filePath);
+          const scenes = loadScenes(itemId);
+          return { 
+            success: true, 
+            filePath: item.filePath, 
+            fileName: item.fileName || path.basename(item.filePath),
+            scenes: scenes
+          };
+        }
+        
+        // Try loading full item from storage
+        const fullItem = this.storage.loadItem(itemId);
+        if (fullItem?.filePath && fs.existsSync(fullItem.filePath)) {
+          console.log('[ClipboardManager] Found filePath in full item:', fullItem.filePath);
+          const scenes = loadScenes(itemId);
+          return { 
+            success: true, 
+            filePath: fullItem.filePath,
+            fileName: fullItem.fileName || path.basename(fullItem.filePath),
+            scenes: scenes
+          };
+        }
+        
+        // Check the item directory for media files
+        const itemDir = path.join(this.storage.itemsDir, itemId);
+        console.log('[ClipboardManager] Checking item dir:', itemDir);
+        if (fs.existsSync(itemDir)) {
+          const files = fs.readdirSync(itemDir);
+          console.log('[ClipboardManager] Files in item dir:', files);
+          const videoExtensions = ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm', '.m4v', '.mpg', '.mpeg'];
+          const videoFile = files.find(f => videoExtensions.some(ext => f.toLowerCase().endsWith(ext)));
+          if (videoFile) {
+            const videoPath = path.join(itemDir, videoFile);
+            console.log('[ClipboardManager] Found video file in item dir:', videoPath);
+            const scenes = loadScenes(itemId);
+            return { 
+              success: true, 
+              filePath: videoPath,
+              fileName: videoFile,
+              scenes: scenes
+            };
+          }
+        }
+        
+        // File not found - provide helpful error
+        const expectedPath = indexEntry?.contentPath 
+          ? path.join(this.storage.storageRoot, indexEntry.contentPath)
+          : 'unknown';
+        console.error('[ClipboardManager] Video file not found. Expected at:', expectedPath);
+        return { 
+          success: false, 
+          error: `Video file is missing from storage. The file may have been deleted or moved. Expected: ${indexEntry?.fileName || 'unknown'}`
+        };
+      } catch (error) {
+        console.error('[ClipboardManager] Error getting video path:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Open video in Video Editor
+    safeHandle('clipboard:open-video-editor', async (event, filePath) => {
+      try {
+        const { BrowserWindow } = require('electron');
+        const path = require('path');
+        
+        console.log('[ClipboardManager] Opening Video Editor with file:', filePath);
+        
+        if (!filePath || !fs.existsSync(filePath)) {
+          console.error('[ClipboardManager] Video file not found:', filePath);
+          return { success: false, error: 'Video file not found: ' + filePath };
+        }
+        
+        const videoEditorWindow = new BrowserWindow({
+          width: 1400,
+          height: 900,
+          title: 'Video Editor',
+          webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            devTools: true,
+            preload: path.join(__dirname, 'preload-video-editor.js')
+          }
+        });
+        
+        // Load the video editor HTML
+        videoEditorWindow.loadFile('video-editor.html');
+
+        // Enable dev tools keyboard shortcut (Cmd+Option+I / Ctrl+Shift+I)
+        videoEditorWindow.webContents.on('before-input-event', (event, input) => {
+          if ((input.meta && input.alt && input.key === 'i') || 
+              (input.control && input.shift && input.key === 'I')) {
+            videoEditorWindow.webContents.toggleDevTools();
+          }
+        });
+        
+        // Once loaded, send the file path to open
+        videoEditorWindow.webContents.on('did-finish-load', () => {
+          console.log('[ClipboardManager] Video Editor loaded, sending file path:', filePath);
+          videoEditorWindow.webContents.send('video-editor:load-file', filePath);
+        });
+        
+        // Setup video editor IPC for this window
+        if (global.videoEditor) {
+          global.videoEditor.setupIPC(videoEditorWindow);
+        }
+        
+        return { success: true };
+      } catch (error) {
+        console.error('[ClipboardManager] Error opening Video Editor:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    safeHandle('clipboard:get-current-user', () => {
       return os.userInfo().username || 'Unknown';
     });
     
     // AI metadata generation
-    ipcMain.handle('clipboard:generate-metadata-ai', async (event, { itemId, apiKey, customPrompt }) => {
-      // Use the helper method that we just fixed
-      const result = await this.generateAIMetadata(itemId, apiKey, customPrompt);
+    safeHandle('clipboard:generate-metadata-ai', async (event, { itemId, apiKey, customPrompt }) => {
+      console.log('[MetadataGen IPC] Generate metadata request received:', { itemId, hasApiKey: !!apiKey, hasCustomPrompt: !!customPrompt });
       
-      if (result.success) {
-        // Get the updated item to return full metadata
-        const item = this.storage.loadItem(itemId);
-          return { 
-            success: true, 
-          metadata: item.metadata,
+      try {
+        // Use the NEW specialized metadata generator
+        const MetadataGenerator = require('./metadata-generator');
+        const metadataGen = new MetadataGenerator(this);
+        
+        console.log('[MetadataGen IPC] Calling generateMetadataForItem...');
+        const result = await metadataGen.generateMetadataForItem(itemId, apiKey, customPrompt);
+        console.log('[MetadataGen IPC] Result:', { success: result.success, error: result.error });
+
+        if (result.success) {
+          // Get the updated item to return full metadata
+          const item = this.storage.loadItem(itemId);
+          console.log('[MetadataGen IPC] Returning success with metadata');
+          return {
+            success: true,
+            metadata: item.metadata,
             message: 'Metadata generated successfully'
           };
         } else {
-        return result;
+          console.log('[MetadataGen IPC] Returning failure:', result.error);
+          return result;
+        }
+      } catch (err) {
+        console.error('[MetadataGen IPC] Exception:', err.message);
+        return { success: false, error: err.message };
       }
     });
     
     // Handle capture methods for external AI windows
-    ipcMain.handle('clipboard:capture-text', async (event, text) => {
+    safeHandle('clipboard:capture-text', async (event, text) => {
       console.log('[V2] Capturing text from external window:', text.substring(0, 100) + '...');
       
       const item = {
@@ -1390,7 +5944,7 @@ class ClipboardManagerV2 {
       return { success: true };
     });
     
-    ipcMain.handle('clipboard:capture-html', async (event, html) => {
+    safeHandle('clipboard:capture-html', async (event, html) => {
       console.log('[V2] Capturing HTML from external window');
       
       const plainText = this.stripHtml(html);
@@ -1410,46 +5964,80 @@ class ClipboardManagerV2 {
       return { success: true };
     });
     
-    // Get audio file as base64
-    ipcMain.handle('clipboard:get-audio-data', (event, itemId) => {
+    // Get audio/video file - returns file path for videos, base64 for audio
+    safeHandle('clipboard:get-audio-data', (event, itemId) => {
+      console.log('[Media] get-audio-data called for:', itemId);
+      
       const item = this.history.find(h => h.id === itemId);
-      if (!item || item.type !== 'file' || item.fileType !== 'audio') {
-        return { success: false, error: 'Audio file not found' };
+      console.log('[Media] Found item:', item ? {
+        type: item.type,
+        fileType: item.fileType,
+        fileCategory: item.fileCategory,
+        filePath: item.filePath,
+        _needsContent: item._needsContent
+      } : 'null');
+      
+      const isAudioOrVideo = item && item.type === 'file' && 
+        (item.fileType === 'audio' || item.fileType === 'video' || 
+         item.fileCategory === 'audio' || item.fileCategory === 'video');
+      
+      if (!item || !isAudioOrVideo) {
+        console.error('[Media] Not an audio/video file or not found');
+        return { success: false, error: 'Audio/video file not found' };
       }
       
       try {
+        let filePath = item.filePath;
+        
         // Load full item if needed
-        if (item._needsContent) {
+        if (item._needsContent || !filePath) {
+          console.log('[Media] Loading full item from storage...');
           const fullItem = this.storage.loadItem(itemId);
-          if (fullItem.filePath && fs.existsSync(fullItem.filePath)) {
-            const audioData = fs.readFileSync(fullItem.filePath);
-            const base64 = audioData.toString('base64');
-            const mimeType = this.getAudioMimeType(item.fileExt);
-            const dataUrl = `data:${mimeType};base64,${base64}`;
-            return { success: true, dataUrl };
+          console.log('[Media] Full item loaded:', fullItem ? { filePath: fullItem.filePath } : 'null');
+          filePath = fullItem?.filePath;
+        }
+        
+        if (filePath && fs.existsSync(filePath)) {
+          const isVideo = item.fileCategory === 'video' || 
+                         (item.fileType && item.fileType.startsWith('video/'));
+          
+          // For videos, return file path directly (don't load into memory)
+          if (isVideo) {
+            console.log('[Media] Video file - returning path:', filePath);
+            const mimeType = this.getMediaMimeType(item.fileExt, item.fileType);
+            return { 
+              success: true, 
+              filePath: filePath,
+              mimeType: mimeType,
+              isVideo: true
+            };
           }
-        } else if (item.filePath && fs.existsSync(item.filePath)) {
-          const audioData = fs.readFileSync(item.filePath);
-          const base64 = audioData.toString('base64');
-          const mimeType = this.getAudioMimeType(item.fileExt);
+          
+          // For audio files, load as base64 (they're typically small enough)
+          console.log('[Media] Audio file - reading into memory:', filePath);
+          const mediaData = fs.readFileSync(filePath);
+          const base64 = mediaData.toString('base64');
+          const mimeType = this.getMediaMimeType(item.fileExt, item.fileType);
           const dataUrl = `data:${mimeType};base64,${base64}`;
+          console.log('[Media] Success - data length:', base64.length);
           return { success: true, dataUrl };
         }
         
-        return { success: false, error: 'Audio file no longer exists' };
+        console.error('[Media] File not found at:', filePath);
+        return { success: false, error: 'Media file no longer exists at: ' + filePath };
       } catch (error) {
-        console.error('Error reading audio file:', error);
+        console.error('[Media] Error reading media file:', error);
         return { success: false, error: error.message };
       }
     });
     
     // Window operations
-    ipcMain.handle('clipboard:open-black-hole', () => {
+    safeHandle('clipboard:open-black-hole', () => {
       this.createBlackHoleWindow();
       return { success: true };
     });
     
-    ipcMain.handle('clipboard:open-space-notebook', (event, spaceId) => {
+    safeHandle('clipboard:open-space-notebook', (event, spaceId) => {
       const { shell } = require('electron');
       const notebookPath = path.join(this.storage.spacesDir, spaceId, 'README.ipynb');
       if (fs.existsSync(notebookPath)) {
@@ -1458,12 +6046,134 @@ class ClipboardManagerV2 {
       return { success: true };
     });
     
+    // Get JSON asset file path
+    safeHandle('clipboard:get-json-asset-path', async (event, itemId) => {
+      try {
+        const item = this.storage.loadItem(itemId);
+        if (!item) {
+          return { success: false, error: 'Item not found' };
+        }
+        
+        const indexEntry = this.storage.index.items.find(i => i.id === itemId);
+        if (!indexEntry?.contentPath) {
+          return { success: false, error: 'Content path not found' };
+        }
+        
+        const filePath = path.join(this.storage.storageRoot, indexEntry.contentPath);
+        if (!fs.existsSync(filePath)) {
+          return { success: false, error: 'File not found: ' + filePath };
+        }
+        
+        return { success: true, filePath, jsonSubtype: indexEntry.jsonSubtype };
+      } catch (error) {
+        console.error('[ClipboardManager] Error getting JSON asset path:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Open Style Guide Editor
+    safeHandle('clipboard:open-style-guide-editor', async (event, itemId) => {
+      try {
+        const { BrowserWindow, shell } = require('electron');
+        
+        // Get the file path for this item
+        const pathResult = await ipcMain.emit('clipboard:get-json-asset-path', event, itemId);
+        const indexEntry = this.storage.index.items.find(i => i.id === itemId);
+        
+        if (!indexEntry?.contentPath) {
+          return { success: false, error: 'Item not found or missing content path' };
+        }
+        
+        const filePath = path.join(this.storage.storageRoot, indexEntry.contentPath);
+        
+        if (!fs.existsSync(filePath)) {
+          return { success: false, error: 'Style guide file not found' };
+        }
+        
+        console.log('[ClipboardManager] Opening Style Guide Editor with file:', filePath);
+        
+        // Open the style guide preview with the file data
+        const styleGuideWindow = new BrowserWindow({
+          width: 1200,
+          height: 900,
+          title: 'Style Guide Editor',
+          webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            preload: path.join(__dirname, 'preload-smart-export.js')
+          }
+        });
+        
+        // Load the style guide HTML file
+        styleGuideWindow.loadFile('smart-export-style-guide.html');
+        
+        // Pass the file path to the window when it's ready
+        styleGuideWindow.webContents.once('did-finish-load', () => {
+          styleGuideWindow.webContents.send('load-style-guide-file', filePath);
+        });
+        
+        return { success: true };
+      } catch (error) {
+        console.error('[ClipboardManager] Error opening Style Guide Editor:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Open Journey Map Editor
+    safeHandle('clipboard:open-journey-map-editor', async (event, itemId) => {
+      try {
+        const { BrowserWindow, shell } = require('electron');
+        
+        const indexEntry = this.storage.index.items.find(i => i.id === itemId);
+        
+        if (!indexEntry?.contentPath) {
+          return { success: false, error: 'Item not found or missing content path' };
+        }
+        
+        const filePath = path.join(this.storage.storageRoot, indexEntry.contentPath);
+        
+        if (!fs.existsSync(filePath)) {
+          return { success: false, error: 'Journey map file not found' };
+        }
+        
+        console.log('[ClipboardManager] Opening Journey Map Editor with file:', filePath);
+        
+        // For now, show the file in Finder as there may not be a dedicated journey editor
+        // In the future, this could open a dedicated journey map editor window
+        shell.showItemInFolder(filePath);
+        
+        // Also try to open the smart export preview which can display journey maps
+        const journeyWindow = new BrowserWindow({
+          width: 1400,
+          height: 900,
+          title: 'Journey Map Viewer',
+          webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            preload: path.join(__dirname, 'preload-smart-export.js')
+          }
+        });
+        
+        journeyWindow.loadFile('smart-export-preview.html');
+        
+        // Pass the file path to the window when it's ready
+        journeyWindow.webContents.once('did-finish-load', () => {
+          journeyWindow.webContents.send('load-journey-map-file', filePath);
+        });
+        
+        return { success: true };
+      } catch (error) {
+        console.error('[ClipboardManager] Error opening Journey Map Editor:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
     // Screenshot capture
-    ipcMain.handle('clipboard:get-screenshot-capture-enabled', () => {
+    safeHandle('clipboard:get-screenshot-capture-enabled', () => {
       return this.screenshotCaptureEnabled;
     });
     
-    ipcMain.handle('clipboard:toggle-screenshot-capture', (event, enabled) => {
+    safeHandle('clipboard:toggle-screenshot-capture', (event, enabled) => {
       this.screenshotCaptureEnabled = enabled;
       this.savePreferences();
       
@@ -1486,7 +6196,7 @@ class ClipboardManagerV2 {
     });
     
     // PDF page thumbnails
-    ipcMain.handle('clipboard:get-pdf-page-thumbnail', async (event, itemId, pageNumber) => {
+    safeHandle('clipboard:get-pdf-page-thumbnail', async (event, itemId, pageNumber) => {
       console.log('[V2-PDF] Requested thumbnail for item:', itemId, 'page:', pageNumber);
       
       const item = this.history.find(h => h.id === itemId);
@@ -1515,155 +6225,294 @@ class ClipboardManagerV2 {
       }
     });
     
-    // Black hole handlers
+    // Black hole handlers - using ContentIngestionService for validation
     ipcMain.handle('black-hole:add-text', async (event, data) => {
-      console.log('Black hole: Adding text to space:', data.spaceId);
+      const opId = `add-text-${Date.now()}`;
+      console.log(`[ContentIngestion:${opId}] ═══════════════════════════════════════`);
+      console.log(`[ContentIngestion:${opId}] ADD-TEXT HANDLER - Time: ${new Date().toISOString()}`);
+      console.log(`[ContentIngestion:${opId}] Data:`, data ? { spaceId: data.spaceId, contentLength: data.content?.length || 0 } : 'NO DATA');
       
-      // Capture app context for the source of the paste
-      let context = null;
+      // Get ingestion service for validation
+      const ingestionService = getContentIngestionService(this);
+      
       try {
-        context = await this.contextCapture.getFullContext();
-        console.log('[Black hole] Captured context:', context);
-      } catch (error) {
-        console.error('[Black hole] Error capturing context:', error);
-      }
-      
-      // Enhance source detection with context
-      const detectedSource = context 
-        ? this.contextCapture.enhanceSourceDetection(data.content, context)
-        : this.detectSource(data.content);
-      
-      const item = {
-        type: 'text',
-        content: data.content,
-        preview: this.truncateText(data.content, 100),
-        timestamp: Date.now(),
-        pinned: false,
-        spaceId: data.spaceId || this.currentSpace || 'unclassified',
-        source: detectedSource
-      };
-      
-      // Add context to metadata if available
-      if (context) {
-        item.metadata = {
-          context: {
-            app: context.app,
-            window: context.window,
-            contextDisplay: this.contextCapture.formatContextDisplay(context)
-          }
+        // Quick validation using ingestion service
+        const validation = ingestionService.validateContent('text', data);
+        if (!validation.valid) {
+          console.error(`[ContentIngestion:${opId}] Validation failed:`, validation.errors);
+          return { success: false, error: validation.errors.join('; '), code: 'VALIDATION_ERROR' };
+        }
+        
+        // Check if content is a YouTube URL (special handling)
+        let isYouTubeUrl;
+        try {
+          const ytModule = require('./youtube-downloader');
+          isYouTubeUrl = ytModule.isYouTubeUrl;
+        } catch (e) {
+          console.warn(`[ContentIngestion:${opId}] YouTube module not available`);
+          isYouTubeUrl = () => false;
+        }
+        
+        const content = data.content?.trim();
+        const isYT = isYouTubeUrl(content);
+        
+        if (isYT) {
+          console.log(`[ContentIngestion:${opId}] YouTube URL detected - returning for download handling`);
+          return { 
+            success: true, 
+            isYouTube: true, 
+            youtubeUrl: content,
+            spaceId: data.spaceId || this.currentSpace || 'unclassified',
+            message: 'YouTube video detected'
+          };
+        }
+        
+        // Capture app context
+        let context = null;
+        try {
+          context = await this.contextCapture.getFullContext();
+        } catch (error) {
+          console.warn(`[ContentIngestion:${opId}] Context capture failed:`, error.message);
+        }
+        
+        // Enhance source detection
+        const detectedSource = context 
+          ? this.contextCapture.enhanceSourceDetection(data.content, context)
+          : this.detectSource(data.content);
+        
+        // Build item
+        const item = {
+          type: 'text',
+          content: data.content,
+          preview: this.truncateText(data.content, 100),
+          timestamp: Date.now(),
+          pinned: false,
+          spaceId: data.spaceId || this.currentSpace || 'unclassified',
+          source: detectedSource
         };
+        
+        // Add context metadata
+        if (context) {
+          item.metadata = {
+            context: {
+              app: context.app,
+              window: context.window,
+              contextDisplay: this.contextCapture.formatContextDisplay(context)
+            }
+          };
+        }
+        
+        // Save item
+        console.log(`[ContentIngestion:${opId}] Saving text item to space: ${item.spaceId}`);
+        await this.addToHistory(item);
+        
+        // Get the saved item ID
+        const savedItem = this.history?.[0];
+        console.log(`[ContentIngestion:${opId}] ✓ Text saved successfully, itemId: ${savedItem?.id}`);
+        
+        return { success: true, itemId: savedItem?.id };
+        
+      } catch (error) {
+        console.error(`[ContentIngestion:${opId}] ERROR:`, error.message);
+        console.error(`[ContentIngestion:${opId}] Stack:`, error.stack);
+        return ingestionService.handleError(error, { opId, type: 'text', spaceId: data?.spaceId });
       }
-      
-      this.addToHistory(item);
-      
-      return { success: true };
     });
     
     ipcMain.handle('black-hole:add-html', async (event, data) => {
-      console.log('Black hole: Adding HTML to space:', data.spaceId);
+      const opId = `add-html-${Date.now()}`;
+      console.log(`[ContentIngestion:${opId}] ADD-HTML HANDLER - spaceId: ${data?.spaceId}`);
       
-      // Capture app context for the source of the paste
-      let context = null;
+      const ingestionService = getContentIngestionService(this);
+      
       try {
-        context = await this.contextCapture.getFullContext();
-        console.log('[Black hole] Captured context:', context);
-      } catch (error) {
-        console.error('[Black hole] Error capturing context:', error);
-      }
-      
-      // Enhance source detection with context
-      const detectedSource = context 
-        ? this.contextCapture.enhanceSourceDetection(data.plainText || data.content, context)
-        : 'black-hole';
-      
-      const item = {
-        type: 'html',
-        content: data.content,
-        plainText: data.plainText,
-        preview: this.truncateText(data.plainText || this.stripHtml(data.content), 100),
-        timestamp: Date.now(),
-        pinned: false,
-        spaceId: data.spaceId || this.currentSpace || 'unclassified',
-        source: detectedSource
-      };
-      
-      // Add context to metadata if available
-      if (context) {
-        item.metadata = {
-          context: {
-            app: context.app,
-            window: context.window,
-            contextDisplay: this.contextCapture.formatContextDisplay(context)
-          }
+        // Validate
+        const validation = ingestionService.validateContent('html', data);
+        if (!validation.valid) {
+          console.error(`[ContentIngestion:${opId}] Validation failed:`, validation.errors);
+          return { success: false, error: validation.errors.join('; '), code: 'VALIDATION_ERROR' };
+        }
+        
+        // Capture app context
+        let context = null;
+        try {
+          context = await this.contextCapture.getFullContext();
+        } catch (error) {
+          console.warn(`[ContentIngestion:${opId}] Context capture failed:`, error.message);
+        }
+        
+        // Enhance source detection
+        const detectedSource = context 
+          ? this.contextCapture.enhanceSourceDetection(data.plainText || data.content, context)
+          : 'black-hole';
+        
+        // Build item - handle both "html" and "content" keys (black hole uses "html")
+        const htmlContent = data.html || data.content || '';
+        const item = {
+          type: 'html',
+          content: htmlContent,
+          plainText: data.plainText || data.text || '',
+          preview: this.truncateText(data.plainText || data.text || this.stripHtml(htmlContent), 100),
+          timestamp: Date.now(),
+          pinned: false,
+          spaceId: data.spaceId || this.currentSpace || 'unclassified',
+          source: detectedSource
         };
+        
+        // Add context metadata
+        if (context) {
+          item.metadata = {
+            context: {
+              app: context.app,
+              window: context.window,
+              contextDisplay: this.contextCapture.formatContextDisplay(context)
+            }
+          };
+        }
+        
+        // Save item
+        console.log(`[ContentIngestion:${opId}] Saving HTML item to space: ${item.spaceId}`);
+        await this.addToHistory(item);
+        
+        const savedItem = this.history?.[0];
+        console.log(`[ContentIngestion:${opId}] ✓ HTML saved successfully, itemId: ${savedItem?.id}`);
+        
+        return { success: true, itemId: savedItem?.id };
+        
+      } catch (error) {
+        console.error(`[ContentIngestion:${opId}] ERROR:`, error.message);
+        return ingestionService.handleError(error, { opId, type: 'html', spaceId: data?.spaceId });
       }
-      
-      this.addToHistory(item);
-      
-      return { success: true };
     });
     
     ipcMain.handle('black-hole:add-image', async (event, data) => {
-      console.log('Black hole: Adding image to space:', data.spaceId);
+      const opId = `add-image-${Date.now()}`;
+      console.log(`[ContentIngestion:${opId}] ADD-IMAGE HANDLER - spaceId: ${data?.spaceId}`);
       
-      // Capture app context for the source of the paste
-      let context = null;
+      const ingestionService = getContentIngestionService(this);
+      
       try {
-        context = await this.contextCapture.getFullContext();
-        console.log('[Black hole] Captured context:', context);
-      } catch (error) {
-        console.error('[Black hole] Error capturing context:', error);
-      }
-      
-      // Generate thumbnail if needed
-      let thumbnail = data.dataUrl;
-      if (data.dataUrl && data.dataUrl.length > 100000) {
-        thumbnail = this.generateImageThumbnail(data.dataUrl);
-      }
-      
-      const item = {
-        type: 'image',
-        content: data.dataUrl,
-        thumbnail: thumbnail,
-        preview: `Image: ${data.fileName}`,
-        timestamp: Date.now(),
-        pinned: false,
-        spaceId: data.spaceId || this.currentSpace || 'unclassified',
-        source: context?.app?.name || 'black-hole',
-        metadata: {
-          fileName: data.fileName,
-          fileSize: data.fileSize
+        // Validate
+        const validation = ingestionService.validateContent('image', data);
+        if (!validation.valid) {
+          console.error(`[ContentIngestion:${opId}] Validation failed:`, validation.errors);
+          return { success: false, error: validation.errors.join('; '), code: 'VALIDATION_ERROR' };
         }
-      };
-      
-      // Add context to metadata if available
-      if (context) {
-        item.metadata = {
-          ...item.metadata,
-          context: {
-            app: context.app,
-            window: context.window,
-            contextDisplay: this.contextCapture.formatContextDisplay(context)
+        
+        // Capture app context
+        let context = null;
+        try {
+          context = await this.contextCapture.getFullContext();
+        } catch (error) {
+          console.warn(`[ContentIngestion:${opId}] Context capture failed:`, error.message);
+        }
+        
+        // Generate thumbnail if needed
+        let thumbnail = data.dataUrl;
+        if (data.dataUrl && data.dataUrl.length > 100000) {
+          thumbnail = this.generateImageThumbnail(data.dataUrl);
+        }
+        
+        // Build item
+        const item = {
+          type: 'image',
+          content: data.dataUrl,
+          thumbnail: thumbnail,
+          preview: `Image: ${data.fileName || 'Untitled'}`,
+          timestamp: Date.now(),
+          pinned: false,
+          spaceId: data.spaceId || this.currentSpace || 'unclassified',
+          source: context?.app?.name || 'black-hole',
+          metadata: {
+            fileName: data.fileName,
+            fileSize: data.fileSize
           }
         };
+        
+        // Add context metadata
+        if (context) {
+          item.metadata = {
+            ...item.metadata,
+            context: {
+              app: context.app,
+              window: context.window,
+              contextDisplay: this.contextCapture.formatContextDisplay(context)
+            }
+          };
+        }
+        
+        // Save item with retry for transient disk errors
+        console.log(`[ContentIngestion:${opId}] Saving image to space: ${item.spaceId}`);
+        await retryOperation(
+          () => this.addToHistory(item),
+          { maxRetries: 3, baseDelay: 200 }
+        );
+        
+        const savedItem = this.history?.[0];
+        console.log(`[ContentIngestion:${opId}] ✓ Image saved successfully, itemId: ${savedItem?.id}`);
+        
+        return { success: true, itemId: savedItem?.id };
+        
+      } catch (error) {
+        console.error(`[ContentIngestion:${opId}] ERROR:`, error.message);
+        return ingestionService.handleError(error, { opId, type: 'image', spaceId: data?.spaceId });
       }
-      
-      this.addToHistory(item);
-      
-      return { success: true };
     });
     
     ipcMain.handle('black-hole:add-file', async (event, data) => {
-      console.log('Black hole: Adding file to space:', data.spaceId);
+      const opId = `add-file-${Date.now()}`;
+      console.log(`[ContentIngestion:${opId}] ADD-FILE HANDLER - spaceId: ${data?.spaceId}, fileName: ${data?.fileName}`);
       
-      // Capture app context for the source of the paste
-      let context = null;
+      const ingestionService = getContentIngestionService(this);
+      
       try {
-        context = await this.contextCapture.getFullContext();
-        console.log('[Black hole] Captured context:', context);
-      } catch (error) {
-        console.error('[Black hole] Error capturing context:', error);
-      }
+        // CRITICAL FIX: If filePath is provided (from paste), read the file
+        if (data.filePath && !data.fileName) {
+          try {
+            if (!fs.existsSync(data.filePath)) {
+              console.error(`[ContentIngestion:${opId}] File does not exist:`, data.filePath);
+              return { success: false, error: 'File does not exist: ' + data.filePath, code: 'FILE_NOT_FOUND' };
+            }
+            
+            const stats = fs.statSync(data.filePath);
+            if (!stats.isFile()) {
+              console.error(`[ContentIngestion:${opId}] Path is not a file:`, data.filePath);
+              return { success: false, error: 'Path is not a file: ' + data.filePath, code: 'NOT_A_FILE' };
+            }
+            
+            // Extract file info from path
+            data.fileName = path.basename(data.filePath);
+            data.fileSize = stats.size;
+            
+            // Read file data as base64
+            const fileBuffer = fs.readFileSync(data.filePath);
+            data.fileData = fileBuffer.toString('base64');
+            
+            console.log(`[ContentIngestion:${opId}] File read from path:`, {
+              fileName: data.fileName,
+              fileSize: data.fileSize,
+              dataLength: data.fileData.length
+            });
+          } catch (readError) {
+            console.error(`[ContentIngestion:${opId}] Error reading file:`, readError);
+            return ingestionService.handleError(readError, { opId, type: 'file', spaceId: data?.spaceId });
+          }
+        }
+        
+        // Validate using ingestion service
+        const validation = ingestionService.validateContent('file', data);
+        if (!validation.valid) {
+          console.error(`[ContentIngestion:${opId}] Validation failed:`, validation.errors);
+          return { success: false, error: validation.errors.join('; '), code: 'VALIDATION_ERROR' };
+        }
+        
+        // Capture app context
+        let context = null;
+        try {
+          context = await this.contextCapture.getFullContext();
+        } catch (error) {
+          console.warn(`[ContentIngestion:${opId}] Context capture failed:`, error.message);
+        }
       
       // Extract file extension and determine category
       const ext = path.extname(data.fileName).toLowerCase();
@@ -1678,7 +6527,7 @@ class ClipboardManagerV2 {
       } else if (['.mp3', '.wav', '.flac', '.aac', '.ogg', '.wma', '.m4a', '.opus', '.aiff', '.ape', '.amr', '.au'].includes(ext)) {
         fileType = 'audio';
         fileCategory = 'media';
-      } else if (['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg', '.webp', '.ico'].includes(ext)) {
+      } else if (['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg', '.webp', '.ico', '.tiff', '.tif', '.heic', '.heif', '.avif', '.jfif', '.pjpeg', '.pjp', '.apng'].includes(ext)) {
         fileType = 'image-file';
         fileCategory = 'media';
       } else if (ext === '.pdf') {
@@ -1689,6 +6538,9 @@ class ClipboardManagerV2 {
         fileCategory = 'notebook';
       } else if (['.doc', '.docx', '.txt', '.rtf', '.odt', '.md'].includes(ext)) {
         fileCategory = 'document';
+      } else if (['.ppt', '.pptx', '.key', '.odp'].includes(ext)) {
+        fileCategory = 'presentation';
+        fileType = 'presentation';
       } else if (['.js', '.ts', '.jsx', '.tsx', '.py', '.java', '.cpp', '.c', '.h', '.cs', '.php', '.rb', '.go', '.rs', '.swift', '.kt', '.html', '.htm', '.css', '.scss', '.sass', '.less'].includes(ext)) {
         fileCategory = 'code';
       } else if (['.fig', '.sketch', '.xd', '.ai', '.psd', '.psb', '.indd', '.afdesign', '.afphoto'].includes(ext)) {
@@ -1702,7 +6554,29 @@ class ClipboardManagerV2 {
         fileType = 'flow';
       }
       
-      // Generate thumbnail for PDF files
+      // Detect JSON subtypes (style-guide, journey-map)
+      let jsonSubtype = null;
+      if (ext === '.json') {
+        // Try to detect from file data first (if provided as base64)
+        if (data.fileData) {
+          try {
+            const content = Buffer.from(data.fileData, 'base64').toString('utf8');
+            jsonSubtype = this.detectJsonSubtype(content);
+          } catch (e) {
+            console.warn('[V2] Error detecting JSON subtype from fileData:', e.message);
+          }
+        }
+        // If not detected yet and we have a file path, try reading the file
+        if (!jsonSubtype && data.filePath) {
+          jsonSubtype = this.detectJsonSubtypeFromFile(data.filePath);
+        }
+        
+        if (jsonSubtype) {
+          console.log(`[V2] Detected JSON subtype: ${jsonSubtype} for file: ${data.fileName}`);
+        }
+      }
+      
+      // Generate thumbnail for PDF files and images
       let thumbnail = null;
       if (fileType === 'pdf') {
         thumbnail = this.generatePDFThumbnail(data.fileName, data.fileSize);
@@ -1710,6 +6584,11 @@ class ClipboardManagerV2 {
         thumbnail = this.generateHTMLThumbnail(data.fileName, data.fileSize);
       } else if (fileType === 'notebook') {
         thumbnail = this.generateNotebookThumbnail(data.fileName, data.fileSize);
+      } else if (fileType === 'image-file' && data.fileData) {
+        // For image files, create a data URL thumbnail from the base64 data
+        const mimeType = data.mimeType || this.getMimeTypeFromExtension(ext);
+        thumbnail = `data:${mimeType};base64,${data.fileData}`;
+        console.log('[V2] Generated image thumbnail, mimeType:', mimeType, 'dataLength:', data.fileData.length);
       }
       
       const itemId = this.generateId();
@@ -1721,6 +6600,7 @@ class ClipboardManagerV2 {
         fileType: fileType,
         fileCategory: fileCategory,
         fileExt: ext,
+        jsonSubtype: jsonSubtype,  // style-guide, journey-map, or null
         preview: `File: ${data.fileName}`,
         thumbnail: thumbnail,
         timestamp: Date.now(),
@@ -1804,8 +6684,12 @@ class ClipboardManagerV2 {
         }
       }
       
-      // Add item to history - this will store the file in the correct location
-      this.addToHistory(item);
+      // Add item to history with retry for transient disk errors
+      console.log(`[ContentIngestion:${opId}] Saving file item to space: ${item.spaceId}`);
+      await retryOperation(
+        () => this.addToHistory(item),
+        { maxRetries: 3, baseDelay: 200 }
+      );
       
       // Now the file has been copied to items/[id]/fileName by the storage system
       // We need to find the actual stored file path for post-processing
@@ -1846,17 +6730,23 @@ class ClipboardManagerV2 {
       if (item.filePath && item.filePath.includes('clipboard-temp-files')) {
         try {
           fs.unlinkSync(item.filePath);
-          console.log('[V2] Cleaned up temp file:', item.filePath);
+          console.log(`[ContentIngestion:${opId}] Cleaned up temp file:`, item.filePath);
         } catch (err) {
           // Ignore cleanup errors
         }
       }
       
-      return { success: true };
+      console.log(`[ContentIngestion:${opId}] ✓ File saved successfully, itemId: ${item.id}`);
+      return { success: true, itemId: item.id };
+      
+      } catch (error) {
+        console.error(`[ContentIngestion:${opId}] ERROR:`, error.message);
+        return ingestionService.handleError(error, { opId, type: 'file', spaceId: data?.spaceId });
+      }
     });
     
     // Screenshot completion handler
-    ipcMain.handle('clipboard:complete-screenshot', (event, { screenshotPath, spaceId, stats, ext }) => {
+    safeHandle('clipboard:complete-screenshot', (event, { screenshotPath, spaceId, stats, ext }) => {
       if (fs.existsSync(screenshotPath)) {
         const previousSpace = this.currentSpace;
         this.currentSpace = spaceId;
@@ -1869,7 +6759,7 @@ class ClipboardManagerV2 {
     });
     
     // PDF generation handlers
-    ipcMain.handle('clipboard:generate-space-pdf', async (event, spaceId, options = {}) => {
+    safeHandle('clipboard:generate-space-pdf', async (event, spaceId, options = {}) => {
       try {
         const PDFGenerator = require('./pdf-generator');
         const generator = new PDFGenerator();
@@ -1936,7 +6826,7 @@ class ClipboardManagerV2 {
       }
     });
     
-    ipcMain.handle('clipboard:export-space-pdf', async (event, spaceId, options = {}) => {
+    safeHandle('clipboard:export-space-pdf', async (event, spaceId, options = {}) => {
       try {
         // Show save dialog
         const { dialog } = require('electron');
@@ -2009,7 +6899,7 @@ class ClipboardManagerV2 {
     });
     
     // Smart export handlers
-    ipcMain.handle('clipboard:smart-export-space', async (event, spaceId) => {
+    safeHandle('clipboard:smart-export-space', async (event, spaceId) => {
       console.log('[Clipboard] Opening smart export for space:', spaceId);
       
       try {
@@ -2067,7 +6957,7 @@ class ClipboardManagerV2 {
     });
     
     // Unified export preview handler
-    ipcMain.handle('clipboard:open-export-preview', async (event, spaceId, options = {}) => {
+    safeHandle('clipboard:open-export-preview', async (event, spaceId, options = {}) => {
       console.log('[Clipboard] Opening export preview for space:', spaceId, 'Options:', options);
       
       try {
@@ -2126,7 +7016,7 @@ class ClipboardManagerV2 {
     });
     
     // Website monitoring handlers
-    ipcMain.handle('clipboard:add-website-monitor', async (event, config) => {
+    safeHandle('clipboard:add-website-monitor', async (event, config) => {
       try {
         const WebsiteMonitor = require('./website-monitor');
         if (!this.websiteMonitor) {
@@ -2142,7 +7032,7 @@ class ClipboardManagerV2 {
       }
     });
     
-    ipcMain.handle('clipboard:check-website', async (event, monitorId) => {
+    safeHandle('clipboard:check-website', async (event, monitorId) => {
       try {
         if (!this.websiteMonitor) {
           const WebsiteMonitor = require('./website-monitor');
@@ -2177,7 +7067,7 @@ class ClipboardManagerV2 {
       }
     });
     
-    ipcMain.handle('clipboard:get-website-monitors', async () => {
+    safeHandle('clipboard:get-website-monitors', async () => {
       try {
         if (!this.websiteMonitor) {
           const WebsiteMonitor = require('./website-monitor');
@@ -2192,7 +7082,7 @@ class ClipboardManagerV2 {
       }
     });
     
-    ipcMain.handle('clipboard:get-monitor-history', async (event, monitorId) => {
+    safeHandle('clipboard:get-monitor-history', async (event, monitorId) => {
       try {
         if (!this.websiteMonitor) {
           const WebsiteMonitor = require('./website-monitor');
@@ -2208,7 +7098,7 @@ class ClipboardManagerV2 {
       }
     });
     
-    ipcMain.handle('clipboard:remove-website-monitor', async (event, monitorId) => {
+    safeHandle('clipboard:remove-website-monitor', async (event, monitorId) => {
       try {
         if (!this.websiteMonitor) {
           const WebsiteMonitor = require('./website-monitor');
@@ -2223,7 +7113,7 @@ class ClipboardManagerV2 {
       }
     });
     
-    ipcMain.handle('clipboard:pause-website-monitor', async (event, monitorId) => {
+    safeHandle('clipboard:pause-website-monitor', async (event, monitorId) => {
       try {
         if (!this.websiteMonitor) {
           const WebsiteMonitor = require('./website-monitor');
@@ -2239,7 +7129,7 @@ class ClipboardManagerV2 {
       }
     });
     
-    ipcMain.handle('clipboard:resume-website-monitor', async (event, monitorId) => {
+    safeHandle('clipboard:resume-website-monitor', async (event, monitorId) => {
       try {
         if (!this.websiteMonitor) {
           const WebsiteMonitor = require('./website-monitor');
@@ -2254,10 +7144,424 @@ class ClipboardManagerV2 {
         return { success: false, error: error.message };
       }
     });
+    
+    // YouTube download handlers
+    this.setupYouTubeHandlers(safeHandle);
+  }
+  
+  // Setup YouTube download IPC handlers
+  setupYouTubeHandlers(safeHandle) {
+    console.log('[ClipboardManager] Setting up YouTube handlers...');
+    const { YouTubeDownloader, isYouTubeUrl, extractVideoId } = require('./youtube-downloader');
+    console.log('[ClipboardManager] YouTube module loaded, isYouTubeUrl:', typeof isYouTubeUrl);
+    
+    // Lazy-init downloader
+    let downloader = null;
+    const getDownloader = () => {
+      if (!downloader) {
+        downloader = new YouTubeDownloader();
+      }
+      return downloader;
+    };
+    
+    // Check if URL is a YouTube video
+    ipcMain.handle('youtube:is-youtube-url', (event, url) => {
+      return isYouTubeUrl(url);
+    });
+    
+    // Extract video ID from URL
+    ipcMain.handle('youtube:extract-video-id', (event, url) => {
+      return extractVideoId(url);
+    });
+    
+    // Get video info without downloading
+    ipcMain.handle('youtube:get-info', async (event, url) => {
+      try {
+        const dl = getDownloader();
+        return await dl.getVideoInfo(url);
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Verify an item exists with file and metadata, returns checksum
+    safeHandle('clipboard:verify-item', async (event, itemId) => {
+      try {
+        console.log('[Verify] Verifying item:', itemId);
+        const itemDir = path.join(this.storage.itemsDir, itemId);
+        
+        // Check directory exists
+        if (!fs.existsSync(itemDir)) {
+          return { success: false, error: 'Item directory not found' };
+        }
+        
+        // Check for metadata
+        const metadataPath = path.join(itemDir, 'metadata.json');
+        if (!fs.existsSync(metadataPath)) {
+          return { success: false, error: 'Metadata file not found' };
+        }
+        
+        const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+        
+        // Find the main file (video/audio/image)
+        const files = fs.readdirSync(itemDir).filter(f => 
+          !f.endsWith('.json') && !f.endsWith('.txt') && f !== '.DS_Store'
+        );
+        
+        if (files.length === 0) {
+          return { success: false, error: 'No media file found' };
+        }
+        
+        const mainFile = files[0];
+        const filePath = path.join(itemDir, mainFile);
+        const fileStats = fs.statSync(filePath);
+        
+        // Calculate simple checksum (first + last 1MB + size)
+        const crypto = require('crypto');
+        const hash = crypto.createHash('md5');
+        const fd = fs.openSync(filePath, 'r');
+        const buffer = Buffer.alloc(Math.min(1024 * 1024, fileStats.size)); // 1MB max
+        
+        // Read first chunk
+        fs.readSync(fd, buffer, 0, buffer.length, 0);
+        hash.update(buffer);
+        
+        // Read last chunk if file is larger
+        if (fileStats.size > buffer.length) {
+          const lastBuffer = Buffer.alloc(Math.min(1024 * 1024, fileStats.size));
+          fs.readSync(fd, lastBuffer, 0, lastBuffer.length, fileStats.size - lastBuffer.length);
+          hash.update(lastBuffer);
+        }
+        
+        fs.closeSync(fd);
+        hash.update(fileStats.size.toString());
+        const checksum = hash.digest('hex').substring(0, 8); // Short checksum
+        
+        console.log('[Verify] Item verified:', itemId, 'checksum:', checksum);
+        
+        return {
+          success: true,
+          itemId: itemId,
+          fileName: mainFile,
+          fileSize: fileStats.size,
+          fileSizeFormatted: formatBytes(fileStats.size),
+          hasMetadata: true,
+          metadataKeys: Object.keys(metadata),
+          title: metadata.title || mainFile,
+          checksum: checksum,
+          hasTranscript: !!(metadata.transcript?.text),
+          source: metadata.source
+        };
+        
+        function formatBytes(bytes) {
+          if (bytes === 0) return '0 B';
+          const k = 1024;
+          const sizes = ['B', 'KB', 'MB', 'GB'];
+          const i = Math.floor(Math.log(bytes) / Math.log(k));
+          return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+      } catch (error) {
+        console.error('[Verify] Error:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Download video to Space
+    ipcMain.handle('youtube:download-to-space', async (event, url, spaceId) => {
+      console.log('[YouTube] download-to-space called with URL:', url, 'spaceId:', spaceId);
+      try {
+        const dl = getDownloader();
+        console.log('[YouTube] Starting download...');
+        const result = await dl.downloadToSpace(url, this, spaceId || this.currentSpace, (percent, status) => {
+          console.log('[YouTube] Progress:', percent, status);
+          // Send progress updates to renderer
+          if (event.sender && !event.sender.isDestroyed()) {
+            event.sender.send('youtube:download-progress', { percent, status, url });
+          }
+        });
+        console.log('[YouTube] Download result:', JSON.stringify(result));
+        return result;
+      } catch (error) {
+        console.error('[YouTube] Download error:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Start YouTube download in background - returns immediately with placeholder item
+    ipcMain.handle('youtube:start-background-download', async (event, url, spaceId) => {
+      console.log('[YouTube] *** start-background-download called ***');
+      console.log('[YouTube] URL:', url);
+      console.log('[YouTube] spaceId:', spaceId);
+      
+      try {
+        const targetSpaceId = spaceId || this.currentSpace || 'unclassified';
+        console.log('[YouTube] targetSpaceId:', targetSpaceId);
+        
+        // Extract video ID from URL for immediate feedback
+        const { extractVideoId } = require('./youtube-downloader');
+        const videoId = extractVideoId(url);
+        console.log('[YouTube] Extracted videoId:', videoId);
+        
+        // Create placeholder immediately WITHOUT waiting for video info
+        // This makes the UI feel responsive
+        const placeholderItem = {
+          type: 'file',
+          fileType: 'video',
+          fileName: `YouTube Video ${videoId || 'download'}.mp4`,
+          preview: `🎬 Downloading YouTube video...`,
+          timestamp: Date.now(),
+          pinned: false,
+          spaceId: targetSpaceId,
+          source: 'youtube',
+          metadata: {
+            youtubeId: videoId,
+            youtubeUrl: url,
+            title: 'Loading...',
+            downloadStatus: 'downloading',
+            downloadProgress: 0
+          }
+        };
+        
+        // Add placeholder to storage
+        const indexEntry = this.storage.addItem(placeholderItem);
+        const placeholderId = indexEntry.id;
+        console.log('[YouTube] Created placeholder item:', placeholderId);
+        
+        // Add to in-memory history
+        this.history.unshift({
+          ...placeholderItem,
+          id: placeholderId,
+          _needsContent: true
+        });
+        this.updateSpaceCounts();
+        this.notifyHistoryUpdate();
+        
+        // Start download in background (don't await)
+        this.downloadYouTubeInBackground(url, targetSpaceId, placeholderId, event.sender);
+        
+        // Return immediately with placeholder info
+        return {
+          success: true,
+          placeholderId: placeholderId,
+          title: 'YouTube Video',
+          message: `Started downloading YouTube video`
+        };
+        
+      } catch (error) {
+        console.error('[YouTube] Error starting background download:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Download video (returns file path, doesn't add to space)
+    ipcMain.handle('youtube:download', async (event, url, options = {}) => {
+      try {
+        const dl = getDownloader();
+        return await dl.download(url, options, (percent, status) => {
+          if (event.sender && !event.sender.isDestroyed()) {
+            event.sender.send('youtube:download-progress', { percent, status, url });
+          }
+        });
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Cancel YouTube download
+    ipcMain.handle('youtube:cancel-download', async (event, placeholderId) => {
+      console.log('[YouTube] Cancel download requested for:', placeholderId);
+      try {
+        const success = this.cancelDownload(placeholderId);
+        return { success };
+      } catch (error) {
+        console.error('[YouTube] Cancel error:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Get active downloads
+    ipcMain.handle('youtube:get-active-downloads', async (event) => {
+      try {
+        const downloads = Array.from(this.activeDownloads.entries()).map(([id, info]) => ({
+          placeholderId: id,
+          progress: info.progress,
+          url: info.url,
+          duration: Date.now() - info.startTime
+        }));
+        return { success: true, downloads };
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Get transcript from YouTube video (using YouTube captions)
+    ipcMain.handle('youtube:get-transcript', async (event, url, lang = 'en') => {
+      console.log('[YouTube] get-transcript called for:', url, 'lang:', lang);
+      try {
+        const dl = getDownloader();
+        const result = await dl.getTranscript(url, lang);
+        console.log('[YouTube] Transcript result:', result.success ? 'success' : result.error);
+        return result;
+      } catch (error) {
+        console.error('[YouTube] Transcript error:', error);
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Fetch and save YouTube transcript for an existing item
+    ipcMain.handle('youtube:fetch-transcript-for-item', async (event, itemId, lang = 'en') => {
+      console.log('[YouTube] fetch-transcript-for-item called for:', itemId, 'lang:', lang);
+      try {
+        // Load item metadata
+        const itemDir = path.join(this.storage.itemsDir, itemId);
+        const metadataPath = path.join(itemDir, 'metadata.json');
+        
+        if (!fs.existsSync(metadataPath)) {
+          return { success: false, error: 'Item not found' };
+        }
+        
+        const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+        const youtubeUrl = metadata.youtubeUrl;
+        
+        if (!youtubeUrl) {
+          return { success: false, error: 'Not a YouTube video' };
+        }
+        
+        console.log('[YouTube] Fetching transcript for:', youtubeUrl);
+        
+        const dl = getDownloader();
+        const result = await dl.getTranscript(youtubeUrl, lang);
+        
+        if (result.success && result.transcript) {
+          // Update metadata with transcript
+          metadata.transcript = {
+            text: result.transcript,
+            segments: result.segments,
+            language: result.language,
+            isAutoGenerated: result.isAutoGenerated,
+            segmentCount: result.segmentCount,
+            fetchedAt: new Date().toISOString()
+          };
+          
+          fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+          
+          // Also save as transcription.txt for compatibility
+          const transcriptionPath = path.join(itemDir, 'transcription.txt');
+          fs.writeFileSync(transcriptionPath, result.transcript, 'utf8');
+          
+          console.log('[YouTube] Transcript saved for item:', itemId, 'length:', result.transcript.length);
+          
+          return {
+            success: true,
+            transcription: result.transcript,
+            language: result.language,
+            isAutoGenerated: result.isAutoGenerated,
+            segmentCount: result.segmentCount
+          };
+        } else {
+          return { success: false, error: result.error || 'Failed to fetch transcript' };
+        }
+      } catch (error) {
+        console.error('[YouTube] fetch-transcript-for-item error:', error);
+        return { success: false, error: error.message };
+      }
+    });
+
+    // Transcribe YouTube video using unified TranscriptionService (ElevenLabs Scribe)
+    // Replaces legacy Whisper endpoint - now uses ElevenLabs with speaker diarization
+    ipcMain.handle('youtube:get-transcript-whisper', async (event, url, lang = 'en') => {
+      console.log('[YouTube] Transcription requested for:', url, 'lang:', lang);
+      try {
+        const dl = getDownloader();
+        
+        // Download audio first
+        if (event.sender && !event.sender.isDestroyed()) {
+          event.sender.send('youtube:transcribe-progress', { percent: 10, status: 'Downloading audio...', url });
+        }
+        const audioPath = await dl.downloadAudio(url);
+        
+        // Use unified TranscriptionService
+        if (event.sender && !event.sender.isDestroyed()) {
+          event.sender.send('youtube:transcribe-progress', { percent: 50, status: 'Transcribing with AI...', url });
+        }
+        
+        const { getTranscriptionService } = await import('./src/transcription/index.js');
+        const service = getTranscriptionService();
+        const result = await service.transcribe(audioPath, {
+          language: lang,
+          diarize: true  // Enable speaker identification
+        });
+        
+        // Clean up audio file
+        const fs = require('fs');
+        if (fs.existsSync(audioPath)) {
+          fs.unlinkSync(audioPath);
+        }
+        
+        if (event.sender && !event.sender.isDestroyed()) {
+          event.sender.send('youtube:transcribe-progress', { percent: 100, status: 'Complete', url });
+        }
+        
+        console.log('[YouTube] Transcription result:', result.success ? 
+          `${result.wordCount} words, ${result.speakerCount} speakers` : result.error);
+        return result;
+      } catch (error) {
+        console.error('[YouTube] Transcription error:', error);
+        return { success: false, error: error.message };
+      }
+    });
+
+    // Process speaker recognition - now uses unified TranscriptionService
+    // ElevenLabs Scribe includes speaker diarization by default
+    ipcMain.handle('youtube:process-speaker-recognition', async (event, url) => {
+      console.log('[YouTube] Speaker recognition requested for:', url);
+      try {
+        const dl = getDownloader();
+        
+        // Download audio first
+        if (event.sender && !event.sender.isDestroyed()) {
+          event.sender.send('youtube:speaker-recognition-progress', { percent: 10, status: 'Downloading audio...', url });
+        }
+        const audioPath = await dl.downloadAudio(url);
+        
+        // Use unified TranscriptionService with diarization
+        if (event.sender && !event.sender.isDestroyed()) {
+          event.sender.send('youtube:speaker-recognition-progress', { percent: 50, status: 'Identifying speakers...', url });
+        }
+        
+        const { getTranscriptionService } = await import('./src/transcription/index.js');
+        const service = getTranscriptionService();
+        const result = await service.transcribe(audioPath, {
+          diarize: true  // Speaker diarization enabled
+        });
+        
+        // Clean up audio file
+        const fs = require('fs');
+        if (fs.existsSync(audioPath)) {
+          fs.unlinkSync(audioPath);
+        }
+        
+        if (event.sender && !event.sender.isDestroyed()) {
+          event.sender.send('youtube:speaker-recognition-progress', { percent: 100, status: 'Complete', url });
+        }
+        
+        console.log('[YouTube] Speaker recognition result:', result.success ? 
+          `${result.speakerCount} speakers, ${result.wordCount} words` : result.error);
+        return result;
+      } catch (error) {
+        console.error('[YouTube] Speaker recognition error:', error);
+        return { success: false, error: error.message };
+      }
+    });
+
+    console.log('[ClipboardManager] YouTube download handlers registered');
   }
   
   // Helper method for space names
   getSpaceName(spaceId) {
+    // Ensure spaces are loaded before accessing (lazy loading pattern)
+    this.ensureHistoryLoaded();
+    
     if (!spaceId || spaceId === null) {
       return 'All Items';
     }
@@ -2271,21 +7575,59 @@ class ClipboardManagerV2 {
       const item = this.storage.loadItem(itemId);
       if (!item) return { success: false, error: 'Item not found' };
       
-      // Update metadata
-      item.metadata = metadata;
-      
-      // Save back to storage
+      // Save back to storage - merge with existing metadata to preserve app-specific fields
       const metadataPath = path.join(this.storage.storageRoot, 'items', itemId, 'metadata.json');
-      fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+      
+      // Read existing metadata from file and merge
+      let existingMetadata = {};
+      if (fs.existsSync(metadataPath)) {
+        try {
+          existingMetadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+        } catch (parseErr) {
+          console.warn('[Clipboard] Could not parse existing metadata, starting fresh:', parseErr.message);
+        }
+      }
+      
+      // Merge: existing fields preserved, new fields added/updated
+      const mergedMetadata = {
+        ...existingMetadata,  // Keep all existing fields (playbookNoteId, _prefixed, assets, etc.)
+        ...metadata           // Overlay with new/updated fields
+      };
+      
+      // Update in-memory item
+      item.metadata = mergedMetadata;
+      
+      // Write merged metadata to file
+      fs.writeFileSync(metadataPath, JSON.stringify(mergedMetadata, null, 2));
       
       // Update in history array if present
       const historyItem = this.history.find(h => h.id === itemId);
       if (historyItem) {
-        historyItem.metadata = metadata;
-        this.notifyHistoryUpdate();
+        historyItem.metadata = mergedMetadata;
+        
+        // For web-monitor items, also update the direct fields
+        if (historyItem.type === 'web-monitor') {
+          if (metadata.lastChecked !== undefined) historyItem.lastChecked = metadata.lastChecked;
+          if (metadata.status !== undefined) historyItem.status = metadata.status;
+          if (metadata.changeCount !== undefined) historyItem.changeCount = metadata.changeCount;
+          if (metadata.timeline !== undefined) historyItem.timeline = metadata.timeline;
+        }
       }
       
-      return { success: true };
+      // Also update the storage index for web-monitor items
+      const indexItem = this.storage.index.items.find(i => i.id === itemId);
+      if (indexItem && indexItem.type === 'web-monitor') {
+        if (metadata.lastChecked !== undefined) indexItem.lastChecked = metadata.lastChecked;
+        if (metadata.status !== undefined) indexItem.status = metadata.status;
+        if (metadata.changeCount !== undefined) indexItem.changeCount = metadata.changeCount;
+        if (metadata.timeline !== undefined) indexItem.timeline = metadata.timeline;
+        // Save the updated index
+        this.storage.saveIndex();
+      }
+      
+      this.notifyHistoryUpdate();
+      
+      return { success: true, metadata: mergedMetadata };
     } catch (error) {
       console.error('Error updating metadata:', error);
       return { success: false, error: error.message };
@@ -2349,6 +7691,11 @@ class ClipboardManagerV2 {
   }
   
   destroy() {
+    // PERFORMANCE: Flush any pending async saves before cleanup
+    if (this.storage && this.storage.flushPendingSaves) {
+      this.storage.flushPendingSaves();
+    }
+    
     if (this.clipboardWindow && !this.clipboardWindow.isDestroyed()) {
       this.clipboardWindow.close();
     }
@@ -2374,6 +7721,10 @@ class ClipboardManagerV2 {
     if (globalShortcut) {
       globalShortcut.unregisterAll();
     }
+    
+    // Reset IPC registration flag to allow re-registration if manager is recreated
+    ClipboardManagerV2._ipcRegistered = false;
+    
     console.log('Clipboard manager cleaned up');
   }
   
@@ -2412,11 +7763,14 @@ class ClipboardManagerV2 {
       const fileExt = item.fileExt ? item.fileExt.toLowerCase() : '';
       
       // Image file types that should use vision
-      const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg', '.ico'];
-      const documentExtensions = ['.pdf', '.doc', '.docx', '.odt', '.rtf'];
-      const codeExtensions = ['.js', '.ts', '.py', '.java', '.cpp', '.c', '.h', '.css', '.html', '.jsx', '.tsx', '.vue', '.rb', '.go', '.rs', '.php', '.swift'];
-      const dataExtensions = ['.json', '.xml', '.csv', '.yaml', '.yml', '.toml'];
-      const textExtensions = ['.txt', '.md', '.log', '.ini', '.conf', '.config'];
+      const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg', '.ico', '.tiff', '.tif', '.heic', '.heif', '.avif', '.raw', '.psd', '.ai', '.eps'];
+      const documentExtensions = ['.pdf', '.doc', '.docx', '.odt', '.rtf', '.xls', '.xlsx', '.ppt', '.pptx', '.pages', '.numbers', '.key', '.epub', '.mobi'];
+      const codeExtensions = ['.js', '.ts', '.py', '.java', '.cpp', '.c', '.h', '.css', '.html', '.jsx', '.tsx', '.vue', '.rb', '.go', '.rs', '.php', '.swift', '.kt', '.scala', '.r', '.m', '.mm', '.sh', '.bash', '.zsh', '.ps1', '.bat', '.cmd', '.sql', '.graphql', '.proto', '.asm', '.s', '.lua', '.perl', '.pl', '.dart', '.elm', '.ex', '.exs', '.clj', '.hs', '.fs', '.ml', '.nim', '.zig', '.v', '.sol'];
+      const dataExtensions = ['.json', '.xml', '.csv', '.yaml', '.yml', '.toml', '.env', '.properties', '.plist', '.ndjson', '.jsonl', '.tsv', '.parquet', '.avro'];
+      const textExtensions = ['.txt', '.md', '.log', '.ini', '.conf', '.config', '.cfg', '.rc', '.gitignore', '.dockerignore', '.editorconfig', '.htaccess', '.readme', '.license', '.changelog', '.todo', '.notes'];
+      const audioExtensions = ['.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a', '.wma', '.aiff', '.opus'];
+      const videoExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.wmv', '.flv', '.webm', '.m4v', '.mpeg', '.mpg', '.3gp'];
+      const archiveExtensions = ['.zip', '.tar', '.gz', '.rar', '.7z', '.bz2', '.xz', '.tgz', '.dmg', '.iso'];
       
       // Check if this is an image that should use vision
       if (item.isScreenshot || 
@@ -2542,6 +7896,55 @@ class ClipboardManagerV2 {
           }
         }
       }
+      // Audio files
+      else if (audioExtensions.includes(fileExt) || item.fileCategory === 'audio' || item.fileType === 'audio') {
+        console.log('[AI Metadata] Processing as audio file');
+        
+        content = [
+          `Audio file: ${item.fileName || 'Unknown'}`,
+          `Format: ${fileExt || 'Unknown'}`,
+          `Size: ${item.fileSize ? this.formatFileSize(item.fileSize) : 'Unknown'}`,
+          item.metadata?.duration ? `Duration: ${item.metadata.duration}` : '',
+          item.metadata?.artist ? `Artist: ${item.metadata.artist}` : '',
+          item.metadata?.album ? `Album: ${item.metadata.album}` : '',
+          item.metadata?.title ? `Title: ${item.metadata.title}` : ''
+        ].filter(Boolean).join('\n');
+        
+        contentType = 'audio';
+      }
+      // Video files
+      else if (videoExtensions.includes(fileExt) || item.fileCategory === 'video' || item.fileType === 'video') {
+        console.log('[AI Metadata] Processing as video file');
+        
+        content = [
+          `Video file: ${item.fileName || 'Unknown'}`,
+          `Format: ${fileExt || 'Unknown'}`,
+          `Size: ${item.fileSize ? this.formatFileSize(item.fileSize) : 'Unknown'}`,
+          item.metadata?.duration ? `Duration: ${item.metadata.duration}` : '',
+          item.metadata?.resolution ? `Resolution: ${item.metadata.resolution}` : ''
+        ].filter(Boolean).join('\n');
+        
+        contentType = 'video';
+        
+        // If we have a thumbnail, use vision to analyze frame
+        if (item.thumbnail && !item.thumbnail.includes('svg+xml') && item.thumbnail.length > 1000) {
+          imageData = item.thumbnail;
+          content += '\n\nAnalyzing video thumbnail/preview frame:';
+        }
+      }
+      // Archive files
+      else if (archiveExtensions.includes(fileExt) || item.fileCategory === 'archive') {
+        console.log('[AI Metadata] Processing as archive file');
+        
+        content = [
+          `Archive file: ${item.fileName || 'Unknown'}`,
+          `Format: ${fileExt || 'Unknown'}`,
+          `Size: ${item.fileSize ? this.formatFileSize(item.fileSize) : 'Unknown'}`,
+          'Compressed archive - contents not directly accessible'
+        ].join('\n');
+        
+        contentType = 'archive';
+      }
       // Generic file handling
       else if (item.type === 'file') {
         console.log('[AI Metadata] Processing as generic file');
@@ -2646,6 +8049,118 @@ class ClipboardManagerV2 {
       }
     } catch (error) {
       console.error('[V2] Error checking migration status:', error);
+    }
+  }
+  
+  /**
+   * Migrate existing web monitor items to fix missing index fields
+   * This runs on startup to repair items created before the fix
+   */
+  migrateWebMonitorItems() {
+    try {
+      console.log('[WebMonitor Migration] Checking for items needing migration...');
+      
+      const indexItems = this.storage.index.items || [];
+      let migratedCount = 0;
+      
+      // Find items in web-monitors space that need migration
+      for (const item of indexItems) {
+        // Check if it's in web-monitors space but missing type or web-monitor fields
+        if (item.spaceId === 'web-monitors' && item.type !== 'web-monitor') {
+          console.log(`[WebMonitor Migration] Fixing item ${item.id} - setting type to web-monitor`);
+          
+          // Try to load the full item to get monitor data
+          try {
+            const fullItem = this.storage.loadItem(item.id);
+            let monitorData = {};
+            
+            // Parse content if it's JSON
+            if (fullItem.content) {
+              try {
+                monitorData = JSON.parse(fullItem.content);
+              } catch (e) {
+                // Not JSON, might be a URL
+                if (typeof fullItem.content === 'string' && fullItem.content.startsWith('http')) {
+                  monitorData.url = fullItem.content;
+                  try {
+                    monitorData.name = new URL(fullItem.content).hostname;
+                  } catch (e2) {
+                    monitorData.name = 'Website';
+                  }
+                }
+              }
+            }
+            
+            // Also check metadata
+            if (fullItem.metadata) {
+              monitorData = { ...monitorData, ...fullItem.metadata };
+            }
+            
+            // Update the index entry with web-monitor fields
+            item.type = 'web-monitor';
+            item.url = monitorData.url || item.url || '';
+            item.name = monitorData.name || item.name || 'Website';
+            item.monitorId = monitorData.monitorId || item.id.replace('monitor-', '');
+            item.lastChecked = monitorData.lastChecked || null;
+            item.status = monitorData.status || 'active';
+            item.changeCount = monitorData.changeCount || 0;
+            item.timeline = monitorData.timeline || [];
+            item.settings = monitorData.settings || { aiDescriptions: false };
+            
+            migratedCount++;
+            console.log(`[WebMonitor Migration] Fixed item ${item.id}:`, {
+              type: item.type,
+              url: item.url,
+              name: item.name
+            });
+          } catch (loadError) {
+            console.error(`[WebMonitor Migration] Failed to load item ${item.id}:`, loadError.message);
+          }
+        }
+        
+        // Also check items that have type=web-monitor but missing fields
+        if (item.type === 'web-monitor' && (!item.url || !item.monitorId)) {
+          console.log(`[WebMonitor Migration] Fixing incomplete web-monitor item ${item.id}`);
+          
+          try {
+            const fullItem = this.storage.loadItem(item.id);
+            let monitorData = {};
+            
+            if (fullItem.content) {
+              try {
+                monitorData = JSON.parse(fullItem.content);
+              } catch (e) {}
+            }
+            if (fullItem.metadata) {
+              monitorData = { ...monitorData, ...fullItem.metadata };
+            }
+            
+            // Fill in missing fields
+            if (!item.url) item.url = monitorData.url || '';
+            if (!item.name) item.name = monitorData.name || 'Website';
+            if (!item.monitorId) item.monitorId = monitorData.monitorId || item.id.replace('monitor-', '');
+            if (item.lastChecked === undefined) item.lastChecked = monitorData.lastChecked || null;
+            if (!item.status) item.status = monitorData.status || 'active';
+            if (item.changeCount === undefined) item.changeCount = monitorData.changeCount || 0;
+            if (!item.timeline) item.timeline = monitorData.timeline || [];
+            if (!item.settings) item.settings = monitorData.settings || { aiDescriptions: false };
+            
+            migratedCount++;
+          } catch (loadError) {
+            console.error(`[WebMonitor Migration] Failed to fix item ${item.id}:`, loadError.message);
+          }
+        }
+      }
+      
+      if (migratedCount > 0) {
+        // Save the updated index
+        this.storage.saveIndex();
+        console.log(`[WebMonitor Migration] Migrated ${migratedCount} items, index saved`);
+      } else {
+        console.log('[WebMonitor Migration] No items needed migration');
+      }
+    } catch (error) {
+      console.error('[WebMonitor Migration] Error:', error);
     }
   }
   
@@ -2790,6 +8305,12 @@ class ClipboardManagerV2 {
   
   // Get PDF page count with multiple fallback methods
   async getPDFPageCount(filePath) {
+    // Windows/Linux compatibility: Return default page count
+    if (process.platform !== 'darwin') {
+      console.log('[V2-PDF] Non-macOS platform detected, returning default page count');
+      return 1;
+    }
+    
     const { exec } = require('child_process');
     const { promisify } = require('util');
     const execAsync = promisify(exec);
@@ -2856,16 +8377,8 @@ class ClipboardManagerV2 {
   
   // Generate PDF thumbnail for specific page
   async generatePDFPageThumbnail(filePath, pageNumber = 1) {
-    const { exec } = require('child_process');
-    const { promisify } = require('util');
-    const execAsync = promisify(exec);
-    
     // This method handles page-specific thumbnail requests
     console.log('[V2-PDF-PAGE] Generating thumbnail for page:', pageNumber);
-    
-    // Since macOS tools can only generate page 1 thumbnails,
-    // we'll return the existing thumbnail from the history item
-    // The UI will show an overlay for pages other than 1
     
     // Try to find the item by file path
     const item = this.history.find(h => h.filePath === filePath);
@@ -2873,6 +8386,20 @@ class ClipboardManagerV2 {
       console.log('[V2-PDF-PAGE] Returning existing thumbnail from history');
       return item.thumbnail;
     }
+    
+    // Windows/Linux compatibility: Return placeholder
+    if (process.platform !== 'darwin') {
+      console.log('[V2-PDF-PAGE] Non-macOS platform detected, using placeholder');
+      return this.generatePDFThumbnail(path.basename(filePath), 0);
+    }
+    
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    
+    // Since macOS tools can only generate page 1 thumbnails,
+    // we'll return the existing thumbnail from the history item
+    // The UI will show an overlay for pages other than 1
     
     // If no existing thumbnail, try to generate one
     try {
@@ -2943,6 +8470,66 @@ class ClipboardManagerV2 {
     
     // Return placeholder if all else fails
     return this.generatePDFThumbnail(path.basename(filePath), 0);
+  }
+  
+  // Get MIME type from file extension
+  getMimeTypeFromExtension(ext) {
+    const mimeTypes = {
+      // Common web image formats
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.jfif': 'image/jpeg',
+      '.pjpeg': 'image/jpeg',
+      '.pjp': 'image/jpeg',
+      '.png': 'image/png',
+      '.apng': 'image/apng',
+      '.gif': 'image/gif',
+      '.bmp': 'image/bmp',
+      '.webp': 'image/webp',
+      '.svg': 'image/svg+xml',
+      '.ico': 'image/x-icon',
+      // Modern formats
+      '.avif': 'image/avif',
+      '.heic': 'image/heic',
+      '.heif': 'image/heif',
+      // TIFF
+      '.tiff': 'image/tiff',
+      '.tif': 'image/tiff'
+    };
+    return mimeTypes[ext.toLowerCase()] || 'application/octet-stream';
+  }
+  
+  // Detect image MIME type from buffer using magic bytes
+  detectImageMimeType(buffer) {
+    if (!buffer || buffer.length < 4) {
+      return 'image/png'; // Default fallback
+    }
+    
+    // Check magic bytes
+    // JPEG: FF D8 FF
+    if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
+      return 'image/jpeg';
+    }
+    // PNG: 89 50 4E 47
+    if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) {
+      return 'image/png';
+    }
+    // GIF: 47 49 46 38
+    if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38) {
+      return 'image/gif';
+    }
+    // WebP: 52 49 46 46 ... 57 45 42 50
+    if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 &&
+        buffer.length > 11 && buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50) {
+      return 'image/webp';
+    }
+    // BMP: 42 4D
+    if (buffer[0] === 0x42 && buffer[1] === 0x4D) {
+      return 'image/bmp';
+    }
+    
+    // Default to PNG
+    return 'image/png';
   }
   
   // Generate a placeholder thumbnail for PDF files
@@ -3230,11 +8817,17 @@ class ClipboardManagerV2 {
   
   // Generate text file preview using Quick Look
   async generateTextPreview(filePath, item) {
+    console.log('[V2-TEXT] Starting text preview generation for:', filePath);
+    
+    // Windows/Linux compatibility: Use custom preview directly
+    if (process.platform !== 'darwin') {
+      console.log('[V2-TEXT] Non-macOS platform detected, using custom preview');
+      return this.createCustomTextPreview(filePath, item);
+    }
+    
     const { exec } = require('child_process');
     const { promisify } = require('util');
     const execAsync = promisify(exec);
-    
-    console.log('[V2-TEXT] Starting text preview generation for:', filePath);
     
     try {
       // For text files, we'll use qlmanage to generate a preview
@@ -3391,6 +8984,47 @@ class ClipboardManagerV2 {
     return mimeTypes[ext] || 'audio/mpeg';
   }
   
+  getMediaMimeType(ext, fileType) {
+    // Audio MIME types
+    const audioMimeTypes = {
+      '.mp3': 'audio/mpeg',
+      '.wav': 'audio/wav',
+      '.flac': 'audio/flac',
+      '.aac': 'audio/aac',
+      '.ogg': 'audio/ogg',
+      '.wma': 'audio/x-ms-wma',
+      '.m4a': 'audio/mp4',
+      '.opus': 'audio/opus',
+      '.aiff': 'audio/aiff',
+      '.webm': 'audio/webm'
+    };
+    
+    // Video MIME types
+    const videoMimeTypes = {
+      '.mp4': 'video/mp4',
+      '.mov': 'video/quicktime',
+      '.avi': 'video/x-msvideo',
+      '.mkv': 'video/x-matroska',
+      '.wmv': 'video/x-ms-wmv',
+      '.flv': 'video/x-flv',
+      '.webm': 'video/webm',
+      '.m4v': 'video/mp4',
+      '.mpeg': 'video/mpeg',
+      '.mpg': 'video/mpeg',
+      '.3gp': 'video/3gpp'
+    };
+    
+    // Check audio first
+    if (audioMimeTypes[ext]) return audioMimeTypes[ext];
+    
+    // Check video
+    if (videoMimeTypes[ext]) return videoMimeTypes[ext];
+    
+    // Default based on fileType
+    if (fileType === 'video') return 'video/mp4';
+    return 'audio/mpeg';
+  }
+  
   // Add missing method from original
   registerShortcut() {
     if (!globalShortcut) {
@@ -3409,45 +9043,429 @@ class ClipboardManagerV2 {
     console.log(`Registered global shortcut: ${shortcut}`);
   }
   
+  // ========================================
+  // WEB MONITORS FEATURE
+  // ========================================
+  
+  /**
+   * Extract URL from text content
+   * Returns the first valid URL found or null
+   */
+  extractURL(content) {
+    if (!content || typeof content !== 'string') return null;
+    
+    // Match http/https URLs
+    const urlRegex = /https?:\/\/[^\s<>"{}|\\^`\[\]]+/gi;
+    const matches = content.match(urlRegex);
+    
+    if (!matches || matches.length === 0) return null;
+    
+    // Clean up the URL (remove trailing punctuation)
+    let url = matches[0];
+    url = url.replace(/[.,;:!?)]+$/, '');
+    
+    // Validate URL
+    try {
+      new URL(url);
+      return url;
+    } catch (e) {
+      return null;
+    }
+  }
+  
+  /**
+   * Find existing monitor by URL
+   */
+  findMonitorByURL(url) {
+    if (!this.websiteMonitor || !this.websiteMonitor.monitors) return null;
+    
+    for (const [id, monitor] of this.websiteMonitor.monitors) {
+      if (monitor.url === url) {
+        return monitor;
+      }
+    }
+    return null;
+  }
+  
+  /**
+   * Create a website monitor from a URL
+   * This is called when a URL is pasted into the Web Monitors space
+   */
+  async createWebsiteMonitorFromURL(url) {
+    const WebsiteMonitor = require('./website-monitor');
+    const { BrowserWindow } = require('electron');
+    
+    console.log('[WebMonitors] createWebsiteMonitorFromURL called with:', url);
+    
+    // Initialize website monitor if needed
+    if (!this.websiteMonitor) {
+      console.log('[WebMonitors] Initializing WebsiteMonitor...');
+      try {
+        this.websiteMonitor = new WebsiteMonitor();
+        await this.websiteMonitor.initialize();
+        console.log('[WebMonitors] WebsiteMonitor initialized successfully');
+      } catch (initError) {
+        console.error('[WebMonitors] Failed to initialize WebsiteMonitor:', initError);
+        throw new Error(`Website Monitor initialization failed: ${initError.message}`);
+      }
+    }
+    
+    // Check for duplicate
+    const existingMonitor = this.findMonitorByURL(url);
+    if (existingMonitor) {
+      console.log('[WebMonitors] URL already being monitored:', url);
+      
+      // Check if a clipboard item exists for this monitor
+      // Check both history cache AND storage index (source of truth)
+      const existingItemInHistory = this.history.find(h => 
+        h.type === 'web-monitor' && h.url === url
+      );
+      const existingItemInStorage = this.storage.index.items.find(i => 
+        i.type === 'web-monitor' && i.spaceId === 'web-monitors'
+      );
+      
+      if (existingItemInHistory || existingItemInStorage) {
+        // Show notification
+        BrowserWindow.getAllWindows().forEach(window => {
+          window.webContents.send('show-notification', {
+            title: 'Already Monitoring',
+            body: `${new URL(url).hostname} is already being monitored`,
+            type: 'warning'
+          });
+        });
+        return existingItemInHistory || existingItemInStorage;
+      }
+      
+      // Monitor exists in WebsiteMonitor but no clipboard item - create one
+      console.log('[WebMonitors] Monitor exists but no clipboard item, creating item...');
+      // Use the existing monitor data, don't call addMonitor again
+      var monitor = existingMonitor;
+    } else {
+      console.log('[WebMonitors] Creating new monitor for:', url);
+      
+      // Create the monitor
+      var monitor = await this.websiteMonitor.addMonitor({
+        url: url,
+        name: new URL(url).hostname,
+        spaceId: 'web-monitors',
+        selector: 'body', // Default to full page, user can change later
+        includeScreenshot: true
+      });
+    }
+    
+    // Create a web-monitor item in the space
+    const monitorData = {
+      monitorId: monitor.id,
+      url: url,
+      name: monitor.name,
+      selector: monitor.selector || 'body',
+      selectorDescription: 'Full Page',
+      lastChecked: monitor.lastChecked,
+      status: 'active',
+      settings: {
+        aiDescriptions: false // Default OFF to save costs
+      },
+      checkCount: 0,
+      changeCount: 0,
+      timeline: []
+    };
+    
+    const monitorItem = {
+      id: `monitor-${monitor.id}`,
+      type: 'web-monitor',
+      url: url,
+      name: monitor.name,
+      spaceId: 'web-monitors',
+      timestamp: Date.now(),
+      preview: `Monitoring: ${monitor.name}`,
+      // Content is required for storage - store the monitor data as JSON
+      content: JSON.stringify(monitorData, null, 2),
+      
+      // Monitor-specific fields (also stored in metadata)
+      monitorId: monitor.id,
+      selector: monitor.selector || 'body',
+      selectorDescription: 'Full Page',
+      currentScreenshotPath: null, // Will be set after first check
+      lastChecked: monitor.lastChecked,
+      nextCheck: null,
+      status: 'active',
+      errorMessage: null,
+      
+      // Settings
+      settings: {
+        aiDescriptions: false // Default OFF to save costs
+      },
+      
+      // Stats
+      checkCount: 0,
+      changeCount: 0,
+      ignoredChangeCount: 0,
+      pauseReason: null,
+      
+      // Badge tracking
+      unviewedChanges: 0,
+      lastViewedAt: new Date().toISOString(),
+      
+      // Cost tracking
+      costTracking: {
+        monthlyTokensUsed: 0,
+        monthlyCost: 0,
+        currentMonth: new Date().toISOString().slice(0, 7)
+      },
+      
+      // Timeline (changes history)
+      timeline: []
+    };
+    
+    // Add to storage
+    const indexEntry = this.storage.addItem(monitorItem);
+    
+    // Add to in-memory history
+    this.history.unshift({
+      ...monitorItem,
+      id: indexEntry.id
+    });
+    
+    // Update space count
+    this.updateSpaceCounts();
+    
+    // Notify UI
+    this.notifyHistoryUpdate();
+    
+    // Show success notification
+    BrowserWindow.getAllWindows().forEach(window => {
+      window.webContents.send('show-notification', {
+        title: 'Website Monitor Created',
+        body: `Now monitoring ${monitor.name}. Capturing initial baseline...`,
+        type: 'success'
+      });
+    });
+    
+    console.log('[WebMonitors] Monitor created successfully:', monitorItem.id);
+    
+    // Perform initial check to capture baseline
+    try {
+      console.log('[WebMonitors] Capturing initial baseline...');
+      const initialResult = await this.websiteMonitor.checkWebsite(monitor.id);
+      
+      if (initialResult && initialResult.snapshot) {
+        // Create baseline entry for timeline
+        const baselineEntry = {
+          id: `baseline-${Date.now()}`,
+          timestamp: new Date().toISOString(),
+          type: 'baseline',
+          summary: 'Initial baseline captured',
+          screenshotPath: initialResult.snapshot.screenshot || null,
+          textLength: initialResult.snapshot.textContent?.length || 0
+        };
+        
+        // Update the monitor item with baseline
+        const historyItem = this.history.find(h => h.id === monitorItem.id || h.id === indexEntry.id);
+        if (historyItem) {
+          historyItem.timeline = [baselineEntry];
+          historyItem.lastChecked = new Date().toISOString();
+          historyItem.changeCount = 0;
+          
+          // Also update in storage
+          await this.updateItemMetadata(historyItem.id, {
+            timeline: [baselineEntry],
+            lastChecked: historyItem.lastChecked,
+            changeCount: 0
+          });
+        }
+        
+        console.log('[WebMonitors] Initial baseline captured successfully');
+        
+        // Notify UI of update
+        this.notifyHistoryUpdate();
+      }
+    } catch (baselineError) {
+      console.error('[WebMonitors] Failed to capture initial baseline:', baselineError.message);
+      // Not critical - monitor will work, just no baseline in timeline
+    }
+    
+    return monitorItem;
+  }
+  
+  // ========================================
+  // END WEB MONITORS FEATURE
+  // ========================================
   
   startWebsiteMonitoring() {
     // Check websites every 30 minutes
     this.websiteCheckInterval = setInterval(async () => {
       try {
+        // Skip if no monitors configured (optimization to avoid unnecessary work)
         if (!this.websiteMonitor) {
           const WebsiteMonitor = require('./website-monitor');
           this.websiteMonitor = new WebsiteMonitor();
           await this.websiteMonitor.initialize();
         }
         
-        console.log('Running periodic website checks...');
+        // Check if there are any active monitors
+        const monitorCount = this.websiteMonitor.monitors?.size || 0;
+        if (monitorCount === 0) {
+          console.log('[WebsiteMonitor] No monitors configured, skipping check');
+          return;
+        }
+        
+        console.log(`[WebsiteMonitor] Running periodic check for ${monitorCount} monitors...`);
         const results = await this.websiteMonitor.checkAllMonitors();
         
-        // Process results and add changes to clipboard
-        results.forEach(result => {
-          if (result.changed && result.monitor && result.monitor.spaceId) {
-            const change = {
-              type: 'text',
-              content: `Website Changed: ${result.monitor.name}\n\nURL: ${result.monitor.url}\n\nLast Changed: ${new Date(result.monitor.lastChanged).toLocaleString()}\n\nView changes in the website monitor.`,
-              preview: `Website Changed: ${result.monitor.name}`,
-              source: 'website-monitor',
-              spaceId: result.monitor.spaceId,
-              metadata: {
-                monitorId: result.monitor.id,
-                url: result.monitor.url,
-                screenshot: result.snapshot.screenshot
-              }
-            };
-            
-            this.addToHistory(change);
+        // Process results and update monitor items
+        for (const result of results) {
+          if (result.changed && result.monitor) {
+            await this.handleWebsiteChange(result);
           }
-        });
+        }
         
-        console.log(`Website monitoring check complete. ${results.filter(r => r.changed).length} changes detected.`);
+        const changedCount = results.filter(r => r.changed).length;
+        console.log(`[WebsiteMonitor] Check complete. ${changedCount}/${monitorCount} sites changed.`);
       } catch (error) {
-        console.error('Error in periodic website check:', error);
+        console.error('[WebsiteMonitor] Error in periodic check:', error);
       }
     }, 30 * 60 * 1000); // 30 minutes
+  }
+  
+  /**
+   * Handle a website change detected by the monitor
+   * Updates the monitor item's timeline and optionally generates AI description
+   */
+  async handleWebsiteChange(result) {
+    const { monitor, snapshot, previousSnapshot } = result;
+    const { BrowserWindow, Notification } = require('electron');
+    
+    console.log(`[WebsiteMonitor] Change detected for ${monitor.name}`);
+    
+    // Find the monitor item in history
+    const monitorItem = this.history.find(h => 
+      h.type === 'web-monitor' && h.monitorId === monitor.id
+    );
+    
+    if (!monitorItem) {
+      console.warn('[WebsiteMonitor] Monitor item not found in history:', monitor.id);
+      return;
+    }
+    
+    // ========================================
+    // AUTO-PAUSE: Check for high-frequency changes
+    // ========================================
+    const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
+    const recentChanges = (monitorItem.timeline || []).filter(c => 
+      new Date(c.timestamp).getTime() > oneDayAgo
+    );
+    
+    if (recentChanges.length >= 5) {
+      // Auto-pause this monitor - too dynamic
+      console.log(`[WebsiteMonitor] Auto-pausing ${monitor.name}: ${recentChanges.length} changes in 24h`);
+      
+      monitorItem.status = 'paused';
+      monitorItem.pauseReason = 'high_frequency';
+      
+      // Also pause in the WebsiteMonitor
+      if (this.websiteMonitor) {
+        await this.websiteMonitor.pauseMonitor(monitor.id);
+      }
+      
+      // Update storage
+      try {
+        await this.updateItemMetadata(monitorItem.id, {
+          status: 'paused',
+          pauseReason: 'high_frequency'
+        });
+      } catch (e) {
+        console.error('[WebsiteMonitor] Failed to update pause status:', e);
+      }
+      
+      // Send notification about auto-pause
+      if (Notification.isSupported()) {
+        new Notification({
+          title: 'Monitor Paused: Too Many Changes',
+          body: `${monitor.name} changed ${recentChanges.length}+ times in 24h. This site may be too dynamic.`,
+          silent: false
+        }).show();
+      }
+      
+      // Notify UI
+      this.notifyHistoryUpdate();
+      return; // Don't record this change
+    }
+    // ========================================
+    // END AUTO-PAUSE
+    // ========================================
+    
+    // Create change entry for timeline
+    const changeId = `change-${Date.now()}`;
+    const changeEntry = {
+      id: changeId,
+      timestamp: new Date().toISOString(),
+      beforeScreenshotPath: previousSnapshot?.screenshot || null,
+      afterScreenshotPath: snapshot?.screenshot || null,
+      diffScreenshotPath: null, // TODO: Generate diff image
+      aiSummary: 'Content updated', // Default summary (no AI)
+      diffPercentage: 0, // TODO: Calculate
+      contentDiff: {
+        added: 0,
+        removed: 0,
+        modified: 0
+      }
+    };
+    
+    // Add to timeline (newest first, max 50)
+    monitorItem.timeline = monitorItem.timeline || [];
+    monitorItem.timeline.unshift(changeEntry);
+    if (monitorItem.timeline.length > 50) {
+      monitorItem.timeline = monitorItem.timeline.slice(0, 50);
+    }
+    
+    // Update stats
+    monitorItem.changeCount = (monitorItem.changeCount || 0) + 1;
+    monitorItem.lastChecked = new Date().toISOString();
+    monitorItem.unviewedChanges = (monitorItem.unviewedChanges || 0) + 1;
+    monitorItem.currentScreenshotPath = snapshot?.screenshot || null;
+    
+    // Update in storage
+    try {
+      await this.updateItemMetadata(monitorItem.id, {
+        timeline: monitorItem.timeline,
+        changeCount: monitorItem.changeCount,
+        lastChecked: monitorItem.lastChecked,
+        unviewedChanges: monitorItem.unviewedChanges,
+        currentScreenshotPath: monitorItem.currentScreenshotPath
+      });
+    } catch (e) {
+      console.error('[WebsiteMonitor] Failed to update storage:', e);
+    }
+    
+    // Update space badge count
+    this.updateWebMonitorsBadge();
+    
+    // Send system notification
+    if (Notification.isSupported()) {
+      new Notification({
+        title: `Website Changed: ${monitor.name}`,
+        body: changeEntry.aiSummary,
+        silent: false
+      }).show();
+    }
+    
+    // Notify UI
+    this.notifyHistoryUpdate();
+  }
+  
+  /**
+   * Update the unviewedChanges count for the Web Monitors space badge
+   */
+  updateWebMonitorsBadge() {
+    const webMonitorsSpace = this.storage.index?.spaces?.find(s => s.id === 'web-monitors');
+    if (!webMonitorsSpace) return;
+    
+    // Count total unviewed changes across all monitors
+    const totalUnviewed = this.history
+      .filter(h => h.type === 'web-monitor')
+      .reduce((sum, m) => sum + (m.unviewedChanges || 0), 0);
+    
+    webMonitorsSpace.unviewedChanges = totalUnviewed;
   }
 }
 

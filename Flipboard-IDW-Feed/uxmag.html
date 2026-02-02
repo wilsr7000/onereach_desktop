@@ -10,7 +10,7 @@
         script-src 'self' 'unsafe-inline' https://platform.twitter.com https://cdnjs.cloudflare.com;
         style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com;
         img-src 'self' data: https: blob:;
-        media-src 'self' https:;
+        media-src 'self' https: blob:;
         connect-src 'self' https:;
         font-src 'self' https://cdnjs.cloudflare.com;
         frame-src https://platform.twitter.com;
@@ -35,13 +35,68 @@
             </div>
         </div>
         
-        <!-- Preferences Panel -->
+        <!-- Playlist & Now Playing Bar (Always visible) -->
+        <div id="playlistBar" class="playlist-bar">
+            <div class="playlist-bar-content">
+                <!-- Play Controls -->
+                <div class="playlist-controls">
+                    <button id="playlistPrev" class="playlist-nav-btn" title="Previous">⏮</button>
+                    <button id="playlistPlayPause" class="playlist-play-btn" title="Play/Pause">
+                        <span class="playlist-play-icon">▶</span>
+                    </button>
+                    <button id="playlistNext" class="playlist-nav-btn" title="Next">⏭</button>
+                </div>
+                
+                <!-- Now Playing Info -->
+                <div class="playlist-now-playing">
+                    <span class="playlist-label" id="playlistLabel">Select articles to listen</span>
+                    <span id="playlistCurrentTitle" class="playlist-current-title">No article selected</span>
+                </div>
+                
+                <!-- Progress -->
+                <div class="playlist-progress-container">
+                    <div class="playlist-progress">
+                        <div id="playlistProgressFill" class="playlist-progress-fill"></div>
+                    </div>
+                    <span id="playlistTime" class="playlist-time">0:00 / 0:00</span>
+                </div>
+                
+                <!-- Queue Info & Toggle -->
+                <div class="playlist-queue-toggle">
+                    <span id="playlistQueueCount" class="playlist-queue-count">0 in queue</span>
+                    <button id="playlistToggle" class="playlist-toggle-btn" title="Show/Hide Playlist">
+                        <span class="playlist-toggle-icon">▼</span>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Expandable Playlist Panel -->
+            <div id="playlistPanel" class="playlist-panel">
+                <div class="playlist-header">
+                    <span class="playlist-header-title">🎧 Listening Queue</span>
+                    <div class="playlist-header-actions">
+                        <button id="playlistSelectAll" class="playlist-action-btn" title="Select All">Select All</button>
+                        <button id="playlistDeselectAll" class="playlist-action-btn" title="Deselect All">Clear</button>
+                    </div>
+                </div>
+                <div id="playlistItems" class="playlist-items">
+                    <!-- Playlist items will be dynamically inserted here -->
+                </div>
+            </div>
+        </div>
+        
+        <!-- Preferences/Playlist Panel -->
         <div id="preferencesPanel" class="preferences-panel">
             <div class="preferences-header">
-                <h2>Content Preferences</h2>
-                <button class="close-preferences" id="closePreferences" title="Close preferences" aria-label="Close preferences panel">&times;</button>
+                <div class="panel-tabs">
+                    <button class="panel-tab active" data-tab="preferences">⚙️ Preferences</button>
+                    <button class="panel-tab" data-tab="playlist">🎧 Playlist</button>
+                </div>
+                <button class="close-preferences" id="closePreferences" title="Close panel" aria-label="Close panel">&times;</button>
             </div>
-            <div class="preferences-content">
+            
+            <!-- Preferences Tab Content -->
+            <div class="tab-content active" id="preferencesTab">
                 <p class="preferences-intro">Select the topics you're interested in to personalize your AI insights feed:</p>
                 <div class="preferences-container">
                     <!-- Preferences will be populated dynamically -->
@@ -49,6 +104,20 @@
                 <div class="preferences-actions">
                     <button class="select-all-btn" id="selectAllBtn" aria-label="Select or deselect all preferences">Select All</button>
                     <button class="save-preferences-btn" id="savePreferencesBtn" aria-label="Save your content preferences">Save</button>
+                </div>
+            </div>
+            
+            <!-- Playlist Tab Content -->
+            <div class="tab-content" id="playlistTab">
+                <div class="playlist-tab-header">
+                    <p class="preferences-intro">Your listening queue of unread articles:</p>
+                    <div class="playlist-tab-actions">
+                        <button class="playlist-action-btn" id="playlistSelectAll">Select All</button>
+                        <button class="playlist-action-btn" id="playlistDeselectAll">Clear</button>
+                    </div>
+                </div>
+                <div class="playlist-tab-items" id="playlistTabItems">
+                    <!-- Playlist items will be dynamically inserted here -->
                 </div>
             </div>
         </div>
@@ -159,12 +228,79 @@
             const savePreferencesBtn = document.getElementById('savePreferencesBtn');
             
             preferencesBtn.addEventListener('click', () => {
+                // Switch to preferences tab
+                switchPanelTab('preferences');
                 preferencesPanel.classList.add('show');
             });
+            
+            // Playlist toggle button - opens panel with playlist tab
+            const playlistToggle = document.getElementById('playlistToggle');
+            const playlistQueueArea = document.querySelector('.playlist-queue-toggle');
+            
+            function openPlaylistPanel() {
+                console.log('[Playlist] Opening playlist panel');
+                switchPanelTab('playlist');
+                preferencesPanel.classList.add('show');
+                // Populate playlist if reader exists
+                if (window.reader && window.reader.populatePlaylistTab) {
+                    window.reader.populatePlaylistTab();
+                }
+            }
+            
+            if (playlistToggle) {
+                console.log('[Playlist] Toggle button found in HTML script');
+                playlistToggle.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    openPlaylistPanel();
+                });
+            }
+            
+            if (playlistQueueArea) {
+                playlistQueueArea.addEventListener('click', (e) => {
+                    if (e.target !== playlistToggle && !playlistToggle?.contains(e.target)) {
+                        openPlaylistPanel();
+                    }
+                });
+            }
             
             closePreferences.addEventListener('click', () => {
                 preferencesPanel.classList.remove('show');
             });
+            
+            // Panel tab switching
+            function switchPanelTab(tabName) {
+                document.querySelectorAll('.panel-tab').forEach(tab => {
+                    tab.classList.toggle('active', tab.dataset.tab === tabName);
+                });
+                document.querySelectorAll('.tab-content').forEach(content => {
+                    content.classList.toggle('active', content.id === tabName + 'Tab');
+                });
+            }
+            
+            document.querySelectorAll('.panel-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    switchPanelTab(tab.dataset.tab);
+                    // If switching to playlist, populate it
+                    if (tab.dataset.tab === 'playlist' && window.reader) {
+                        window.reader.populatePlaylistTab();
+                    }
+                });
+            });
+            
+            // Playlist tab select/deselect buttons
+            const playlistSelectAll = document.getElementById('playlistSelectAll');
+            const playlistDeselectAll = document.getElementById('playlistDeselectAll');
+            
+            if (playlistSelectAll) {
+                playlistSelectAll.addEventListener('click', () => {
+                    if (window.reader) window.reader.selectAllPlaylist(true);
+                });
+            }
+            if (playlistDeselectAll) {
+                playlistDeselectAll.addEventListener('click', () => {
+                    if (window.reader) window.reader.selectAllPlaylist(false);
+                });
+            }
             
             selectAllBtn.addEventListener('click', () => {
                 const checkboxes = document.querySelectorAll('.preferences-container input[type="checkbox"]');

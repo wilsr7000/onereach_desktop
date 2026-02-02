@@ -1,0 +1,8 @@
+version: 3.8.17
+files:
+  - url: Onereach.ai-3.8.17-arm64-mac.zip
+    sha512: TrckxMDtyUnLsLY1Px2Hpat1m4DDw3+8wctqhRxWJ3+JLK7sBevSLRcvKLjkcIaicsgBPJ0iA3rWDOSNPbJmMg==
+    size: 256037370
+path: Onereach.ai-3.8.17-arm64-mac.zip
+sha512: TrckxMDtyUnLsLY1Px2Hpat1m4DDw3+8wctqhRxWJ3+JLK7sBevSLRcvKLjkcIaicsgBPJ0iA3rWDOSNPbJmMg==
+releaseDate: '2026-01-23T02:58:08.000Z'

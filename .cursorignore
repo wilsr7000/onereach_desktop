@@ -1,0 +1,61 @@
+# Build outputs (909MB+ of binaries)
+dist/
+dist/**
+out/
+out/**
+
+# Dependencies
+node_modules/
+node_modules/**
+
+# Large binary files
+*.dmg
+*.zip
+*.app
+*.exe
+*.AppImage
+*.snap
+*.blockmap
+
+# Logs
+*.log
+dev-output.log
+
+# Temp/cache files
+_temp/
+.cache/
+
+# Media files
+*.mp4
+*.mov
+*.wav
+*.mp3
+*.aac
+*.ogg
+*.webm
+
+# Image files (large)
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.ico
+*.icns
+
+# Package files
+*.tgz
+*.tar
+*.gz
+
+# IDE folders that might have cache
+.idea/
+.vscode/
+
+# Git internals
+.git/objects/
+
+# Large single-file editor bundles (prefer editing modular `src/**` versions)
+# NOTE: temporarily allow these through Cursor tools while debugging detached playback.
+# video-editor-app.js
+# video-editor.css
+# video-editor.js

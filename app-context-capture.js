@@ -192,7 +192,11 @@ class AppContextCapture {
         domain: url ? this.extractDomain(url) : ''
       };
     } catch (error) {
-      console.error('Error getting window context:', error);
+      // Silently handle - this often fails due to permissions or certain apps being in focus
+      // Only log if it's an unexpected error (not permission-related)
+      if (error.code !== 1 && !error.message?.includes('not allowed')) {
+        console.debug('[AppContext] Window context unavailable:', error.message || error.code);
+      }
       return {
         windowTitle: '',
         url: '',
