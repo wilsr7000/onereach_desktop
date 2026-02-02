@@ -226,6 +226,8 @@ const calendarAgent = {
   id: 'calendar-agent',
   name: 'Calendar Agent',
   description: 'Answers calendar and meeting questions - shows your schedule and availability with proactive reminders',
+  voice: 'coral',  // Professional, clear - see VOICE-GUIDE.md
+  acks: ["Let me check your calendar.", "Checking your schedule."],
   categories: ['system', 'calendar'],
   keywords: [
     'calendar', 'meeting', 'meetings', 'schedule', 'event', 'events', 
@@ -276,6 +278,10 @@ If the user asks about what's happening on ANY day or time period, this is a cal
       await this.memory.load();
       this._ensureMemorySections();
     }
+    
+    // Clear cache on initialize to force fresh data fetch
+    this._cache.events = null;
+    this._cache.fetchedAt = 0;
     
     // Start meeting poller for proactive reminders
     this._startMeetingPoller();
@@ -458,70 +464,10 @@ If the user asks about what's happening on ANY day or time period, this is a cal
   // ==================== BIDDING ====================
   
   /**
-   * Bid on a task
+   * Bid on a task - uses LLM-based unified bidder
    */
   bid(task) {
-    if (!task?.content) return null;
-
-    const lower = task.content.toLowerCase();
-
-    // Don't bid on time-only queries (let time-agent handle those)
-    if (/^what('s| is) the time/i.test(lower) || /^what time is it/i.test(lower)) {
-      return null;
-    }
-
-    // Calendar-specific keywords
-    const calendarKeywords = [
-      'calendar', 'meeting', 'meetings', 'schedule', 'event', 'events',
-      'appointment', 'appointments', 'busy', 'free', 'available', 'availability'
-    ];
-    
-    // Day names - if someone asks about a specific day, likely calendar related
-    const dayNames = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
-    
-    // Time period keywords
-    const timePeriodKeywords = ['today', 'tomorrow', 'this week', 'next week', 'this morning', 'this afternoon'];
-
-    // Calendar question patterns
-    const calendarPatterns = [
-      /what('s| is) on my (calendar|schedule)/i,
-      /when('s| is) my next (meeting|appointment|event)/i,
-      /do i have (any )?(meetings|events|appointments)/i,
-      /am i (free|busy|available)/i,
-      /what (meetings|events|appointments) do i have/i,
-      /check my (calendar|schedule)/i,
-      /my (calendar|schedule|meetings)/i,
-      /what('s| is|'s) happening/i,  // "what's happening Monday"
-      /what('s| is) going on/i,       // "what's going on tomorrow"
-      /anything (on|happening|scheduled|planned)/i,  // "anything on Monday"
-      /what do i have/i,              // "what do I have Monday"
-    ];
-
-    const hasKeyword = calendarKeywords.some(k => lower.includes(k));
-    const matchesPattern = calendarPatterns.some(p => p.test(lower));
-    const hasDayName = dayNames.some(d => lower.includes(d));
-    const hasTimePeriod = timePeriodKeywords.some(t => lower.includes(t));
-    
-    // High confidence if calendar keyword or matches explicit pattern
-    if (hasKeyword || matchesPattern) {
-      return { confidence: 0.92, reasoning: 'Calendar/meeting query' };
-    }
-    
-    // Medium-high confidence if asking about a specific day with context
-    if (hasDayName && (matchesPattern || /what|any|do i/i.test(lower))) {
-      return { confidence: 0.88, reasoning: 'Day-specific schedule query' };
-    }
-    
-    // Medium confidence if just a day name with a question word
-    if (hasDayName && /^(what|how|any)/i.test(lower)) {
-      return { confidence: 0.85, reasoning: 'Day name with question' };
-    }
-    
-    // Time period with question
-    if (hasTimePeriod && /^(what|how|any)/i.test(lower)) {
-      return { confidence: 0.85, reasoning: 'Time period schedule query' };
-    }
-
+    // No fast bidding - let the unified bidder handle all evaluation via LLM
     return null;
   },
   
@@ -578,33 +524,72 @@ If the user asks about what's happening on ANY day or time period, this is a cal
       return { success: false, message: "I need an API key to check your calendar." };
     }
     
-    // Format events for LLM (include all relevant info)
+    // Format events for LLM - separate past and future events clearly
     const now = new Date();
-    const eventsText = events.map(e => {
+    const startOfToday = new Date(now);
+    startOfToday.setHours(0, 0, 0, 0);
+    
+    // Separate past and future events
+    const futureEvents = [];
+    const pastEvents = [];
+    
+    events.forEach(e => {
+      const start = new Date(e.start?.dateTime || e.start?.date);
+      if (start >= startOfToday) {
+        futureEvents.push(e);
+      } else {
+        pastEvents.push(e);
+      }
+    });
+    
+    // Sort future events by date
+    futureEvents.sort((a, b) => {
+      return new Date(a.start?.dateTime || a.start?.date) - new Date(b.start?.dateTime || b.start?.date);
+    });
+    
+    console.log(`[CalendarAgent] Events: ${futureEvents.length} future, ${pastEvents.length} past (${events.length} total)`);
+    
+    // Format future events for LLM
+    const formatEvent = (e) => {
       const start = new Date(e.start?.dateTime || e.start?.date);
       const dayName = start.toLocaleDateString('en-US', { weekday: 'long' });
-      const date = start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const date = start.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
       const time = e.start?.dateTime 
         ? start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
         : 'All day';
       return `- ${dayName}, ${date} at ${time}: "${e.summary}"`;
-    }).join('\n');
+    };
+    
+    const futureEventsText = futureEvents.map(formatEvent).join('\n');
+    
+    // Build the events section - only show future events
+    let eventsSection;
+    if (futureEvents.length > 0) {
+      eventsSection = futureEventsText;
+    } else if (pastEvents.length > 0) {
+      eventsSection = `No upcoming events scheduled.\n(Note: Calendar has ${pastEvents.length} past events but no future events - the calendar data may need to be refreshed)`;
+    } else {
+      eventsSection = 'No events found in calendar';
+    }
     
     const systemPrompt = `You are a helpful calendar assistant. Answer the user's question about their calendar.
 
-CURRENT DATE/TIME:
-- Today is ${now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+CURRENT DATE/TIME (USE THIS AS YOUR REFERENCE):
+- TODAY is ${now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
 - Current time: ${now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
 - Part of day: ${context.partOfDay}
 
-CALENDAR EVENTS (next 2 weeks):
-${eventsText || 'No events found'}
+UPCOMING CALENDAR EVENTS:
+${eventsSection}
 
-INSTRUCTIONS:
+CRITICAL INSTRUCTIONS:
+- ONLY refer to events listed above - do NOT make up or hallucinate events
+- If there are no upcoming events listed, tell the user their calendar is clear
+- When user asks about a day (e.g., "Tuesday"), look for that day in the events list
+- Always use the FULL date with year when answering (e.g., "Tuesday, February 3, 2026")
 - Answer the user's question directly and concisely
-- For "what's happening Monday" type questions, list the events for that day
 - Keep responses brief and conversational (1-3 sentences for simple queries)
-- If no events match the query, say so clearly
+- If the note mentions calendar data may need refreshing, you can mention this to the user
 - Use natural language, not bullet points for voice responses`;
 
     try {
@@ -970,14 +955,64 @@ INSTRUCTIONS:
     }
     
     try {
-      console.log('[CalendarAgent] Fetching events from omnical API');
-      const response = await fetch(OMNICAL_API_URL);
+      // Build date range (start of today to 2 weeks out)
+      const startDate = new Date();
+      startDate.setHours(0, 0, 0, 0);
+      const endDate = new Date(startDate.getTime() + 14 * 24 * 60 * 60 * 1000);
+      
+      // Format dates as "Mon DD YYYY" for the timeInterpreter
+      const formatDate = (d) => {
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        return `${months[d.getMonth()]} ${d.getDate()} ${d.getFullYear()}`;
+      };
+      
+      console.log(`[CalendarAgent] Fetching events from omnical API`);
+      console.log(`[CalendarAgent] Date range: ${formatDate(startDate)} to ${formatDate(endDate)}`);
+      
+      // API requires POST with JSON body containing ALL fields (even empty ones)
+      const requestBody = {
+        method: '',
+        startDate: formatDate(startDate),
+        endDate: formatDate(endDate),
+        startTime: '',
+        endTime: '',
+        searchText: '',
+        timeZone: 'America/Los_Angeles'
+      };
+      
+      const response = await fetch(OMNICAL_API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestBody)
+      });
       
       if (!response.ok) {
         throw new Error(`API error: ${response.status}`);
       }
       
-      const events = await response.json();
+      const data = await response.json();
+      
+      // Handle "not found" response (empty calendar)
+      if (data?.result === 'not found') {
+        console.log('[CalendarAgent] No events found in calendar');
+        this._cache.events = [];
+        this._cache.fetchedAt = now;
+        return [];
+      }
+      
+      // Ensure we have an array
+      const events = Array.isArray(data) ? data : [];
+      
+      // Log first few event dates to debug
+      if (events.length > 0) {
+        const sample = events.slice(0, 3).map(e => {
+          const d = e.start?.dateTime || e.start?.date;
+          return `${e.summary?.slice(0, 20)}: ${d}`;
+        });
+        console.log(`[CalendarAgent] Sample events returned:`, sample);
+      }
       
       // Cache the events
       this._cache.events = events;
