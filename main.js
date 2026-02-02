@@ -995,19 +995,9 @@ app.whenReady().then(() => {
   setImmediate(() => {
     console.log('[Startup] Initializing deferred managers...');
     
-    // Initialize clipboard manager
+    // Note: Clipboard manager is already initialized earlier (around line 954)
+    // Just initialize App Health Dashboard components here
     try {
-      console.log('[DEBUG-H1] Creating new ClipboardManager instance...');
-      clipboardManager = new ClipboardManager();
-      console.log('[DEBUG-H1] ClipboardManager created, registering shortcut...');
-      clipboardManager.registerShortcut();
-      global.clipboardManager = clipboardManager;
-      console.log('Clipboard manager initialized');
-      logger.logFeatureUsed('clipboard-manager', {
-        status: 'initialized',
-        shortcutRegistered: true
-      });
-      
       // Initialize App Health Dashboard components
       try {
         const { getDashboardAPI } = require('./dashboard-api');
@@ -7387,134 +7377,11 @@ function setupIPC() {
     }
   });
 
-  // Get video path for a clipboard item (alias for get-item-path)
-  // Returns { success: boolean, filePath?: string, fileName?: string, scenes?: array, error?: string }
-  ipcMain.handle('clipboard:get-video-path', async (event, itemId) => {
-    try {
-      const ClipboardStorage = require('./clipboard-storage-v2');
-      const storage = new ClipboardStorage();
-      
-      console.log('[Clipboard] Getting video path for item:', itemId);
-      
-      // Helper to load scenes from metadata
-      const loadScenes = (itemId) => {
-        try {
-          const metadataPath = path.join(storage.itemsDir, itemId, 'metadata.json');
-          if (fs.existsSync(metadataPath)) {
-            const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
-            return metadata.scenes || [];
-          }
-        } catch (e) {
-          // Ignore metadata errors
-        }
-        return [];
-      };
-      
-      // First, try to load item via storage (which scans for actual files)
-      try {
-        const item = storage.loadItem(itemId);
-        
-        if (item && item.content) {
-          let filePath;
-          if (path.isAbsolute(item.content)) {
-            filePath = item.content;
-          } else {
-            filePath = path.join(storage.storageRoot, item.content);
-          }
-          
-          if (fs.existsSync(filePath)) {
-            console.log('[Clipboard] Found video via loadItem:', filePath);
-            return { 
-              success: true, 
-              filePath: filePath,
-              fileName: item.fileName || path.basename(filePath),
-              scenes: loadScenes(itemId)
-            };
-          }
-        }
-      } catch (loadError) {
-        console.log('[Clipboard] loadItem failed, trying fallback:', loadError.message);
-      }
-      
-      // Fallback: Scan the item directory for video files directly
-      // This handles cases where contentPath in index.json doesn't match actual filename
-      const itemDir = path.join(storage.itemsDir, itemId);
-      console.log('[Clipboard] Checking item directory:', itemDir);
-      
-      if (fs.existsSync(itemDir)) {
-        const files = fs.readdirSync(itemDir);
-        console.log('[Clipboard] Files in item dir:', files);
-        
-        // Filter for video files (excluding metadata, thumbnails, etc.)
-        const videoExtensions = ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm', '.m4v', '.mpg', '.mpeg'];
-        const videoFile = files.find(f => {
-          const lower = f.toLowerCase();
-          // Skip hidden files and non-video files
-          if (f.startsWith('.')) return false;
-          return videoExtensions.some(ext => lower.endsWith(ext));
-        });
-        
-        if (videoFile) {
-          const videoPath = path.join(itemDir, videoFile);
-          console.log('[Clipboard] Found video file in item dir:', videoPath);
-          
-          // Get fileName from index entry if available
-          const indexEntry = storage.index.items.find(i => i.id === itemId);
-          
-          return { 
-            success: true, 
-            filePath: videoPath,
-            fileName: indexEntry?.fileName || videoFile,
-            scenes: loadScenes(itemId)
-          };
-        }
-      }
-      
-      // File not found
-      const indexEntry = storage.index.items.find(i => i.id === itemId);
-      console.error('[Clipboard] Video file not found. Expected:', indexEntry?.contentPath);
-      return { 
-        success: false, 
-        error: `Video file is missing from storage. The file may have been deleted or moved. Expected: ${indexEntry?.fileName || 'unknown'}`
-      };
-    } catch (error) {
-      console.error('[Clipboard] Error getting video path:', error);
-      return { success: false, error: error.message };
-    }
-  });
+  // NOTE: clipboard:get-video-path is already registered in clipboard-manager-v2-adapter.js
+  // Do not register it here to avoid duplicate handler error
 
-  // Get metadata for a clipboard item (fallback handler for video editor)
-  ipcMain.handle('clipboard:get-metadata', async (event, itemId) => {
-    console.log('[Clipboard] clipboard:get-metadata called with itemId:', itemId);
-    try {
-      const ClipboardStorage = require('./clipboard-storage-v2');
-      const storage = new ClipboardStorage();
-      const item = storage.loadItem(itemId);
-      if (!item) return { success: false, error: 'Item not found' };
-      
-      // Build complete metadata object with all properties
-      const metadata = {
-        ...(item.metadata || {}),
-        description: item.metadata?.description || '',
-        notes: item.metadata?.notes || '',
-        instructions: item.metadata?.instructions || '',
-        tags: item.metadata?.tags || [],
-        source: item.metadata?.source || item.source || '',
-        ai_generated: item.metadata?.ai_generated || false,
-        ai_assisted: item.metadata?.ai_assisted || false,
-        ai_model: item.metadata?.ai_model || '',
-        ai_provider: item.metadata?.ai_provider || '',
-        scenes: item.metadata?.scenes || [],
-        transcription: item.metadata?.transcription || null,
-        videoEditorProjectState: item.metadata?.videoEditorProjectState || null
-      };
-      
-      return { success: true, metadata };
-    } catch (error) {
-      console.error('[Clipboard] Error getting metadata:', error);
-      return { success: false, error: error.message };
-    }
-  });
+  // NOTE: clipboard:get-metadata is already registered in clipboard-manager-v2-adapter.js
+  // Do not register it here to avoid duplicate handler error
 
   // ============================================
   // UNIVERSAL SPACES API IPC HANDLERS
