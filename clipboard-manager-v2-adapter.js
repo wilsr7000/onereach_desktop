@@ -1088,6 +1088,17 @@ class ClipboardManagerV2 {
         item._needsContent = false;
       }
       
+      // DEBUG: Log item details
+      console.log('📋 Pasting item:', {
+        id: item.id,
+        type: item.type,
+        fileName: item.fileName,
+        hasContent: !!item.content,
+        contentLength: item.content ? item.content.length : 0,
+        contentPreview: item.content ? item.content.substring(0, 100) : 'none',
+        filePath: item.filePath
+      });
+      
       // Paste logic based on type
       if (item.type === 'text') {
         // For plain text, just write the text content
@@ -1104,10 +1115,43 @@ class ClipboardManagerV2 {
         // Only write plain text - NO HTML format to avoid formatting issues
         clipboard.writeText(cleanText);
       } else if (item.type === 'image' && item.content) {
-        const image = nativeImage.createFromDataURL(item.content);
-        clipboard.writeImage(image);
-      } else if (item.type === 'file' && item.filePath) {
-        clipboard.writeBuffer('public.file-url', Buffer.from(item.filePath));
+        // Check if this is actually a text file stored as 'image' type (from drag-and-drop)
+        const isTextFile = item.fileName && /\.(md|txt|json|js|ts|tsx|jsx|html|css|py|java|cpp|c|h|cs|php|rb|go|rs|swift|kt|xml|yaml|yml|csv|log|sh|bash)$/i.test(item.fileName);
+        
+        if (isTextFile && item.content.startsWith('data:')) {
+          // Decode text file content from base64
+          const base64Data = item.content.split(',')[1];
+          if (base64Data) {
+            const textContent = Buffer.from(base64Data, 'base64').toString('utf-8');
+            clipboard.writeText(textContent);
+          }
+        } else {
+          // Regular image - write as image
+          const image = nativeImage.createFromDataURL(item.content);
+          clipboard.writeImage(image);
+        }
+      } else if (item.type === 'file') {
+        // For files, copy the actual content, not the file path
+        if (item.fileType === 'image-file' && item.content) {
+          // For image files, write as image
+          const image = nativeImage.createFromDataURL(item.content);
+          clipboard.writeImage(image);
+        } else if (item.content) {
+          // For text-based files (markdown, code, etc), copy the text content
+          // Remove data URL prefix if present
+          let textContent = item.content;
+          if (textContent.startsWith('data:')) {
+            // Extract base64 content and decode it
+            const base64Data = textContent.split(',')[1];
+            if (base64Data) {
+              textContent = Buffer.from(base64Data, 'base64').toString('utf-8');
+            }
+          }
+          clipboard.writeText(textContent);
+        } else if (item.filePath) {
+          // Fallback: if no content, copy file path
+          clipboard.writeText(item.filePath);
+        }
       }
       
       return { success: true };

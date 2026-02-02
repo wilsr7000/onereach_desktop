@@ -1844,6 +1844,33 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
         },
         { type: 'separator' },
         {
+          label: 'Open Black Hole (Upload Files)',
+          accelerator: process.platform === 'darwin' ? 'Cmd+Shift+U' : 'Ctrl+Shift+U',
+          click: () => {
+            // Get the clipboard manager from the global scope
+            if (global.clipboardManager) {
+              // Get the focused window position
+              const { BrowserWindow } = require('electron');
+              const focusedWindow = BrowserWindow.getFocusedWindow();
+              if (focusedWindow) {
+                const bounds = focusedWindow.getBounds();
+                const position = {
+                  x: bounds.x + bounds.width / 2 - 200,
+                  y: bounds.y + bounds.height / 2 - 200
+                };
+                // Open in expanded mode with space chooser visible
+                global.clipboardManager.createBlackHoleWindow(position, true);
+              } else {
+                // Default center position
+                global.clipboardManager.createBlackHoleWindow({ x: 400, y: 300 }, true);
+              }
+            } else {
+              console.error('[Menu] Clipboard manager not available');
+            }
+          }
+        },
+        { type: 'separator' },
+        {
           label: 'Validate & Clean Storage',
           click: async () => {
             const { dialog } = require('electron');

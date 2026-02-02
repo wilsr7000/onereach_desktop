@@ -498,9 +498,9 @@ app.whenReady().then(() => {
   
   // Initialize clipboard manager after app is ready
   clipboardManager = new ClipboardManager();
-  clipboardManager.registerShortcut();
+  // clipboardManager.registerShortcut(); // DISABLED: Cmd+Shift+V conflicts with system shortcuts
   global.clipboardManager = clipboardManager;
-  console.log('Clipboard manager initialized');
+  console.log('Clipboard manager initialized (shortcut disabled)');
   logger.logFeatureUsed('clipboard-manager', {
     status: 'initialized',
     shortcutRegistered: true
@@ -2202,8 +2202,8 @@ function setupIPC() {
         console.log('Initializing clipboard manager on demand');
         const ClipboardManager = require('./clipboard-manager-v2-adapter');
         global.clipboardManager = new ClipboardManager();
-        global.clipboardManager.registerShortcut();
-        console.log('Clipboard manager initialized successfully');
+        // global.clipboardManager.registerShortcut(); // DISABLED: Cmd+Shift+V conflicts with system shortcuts
+        console.log('Clipboard manager initialized successfully (shortcut disabled)');
         return true;
       } catch (error) {
         console.error('Failed to initialize clipboard manager:', error);
@@ -2367,8 +2367,8 @@ function setupIPC() {
       if (app.isReady()) {
         const ClipboardManager = require('./clipboard-manager-v2-adapter');
         global.clipboardManager = new ClipboardManager();
-        global.clipboardManager.registerShortcut();
-        console.log('Clipboard manager initialized on demand');
+        // global.clipboardManager.registerShortcut(); // DISABLED: Cmd+Shift+V conflicts with system shortcuts
+        console.log('Clipboard manager initialized on demand (shortcut disabled)');
         global.clipboardManager.createBlackHoleWindow(position);
       } else {
         console.error('App not ready, cannot initialize clipboard manager');
