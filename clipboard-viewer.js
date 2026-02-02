@@ -71,8 +71,10 @@ async function init() {
         
         // If clipboard API is still not available, show a helpful error
         if (!window.clipboard) {
-            throw new Error('The clipboard manager is not initialized. Please close this window and try again.');
+            throw new Error('The clipboard manager is not initialized. Please restart the app and try again.');
         }
+        
+        console.log('✓ Clipboard API is available');
         
         // PERFORMANCE: Hide loading overlay immediately to show UI shell
         // This makes the app feel much more responsive
@@ -6033,6 +6035,152 @@ function setupEventListeners() {
         screenshotCaptureEnabled = enabled;
         updateScreenshotIndicator();
     });
+    
+    // Drag and drop file upload
+    const mainContent = document.querySelector('.main-content');
+    const historyList = document.getElementById('historyList');
+    
+    // Prevent default drag behaviors
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+        mainContent.addEventListener(eventName, preventDefaults, false);
+        document.body.addEventListener(eventName, preventDefaults, false);
+    });
+    
+    function preventDefaults(e) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
+    
+    // Highlight drop area when dragging
+    ['dragenter', 'dragover'].forEach(eventName => {
+        mainContent.addEventListener(eventName, () => {
+            mainContent.style.background = 'rgba(100, 200, 255, 0.1)';
+            mainContent.style.border = '2px dashed rgba(100, 200, 255, 0.5)';
+        }, false);
+    });
+    
+    ['dragleave', 'drop'].forEach(eventName => {
+        mainContent.addEventListener(eventName, () => {
+            mainContent.style.background = '';
+            mainContent.style.border = '';
+        }, false);
+    });
+    
+    // Handle dropped files
+    mainContent.addEventListener('drop', async (e) => {
+        const dt = e.dataTransfer;
+        const files = [...dt.files];
+        
+        if (files.length === 0) return;
+        
+        // Get current space
+        const spaceId = currentSpace;
+        const spaceName = spaceId ? spaces.find(s => s.id === spaceId)?.name || 'Unknown' : 'All Items';
+        
+        console.log(`Dropping ${files.length} file(s) into space:`, spaceName);
+        
+        // Show processing message
+        showNotification(`⏳ Uploading ${files.length} file(s)...`);
+        
+        // Process each file
+        let successCount = 0;
+        for (const file of files) {
+            try {
+                // Read file as data URL
+                const dataUrl = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = (e) => resolve(e.target.result);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(file);
+                });
+                
+                // Determine file type
+                let fileType = 'file';
+                if (file.type.startsWith('image/')) {
+                    fileType = 'image-file';
+                } else if (file.type === 'application/pdf') {
+                    fileType = 'pdf';
+                }
+                
+                console.log('Adding file:', file.name, 'to space:', spaceId, 'type:', fileType);
+                console.log('File size:', file.size, 'bytes');
+                console.log('Data URL length:', dataUrl.length);
+                
+                try {
+                    // Use the image handler for all files - it saves content properly
+                    const result = await window.electron.ipcRenderer.invoke('black-hole:add-image', {
+                        fileName: file.name,
+                        dataUrl: dataUrl,
+                        fileSize: file.size,
+                        spaceId: spaceId
+                    });
+                    
+                    console.log('✓ File added result:', result);
+                    
+                    if (result && result.success) {
+                        successCount++;
+                        console.log('✓ Success count:', successCount);
+                    } else {
+                        const errorMsg = `File result invalid: ${JSON.stringify(result)}`;
+                        console.error('❌', errorMsg);
+                        alert(errorMsg);
+                    }
+                } catch (error) {
+                    const errorMsg = `Error adding file: ${error.message || error}`;
+                    console.error('❌', errorMsg, error);
+                    alert(errorMsg);
+                }
+            } catch (error) {
+                console.error('Error uploading file:', file.name, error);
+            }
+        }
+        
+        // Wait a moment for files to be written to disk
+        console.log('Waiting for files to be saved...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Reload history to show new files
+        console.log('Reloading history after file upload...');
+        await loadHistory();
+        console.log('History loaded, item count:', history.length);
+        renderHistory();
+        console.log('History rendered');
+        
+        // Show success message
+        if (successCount > 0) {
+            if (files.length === 1) {
+                showNotification(`✓ Added ${files[0].name} to ${spaceName}`);
+            } else {
+                showNotification(`✓ Added ${successCount} file(s) to ${spaceName}`);
+            }
+        } else {
+            showNotification(`❌ Failed to add files`);
+        }
+    }, false);
+    
+    // Helper function to show notifications
+    function showNotification(message) {
+        const notification = document.createElement('div');
+        notification.style.cssText = `
+            position: fixed;
+            top: 60px;
+            right: 20px;
+            background: rgba(100, 200, 255, 0.95);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            z-index: 10000;
+            animation: slideIn 0.3s ease-out;
+        `;
+        notification.textContent = message;
+        document.body.appendChild(notification);
+        
+        setTimeout(() => {
+            notification.style.animation = 'slideOut 0.3s ease-out';
+            setTimeout(() => notification.remove(), 300);
+        }, 3000);
+    }
     
     // Listen for screenshot space selection
     window.electron.on('clipboard:select-space-for-screenshot', async (data) => {

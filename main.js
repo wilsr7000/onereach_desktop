@@ -928,7 +928,7 @@ app.whenReady().then(() => {
     url: 'index.html'
   });
   
-  // Initialize settings manager EARLY (needed for other managers)
+// Initialize settings manager EARLY (needed for other managers)
   const { getSettingsManager } = require('./settings-manager');
   global.settingsManager = getSettingsManager();
   console.log('Settings manager initialized');
@@ -948,6 +948,16 @@ app.whenReady().then(() => {
     console.log('Spaces API Server started');
   }).catch(err => {
     console.error('Failed to start Spaces API Server:', err);
+  });
+  
+  // Initialize clipboard manager after app is ready (from Josh)
+  clipboardManager = new ClipboardManager();
+  // clipboardManager.registerShortcut(); // DISABLED: Cmd+Shift+V conflicts with system shortcuts
+  global.clipboardManager = clipboardManager;
+  console.log('Clipboard manager initialized (shortcut disabled)');
+  logger.logFeatureUsed('clipboard-manager', {
+    status: 'initialized',
+    shortcutRegistered: false
   });
   
   // Set up Tab Picker IPC handlers
@@ -8692,8 +8702,8 @@ function setupIPC() {
         console.log('Initializing clipboard manager on demand');
         const ClipboardManager = require('./clipboard-manager-v2-adapter');
         global.clipboardManager = new ClipboardManager();
-        global.clipboardManager.registerShortcut();
-        console.log('Clipboard manager initialized successfully');
+        // global.clipboardManager.registerShortcut(); // DISABLED: Cmd+Shift+V conflicts with system shortcuts
+        console.log('Clipboard manager initialized successfully (shortcut disabled)');
         return true;
       } catch (error) {
         console.error('Failed to initialize clipboard manager:', error);
@@ -8860,8 +8870,8 @@ function setupIPC() {
       if (app.isReady()) {
         const ClipboardManager = require('./clipboard-manager-v2-adapter');
         global.clipboardManager = new ClipboardManager();
-        global.clipboardManager.registerShortcut();
-        console.log('Clipboard manager initialized on demand');
+        // global.clipboardManager.registerShortcut(); // DISABLED: Cmd+Shift+V conflicts with system shortcuts
+        console.log('Clipboard manager initialized on demand (shortcut disabled)');
         global.clipboardManager.createBlackHoleWindow(position, startExpanded);
       } else {
         console.error('App not ready, cannot initialize clipboard manager');
