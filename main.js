@@ -1218,6 +1218,14 @@ app.whenReady().then(() => {
     console.error('[Main] Error setting up Spaces API:', error);
   }
   
+  // Setup App Actions IPC (for voice-controlled app navigation)
+  try {
+    setupAppActionsIPC();
+    console.log('[Main] App Actions IPC initialized');
+  } catch (error) {
+    console.error('[Main] Error setting up App Actions IPC:', error);
+  }
+  
   // Setup Evaluation and Meta-Learning IPC handlers
   try {
     const { setupEvaluationIPC } = require('./lib/ipc');
@@ -2750,6 +2758,36 @@ function setupSpacesAPI() {
 let tabPickerWindow = null;
 let tabPickerCallback = null;
 
+// ============================================
+// APP ACTIONS IPC - Voice-controlled app navigation
+// ============================================
+
+/**
+ * Set up App Actions IPC handlers
+ * Delegates to centralized action-executor.js
+ */
+function setupAppActionsIPC() {
+  console.log('[AppActions] Setting up IPC handlers (delegating to action-executor)...');
+  
+  const { executeAction, listActions, setupActionIPC } = require('./action-executor');
+  
+  // Set up the action executor's IPC handlers
+  setupActionIPC();
+  
+  // Legacy IPC handler for backward compatibility
+  ipcMain.handle('app:execute-action', async (event, action) => {
+    console.log('[AppActions] Executing action:', action);
+    return executeAction(action.type, action);
+  });
+  
+  // Legacy list actions handler
+  ipcMain.handle('app:list-actions', async () => {
+    return listActions();
+  });
+  
+  console.log('[AppActions] IPC handlers registered');
+}
+
 // Set up Tab Picker IPC handlers
 function setupTabPickerIPC() {
   // Get API server status
@@ -3298,8 +3336,8 @@ function setupModuleManagerIPC() {
       if (!global.moduleManager) {
         return { success: false, error: 'Module manager not yet initialized' };
       }
-      global.moduleManager.addWebTool(tool);
-      return { success: true };
+      const result = await global.moduleManager.addWebTool(tool);
+      return { success: true, agentCreated: result.agentCreated || false };
     } catch (error) {
       return { success: false, error: error.message };
     }
@@ -3324,7 +3362,7 @@ function setupModuleManagerIPC() {
       if (!global.moduleManager) {
         return { success: false, error: 'Module manager not yet initialized' };
       }
-      global.moduleManager.deleteWebTool(toolId);
+      await global.moduleManager.deleteWebTool(toolId);
       return { success: true };
     } catch (error) {
       return { success: false, error: error.message };
@@ -10858,6 +10896,17 @@ function setupIPC() {
       return;
     }
     
+    // ==================== APP FEATURE ACTIONS (delegated to action-executor) ====================
+    // These actions are handled by action-executor.js for centralized management
+    if (data.action && data.action.startsWith('open-') && !data.url) {
+      const { executeAction, hasAction } = require('./action-executor');
+      if (hasAction(data.action)) {
+        console.log('[Menu Action] Delegating to action-executor:', data.action);
+        executeAction(data.action, data);
+        return;
+      }
+    }
+    
     // Handle IDW URL opening
     if (data.action === 'open-idw-url' && data.url) {
       // Validate and clean the URL
@@ -15642,6 +15691,27 @@ function setupAgentManagerIPC() {
   
   // ==================== BUILTIN AGENTS ====================
   
+  // Get all builtin agents from registry (single source of truth)
+  ipcMain.handle('agents:get-builtin-list', async () => {
+    try {
+      const { getAllAgents } = require('./packages/agents/agent-registry');
+      const agents = getAllAgents();
+      // Return serializable agent info for frontend
+      return agents.map(a => ({
+        id: a.id,
+        name: a.name,
+        description: a.description,
+        categories: a.categories,
+        keywords: a.keywords,
+        capabilities: a.capabilities,
+        builtin: true,
+      }));
+    } catch (error) {
+      console.error('[AgentManager] Failed to get builtin agents:', error);
+      return [];
+    }
+  });
+  
   // Get enabled states for all builtin agents
   ipcMain.handle('agents:get-builtin-states', async () => {
     if (global.settingsManager) {
@@ -15667,23 +15737,16 @@ function setupAgentManagerIPC() {
   ipcMain.handle('agents:test-phrase', async (event, agentId, phrase) => {
     try {
       const { evaluateAgentBid } = require('./packages/agents/unified-bidder');
+      const { getAgent: getBuiltinAgent } = require('./packages/agents/agent-registry');
       const store = getAgentStore();
       await store.init();
       
-      // Get the agent
+      // Get the agent - check custom agents first, then builtin registry
       let agent = store.getAgent(agentId);
       
-      // If not a custom agent, check builtin agents
+      // If not a custom agent, check builtin agents from registry
       if (!agent) {
-        const builtinAgents = {
-          'time-agent': { id: 'time-agent', name: 'Time Agent', keywords: ['time', 'clock', 'date', 'day', 'month', 'year'], capabilities: ['Tell current time', 'Tell current date'] },
-          'weather-agent': { id: 'weather-agent', name: 'Weather Agent', keywords: ['weather', 'temperature', 'forecast', 'rain'], capabilities: ['Check weather', 'Provide forecasts'] },
-          'media-agent': { id: 'media-agent', name: 'Media Agent', keywords: ['play', 'pause', 'stop', 'music', 'volume'], capabilities: ['Play music', 'Control playback', 'Adjust volume'] },
-          'help-agent': { id: 'help-agent', name: 'Help Agent', keywords: ['help', 'assist', 'capabilities'], capabilities: ['Explain features', 'Provide guidance'] },
-          'search-agent': { id: 'search-agent', name: 'Search Agent', keywords: ['search', 'find', 'look up'], capabilities: ['Search the web', 'Find information'] },
-          'smalltalk-agent': { id: 'smalltalk-agent', name: 'Smalltalk Agent', keywords: ['hello', 'hi', 'thanks', 'goodbye'], capabilities: ['Greetings', 'Social conversation'] },
-        };
-        agent = builtinAgents[agentId];
+        agent = getBuiltinAgent(agentId);
       }
       
       if (!agent) {
@@ -15708,24 +15771,16 @@ function setupAgentManagerIPC() {
   ipcMain.handle('agents:test-phrase-all', async (event, phrase) => {
     try {
       const { evaluateAgentBid } = require('./packages/agents/unified-bidder');
+      const { getAllAgents: getBuiltinAgents } = require('./packages/agents/agent-registry');
       const store = getAgentStore();
       await store.init();
-      
-      const results = [];
       
       // Get custom agents
       const customAgents = store.getLocalAgents().filter(a => a.enabled);
       
-      // Get enabled builtin agents
+      // Get enabled builtin agents from registry (single source of truth)
       const builtinStates = global.settingsManager?.get('builtinAgentStates') || {};
-      const builtinAgents = [
-        { id: 'time-agent', name: 'Time Agent', keywords: ['time', 'clock', 'date', 'day', 'month', 'year'], capabilities: ['Tell current time', 'Tell current date'] },
-        { id: 'weather-agent', name: 'Weather Agent', keywords: ['weather', 'temperature', 'forecast', 'rain'], capabilities: ['Check weather', 'Provide forecasts'] },
-        { id: 'media-agent', name: 'Media Agent', keywords: ['play', 'pause', 'stop', 'music', 'volume'], capabilities: ['Play music', 'Control playback', 'Adjust volume'] },
-        { id: 'help-agent', name: 'Help Agent', keywords: ['help', 'assist', 'capabilities'], capabilities: ['Explain features', 'Provide guidance'] },
-        { id: 'search-agent', name: 'Search Agent', keywords: ['search', 'find', 'look up'], capabilities: ['Search the web', 'Find information'] },
-        { id: 'smalltalk-agent', name: 'Smalltalk Agent', keywords: ['hello', 'hi', 'thanks', 'goodbye'], capabilities: ['Greetings', 'Social conversation'] },
-      ].filter(a => builtinStates[a.id] !== false);
+      const builtinAgents = getBuiltinAgents().filter(a => builtinStates[a.id] !== false);
       
       const allAgents = [...customAgents, ...builtinAgents];
       
@@ -15759,7 +15814,80 @@ function setupAgentManagerIPC() {
       return [];
     }
   });
-  
+
+  // Execute an agent directly (bypasses Exchange for testing)
+  ipcMain.handle('agents:execute-direct', async (event, agentId, phrase) => {
+    try {
+      const { getAgent: getBuiltinAgent } = require('./packages/agents/agent-registry');
+      const store = getAgentStore();
+      await store.init();
+
+      // Get the agent - check custom agents first, then builtin registry
+      let agent = store.getAgent(agentId);
+      if (!agent) {
+        agent = getBuiltinAgent(agentId);
+      }
+
+      if (!agent) {
+        return { success: false, error: `Agent ${agentId} not found` };
+      }
+
+      if (!agent.execute || typeof agent.execute !== 'function') {
+        return { success: false, error: `Agent ${agentId} has no execute method` };
+      }
+
+      // Get agent's ack and voice for display
+      let ack = null;
+      if (agent.acks && Array.isArray(agent.acks) && agent.acks.length > 0) {
+        ack = agent.acks[Math.floor(Math.random() * agent.acks.length)];
+      } else if (agent.ack) {
+        ack = agent.ack;
+      }
+      const voice = agent.voice || 'alloy';
+
+      // Initialize agent if needed
+      if (agent.initialize && typeof agent.initialize === 'function') {
+        await agent.initialize();
+      }
+
+      // Execute the agent
+      const task = { id: `test_${Date.now()}`, content: phrase };
+      const startTime = Date.now();
+      const result = await agent.execute(task);
+      const executionTime = Date.now() - startTime;
+
+      return {
+        success: result.success !== false,
+        message: result.message || result.result || result.output,
+        data: result.data,
+        needsInput: result.needsInput,
+        executionTime,
+        agentId,
+        // Include ack and voice for test UI display
+        ack,
+        voice,
+        // Include orchestration info if present (for multi-agent coordination)
+        orchestrated: result.orchestrated || false,
+        agentsUsed: result.agentsUsed || null,
+      };
+    } catch (error) {
+      console.error('[AgentManager] Execute direct error:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Get API key for auto-test phrase generation
+  ipcMain.handle('agents:get-api-key', async () => {
+    if (global.settingsManager) {
+      const openaiKey = global.settingsManager.get('openaiApiKey');
+      if (openaiKey) return openaiKey;
+      const provider = global.settingsManager.get('llmProvider');
+      const llmKey = global.settingsManager.get('llmApiKey');
+      if (provider === 'openai' && llmKey) return llmKey;
+    }
+    return process.env.OPENAI_API_KEY || null;
+  });
+
   // ==================== VERSION HISTORY (aliases) ====================
   
   // Get version history (alias for agents:get-versions)

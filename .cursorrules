@@ -178,6 +178,17 @@ Use `npm run release` which runs `scripts/release-master.sh`:
 - Reference file paths when discussing changes
 - Update constitutional documents as part of completing work
 
+## Classification Approach (MANDATORY)
+
+**Never use regex or keyword-based classification** unless the user explicitly asks for it. This applies to:
+- Intent detection
+- Content categorization
+- Task routing
+- Message parsing
+- Any classification task
+
+Instead, use semantic understanding and context. Regex/keyword approaches are fragile and miss nuance.
+
 ## Email Capability
 
 **To send an email, run this shell command directly - don't just give the user a link:**

@@ -126,6 +126,7 @@ function createSpellingAgent(exchangeUrl) {
   return createAgent({
     name: 'spelling-agent',
     version: '1.0.0',
+    voice: 'sage',  // Calm, precise - see VOICE-GUIDE.md
     categories: ['spelling', 'language', 'words'],
     
     exchange: {

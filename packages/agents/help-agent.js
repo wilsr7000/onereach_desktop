@@ -16,6 +16,7 @@ const helpAgent = {
   id: 'help-agent',
   name: 'Help Agent',
   description: 'Lists available capabilities - remembers your skill level',
+  voice: 'alloy',  // Neutral, helpful - see VOICE-GUIDE.md
   categories: ['system', 'help'],
   keywords: ['help', 'what can you do', 'capabilities', 'commands', 'how do i', 'what do you'],
   
@@ -56,22 +57,10 @@ const helpAgent = {
   },
   
   /**
-   * Bid on a task
+   * Bid on a task - uses LLM-based unified bidder
    */
   bid(task) {
-    if (!task?.content) return null;
-    
-    const lower = task.content.toLowerCase();
-    
-    if (lower.includes('help') || 
-        lower.includes('what can you do') ||
-        lower.includes('capabilities') ||
-        lower.includes('commands') ||
-        /what (do you|can you)/.test(lower) ||
-        /how (do i|can i)/.test(lower)) {
-      return { confidence: 0.95, reasoning: 'Help request' };
-    }
-    
+    // No fast bidding - let the unified bidder handle all evaluation via LLM
     return null;
   },
   

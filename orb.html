@@ -215,18 +215,21 @@
             position: fixed;
             background: linear-gradient(135deg, rgba(15, 15, 20, 0.95) 0%, rgba(25, 25, 35, 0.9) 100%);
             color: rgba(255, 255, 255, 0.95);
-            padding: 14px 20px;
+            padding: 16px 22px;
             border-radius: 16px;
-            font-size: 14px;
+            font-size: 15px;
             font-weight: 400;
-            letter-spacing: 0.3px;
-            line-height: 1.5;
+            letter-spacing: 0.2px;
+            line-height: 1.6;
             font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
-            max-width: 320px;
-            max-height: 150px;
+            max-width: 420px;
+            max-height: 200px;
             overflow-y: auto;
-            text-align: center;
+            text-align: left;
             white-space: normal;
+            /* Hide scrollbar but keep scroll functionality */
+            scrollbar-width: none; /* Firefox */
+            -ms-overflow-style: none; /* IE/Edge */
             word-wrap: break-word;
             opacity: 0;
             /* Allow clicks through when hidden, enable when visible */
@@ -252,6 +255,11 @@
             z-index: 100;
         }
         
+        /* Hide scrollbar for WebKit browsers (Chrome, Safari) */
+        .transcript-tooltip::-webkit-scrollbar {
+            display: none;
+        }
+        
         .transcript-tooltip.visible {
             opacity: 1;
             transform: translateY(0);
@@ -268,6 +276,13 @@
             color: rgba(180, 180, 200, 0.9);
             font-style: italic;
             font-weight: 300;
+        }
+        
+        /* Agent speaking - distinct style */
+        .transcript-tooltip.agent-speaking {
+            background: linear-gradient(135deg, rgba(20, 40, 60, 0.95) 0%, rgba(30, 50, 70, 0.9) 100%);
+            border-left: 3px solid rgba(100, 180, 255, 0.7);
+            color: rgba(200, 230, 255, 0.95);
         }
         
         /* Position below orb when near top of window */
@@ -727,43 +742,51 @@
         // Common noise/filler words to ignore (background noise often produces these)
         const NOISE_WORDS = new Set([
             'hmm', 'hm', 'um', 'uh', 'ah', 'oh', 'eh', 'er', 'mm',
-            'yeah', 'yep', 'yes', 'no', 'nope', 'ok', 'okay', 'mhm', 'uh-huh',
+            'mhm', 'uh-huh',
             'the', 'a', 'i', 'it', 'is', 'and', 'but', 'so', 'like',
-            'bye', 'hi', 'hey', 'hello', 'thanks', 'thank you',
-            'right', 'alright', 'sure', 'well', 'now', 'just',
+            'right', 'alright', 'well', 'now', 'just',
             // Common misheard noise
             'you', 'me', 'we', 'he', 'she', 'they', 'that', 'this',
             'what', 'huh', 'wow', 'ooh', 'aah', 'ugh'
         ]);
         
+        // Valid short commands that should NOT be filtered (agents can handle these)
+        const VALID_SHORT_COMMANDS = new Set([
+            // Greetings (smalltalk agent)
+            'hi', 'hey', 'hello', 'yo', 'sup', 'bye', 'goodbye',
+            // Confirmations (multi-turn conversations)
+            'yes', 'yeah', 'yep', 'no', 'nope', 'ok', 'okay', 'sure',
+            // Gratitude
+            'thanks', 'thank you',
+            // Playback controls (DJ agent)
+            'stop', 'play', 'pause', 'skip', 'next', 'back', 'mute',
+            // Actions
+            'help', 'cancel', 'undo', 'done', 'repeat'
+        ]);
+        
         // Check if transcript is likely just noise
+        // NOTE: We now let more through - smalltalk agent handles unclear inputs naturally
         function isLikelyNoise(text) {
             if (!text) return true;
             
             const normalized = text.toLowerCase().trim();
-            
-            // Too short
-            if (normalized.length <= 3) return true;
-            
-            // Single noise word
-            if (NOISE_WORDS.has(normalized)) return true;
-            
-            // Remove punctuation and check again
             const stripped = normalized.replace(/[.,!?;:'"]/g, '').trim();
-            if (NOISE_WORDS.has(stripped)) return true;
             
-            // Check if it's just repeated characters (like "aaaah" or "mmmm")
-            if (/^(.)\1{2,}$/.test(stripped)) return true;
+            // Allow valid short commands - these are intentional user input
+            if (VALID_SHORT_COMMANDS.has(stripped)) return false;
             
-            // Very short after stripping (like "I." or "A!")
-            if (stripped.length <= 2) return true;
+            // Allow anything 4+ characters - let agents decide what to do with it
+            // (smalltalk agent will handle gibberish with "Hmm?" type responses)
+            if (stripped.length >= 4) return false;
             
-            // Two-word combos that are likely noise (e.g., "oh yeah", "uh huh")
-            const words = stripped.split(/\s+/);
-            if (words.length <= 2 && words.every(w => NOISE_WORDS.has(w) || w.length <= 2)) {
-                return true;
-            }
+            // Only filter truly empty or single-char noise
+            if (stripped.length <= 1) return true;
             
+            // Filter common 2-3 char noise that's definitely not intentional
+            const definiteNoise = new Set(['um', 'uh', 'ah', 'eh', 'er', 'mm', 'hm']);
+            if (definiteNoise.has(stripped)) return true;
+            
+            // Let everything else through to agents
             return false;
         }
         
@@ -917,6 +940,50 @@
             return float32;
         }
         
+        // Play WAV audio from base64 string (from TTS API)
+        async function playWAVAudio(base64Audio) {
+            try {
+                console.log('[Orb] playWAVAudio: decoding WAV...');
+                
+                // Decode base64 to ArrayBuffer
+                const binaryString = atob(base64Audio);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+                
+                // Get or create AudioContext
+                const ctx = initTTSAudio();
+                if (ctx.state === 'suspended') {
+                    console.log('[Orb] playWAVAudio: resuming AudioContext...');
+                    await ctx.resume();
+                }
+                
+                // Decode WAV using Web Audio API
+                const audioBuffer = await ctx.decodeAudioData(bytes.buffer.slice(0));
+                
+                console.log(`[Orb] playWAVAudio: decoded ${audioBuffer.duration.toFixed(2)}s of audio`);
+                
+                // Create source and play
+                const source = ctx.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(ctx.destination);
+                
+                source.onended = () => {
+                    console.log('[Orb] playWAVAudio: playback complete');
+                    isSpeaking = false;
+                    ttsEndTime = Date.now();
+                };
+                
+                source.start(0);
+                console.log('[Orb] playWAVAudio: playing...');
+                
+            } catch (e) {
+                console.error('[Orb] playWAVAudio error:', e);
+                isSpeaking = false;
+            }
+        }
+        
         // Play a pleasant ready chime using Web Audio API
         // This is a short tone that won't trigger function calling
         async function playReadyChime() {
@@ -1046,6 +1113,22 @@
                         const float32 = base64ToFloat32(event.audio);
                         ttsAudioChunks.push(float32);
                         isSpeaking = true;
+                    } else if (event.type === 'audio_wav' && event.audio) {
+                        // WAV format from TTS API - decode and play directly
+                        console.log('[Orb] Persistent: audio_wav received, size:', event.audio.length);
+                        isSpeaking = true;
+                        window._agentResponseText = '';  // Clear for new response
+                        
+                        // CRITICAL: Clear input audio buffer to prevent echo
+                        // The microphone might pick up our TTS output
+                        try {
+                            window.orbAPI.clear();
+                            console.log('[Orb] Cleared audio input buffer to prevent TTS echo');
+                        } catch (e) {
+                            console.warn('[Orb] Could not clear audio buffer:', e);
+                        }
+                        
+                        playWAVAudio(event.audio);
                     } else if (event.type === 'audio_done') {
                         console.log('[Orb] Persistent: audio_done, playing', ttsAudioChunks.length, 'chunks');
                         if (ttsAudioChunks.length > 0) {
@@ -1455,7 +1538,9 @@
         // NOTE: exchange-bridge now speaks directly via realtimeSpeech.speak()
         // so we DON'T speak here to avoid duplicates
         if (window.orbAPI.onTaskEvent) {
+            console.log('[Orb] Setting up task event listener');
             window.orbAPI.onTaskEvent(async (event) => {
+                console.log('[Orb] Task event received:', event.type, event);
                 // Handle multi-turn conversation prompts
                 if (event.type === 'needs-input') {
                     console.log('[Orb] Agent needs input, prompt:', event.prompt);
@@ -1868,6 +1953,9 @@
             transcriptEl.textContent = text;
             transcriptEl.classList.toggle('interim', isInterim);
             
+            // Auto-scroll to bottom for streaming text
+            transcriptEl.scrollTop = transcriptEl.scrollHeight;
+
             // Get the orb's position within the window
             const orbContainer = document.querySelector('.orb-container');
             const orbRect = orbContainer.getBoundingClientRect();
@@ -1994,6 +2082,16 @@
                         const callId = event.callId;
                         const now = Date.now();
                         
+                        // ACTIVE TTS CHECK: Ignore function calls while TTS is playing
+                        // This prevents the microphone from transcribing our own TTS output
+                        if (isSpeaking) {
+                            console.log('[Orb] Ignoring function call during active TTS playback:', transcript);
+                            try {
+                                await window.orbAPI.respondToFunction(callId, "");
+                            } catch (e) { /* ignore */ }
+                            return;
+                        }
+
                         // NOISE CHECK: Ignore background noise that triggered function call
                         if (isLikelyNoise(transcript)) {
                             console.log('[Orb] Ignoring noise in function call:', transcript);
@@ -2003,7 +2101,7 @@
                             } catch (e) { /* ignore */ }
                             return;
                         }
-                        
+
                         // COOLDOWN CHECK: Ignore function calls right after TTS
                         // This prevents the microphone from picking up echo/ambient noise
                         const timeSinceTTS = now - ttsEndTime;
@@ -2051,7 +2149,10 @@
                             
                             // Check if agent needs input (multi-turn conversation, synchronous path)
                             if (result.needsInput) {
-                                console.log('[Orb] Agent needs input (sync)');
+                                console.log('[Orb] Agent needs input (sync), keeping mic active');
+                                // CRITICAL: Mark that we're waiting for user input
+                                // This prevents disconnection after TTS completes
+                                isWaitingForUserInput = true;
                                 // Respond with the prompt
                                 const prompt = result.message || result.needsInput.prompt || "What would you like?";
                                 await window.orbAPI.respondToFunction(callId, prompt);
@@ -2077,6 +2178,12 @@
                     } else if (event.type === 'transcript') {
                         const text = event.text?.trim();
                         const now = Date.now();
+                        
+                        // Skip if TTS is actively playing (prevents echo)
+                        if (isSpeaking) {
+                            console.log('[Orb] Ignoring transcript during active TTS playback:', text);
+                            return;
+                        }
                         
                         // Skip if empty or likely background noise
                         if (isLikelyNoise(text)) {
@@ -2123,6 +2230,26 @@
                         processVoiceCommand(text);
                         // Hide transcript after a delay
                         setTimeout(hideTranscript, 3000);
+                    } else if (event.type === 'speech_text_delta') {
+                        // Agent is speaking - show text word by word in real-time
+                        if (!window._agentResponseText) {
+                            window._agentResponseText = '';
+                        }
+                        window._agentResponseText += event.text;
+                        
+                        // Show accumulated agent response (different style for agent speech)
+                        transcriptEl.classList.add('agent-speaking');
+                        showTranscript(window._agentResponseText, false);
+                    } else if (event.type === 'speech_text') {
+                        // Full agent response text (final)
+                        window._agentResponseText = '';  // Reset for next response
+                        showTranscript(event.text, false);
+                        transcriptEl.classList.add('agent-speaking');
+                        // Keep visible longer for agent responses
+                        setTimeout(() => {
+                            hideTranscript();
+                            transcriptEl.classList.remove('agent-speaking');
+                        }, 4000);
                     } else if (event.type === 'response_cancelled' || event.type === 'clear_audio_buffer') {
                         // FIX: When a response is cancelled OR we're about to speak something new,
                         // clear any accumulated audio chunks to prevent mixing responses
@@ -2164,6 +2291,9 @@
                     } else if (event.type === 'audio_done') {
                         // AUDIO PLAYBACK handled by persistent listener
                         // But we still need to update state here
+                        
+                        // Clear agent response text buffer
+                        window._agentResponseText = '';
                         
                         // ALWAYS update ttsEndTime when audio finishes
                         // This handles speech from backend (exchange-bridge) via realtimeSpeech.speak()

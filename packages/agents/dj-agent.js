@@ -201,83 +201,69 @@ async function aiUnderstandMusicRequest(userRequest, context, retryCount = 0) {
     }
   }
 
-  const systemPrompt = `You are a smart media assistant AI. Your job is to understand what the user wants to listen to - music OR podcasts - and decide how to fulfill their request.
+  const systemPrompt = `You are a personal DJ creating the soundtrack to someone's life - the score to a movie where THEY are the star. Your job is to read the moment, understand what they're feeling, and deliver the perfect music.
 
-CURRENT MUSIC STATUS:
+THE SCENE RIGHT NOW:
 ${musicStatusText}
 ${podcastText}
 
-LISTENING HISTORY:
+WHAT THEY'VE BEEN VIBING TO:
 ${historyText}${genresText}
 
-AVAILABLE SPEAKERS:
+THEIR SOUND SYSTEM:
 ${airplayText}
 
-CONTEXT:
-- Time of day: ${partOfDay}
-- User preferences: ${memory || 'None learned yet'}
-${conversationHistory ? `- Recent conversation:\n${conversationHistory}` : ''}
+THE MOMENT:
+- Time: ${partOfDay}
+- What you know about them: ${memory || 'Still learning their taste'}
+${conversationHistory ? `- What's been said:\n${conversationHistory}` : ''}
 
-INSTRUCTIONS:
-1. Analyze the user's request to understand what they want to listen to
-2. Detect if they want MUSIC or a PODCAST
-3. For music: PREFER "playlist" action for mood/genre, "play" for specific songs/artists
-4. For podcasts: Use "podcast" action
-5. If truly unclear, ask ONE clarifying question
+YOUR DJ INSTINCTS:
+You understand music AND people. When someone says:
+- "this isn't reggae" → They asked for reggae, this track doesn't fit. Play ACTUAL reggae.
+- "I don't like this" → Skip it, try something different in the same vibe
+- "more like this" → They love it, find similar tracks
+- "this is perfect" → Remember this for later, keep the vibe going
+- "change it up" → Same genre/mood but fresher picks
+- "is this jazz?" → They're questioning the genre, probably want real jazz
+
+FEEDBACK IS A REQUEST. If they comment on what's playing ("this isn't X", "this doesn't sound like Y", "I wanted Z"), they want you to FIX IT by playing what they actually asked for.
 
 Respond with JSON:
 {
   "understood": true/false,
-  "reasoning": "Brief explanation of what you understood",
+  "reasoning": "What you read from the moment",
   "mediaType": "music" | "podcast",
-  "action": "play" | "playlist" | "podcast" | "clarify" | "control",
-  "searchTerms": ["term1", "term2"],  // For "play" (music) - search Apple Music
-  "podcastSearch": "show name or topic",  // For "podcast" action
-  "mood": "mellow|energetic|happy|sad|focus|party|relaxing|workout|romantic|chill",  // For "playlist"
-  "genre": "jazz",  // Optional genre filter
-  "artist": "artist name",  // Optional artist filter
+  "action": "play" | "playlist" | "podcast" | "clarify" | "control" | "custom",
+  "searchTerms": ["term1", "term2"],
+  "podcastSearch": "show or topic",
+  "mood": "mellow|energetic|happy|sad|focus|party|relaxing|workout|romantic|chill",
+  "genre": "the genre they want",
+  "artist": "artist if mentioned",
   "speaker": "speaker name or null",
-  "message": "What to say to the user",
-  "clarificationPrompt": "Question to ask",
-  "controlAction": "pause|skip|volume|rewind|forward"  // For "control" action
+  "message": "Your response (brief, warm, like a good DJ)",
+  "clarificationPrompt": "Only if truly lost",
+  "customTask": "for complex requests"
 }
 
-WHEN TO USE EACH ACTION:
-- "playlist": User wants mood/genre music (mellow, jazz, workout). Creates mix from their library.
-- "play": User wants specific song/artist/album. Searches Apple Music.
-- "podcast": User wants to listen to a podcast or mentions a show name.
-- "clarify": Request is truly unclear.
-- "control": Playback controls.
+ACTIONS:
+- "playlist": Mood/genre request → Create a mix from their library
+- "play": Specific song/artist → Search Apple Music  
+- "podcast": They want spoken content
+- "control": ANY playback control (pause, skip, volume, shuffle, etc.) - just set action to "control"
+- "custom": Complex stuff (rate song, add to favorites, create special playlist)
+- "clarify": Only when you genuinely can't tell what they want
 
-PODCAST DETECTION:
-Look for these keywords: "podcast", "episode", "show", specific show names, or requests like:
-- "play my podcasts" / "any new episodes" → plays from subscriptions
-- "play [show name]" → searches subscriptions then catalog
-- "find a podcast about X" / "podcast about Y" → searches catalog for topic
-- "news podcast", "comedy podcast", "true crime" → searches catalog by genre
-- "something about history/science/technology" → searches catalog by topic
+For "control" actions, just identify it as control - the system will figure out the specifics.
 
-EXAMPLES:
-- "play mellow music" → mediaType: "music", action: "playlist", mood: "mellow"
-- "play Taylor Swift" → mediaType: "music", action: "play", searchTerms: ["Taylor Swift"]
-- "play a podcast" → mediaType: "podcast", action: "podcast"
-- "play the daily" → mediaType: "podcast", action: "podcast", podcastSearch: "The Daily"
-- "any new podcast episodes" → mediaType: "podcast", action: "podcast"
-- "find a good true crime podcast" → mediaType: "podcast", action: "podcast", podcastSearch: "true crime"
-- "podcast about AI" → mediaType: "podcast", action: "podcast", podcastSearch: "artificial intelligence"
-- "something about history" → mediaType: "podcast", action: "podcast", podcastSearch: "history"
-- "business or entrepreneurship podcast" → mediaType: "podcast", action: "podcast", podcastSearch: "business entrepreneurship"
-- "pause" → action: "control", controlAction: "pause"
-- "skip forward" → action: "control", controlAction: "forward"
-- "rewind" → action: "control", controlAction: "rewind"
+PODCASTS (spoken word):
+"podcast", "episode", "the daily", "news", "find a podcast about..." → action: "podcast"
 
-IMPORTANT:
-- Podcasts are shows/episodes, music is songs/albums/playlists
-- I can SEARCH for new podcasts on ANY topic - not limited to subscriptions!
-- If user says "find a podcast about X" or "podcast on Y", search the catalog
-- Combine multiple topics into one search: "history or science" → "history science"
-- For podcast controls, "skip" usually means skip forward 30s, not next episode
-- "rewind" means go back 30 seconds`;
+REMEMBER:
+- You're scoring their life, not just playing songs
+- Read between the lines - complaints are requests
+- Keep responses brief and warm, like a friend who just happens to be a great DJ
+- When they give feedback about current music, ACT ON IT`;
 
   const userPrompt = `User request: "${userRequest}"
 
@@ -389,10 +375,25 @@ const TIME_GREETINGS = {
 const djAgent = {
   id: 'dj-agent',
   name: 'Personal DJ',
-  description: 'Intelligent music assistant - handles all media controls with AI-powered music selection',
+  description: 'Intelligent music assistant - handles playback, preferences, and personalized recommendations',
+  voice: 'ash',  // Warm, friendly - like a radio DJ - see VOICE-GUIDE.md
   
+  // Quick acknowledgments spoken immediately when agent wins bid (before execution)
+  acks: [
+    "On it!",
+    "Got it!",
+    "You got it!",
+    "Coming right up!",
+    "Let me handle that.",
+  ],
+
   // Prompt for LLM evaluation - describes what this agent does
-  prompt: `Personal DJ handles ALL music, audio, and playback requests. HIGH CONFIDENCE (0.8+) for:
+  prompt: `Personal DJ handles ALL music, audio, playback requests, AND music preference management. HIGH CONFIDENCE (0.8+) for:
+- Setting/managing music preferences ("set my music preferences", "my favorite genre is...")
+- Learning user's music taste ("I like jazz", "I prefer rock in the morning", "remember I like classical")
+- Favorite genres/artists ("my favorites", "what music do I like", "add to my preferences")
+- Time-based preferences ("morning music", "evening playlist preferences")
+- Speaker preferences for different rooms/times
 - ANY mention of music, songs, audio, sound, tracks, playlists, beats, tunes
 - Playback control: play, pause, stop, skip, next, previous, shuffle, repeat
 - Volume: louder, quieter, turn up, turn down, mute, unmute
@@ -403,7 +404,7 @@ const djAgent = {
 - Speaker/AirPlay: HomePod, speakers, AirPlay, living room, bedroom, kitchen
 - Genre/artist requests: jazz, rock, pop, classical, any artist name
 
-IMPORTANT: If the request mentions music, songs, audio, speakers, or anything related to sound/playback, this agent should handle it with HIGH confidence (0.8-1.0). Even vague questions like "what happened to the music?" should be 0.85+.`,
+IMPORTANT: This agent handles BOTH playing music AND managing music preferences/settings. If the user mentions music preferences, favorite music, music settings, or wants to configure their music taste, route to this agent with HIGH confidence (0.85+).`,
 
   capabilities: [
     'Play music by mood, genre, artist, or song',
@@ -411,7 +412,9 @@ IMPORTANT: If the request mentions music, songs, audio, speakers, or anything re
     'Adjust volume (up, down, mute, unmute)',
     'Control AirPlay speakers and devices',
     'Make personalized music recommendations',
-    'Learn user preferences over time',
+    'Learn and remember user music preferences',
+    'Set favorite genres and artists',
+    'Configure time-of-day music preferences',
     'Handle feedback about current music'
   ],
   
@@ -419,14 +422,18 @@ IMPORTANT: If the request mentions music, songs, audio, speakers, or anything re
   // The AI analyzes the request and asks clarifying questions only when needed
   // This is more flexible and natural than keyword-based detection
   
-  categories: ['media', 'music', 'entertainment', 'personal'],
+  categories: ['media', 'music', 'entertainment', 'personal', 'mood'],
   keywords: [
     // Music/DJ keywords
     'dj', 'play music', 'play something', 'what should i listen', 'music recommendation', 'suggest music',
     // Basic media controls
     'play', 'pause', 'stop', 'skip', 'next', 'previous', 'volume', 'mute', 'unmute',
     // AirPlay
-    'airplay', 'speaker', 'speakers', 'homepod', 'apple tv', 'output', 'living room', 'bedroom', 'kitchen'
+    'airplay', 'speaker', 'speakers', 'homepod', 'apple tv', 'output', 'living room', 'bedroom', 'kitchen',
+    // Mood/emotional requests - DJ can help with music
+    'cheer me up', 'feeling down', 'feeling sad', 'need energy', 'pump me up', 'calm me down',
+    'relax', 'relaxing', 'focus', 'concentrate', 'work music', 'study music', 'party', 'celebrate',
+    'feeling happy', 'feeling energetic', 'feeling tired', 'wake me up', 'wind down', 'chill'
   ],
   
   // Memory store instance
@@ -487,7 +494,12 @@ IMPORTANT: If the request mentions music, songs, audio, speakers, or anything re
     if (!sections.includes('Favorite Artists')) {
       this.memory.updateSection('Favorite Artists', `*Will be populated as you listen to music*`);
     }
-    
+
+    // Add Custom AppleScripts tracking if missing
+    if (!sections.includes('Custom AppleScripts')) {
+      this.memory.updateSection('Custom AppleScripts', `*No custom scripts tracked yet*`);
+    }
+
     // Save if we made changes
     if (this.memory.isDirty()) {
       this.memory.save();
@@ -509,60 +521,6 @@ IMPORTANT: If the request mentions music, songs, audio, speakers, or anything re
       // Initialize memory if needed
       if (!this.memory) {
         await this.initialize();
-      }
-      
-      const lower = (task.content || '').toLowerCase();
-      
-      // ==================== BASIC MEDIA CONTROLS ====================
-      // Handle these directly without AI reasoning
-      
-      // Pause/Stop
-      if (lower.includes('pause') || (lower.includes('stop') && !lower.includes('stop playing'))) {
-        const { smartPause } = require('./applescript-helper');
-        const app = lower.includes('spotify') ? 'Spotify' : 'Music';
-        const result = await smartPause(app);
-        return {
-          success: result.success,
-          message: result.success ? 'Paused' : 'Could not pause'
-        };
-      }
-      
-      // Skip/Next
-      if (lower.includes('skip') || lower.includes('next')) {
-        const { smartSkip } = require('./applescript-helper');
-        const app = lower.includes('spotify') ? 'Spotify' : 'Music';
-        const result = await smartSkip(app);
-        return {
-          success: result.success,
-          message: result.success ? 'Skipped to next track' : 'Could not skip'
-        };
-      }
-      
-      // Volume control
-      if (lower.includes('volume')) {
-        const { runScript } = require('./applescript-helper');
-        const app = lower.includes('spotify') ? 'Spotify' : 'Music';
-        
-        if (lower.includes('up') || lower.includes('louder')) {
-          await runScript(`tell application "${app}" to set sound volume to (sound volume + 10)`);
-          return { success: true, message: 'Volume up' };
-        } else if (lower.includes('down') || lower.includes('quieter') || lower.includes('softer')) {
-          await runScript(`tell application "${app}" to set sound volume to (sound volume - 10)`);
-          return { success: true, message: 'Volume down' };
-        } else if (lower.includes('mute')) {
-          await runScript(`tell application "${app}" to set sound volume to 0`);
-          return { success: true, message: 'Muted' };
-        } else if (lower.includes('max') || lower.includes('full')) {
-          await runScript(`tell application "${app}" to set sound volume to 100`);
-          return { success: true, message: 'Volume at max' };
-        }
-        // Try to extract a number
-        const numMatch = lower.match(/(\d+)/);
-        if (numMatch) {
-          const vol = Math.min(100, Math.max(0, parseInt(numMatch[1])));
-          await runScript(`tell application "${app}" to set sound volume to ${vol}`);
-          return { success: true, message: `Volume set to ${vol}%` };
-        }
       }
       
       // ==================== MULTI-TURN CONVERSATION STATE ====================
@@ -617,11 +575,16 @@ IMPORTANT: If the request mentions music, songs, audio, speakers, or anything re
       
       // Handle based on AI's decision
       if (aiResult.action === 'control') {
-        // AI identified this as a control action - check if it's for podcast
-        if (aiResult.mediaType === 'podcast' || ['rewind', 'forward'].includes(aiResult.controlAction)) {
-          return this._handlePodcastControl(aiResult.controlAction);
+        console.log('[DJAgent] Control action - letting LLM figure it out');
+        // Pass original request - LLM will determine the AppleScript
+        try {
+          const controlResult = await this._handleControlAction(null, task.content);
+          console.log('[DJAgent] Control result:', JSON.stringify(controlResult));
+          return controlResult;
+        } catch (controlError) {
+          console.error('[DJAgent] Control action threw:', controlError?.message || controlError);
+          return { success: false, message: `Control failed: ${controlError?.message}` };
         }
-        return this._handleControlAction(aiResult.controlAction);
       }
 
       // AI wants to play a podcast
@@ -664,11 +627,18 @@ IMPORTANT: If the request mentions music, songs, audio, speakers, or anything re
         return this._playWithSearchTerms(aiResult.searchTerms, aiResult.message, aiResult.speaker);
       }
 
+      // AI identified this as a custom/complex request requiring generated AppleScript
+      if (aiResult.action === 'custom' && aiResult.customTask) {
+        console.log('[DJAgent] Generating custom AppleScript for:', aiResult.customTask);
+        return this._generateAndExecuteCustomAppleScript(aiResult.customTask, task.content, aiResult.message);
+      }
+
       // Fallback to asking
       return this._askMood(context);
       
     } catch (error) {
-      console.error('[DJAgent] Error:', error);
+      console.error('[DJAgent] Execute error:', error?.message || error);
+      console.error('[DJAgent] Stack:', error?.stack);
       return {
         success: false,
         message: "I had trouble getting your music ready. Let me try again."
@@ -880,124 +850,324 @@ IMPORTANT: If the request mentions music, songs, audio, speakers, or anything re
   },
   
   /**
-   * Handle control actions identified by AI (volume, etc.)
+   * Tool library - JS functions that LLM can call
+   * Each function executes AppleScript and returns result for LLM to consume
    * @private
    */
-  async _handleControlAction(controlAction) {
-    const { runScript, getFullMusicStatus } = require('./applescript-helper');
-    const app = 'Music';
-
-    // Get state before action for comparison
-    let beforeState = null;
-    try {
-      beforeState = await getFullMusicStatus(app);
-    } catch (e) {
-      // Continue anyway
-    }
-
-    try {
-      let expectedState = null;
-      let successMessage = '';
-      
-      switch (controlAction) {
-        case 'volume_up':
-          await runScript(`tell application "${app}" to set sound volume to (sound volume + 15)`);
-          successMessage = 'Volume up';
-          break;
-        case 'volume_down':
-          await runScript(`tell application "${app}" to set sound volume to (sound volume - 15)`);
-          successMessage = 'Volume down';
-          break;
-        case 'pause':
-          await runScript(`tell application "${app}" to pause`);
-          expectedState = 'paused';
-          successMessage = 'Paused';
-          break;
-        case 'play':
-        case 'resume':
-          await runScript(`tell application "${app}" to play`);
-          expectedState = 'playing';
-          successMessage = 'Playing';
-          break;
-        case 'skip':
-        case 'next':
-          await runScript(`tell application "${app}" to next track`);
-          successMessage = 'Skipped to next track';
-          break;
-        case 'previous':
-          await runScript(`tell application "${app}" to previous track`);
-          successMessage = 'Playing previous track';
-          break;
-        case 'shuffle':
-          await runScript(`tell application "${app}" to set shuffle enabled to (not shuffle enabled)`);
-          successMessage = 'Shuffle toggled';
-          break;
-        default:
-          return { success: false, message: `Unknown control: ${controlAction}` };
-      }
-      
-      // Verify the action worked
-      await new Promise(r => setTimeout(r, 500));
-      
-      try {
-        const afterState = await getFullMusicStatus(app);
-        
-        // Verify state change for play/pause
-        if (expectedState) {
-          if (afterState.state === expectedState) {
-            console.log(`[DJAgent] Control verified: ${expectedState}`);
-          } else {
-            console.warn(`[DJAgent] Expected ${expectedState} but got ${afterState.state}, retrying...`);
-            // Retry the action
-            if (expectedState === 'playing') {
-              await runScript(`tell application "${app}" to play`);
-            } else if (expectedState === 'paused') {
-              await runScript(`tell application "${app}" to pause`);
-            }
-          }
-        }
-        
-        // Add current track info to message
-        if (afterState.state === 'playing' && afterState.track) {
-          successMessage = `${successMessage}. Now playing: ${afterState.track}`;
-        }
-        
-        // Verify volume changed
-        if (controlAction === 'volume_up' || controlAction === 'volume_down') {
-          successMessage = `Volume set to ${afterState.volume}%`;
-        }
-        
-      } catch (e) {
-        // Verification failed but action might have worked
-        console.warn('[DJAgent] Could not verify control action:', e.message);
-      }
-      
-      return { success: true, message: successMessage };
-      
-    } catch (e) {
-      console.error('[DJAgent] Control action failed:', e.message);
-      
-      // Try one more time
-      try {
-        console.log('[DJAgent] Retrying control action...');
-        await runScript(`tell application "${app}" to activate`);
-        await new Promise(r => setTimeout(r, 500));
-        
-        // Retry the specific action
-        if (controlAction === 'play' || controlAction === 'resume') {
-          await runScript(`tell application "${app}" to play`);
-          return { success: true, message: 'Playing' };
-        } else if (controlAction === 'pause') {
-          await runScript(`tell application "${app}" to pause`);
-          return { success: true, message: 'Paused' };
-        }
-      } catch (retryError) {
-        // Give up
-      }
-      
-      return { success: false, message: 'Could not control playback. Is the Music app open?' };
+  _tools: {
+    async setVolume({ level }) {
+      const { runScript, getFullMusicStatus } = require('./applescript-helper');
+      const clampedLevel = Math.min(100, Math.max(0, parseInt(level)));
+      await runScript(`tell application "Music" to set sound volume to ${clampedLevel}`);
+      const status = await getFullMusicStatus('Music');
+      return { success: true, newVolume: status.volume };
+    },
+    
+    async adjustVolume({ delta }) {
+      const { runScript, getFullMusicStatus } = require('./applescript-helper');
+      const op = delta >= 0 ? '+' : '';
+      await runScript(`tell application "Music" to set sound volume to (sound volume ${op} ${delta})`);
+      const status = await getFullMusicStatus('Music');
+      return { success: true, newVolume: status.volume };
+    },
+    
+    async pause() {
+      const { runScript, getFullMusicStatus } = require('./applescript-helper');
+      await runScript(`tell application "Music" to pause`);
+      const status = await getFullMusicStatus('Music');
+      return { success: true, state: status.state };
+    },
+    
+    async play() {
+      const { runScript, getFullMusicStatus } = require('./applescript-helper');
+      await runScript(`tell application "Music" to play`);
+      const status = await getFullMusicStatus('Music');
+      return { success: true, state: status.state, track: status.track };
+    },
+    
+    async nextTrack() {
+      const { runScript, getFullMusicStatus } = require('./applescript-helper');
+      await runScript(`tell application "Music" to next track`);
+      await new Promise(r => setTimeout(r, 300));
+      const status = await getFullMusicStatus('Music');
+      return { success: true, track: status.track, artist: status.artist };
+    },
+    
+    async previousTrack() {
+      const { runScript, getFullMusicStatus } = require('./applescript-helper');
+      await runScript(`tell application "Music" to previous track`);
+      await new Promise(r => setTimeout(r, 300));
+      const status = await getFullMusicStatus('Music');
+      return { success: true, track: status.track, artist: status.artist };
+    },
+    
+    async toggleShuffle() {
+      const { runScript } = require('./applescript-helper');
+      await runScript(`tell application "Music" to set shuffle enabled to (not shuffle enabled)`);
+      const result = await runScript(`tell application "Music" to get shuffle enabled`);
+      return { success: true, shuffleEnabled: result.trim() === 'true' };
+    },
+    
+    async runCustomScript({ script }) {
+      const { runScript, getFullMusicStatus } = require('./applescript-helper');
+      await runScript(`tell application "Music" to ${script}`);
+      const status = await getFullMusicStatus('Music');
+      return { success: true, volume: status.volume, state: status.state, track: status.track };
     }
   },
+
+  /**
+   * Tool descriptions for LLM
+   * @private
+   */
+  _toolDescriptions: `
+AVAILABLE TOOLS:
+- setVolume({level: 0-100}) - Set exact volume level
+- adjustVolume({delta: number}) - Adjust volume relatively (+15, -10, etc.)
+- pause() - Pause playback
+- play() - Resume playback
+- nextTrack() - Skip to next track
+- previousTrack() - Go back to previous track
+- toggleShuffle() - Toggle shuffle on/off
+- runCustomScript({script: "AppleScript"}) - Run any AppleScript command
+`,
+
+  /**
+   * Pattern cache for common requests - skips LLM entirely
+   * Each pattern has keywords to match and the tool call to make
+   * @private
+   */
+  _patternCache: [
+    // Volume up variations
+    { keywords: ['turn it up', 'louder', 'crank it', 'pump it up'], tool: 'adjustVolume', args: { delta: 15 } },
+    { keywords: ['turn it up a bit', 'little louder', 'bit louder'], tool: 'adjustVolume', args: { delta: 10 } },
+    { keywords: ['turn it up a lot', 'way up', 'much louder', 'crank'], tool: 'adjustVolume', args: { delta: 30 } },
+    // Volume down variations
+    { keywords: ['turn it down', 'quieter', 'lower'], tool: 'adjustVolume', args: { delta: -15 } },
+    { keywords: ['turn it down a bit', 'little quieter', 'bit quieter'], tool: 'adjustVolume', args: { delta: -10 } },
+    { keywords: ['turn it down a lot', 'way down', 'much quieter'], tool: 'adjustVolume', args: { delta: -30 } },
+    // Volume extremes
+    { keywords: ['mute', 'silence'], tool: 'setVolume', args: { level: 0 } },
+    { keywords: ['max volume', 'full volume', 'all the way up'], tool: 'setVolume', args: { level: 100 } },
+    // Playback
+    { keywords: ['pause', 'stop'], tool: 'pause', args: {} },
+    { keywords: ['play', 'resume', 'unpause', 'start'], tool: 'play', args: {} },
+    { keywords: ['skip', 'next', 'next song', 'next track'], tool: 'nextTrack', args: {} },
+    { keywords: ['previous', 'back', 'go back', 'last song'], tool: 'previousTrack', args: {} },
+    { keywords: ['shuffle', 'randomize', 'mix it up'], tool: 'toggleShuffle', args: {} },
+  ],
+
+  /**
+   * Try to match request against pattern cache
+   * Returns { tool, args } if matched, null if no match
+   * @private
+   */
+  _matchPattern(request) {
+    const r = request.toLowerCase().trim();
+    
+    // Check for specific volume level first (e.g., "volume to 23%", "set it to 50")
+    const volumeMatch = r.match(/(?:volume|set it|turn it|put it)?\s*(?:to|at)\s*(\d+)\s*%?/);
+    if (volumeMatch) {
+      const level = Math.min(100, Math.max(0, parseInt(volumeMatch[1])));
+      return { tool: 'setVolume', args: { level }, cached: true };
+    }
+    
+    // Check pattern cache - longer patterns first for better matching
+    const sortedPatterns = [...this._patternCache].sort((a, b) => {
+      const aMax = Math.max(...a.keywords.map(k => k.length));
+      const bMax = Math.max(...b.keywords.map(k => k.length));
+      return bMax - aMax;
+    });
+    
+    for (const pattern of sortedPatterns) {
+      for (const keyword of pattern.keywords) {
+        if (r.includes(keyword)) {
+          return { tool: pattern.tool, args: pattern.args, cached: true };
+        }
+      }
+    }
+    
+    return null; // No match, need LLM
+  },
+
+  /**
+   * Single LLM call that picks tool AND generates response
+   * Returns { tool, args, response } in one call to reduce latency
+   * @private
+   */
+  async _pickToolWithResponse(request, currentState) {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) throw new Error('No API key');
+
+    const prompt = `You control Apple Music. User said: "${request}"
+Current: volume=${currentState.volume ?? '?'}%, state=${currentState.state ?? '?'}, track="${currentState.track ?? 'none'}"
+
+${this._toolDescriptions}
+
+Pick the best tool, provide arguments, AND write a brief friendly DJ response.
+
+Return JSON:
+{
+  "tool": "toolName",
+  "args": {arg1: value1},
+  "response": "brief friendly response to say after"
+}
+
+Examples:
+- "turn it to 23%" → {"tool": "setVolume", "args": {"level": 23}, "response": "Setting it to 23%"}
+- "turn it up" → {"tool": "adjustVolume", "args": {"delta": 15}, "response": "Turning it up"}
+- "turn it up a lot" → {"tool": "adjustVolume", "args": {"delta": 30}, "response": "Cranking it up!"}
+- "turn it down a bit" → {"tool": "adjustVolume", "args": {"delta": -10}, "response": "Bringing it down a touch"}
+- "pause" → {"tool": "pause", "args": {}, "response": "Paused"}
+- "skip" → {"tool": "nextTrack", "args": {}, "response": "Skipping to the next one"}
+- "rate this 5 stars" → {"tool": "runCustomScript", "args": {"script": "set rating of current track to 100"}, "response": "Rated 5 stars"}`;
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], temperature: 0, max_tokens: 200 })
+    });
+
+    const data = await response.json();
+    let content = data.choices?.[0]?.message?.content?.trim();
+    if (content.includes('```')) content = content.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
+    
+    if (global.budgetManager) {
+      global.budgetManager.trackUsage({ model: 'gpt-4o-mini', inputTokens: data.usage?.prompt_tokens || 0, outputTokens: data.usage?.completion_tokens || 0, context: 'dj-pick-tool' });
+    }
+
+    return JSON.parse(content);
+  },
+
+  /**
+   * Generate simple response from tool result without LLM
+   * Used for cached patterns and to enhance LLM responses with actual values
+   * @private
+   */
+  _simpleResponse(result, toolName) {
+    // Volume responses
+    if (result.newVolume !== undefined) {
+      return `Volume at ${result.newVolume}%`;
+    }
+    
+    // Track responses
+    if (result.track) {
+      const artist = result.artist ? ` by ${result.artist}` : '';
+      return `Now playing: ${result.track}${artist}`;
+    }
+    
+    // State responses
+    if (result.state) {
+      return result.state === 'playing' ? 'Playing' : 'Paused';
+    }
+    
+    // Shuffle responses
+    if (result.shuffleEnabled !== undefined) {
+      return result.shuffleEnabled ? 'Shuffle on' : 'Shuffle off';
+    }
+    
+    // Tool-specific fallbacks
+    const toolResponses = {
+      'adjustVolume': 'Volume adjusted',
+      'setVolume': 'Volume set',
+      'pause': 'Paused',
+      'play': 'Playing',
+      'nextTrack': 'Skipped',
+      'previousTrack': 'Going back',
+      'toggleShuffle': 'Shuffle toggled',
+      'runCustomScript': 'Done'
+    };
+    
+    return toolResponses[toolName] || 'Done';
+  },
+
+  /**
+   * Enhance LLM response with actual result values
+   * @private
+   */
+  _enhanceResponse(llmResponse, result) {
+    // If LLM response doesn't include the actual value, append it
+    if (result.newVolume !== undefined && !llmResponse.includes('%')) {
+      return `${llmResponse}. Volume at ${result.newVolume}%`;
+    }
+    if (result.track && !llmResponse.toLowerCase().includes(result.track.toLowerCase())) {
+      return `${llmResponse}. Now playing: ${result.track}`;
+    }
+    return llmResponse;
+  },
+
+  /**
+   * Handle control actions - Optimized flow:
+   * 1. Check pattern cache (skips LLM entirely for common requests)
+   * 2. If cache miss → single LLM call (tool + response together)
+   * 3. Execute tool function
+   * 4. Return response (simple for cache hits, LLM response for complex)
+   * @private
+   */
+  async _handleControlAction(_, originalRequest) {
+    const { getFullMusicStatus } = require('./applescript-helper');
+
+    console.log(`[DJAgent] Control: "${originalRequest}"`);
+
+    // STEP 1: Get current state for context
+    let currentState = {};
+    try {
+      currentState = await getFullMusicStatus('Music');
+      console.log(`[DJAgent] State: volume=${currentState.volume}, state=${currentState.state}`);
+    } catch (e) {
+      console.warn('[DJAgent] Could not get state:', e.message);
+    }
+
+    // STEP 2: Try pattern cache first (no LLM needed for common requests)
+    let toolCall = this._matchPattern(originalRequest);
+    let usedCache = false;
+    
+    if (toolCall) {
+      console.log(`[DJAgent] Cache hit: ${toolCall.tool}(${JSON.stringify(toolCall.args)})`);
+      usedCache = true;
+    } else {
+      // STEP 2b: Cache miss - use single LLM call for tool + response
+      console.log(`[DJAgent] Cache miss, calling LLM...`);
+      try {
+        toolCall = await this._pickToolWithResponse(originalRequest, currentState);
+        console.log(`[DJAgent] LLM: ${toolCall.tool}(${JSON.stringify(toolCall.args)}) → "${toolCall.response}"`);
+      } catch (e) {
+        console.error('[DJAgent] LLM failed:', e.message);
+        return { success: false, message: `I couldn't figure that out` };
+      }
+    }
+
+    // STEP 3: Execute the tool
+    const tool = this._tools[toolCall.tool];
+    if (!tool) {
+      console.error(`[DJAgent] Unknown tool: ${toolCall.tool}`);
+      return { success: false, message: `I don't know how to do that` };
+    }
+
+    let result;
+    try {
+      result = await tool(toolCall.args || {});
+      console.log(`[DJAgent] Result: ${JSON.stringify(result)}`);
+    } catch (e) {
+      console.error(`[DJAgent] Tool failed: ${e.message}`);
+      return { success: false, message: `That didn't work: ${e.message}` };
+    }
+
+    // STEP 4: Generate response
+    let message;
+    if (usedCache) {
+      // Cache hit - use simple response based on result
+      message = this._simpleResponse(result, toolCall.tool);
+    } else {
+      // LLM call - use LLM's response, enhanced with actual values
+      message = this._enhanceResponse(toolCall.response || 'Done', result);
+    }
+    
+    console.log(`[DJAgent] Response: ${message}`);
+    return { success: true, message };
+  },
+
+
   
   /**
    * Verify music is actually playing after an action
@@ -1059,6 +1229,264 @@ IMPORTANT: If the request mentions music, songs, audio, speakers, or anything re
       console.warn('[DJAgent] Force play failed:', e.message);
       return false;
     }
+  },
+
+  /**
+   * Generate and execute custom AppleScript using Claude
+   * For complex requests that don't fit pre-built patterns
+   * Tracks successful scripts for potential promotion to pre-built
+   * @private
+   */
+  async _generateAndExecuteCustomAppleScript(customTask, originalRequest, aiMessage) {
+    const { runScript } = require('./applescript-helper');
+    
+    try {
+      // Get Claude to generate AppleScript
+      const claudeCode = require('../../lib/claude-code-runner');
+      
+      const prompt = `You are an expert at writing AppleScript for macOS Music app (Apple Music).
+
+USER REQUEST: "${originalRequest}"
+TASK: ${customTask}
+
+Generate AppleScript code to accomplish this task. The script should:
+1. Work with the Music app (not iTunes - use "tell application Music")
+2. Handle errors gracefully with try blocks
+3. Return a meaningful result or confirmation
+4. Be safe - don't delete playlists or data without confirmation
+
+IMPORTANT GUIDELINES:
+- Use "Music" not "iTunes" as the application name
+- For playlists, use: make new playlist with properties {name:"..."}
+- For adding to library: add (some track) to library playlist 1
+- For ratings: set rating of current track to X (where X is 0-100, 100=5 stars)
+- For favorites/loved: set loved of current track to true
+- To get track info: get {name, artist, album} of current track
+- For searching: (every track whose name contains "...")
+
+Return ONLY the AppleScript code, no explanation. The code should be directly executable.`;
+
+      console.log('[DJAgent] Generating custom AppleScript with Claude...');
+      
+      const response = await claudeCode.complete(prompt, {
+        maxTokens: 1000,
+      });
+      
+      if (!response) {
+        throw new Error('No response from Claude');
+      }
+      
+      // Extract AppleScript from response (might be in code blocks)
+      let script = response;
+      const codeMatch = response.match(/```(?:applescript)?\n?([\s\S]*?)```/);
+      if (codeMatch) {
+        script = codeMatch[1].trim();
+      }
+      
+      // Clean up the script
+      script = script.trim();
+      if (!script) {
+        throw new Error('Empty script generated');
+      }
+      
+      console.log('[DJAgent] Generated AppleScript:', script.substring(0, 200) + '...');
+      
+      // Execute the generated script
+      const result = await runScript(script, 15000); // 15 second timeout for complex scripts
+      
+      console.log('[DJAgent] Custom script result:', result);
+      
+      // Track successful script for potential promotion
+      await this._trackCustomScriptSuccess(customTask, originalRequest, script);
+      
+      return {
+        success: true,
+        message: aiMessage || result || 'Done!'
+      };
+      
+    } catch (error) {
+      console.error('[DJAgent] Custom AppleScript failed:', error.message);
+      
+      // Track failure for learning
+      await this._trackCustomScriptFailure(customTask, originalRequest, error.message);
+      
+      // Try to provide a helpful error message
+      if (error.message.includes('not authorized')) {
+        return {
+          success: false,
+          message: "I need permission to control the Music app. Please grant access in System Preferences > Privacy & Security > Automation."
+        };
+      }
+      
+      return {
+        success: false,
+        message: `I couldn't complete that action: ${error.message}. Try asking in a different way?`
+      };
+    }
+  },
+
+  /**
+   * Track successful custom AppleScript for potential promotion
+   * @private
+   */
+  async _trackCustomScriptSuccess(customTask, originalRequest, script) {
+    try {
+      if (!this.memory) {
+        await this.initialize();
+      }
+
+      // Normalize the task for pattern matching
+      const normalizedTask = customTask.toLowerCase().trim();
+      
+      // Get existing custom scripts section
+      let customScripts = this.memory.getSection('Custom AppleScripts') || '';
+      
+      // Parse existing entries
+      const entries = this._parseCustomScriptEntries(customScripts);
+      
+      // Find existing entry for similar task
+      const existingIndex = entries.findIndex(e => 
+        this._tasksAreSimilar(e.task, normalizedTask)
+      );
+      
+      const timestamp = new Date().toISOString().split('T')[0];
+      
+      if (existingIndex >= 0) {
+        // Update existing entry
+        entries[existingIndex].successCount++;
+        entries[existingIndex].lastUsed = timestamp;
+        entries[existingIndex].script = script; // Keep latest working version
+        
+        // Check if ready for promotion (3+ successes)
+        if (entries[existingIndex].successCount >= 3 && !entries[existingIndex].flaggedForPromotion) {
+          entries[existingIndex].flaggedForPromotion = true;
+          console.log(`[DJAgent] PROMOTION CANDIDATE: "${customTask}" has ${entries[existingIndex].successCount} successes`);
+          console.log('[DJAgent] Script to add to applescript-helper.js:');
+          console.log('---BEGIN SCRIPT---');
+          console.log(script);
+          console.log('---END SCRIPT---');
+        }
+      } else {
+        // Add new entry
+        entries.push({
+          task: normalizedTask,
+          originalRequest,
+          script,
+          successCount: 1,
+          failureCount: 0,
+          lastUsed: timestamp,
+          flaggedForPromotion: false
+        });
+      }
+      
+      // Save back to memory
+      this._saveCustomScriptEntries(entries);
+      await this.memory.save();
+      
+    } catch (error) {
+      console.warn('[DJAgent] Could not track custom script:', error.message);
+    }
+  },
+
+  /**
+   * Track failed custom AppleScript for learning
+   * @private
+   */
+  async _trackCustomScriptFailure(customTask, originalRequest, errorMessage) {
+    try {
+      if (!this.memory) {
+        await this.initialize();
+      }
+
+      const normalizedTask = customTask.toLowerCase().trim();
+      let customScripts = this.memory.getSection('Custom AppleScripts') || '';
+      const entries = this._parseCustomScriptEntries(customScripts);
+      
+      const existingIndex = entries.findIndex(e => 
+        this._tasksAreSimilar(e.task, normalizedTask)
+      );
+      
+      if (existingIndex >= 0) {
+        entries[existingIndex].failureCount++;
+        entries[existingIndex].lastError = errorMessage;
+        this._saveCustomScriptEntries(entries);
+        await this.memory.save();
+      }
+    } catch (error) {
+      // Silently fail - tracking is non-critical
+    }
+  },
+
+  /**
+   * Check if two tasks are similar (for pattern matching)
+   * @private
+   */
+  _tasksAreSimilar(task1, task2) {
+    // Simple word overlap similarity
+    const words1 = new Set(task1.split(/\s+/).filter(w => w.length > 2));
+    const words2 = new Set(task2.split(/\s+/).filter(w => w.length > 2));
+    
+    const intersection = [...words1].filter(w => words2.has(w));
+    const union = new Set([...words1, ...words2]);
+    
+    // Jaccard similarity > 0.5 = similar
+    return intersection.length / union.size > 0.5;
+  },
+
+  /**
+   * Parse custom script entries from memory section
+   * @private
+   */
+  _parseCustomScriptEntries(sectionContent) {
+    if (!sectionContent || sectionContent.includes('*No custom')) {
+      return [];
+    }
+    
+    try {
+      // Try JSON format first
+      if (sectionContent.startsWith('[')) {
+        return JSON.parse(sectionContent);
+      }
+    } catch (e) {
+      // Not JSON, return empty
+    }
+    
+    return [];
+  },
+
+  /**
+   * Save custom script entries to memory
+   * @private
+   */
+  _saveCustomScriptEntries(entries) {
+    // Keep only last 20 entries to prevent unbounded growth
+    const trimmed = entries.slice(-20);
+    
+    // Sort by success count (most successful first)
+    trimmed.sort((a, b) => b.successCount - a.successCount);
+    
+    this.memory.updateSection('Custom AppleScripts', JSON.stringify(trimmed, null, 2));
+  },
+
+  /**
+   * Get promotion candidates (scripts ready to be added to pre-built)
+   * Can be called to review what should be promoted
+   */
+  getPromotionCandidates() {
+    if (!this.memory) {
+      return [];
+    }
+    
+    const customScripts = this.memory.getSection('Custom AppleScripts') || '';
+    const entries = this._parseCustomScriptEntries(customScripts);
+    
+    return entries.filter(e => e.flaggedForPromotion).map(e => ({
+      task: e.task,
+      originalRequest: e.originalRequest,
+      script: e.script,
+      successCount: e.successCount,
+      failureCount: e.failureCount
+    }));
   },
 
   /**

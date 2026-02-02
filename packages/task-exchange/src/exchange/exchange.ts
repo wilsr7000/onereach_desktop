@@ -35,6 +35,21 @@ const DEFAULT_AUCTION_CONFIG: AuctionConfig = {
   executionTimeoutMs: 30000,
 };
 
+/**
+ * Master Evaluator callback type
+ * Called after bids are collected to intelligently select winner(s)
+ */
+export type MasterEvaluator = (
+  task: Task,
+  bids: EvaluatedBid[]
+) => Promise<{
+  winners: string[];
+  executionMode: 'single' | 'parallel' | 'series';
+  reasoning: string;
+  rejectedBids?: { agentId: string; reason: string }[];
+  agentFeedback?: { agentId: string; feedback: string }[];
+}>;
+
 export class Exchange extends TypedEventEmitter<ExchangeEvents> {
   private config: ExchangeConfig;
   private auctionConfig: AuctionConfig;
@@ -52,6 +67,9 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
   private isProcessing = false;  // Guard against concurrent processQueue calls
   private processingLoop: NodeJS.Timeout | null = null;
   private healthCheckLoop: NodeJS.Timeout | null = null;
+  
+  // Master Orchestrator evaluator - set externally to enable intelligent winner selection
+  private masterEvaluator: MasterEvaluator | null = null;
 
   constructor(
     config: ExchangeConfig,
@@ -267,6 +285,22 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
     return this.categoryIndex;
   }
 
+  /**
+   * Set the Master Orchestrator evaluator
+   * When set, this function will be called to select winners instead of simple score ranking
+   */
+  setMasterEvaluator(evaluator: MasterEvaluator): void {
+    this.masterEvaluator = evaluator;
+    console.log('[Exchange] Master Orchestrator evaluator set');
+  }
+
+  /**
+   * Check if Master Orchestrator is enabled
+   */
+  hasMasterEvaluator(): boolean {
+    return this.masterEvaluator !== null;
+  }
+
   // === Internal Methods ===
 
   private async processQueue(): Promise<void> {
@@ -367,8 +401,60 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
       return;
     }
 
+    // Use Master Orchestrator if available, otherwise fall back to top scorer
+    let winner: EvaluatedBid;
+    let backups: EvaluatedBid[];
+    let masterEvaluation: {
+      executionMode?: string;
+      reasoning?: string;
+      rejectedBids?: { agentId: string; reason: string }[];
+      agentFeedback?: { agentId: string; feedback: string }[];
+    } | null = null;
+
+    if (this.masterEvaluator) {
+      try {
+        console.log('[Exchange] Using Master Orchestrator to select winner');
+        const evaluation = await this.masterEvaluator(task, rankedBids);
+        masterEvaluation = evaluation;
+        
+        // Find the selected winners in the ranked bids
+        const selectedWinners = evaluation.winners
+          .map(winnerId => rankedBids.find(b => b.agentId === winnerId))
+          .filter((b): b is EvaluatedBid => b !== undefined);
+        
+        if (selectedWinners.length > 0) {
+          // Primary winner is first selected
+          winner = selectedWinners[0];
+          // Backups are remaining selected + other high scorers
+          backups = [
+            ...selectedWinners.slice(1),
+            ...rankedBids.filter(b => !evaluation.winners.includes(b.agentId))
+          ];
+          
+          console.log(`[Exchange] Master selected: ${winner.agentId} (mode: ${evaluation.executionMode})`);
+          console.log(`[Exchange] Master reasoning: ${evaluation.reasoning}`);
+          
+          // Emit master evaluation event for logging/HUD
+          this.emit('master:evaluated', {
+            task,
+            evaluation,
+            selectedWinner: winner,
+            allBids: rankedBids
+          });
+        } else {
+          console.warn('[Exchange] Master Orchestrator selected no valid winners, falling back');
+          [winner, ...backups] = rankedBids;
+        }
+      } catch (error) {
+        console.error('[Exchange] Master Orchestrator error, falling back:', error);
+        [winner, ...backups] = rankedBids;
+      }
+    } else {
+      // No master evaluator - use traditional top scorer
+      [winner, ...backups] = rankedBids;
+    }
+
     // Assign winner
-    const [winner, ...backups] = rankedBids;
     task.status = Status.ASSIGNED;
     task.assignedAgent = winner.agentId;
     task.backupQueue = backups.map(b => b.agentId);
@@ -376,7 +462,13 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
     task.assignedAt = Date.now();
     task.auctionClosedAt = Date.now();
 
-    this.emit('task:assigned', { task, winner, backups });
+    // Include master evaluation in the event if available
+    this.emit('task:assigned', { 
+      task, 
+      winner, 
+      backups,
+      masterEvaluation 
+    });
 
     // Execute
     await this.executeWithCascade(task, winner);

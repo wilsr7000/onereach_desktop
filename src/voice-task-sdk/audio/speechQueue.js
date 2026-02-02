@@ -175,8 +175,8 @@ class SpeechQueue extends EventEmitter {
     }, this.speechTimeout);
     
     try {
-      // Call the speak function
-      const success = await this.speakFn(this.currentItem.text);
+      // Call the speak function with text and metadata (e.g., voice)
+      const success = await this.speakFn(this.currentItem.text, this.currentItem.metadata);
       
       // Don't call onSpeechComplete here - wait for audio_done event
       // The caller should call markComplete() when audio finishes

@@ -33,6 +33,9 @@ const path = require('path');
 // ==================== AGENT IDS ====================
 // Add new agent IDs here - the registry handles the rest
 const BUILT_IN_AGENT_IDS = [
+  'orchestrator-agent',  // Meta-agent - coordinates multiple agents for composite requests
+  'app-agent',           // App guide - knows all features, gives tours
+  'spaces-agent',        // Spaces assistant - manages saved content with smart summaries
   'time-agent',
   'weather-agent',
   'calendar-agent',
@@ -47,7 +50,7 @@ const BUILT_IN_AGENT_IDS = [
 // ==================== VALIDATION ====================
 
 const REQUIRED_PROPERTIES = ['id', 'name', 'description', 'categories', 'keywords', 'execute'];
-const OPTIONAL_PROPERTIES = ['prompt', 'capabilities', 'bid', 'initialize', 'cleanup', 'memory', 'version'];
+const OPTIONAL_PROPERTIES = ['prompt', 'capabilities', 'bid', 'initialize', 'cleanup', 'memory', 'version', 'voice', 'ack', 'acks'];
 
 /**
  * Validate an agent has required properties

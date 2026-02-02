@@ -347,7 +347,29 @@ export interface ExchangeEvents {
   'auction:closed': { task: Task; auctionId: string; bids: EvaluatedBid[] };
   
   'task:queued': { task: Task };
-  'task:assigned': { task: Task; winner: EvaluatedBid; backups: EvaluatedBid[] };
+  'task:assigned': { 
+    task: Task; 
+    winner: EvaluatedBid; 
+    backups: EvaluatedBid[];
+    masterEvaluation?: {
+      executionMode?: string;
+      reasoning?: string;
+      rejectedBids?: { agentId: string; reason: string }[];
+      agentFeedback?: { agentId: string; feedback: string }[];
+    } | null;
+  };
+  'master:evaluated': {
+    task: Task;
+    evaluation: {
+      winners: string[];
+      executionMode: string;
+      reasoning: string;
+      rejectedBids?: { agentId: string; reason: string }[];
+      agentFeedback?: { agentId: string; feedback: string }[];
+    };
+    selectedWinner: EvaluatedBid;
+    allBids: EvaluatedBid[];
+  };
   'task:executing': { task: Task; agentId: string; attempt: number };
   'task:settled': { task: Task; result: TaskResult; agentId: string; attempt: number };
   'task:busted': { task: Task; agentId: string; error: string; isTimeout: boolean; backupsRemaining: number };

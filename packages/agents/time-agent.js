@@ -40,8 +40,30 @@ const timeAgent = {
   id: 'time-agent',
   name: 'Time Agent',
   description: 'Answers time and date questions - remembers your preferred format',
+  voice: 'sage',  // Calm, wise - see VOICE-GUIDE.md
+  acks: ["Let me check.", "One moment."],
   categories: ['system', 'time'],
   keywords: ['time', 'clock', 'hour', 'minute', 'date', 'day', 'month', 'year', 'today', 'what day'],
+  
+  // Prompt for LLM evaluation - be specific about what this agent handles
+  prompt: `Time Agent answers questions about the CURRENT time and date from the system clock.
+
+HIGH CONFIDENCE (0.85+) for:
+- "What time is it?" - asking current time
+- "What's the date?" - asking current date  
+- "What day is it?" - asking current day of the week
+- "What month is it?" - asking current month
+- "What year is it?" - asking current year
+
+LOW CONFIDENCE (0.00-0.20) - DO NOT BID on these:
+- Schedule/calendar queries: "What do I have on Tuesday?" (calendar agent territory)
+- Meeting questions: "When is my next meeting?" (calendar agent territory)
+- Weather questions: "What's it like outside?" (weather agent territory)
+- Any question asking about events, appointments, or schedules
+
+CRITICAL: If the user mentions a day name (Monday, Tuesday, etc.) and asks "what's happening" or "what do I have", this is a CALENDAR query about their schedule, NOT a time query. Return confidence 0.00.
+
+This agent ONLY knows the current time/date from the system clock. It has NO access to calendars, schedules, or events.`,
   
   // Memory instance
   memory: null,
@@ -81,30 +103,10 @@ const timeAgent = {
   },
   
   /**
-   * Bid on a task
+   * Bid on a task - uses LLM-based unified bidder
    */
   bid(task) {
-    if (!task?.content) return null;
-    
-    const lower = task.content.toLowerCase();
-    
-    // Don't bid on weather queries
-    const weatherKeywords = ['weather', 'temperature', 'forecast', 'rain', 'snow', 'sunny', 'cloudy', 'humid', 'cold', 'hot', 'warm'];
-    if (weatherKeywords.some(k => lower.includes(k))) {
-      return null;
-    }
-    
-    const timeKeywords = ['time', 'clock', 'hour', 'date', 'day', 'month', 'year', 'today', 'what day'];
-    const hasKeyword = timeKeywords.some(k => lower.includes(k));
-    
-    const isTimeQuestion = /what('s| is) the (time|date|day)/i.test(lower) ||
-                          /what (time|date|day) is it/i.test(lower) ||
-                          /tell me the (time|date)/i.test(lower);
-    
-    if (hasKeyword || isTimeQuestion) {
-      return { confidence: 0.95, reasoning: 'Time/date question' };
-    }
-    
+    // No fast bidding - let the unified bidder handle all evaluation via LLM
     return null;
   },
   

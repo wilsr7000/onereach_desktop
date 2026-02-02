@@ -1805,6 +1805,10 @@ async function openGSXWindow(url, title, idwEnvironment) {
   // This ensures the token is available when the window first loads
   const multiTenantStore = require('./multi-tenant-store');
   
+  // #region agent log
+  try{require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log',JSON.stringify({location:'browserWindow.js:1808',message:'openGSXWindow token check',data:{idwEnvironment,fullPartition,hasValidToken:multiTenantStore.hasValidToken(idwEnvironment)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-compare'})+'\n');}catch(e){}
+  // #endregion
+  
   if (multiTenantStore.hasValidToken(idwEnvironment)) {
     const token = multiTenantStore.getToken(idwEnvironment);
     const ses = session.fromPartition(fullPartition);
@@ -1836,6 +1840,8 @@ async function openGSXWindow(url, title, idwEnvironment) {
         const cookies = await ses.cookies.get({ name: 'mult' });
         console.log(`[GSX] Injected ${idwEnvironment} token into ${partitionName} - ${cookies.length} mult cookies:`,
           cookies.map(c => ({ domain: c.domain, sameSite: c.sameSite })));
+        // #region agent log
+        try{require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log',JSON.stringify({location:'browserWindow.js:1838',message:'openGSXWindow TOKEN INJECTED',data:{idwEnvironment,partitionName,cookieCount:cookies.length,cookieDomains:cookies.map(c=>c.domain)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-compare'})+'\n');}catch(e){}
       } else {
         console.log(`[GSX] Token already exists in ${partitionName}:`, existing.map(c => ({ domain: c.domain })));
       }

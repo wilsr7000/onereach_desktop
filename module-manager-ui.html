@@ -496,6 +496,11 @@
                             <label>Description (Optional)</label>
                             <input type="text" id="webToolDescription" placeholder="A useful web tool">
                         </div>
+                        <div class="form-group">
+                            <label>Documentation URL (Optional)</label>
+                            <input type="text" id="webToolDocsUrl" placeholder="https://docs.example.com/tool">
+                            <p style="font-size: 11px; color: #888; margin-top: 4px;">If provided, an AI agent will be auto-created from the docs</p>
+                        </div>
                         <div class="modal-footer">
                             <button class="btn btn-secondary" onclick="ModuleManager.showAddModule()">Back</button>
                             <button class="btn btn-primary" onclick="ModuleManager.addWebToolLink()">Add Tool</button>
@@ -518,6 +523,7 @@
                 const name = document.getElementById('webToolName').value.trim();
                 const url = document.getElementById('webToolUrl').value.trim();
                 const description = document.getElementById('webToolDescription').value.trim();
+                const docsUrl = document.getElementById('webToolDocsUrl').value.trim();
                 const windowSize = document.getElementById('webToolWindowSize').value;
                 
                 if (!name || !url) {
@@ -526,10 +532,12 @@
                 }
                 
                 const body = document.getElementById('addModuleBody');
+                const hasDocsUrl = docsUrl && docsUrl.length > 0;
                 body.innerHTML = `
                     <h3>Adding Web Tool...</h3>
+                    ${hasDocsUrl ? '<p style="color: #a78bfa;">Creating AI agent from documentation...</p>' : ''}
                     <div class="progress-bar">
-                        <div class="progress-fill" style="width: 50%"></div>
+                        <div class="progress-fill" style="width: ${hasDocsUrl ? '30' : '50'}%"></div>
                     </div>
                 `;
                 
@@ -539,6 +547,7 @@
                         name: name,
                         url: url,
                         description: description || '',
+                        docsUrl: docsUrl || '',
                         windowSize: windowSize,
                         type: 'weblink'
                     };
@@ -546,9 +555,11 @@
                     const result = await ipcRenderer.invoke('module:add-web-tool', tool);
                     
                     if (result.success) {
+                        const agentCreated = result.agentCreated;
                         body.innerHTML = `
-                            <h3>✅ Web Tool Added!</h3>
+                            <h3>Web Tool Added!</h3>
                             <p>${name} has been added successfully.</p>
+                            ${agentCreated ? '<p style="color: #22c55e;">AI agent created and available in Agent Manager.</p>' : ''}
                             <div class="modal-footer">
                                 <button class="btn btn-primary" onclick="ModuleManager.finishWebToolAdd()">Done</button>
                             </div>

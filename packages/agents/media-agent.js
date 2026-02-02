@@ -44,31 +44,36 @@ const mediaAgent = {
   id: 'media-agent',
   name: 'Media Agent',
   description: 'Controls Music and Spotify via AppleScript with AirPlay support',
+  voice: 'ash',  // Warm, entertainment-focused - see VOICE-GUIDE.md
   categories: ['media', 'music'],
-  keywords: ['play', 'pause', 'stop', 'skip', 'next', 'previous', 'volume', 'music', 'song', 'track', 
+  keywords: ['play', 'pause', 'stop', 'skip', 'next', 'previous', 'volume', 'music', 'song', 'track',
              'airplay', 'speaker', 'speakers', 'homepod', 'apple tv', 'output', 'living room', 'bedroom', 'kitchen'],
   
+  // Prompt for LLM evaluation
+  prompt: `Media Agent controls music playback on Apple Music and Spotify.
+
+HIGH CONFIDENCE (0.85+) for:
+- Playback control: "Play", "Pause", "Stop", "Skip", "Next song", "Previous"
+- Volume control: "Volume up", "Turn it down", "Mute", "Unmute"
+- AirPlay/speakers: "Play on living room", "Switch to HomePod", "AirPlay to bedroom"
+- Now playing: "What's playing?", "What song is this?"
+
+MEDIUM CONFIDENCE (0.50-0.70) for:
+- Generic music requests: "Play music" (DJ agent might be better for recommendations)
+
+LOW CONFIDENCE (0.00-0.20) - DO NOT BID on these:
+- Music recommendations: "Play something relaxing" (DJ agent handles mood-based requests)
+- Calendar queries: "What do I have today?"
+- Time queries: "What time is it?"
+- Non-media commands
+
+This agent controls the Music app and Spotify directly. For music recommendations based on mood, the DJ agent is more appropriate.`,
+  
   /**
-   * Bid on a task
-   * @param {Object} task - { content, ... }
-   * @returns {Object|null} - { confidence } or null to not bid
+   * Bid on a task - uses LLM-based unified bidder
    */
   bid(task) {
-    if (!task?.content) return null;
-    
-    const lower = task.content.toLowerCase();
-    const mediaKeywords = ['play', 'pause', 'stop', 'skip', 'next', 'previous', 'volume', 'music', 'song', 'track', 'mute', 'unmute'];
-    const airplayKeywords = ['airplay', 'speaker', 'speakers', 'homepod', 'apple tv', 'output to', 'play on', 'switch to', 'living room', 'bedroom', 'kitchen', 'office'];
-    
-    // High confidence for AirPlay commands
-    if (airplayKeywords.some(k => lower.includes(k))) {
-      return { confidence: 0.95 };
-    }
-    
-    if (mediaKeywords.some(k => lower.includes(k))) {
-      return { confidence: 0.9 };
-    }
-    
+    // No fast bidding - let the unified bidder handle all evaluation via LLM
     return null;
   },
   

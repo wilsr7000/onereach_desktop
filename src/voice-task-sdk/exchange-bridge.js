@@ -48,6 +48,98 @@ const { evaluateAgentBid, checkBidderReady } = require('../../packages/agents/un
 // Router instance (initialized after exchange is ready)
 let routerInstance = null;
 
+// ==================== AGENT VOICE PERSONALITIES ====================
+// Each agent gets a unique voice that matches their personality
+// OpenAI Realtime API voices: alloy, ash, ballad, coral, echo, sage, shimmer, verse
+// See packages/agents/VOICE-GUIDE.md for voice descriptions and selection guide
+
+// Default voice assignments (used if agent doesn't specify voice property)
+const DEFAULT_AGENT_VOICES = {
+  'dj-agent': 'ash',           // Warm, friendly - like a radio DJ
+  'smalltalk-agent': 'coral',  // Clear, welcoming
+  'time-agent': 'sage',        // Calm, informative
+  'weather-agent': 'verse',    // Natural, conversational
+  'calendar-agent': 'coral',   // Professional, clear
+  'help-agent': 'alloy',       // Neutral, helpful
+  'search-agent': 'echo',      // Authoritative, knowledgeable
+  'spelling-agent': 'sage',    // Calm, precise
+  'media-agent': 'ash',        // Warm, entertainment-focused
+  'fallback-agent': 'alloy',   // Neutral default
+};
+
+// Voice descriptions for reference (searchable)
+const VOICE_DESCRIPTIONS = {
+  alloy: { personality: 'Neutral, balanced, versatile', bestFor: 'General purpose, help systems', keywords: ['neutral', 'balanced', 'default', 'professional'] },
+  ash: { personality: 'Warm, friendly, personable', bestFor: 'Music, entertainment, social', keywords: ['warm', 'friendly', 'DJ', 'music', 'entertainment'] },
+  ballad: { personality: 'Expressive, storytelling, dramatic', bestFor: 'Creative, narrative content', keywords: ['expressive', 'storytelling', 'dramatic', 'creative'] },
+  coral: { personality: 'Clear, professional, articulate', bestFor: 'Business, scheduling', keywords: ['clear', 'professional', 'business', 'scheduling'] },
+  echo: { personality: 'Deep, authoritative, knowledgeable', bestFor: 'Search, education, experts', keywords: ['authoritative', 'knowledgeable', 'expert', 'search'] },
+  sage: { personality: 'Calm, wise, measured', bestFor: 'Time, spelling, precision', keywords: ['calm', 'wise', 'precise', 'time', 'spelling'] },
+  shimmer: { personality: 'Energetic, bright, enthusiastic', bestFor: 'Motivation, fitness', keywords: ['energetic', 'bright', 'enthusiastic', 'upbeat'] },
+  verse: { personality: 'Natural, conversational, relatable', bestFor: 'Weather, casual chat', keywords: ['natural', 'conversational', 'casual', 'weather'] },
+};
+
+/**
+ * Get voice for an agent
+ * Priority: 1. Agent's voice property, 2. Default mapping, 3. 'alloy'
+ * @param {string} agentId - Agent ID
+ * @param {Object} agent - Optional agent object with voice property
+ * @returns {string} Voice name
+ */
+function getAgentVoice(agentId, agent = null) {
+  // Check if agent has voice property defined
+  if (agent?.voice && VOICE_DESCRIPTIONS[agent.voice]) {
+    return agent.voice;
+  }
+  
+  // Try to get agent from registry to check its voice property
+  try {
+    const { getAgent } = require('../../packages/agents/agent-registry');
+    const registryAgent = getAgent(agentId);
+    if (registryAgent?.voice && VOICE_DESCRIPTIONS[registryAgent.voice]) {
+      return registryAgent.voice;
+    }
+  } catch (e) {
+    // Registry not available, use defaults
+  }
+  
+  // Fall back to default mapping or alloy
+  return DEFAULT_AGENT_VOICES[agentId] || 'alloy';
+}
+
+/**
+ * Find best voice for a description/keywords
+ * @param {string} query - Description or keywords to match
+ * @returns {{ voice: string, score: number, description: Object }[]} Ranked matches
+ */
+function searchVoices(query) {
+  const queryLower = query.toLowerCase();
+  const results = [];
+  
+  for (const [voice, desc] of Object.entries(VOICE_DESCRIPTIONS)) {
+    let score = 0;
+    
+    // Check personality match
+    if (desc.personality.toLowerCase().includes(queryLower)) score += 3;
+    
+    // Check bestFor match
+    if (desc.bestFor.toLowerCase().includes(queryLower)) score += 2;
+    
+    // Check keywords match
+    for (const keyword of desc.keywords) {
+      if (keyword.includes(queryLower) || queryLower.includes(keyword)) {
+        score += 1;
+      }
+    }
+    
+    if (score > 0) {
+      results.push({ voice, score, description: desc });
+    }
+  }
+  
+  return results.sort((a, b) => b.score - a.score);
+}
+
 // ==================== VOICE SYSTEM CONFIGURATION ====================
 // All configurable timeouts and settings in one place
 const VOICE_CONFIG = {
@@ -540,7 +632,7 @@ const DEFAULT_EXCHANGE_CONFIG = {
     instantWinThreshold: VOICE_CONFIG.instantWinThreshold,
     dominanceMargin: 0.3,
     maxAuctionAttempts: 2,   // Quick retry
-    executionTimeoutMs: 10000, // 10s for voice tasks
+    executionTimeoutMs: 45000, // 45s for voice tasks (DJ agent needs time for playlist creation)
   },
   
   marketMaker: {
@@ -685,27 +777,44 @@ async function connectBuiltInAgentToExchange(wrappedAgent, port) {
         if (msg.type === 'bid_request') {
           console.log(`[BuiltIn:${wrappedAgent.name}] Evaluating bid request`);
           
-          // Built-in agents use their own bid() method if available
-          // Use LLM-based bidding for all agents (not keyword matching)
+          // FAST PATH: Check if agent has its own bid method that returns high confidence
+          // This allows agents to handle well-defined commands instantly without LLM delay
+          if (typeof originalAgent.bid === 'function') {
+            try {
+              const quickBid = originalAgent.bid(msg.task);
+              if (quickBid && quickBid.confidence >= 0.9) {
+                // High confidence from agent's own logic - send immediately!
+                console.log(`[BuiltIn:${wrappedAgent.name}] Fast bid: ${quickBid.confidence.toFixed(2)} - ${quickBid.reasoning || 'Fast path match'}`);
+                ws.send(JSON.stringify({
+                  type: 'bid_response',
+                  auctionId: msg.auctionId,
+                  agentId: wrappedAgent.id,
+                  agentVersion: wrappedAgent.version,
+                  bid: {
+                    confidence: quickBid.confidence,
+                    reasoning: quickBid.reasoning || 'Fast path match',
+                    estimatedTimeMs: 1000,
+                    tier: 'builtin',
+                  }
+                }));
+                return; // Done - don't wait for LLM
+              }
+            } catch (bidError) {
+              console.warn(`[BuiltIn:${wrappedAgent.name}] Agent bid method error:`, bidError.message);
+            }
+          }
+          
+          // SLOW PATH: Use LLM-based bidding for all other cases
           let evaluation = { confidence: 0, plan: null };
           
           try {
             // Import unified bidder for LLM evaluation
             const { evaluateAgentBid } = require('../../packages/agents/unified-bidder');
             
-            // Build agent definition for LLM evaluation
-            const agentDef = {
-              id: wrappedAgent.id,
-              name: wrappedAgent.name,
-              keywords: wrappedAgent.keywords || originalAgent.keywords || [],
-              capabilities: wrappedAgent.capabilities || originalAgent.capabilities || [],
-              prompt: originalAgent.prompt || originalAgent.description || wrappedAgent.name,
-              executionType: originalAgent.executionType || 'builtin'
-            };
-            
-            // Use LLM to evaluate with 3-second timeout
+            // Use the original agent directly (same as test UI in main.js)
+            // This ensures identical behavior between testing and production
             const llmResult = await Promise.race([
-              evaluateAgentBid(agentDef, msg.task),
+              evaluateAgentBid(originalAgent, msg.task),
               new Promise((_, reject) => setTimeout(() => reject(new Error('LLM timeout')), 3000))
             ]);
             
@@ -1432,11 +1541,11 @@ function setupAgentMessageQueue() {
   // Set up speak function using realtime speech
   queue.setSpeakFunction(async (message) => {
     try {
-      const { getRealtimeSpeech } = require('../../realtime-speech');
-      const realtimeSpeech = getRealtimeSpeech();
-      
-      if (realtimeSpeech && realtimeSpeech.isConnected) {
-        await realtimeSpeech.speak(message);
+      const { getVoiceSpeaker } = require('../../voice-speaker');
+      const speaker = getVoiceSpeaker();
+
+      if (speaker) {
+        await speaker.speak(message);
         return true;
       } else {
         console.warn('[AgentMessageQueue] Speech system not connected');
@@ -1455,22 +1564,17 @@ function setupAgentMessageQueue() {
       return false;
     }
     
-    // Check if realtime speech is available and not busy
+    // Check if voice speaker is available and not busy
     try {
-      const { getRealtimeSpeech } = require('../../realtime-speech');
-      const realtimeSpeech = getRealtimeSpeech();
-      
-      if (!realtimeSpeech || !realtimeSpeech.isConnected) {
+      const { getVoiceSpeaker } = require('../../voice-speaker');
+      const speaker = getVoiceSpeaker();
+
+      if (!speaker) {
         return false;
       }
-      
-      // Check if speech queue is empty
-      if (realtimeSpeech.speechQueue && realtimeSpeech.speechQueue.hasPendingOrActiveSpeech()) {
-        return false;
-      }
-      
-      // Check if there's an active response
-      if (realtimeSpeech.hasActiveResponse) {
+
+      // Check if speaker has pending speech
+      if (speaker.hasPendingSpeech()) {
         return false;
       }
       
@@ -1526,6 +1630,18 @@ async function initializeExchangeBridge(config = {}) {
     
     // Create exchange
     exchangeInstance = new Exchange(mergedConfig, storage);
+    
+    // ==================== MASTER ORCHESTRATOR ====================
+    // Set up intelligent winner selection
+    try {
+      const masterOrchestrator = require('../../packages/agents/master-orchestrator');
+      exchangeInstance.setMasterEvaluator(async (task, bids) => {
+        return await masterOrchestrator.evaluate(task, bids);
+      });
+      console.log('[ExchangeBridge] Master Orchestrator enabled');
+    } catch (e) {
+      console.warn('[ExchangeBridge] Master Orchestrator not available:', e.message);
+    }
     
     // Create transport
     transportInstance = new WebSocketTransport(exchangeInstance, {
@@ -1664,11 +1780,49 @@ function setupExchangeEvents() {
   });
   
   // Task assigned to winner
-  exchangeInstance.on('task:assigned', ({ task, winner, backups }) => {
+  exchangeInstance.on('task:assigned', async ({ task, winner, backups, masterEvaluation }) => {
     console.log('[ExchangeBridge] Task assigned to:', winner.agentId);
     
+    // Store master evaluation in task metadata for feedback phase
+    if (masterEvaluation) {
+      task.metadata = task.metadata || {};
+      task.metadata.masterEvaluation = masterEvaluation;
+      console.log('[ExchangeBridge] Master evaluation stored:', masterEvaluation.reasoning);
+    }
+
     // Track execution start time for duration calculation
     taskExecutionStartTimes.set(task.id, Date.now());
+    
+    // IMMEDIATE ACK - speak before agent starts work
+    // This gives instant feedback while agent processes
+    try {
+      const { getVoiceSpeaker } = require('../../voice-speaker');
+      const speaker = getVoiceSpeaker();
+
+      if (speaker) {
+        // Get agent's ack message (random from array, or single string, or default)
+        let ackMessage = null;
+        
+        // Try to get agent's custom acks
+        const { getAgent } = require('../../packages/agents/agent-registry');
+        const agent = getAgent(winner.agentId);
+        
+        if (agent?.acks && Array.isArray(agent.acks) && agent.acks.length > 0) {
+          ackMessage = agent.acks[Math.floor(Math.random() * agent.acks.length)];
+        } else if (agent?.ack) {
+          ackMessage = agent.ack;
+        }
+        
+        // Speak the ack with agent's voice
+        if (ackMessage) {
+          const agentVoice = getAgentVoice(winner.agentId, agent);
+          console.log('[ExchangeBridge] Speaking agent ack:', ackMessage, '| Voice:', agentVoice);
+          speaker.speak(ackMessage, { voice: agentVoice });
+        }
+      }
+    } catch (e) {
+      console.warn('[ExchangeBridge] Could not speak ack:', e.message);
+    }
     
     // Build all bids summary for HUD
     const allBids = [winner, ...backups];
@@ -1733,6 +1887,9 @@ function setupExchangeEvents() {
   // Task completed successfully
   exchangeInstance.on('task:settled', async ({ task, result, agentId }) => {
     console.log('[ExchangeBridge] Task settled by:', agentId);
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange-bridge.js:1725',message:'task:settled fired',data:{agentId,taskContent:task?.content?.slice(0,50),resultOutput:result?.output?.slice?.(0,100),resultMessage:result?.message?.slice?.(0,100),resultSuccess:result?.success,resultKeys:Object.keys(result||{})},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A-B'})}).catch(()=>{});
+    // #endregion
     
     // Calculate execution duration
     const startTime = taskExecutionStartTimes.get(task.id);
@@ -1756,6 +1913,24 @@ function setupExchangeEvents() {
       });
     } catch (e) {
       console.warn('[ExchangeBridge] Stats tracking error:', e.message);
+    }
+    
+    // ==================== MASTER ORCHESTRATOR FEEDBACK ====================
+    // Provide feedback to help agents learn
+    try {
+      const masterOrchestrator = require('../../packages/agents/master-orchestrator');
+      const winner = { agentId, agentVersion: '1.0.0' };
+      // Get the master evaluation from the task metadata if available
+      const masterEvaluation = task.metadata?.masterEvaluation || null;
+      await masterOrchestrator.provideFeedback(task, result, winner, masterEvaluation);
+      
+      // Process any rejected bids (apply reputation penalties)
+      if (masterEvaluation?.rejectedBids?.length > 0) {
+        await masterOrchestrator.processRejectedBids(masterEvaluation.rejectedBids);
+      }
+    } catch (e) {
+      // Master orchestrator feedback is optional
+      console.warn('[ExchangeBridge] Master Orchestrator feedback error:', e.message);
     }
     
     // Phase 1: Check if this task was cancelled (late result suppression)
@@ -1799,17 +1974,19 @@ function setupExchangeEvents() {
       // DIRECT TTS - Speak the prompt immediately via realtime speech
       // This ensures TTS works even if event-based approach has race conditions
       try {
-        const { getRealtimeSpeech } = require('../../realtime-speech');
-        const realtimeSpeech = getRealtimeSpeech();
-        console.log('[ExchangeBridge] Got realtimeSpeech instance:', !!realtimeSpeech, 'isConnected:', realtimeSpeech?.isConnected);
+        const { getVoiceSpeaker } = require('../../voice-speaker');
+        const speaker = getVoiceSpeaker();
+        console.log('[ExchangeBridge] Got voice speaker instance:', !!speaker);
         
-        if (realtimeSpeech && result.needsInput.prompt) {
-          console.log('[ExchangeBridge] Speaking needsInput prompt directly:', result.needsInput.prompt);
+        if (speaker && result.needsInput.prompt) {
+          // Get agent-specific voice personality
+          const agentVoice = getAgentVoice(agentId);
+          console.log('[ExchangeBridge] Speaking needsInput prompt directly:', result.needsInput.prompt, '| Voice:', agentVoice);
           // Await the speak call to ensure it's queued
-          const speakResult = await realtimeSpeech.speak(result.needsInput.prompt);
+          const speakResult = await speaker.speak(result.needsInput.prompt, { voice: agentVoice });
           console.log('[ExchangeBridge] Speak result:', speakResult);
         } else {
-          console.warn('[ExchangeBridge] Cannot speak: realtimeSpeech=', !!realtimeSpeech, 'prompt=', !!result.needsInput.prompt);
+          console.warn('[ExchangeBridge] Cannot speak: speaker=', !!speaker, 'prompt=', !!result.needsInput.prompt);
         }
       } catch (e) {
         console.error('[ExchangeBridge] Direct TTS failed:', e.message, e.stack);
@@ -1827,7 +2004,118 @@ function setupExchangeEvents() {
       return; // Don't mark as completed yet
     }
     
+    // ==================== EXECUTE APP ACTIONS ====================
+    // If agent returned an action, execute it via IPC
+    if (result.data?.action) {
+      try {
+        console.log('[ExchangeBridge] Agent requested action:', result.data.action);
+        
+        // Execute the action through the app-actions handler
+        // Use the exported executeAppAction function or fall back to requiring main
+        let actionResult;
+        
+        try {
+          // Try to get the exported action handler
+          const appActions = require('../../main.js');
+          if (typeof appActions.executeAppAction === 'function') {
+            actionResult = await appActions.executeAppAction(result.data.action);
+          } else {
+            // Fallback: Use BrowserWindow to find main window and send message
+            const { BrowserWindow } = require('electron');
+            const mainWindow = BrowserWindow.getAllWindows().find(w => !w.isDestroyed());
+            
+            const { ipcMain } = require('electron');
+            const action = result.data.action;
+            
+            // Handle menu item opening (LLM already matched the item)
+            if (action.type === 'open-menu-item') {
+              // Use pre-matched item if available, otherwise search
+              let menuItem = action.matchedItem;
+              
+              if (!menuItem && action.query) {
+                // Fallback: search for item (shouldn't normally happen with LLM)
+                const { findMenuItem } = require('../../menu.js');
+                menuItem = await findMenuItem(action.query);
+              }
+              
+              if (menuItem) {
+                console.log(`[ExchangeBridge] Opening menu item: ${menuItem.name} (${menuItem.type})`);
+                
+                // Handle different item types
+                if (menuItem.type === 'app-feature') {
+                  // App features use direct IPC actions
+                  console.log(`[ExchangeBridge] Opening app feature: ${menuItem.name} via ${menuItem.action}`);
+                  ipcMain.emit('menu-action', null, {
+                    action: menuItem.action,
+                    label: menuItem.name
+                  });
+                  actionResult = { success: true, opened: menuItem.name };
+                } else if (menuItem.type === 'tool-module') {
+                  // Tool modules use moduleManager
+                  console.log(`[ExchangeBridge] Opening tool module: ${menuItem.name}`);
+                  const { executeAction } = require('../../action-executor');
+                  actionResult = executeAction('open-module', { moduleId: menuItem.moduleId, name: menuItem.name });
+                } else if (menuItem.type === 'web-tool') {
+                  // Web tools open in browser
+                  console.log(`[ExchangeBridge] Opening web tool: ${menuItem.name}`);
+                  const { executeAction } = require('../../action-executor');
+                  actionResult = executeAction('open-web-tool', { url: menuItem.url, name: menuItem.name });
+                } else if (menuItem.type === 'tool') {
+                  // Built-in tools (Black Hole, etc.)
+                  console.log(`[ExchangeBridge] Opening built-in tool: ${menuItem.name} via ${menuItem.action}`);
+                  const { executeAction } = require('../../action-executor');
+                  actionResult = executeAction(menuItem.action);
+                } else {
+                  // Determine the correct action based on item type
+                  let menuAction = 'open-external-bot';
+                  if (menuItem.type === 'image-creator') menuAction = 'open-image-creator';
+                  else if (menuItem.type === 'video-creator') menuAction = 'open-video-creator';
+                  else if (menuItem.type === 'audio-generator') menuAction = 'open-audio-generator';
+                  else if (menuItem.type === 'idw-environment') menuAction = 'open-idw-url';
+                  
+                  ipcMain.emit('menu-action', null, {
+                    action: menuAction,
+                    url: menuItem.url,
+                    label: menuItem.name,
+                    isExternal: true
+                  });
+                  actionResult = { success: true, opened: menuItem.name };
+                }
+              } else {
+                console.warn(`[ExchangeBridge] No menu item found for: ${action.query}`);
+                actionResult = { success: false, error: `Could not find "${action.query}" in menu` };
+              }
+            } else if (action.type && action.type.startsWith('open-')) {
+              // Direct window action (open-spaces, open-gsx-create, etc.)
+              // Use centralized action executor
+              console.log(`[ExchangeBridge] Executing app action: ${action.type}`);
+              const { executeAction } = require('../../action-executor');
+              actionResult = executeAction(action.type, action.params || {});
+            } else {
+              console.warn('[ExchangeBridge] Unknown action format:', action);
+              actionResult = { success: false, error: `Unknown action format` };
+            }
+          }
+        } catch (requireError) {
+          console.error('[ExchangeBridge] Failed to load action handler:', requireError.message);
+          actionResult = { success: false, error: requireError.message };
+        }
+        
+        console.log('[ExchangeBridge] Action result:', actionResult);
+        
+        // If action failed, add error to message
+        if (!actionResult.success) {
+          console.warn('[ExchangeBridge] Action failed:', actionResult.error);
+        }
+      } catch (actionError) {
+        console.error('[ExchangeBridge] Failed to execute action:', actionError);
+      }
+    }
+    
     const message = result.output || result.data?.message || (result.success ? 'All done' : null);
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange-bridge.js:1823',message:'message extracted',data:{extractedMessage:message?.slice?.(0,100),resultOutput:result?.output?.slice?.(0,100),resultDataMessage:result?.data?.message?.slice?.(0,100),willSpeak:!!(message && message !== 'All done')},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
     
     // Add assistant response to conversation history
     if (message) {
@@ -1857,18 +2145,26 @@ function setupExchangeEvents() {
     // DIRECT TTS - Speak the result directly via realtime speech
     // For async tasks, respondToFunctionCall already completed with empty response
     // so we need to speak the actual result here
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange-bridge.js:1853',message:'TTS check entry',data:{hasMessage:!!message,messageValue:message?.slice?.(0,100),isAllDone:message==='All done',willTrySpeaking:!!(message && message !== 'All done')},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
     if (message && message !== 'All done') {
       try {
-        const { getRealtimeSpeech } = require('../../realtime-speech');
-        const realtimeSpeech = getRealtimeSpeech();
-        console.log('[ExchangeBridge] Got realtimeSpeech for result:', !!realtimeSpeech, 'isConnected:', realtimeSpeech?.isConnected);
+        const { getVoiceSpeaker } = require('../../voice-speaker');
+        const speaker = getVoiceSpeaker();
+        console.log('[ExchangeBridge] Got voice speaker for result:', !!speaker);
         
-        if (realtimeSpeech) {
-          console.log('[ExchangeBridge] Speaking task result directly:', message.slice(0, 50));
-          const speakResult = await realtimeSpeech.speak(message);
+        if (speaker) {
+          // Get agent-specific voice personality
+          const agentVoice = getAgentVoice(agentId);
+          console.log('[ExchangeBridge] Speaking task result directly:', message.slice(0, 50), '| Voice:', agentVoice);
+          const speakResult = await speaker.speak(message, { voice: agentVoice });
           console.log('[ExchangeBridge] Speak result for task completion:', speakResult);
         }
       } catch (e) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange-bridge.js:1878',message:'TTS error',data:{errorMessage:e.message,errorStack:e.stack?.slice?.(0,300)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
+        // #endregion
         console.error('[ExchangeBridge] Direct TTS for result failed:', e.message, e.stack);
       }
     }
@@ -1899,6 +2195,9 @@ function setupExchangeEvents() {
   // Task failed, trying backup
   exchangeInstance.on('task:busted', ({ task, agentId, error, backupsRemaining }) => {
     console.log('[ExchangeBridge] Task busted, backups remaining:', backupsRemaining);
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange-bridge.js:1903',message:'task busted',data:{taskContent:task?.content?.slice(0,50),agentId,error,backupsRemaining},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
     
     if (global.showCommandHUD) {
       global.showCommandHUD({
@@ -1916,6 +2215,9 @@ function setupExchangeEvents() {
   // Task dead-lettered (all retries exhausted)
   exchangeInstance.on('task:dead_letter', ({ task, reason }) => {
     console.error('[ExchangeBridge] Task dead-lettered:', reason);
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange-bridge.js:1918',message:'task dead-lettered',data:{taskContent:task?.content?.slice(0,50),reason},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
     
     if (global.sendCommandHUDResult) {
       global.sendCommandHUDResult({
@@ -2053,11 +2355,11 @@ function setupExchangeIPC() {
             const prompt = result.needsInput.prompt;
             if (prompt) {
               try {
-                const { getRealtimeSpeech } = require('../../realtime-speech');
-                const realtimeSpeech = getRealtimeSpeech();
-                if (realtimeSpeech) {
-                  console.log('[ExchangeBridge] Speaking follow-up prompt via realtime speech');
-                  await realtimeSpeech.speak(prompt);
+                const { getVoiceSpeaker } = require('../../voice-speaker');
+                const speaker = getVoiceSpeaker();
+                if (speaker) {
+                  console.log('[ExchangeBridge] Speaking follow-up prompt via voice speaker');
+                  await speaker.speak(prompt);
                 }
               } catch (speakErr) {
                 console.error('[ExchangeBridge] Failed to speak follow-up prompt:', speakErr.message);
@@ -2094,11 +2396,11 @@ function setupExchangeIPC() {
           addToHistory('assistant', completedMessage, agentId);
           if (completedMessage && completedMessage !== 'Done!') {
             try {
-              const { getRealtimeSpeech } = require('../../realtime-speech');
-              const realtimeSpeech = getRealtimeSpeech();
-              if (realtimeSpeech) {
-                console.log('[ExchangeBridge] Speaking follow-up completion via realtime speech');
-                await realtimeSpeech.speak(completedMessage);
+              const { getVoiceSpeaker } = require('../../voice-speaker');
+              const speaker = getVoiceSpeaker();
+              if (speaker) {
+                console.log('[ExchangeBridge] Speaking follow-up completion via voice speaker');
+                await speaker.speak(completedMessage);
               }
             } catch (speakErr) {
               console.error('[ExchangeBridge] Failed to speak completion:', speakErr.message);
@@ -2332,10 +2634,10 @@ function setupExchangeIPC() {
       if (target.includes('agent composer') || target.includes('composer') || target.includes('gsx create')) {
         console.log('[ExchangeBridge] Opening Agent Composer window');
         
-        // Cancel any AI response
+        // Cancel any current speech
         try {
-          const { getRealtimeSpeech } = require('../../realtime-speech');
-          getRealtimeSpeech().cancelResponse();
+          const { getVoiceSpeaker } = require('../../voice-speaker');
+          getVoiceSpeaker().cancel();
         } catch (e) {}
         
         try {
@@ -2403,14 +2705,14 @@ function setupExchangeIPC() {
       
       console.log('[ExchangeBridge] Opening Agent Composer for new agent, description:', description);
       
-      // Cancel any AI response since we're handling this locally
-      const { getRealtimeSpeech } = require('../../realtime-speech');
-      const realtimeSpeech = getRealtimeSpeech();
+      // Cancel any current speech since we're handling this locally
+      const { getVoiceSpeaker } = require('../../voice-speaker');
+      const speaker = getVoiceSpeaker();
       
       try {
-        realtimeSpeech.cancelResponse();
+        speaker.cancel();
       } catch (e) {
-        console.warn('[ExchangeBridge] Could not cancel AI response:', e);
+        console.warn('[ExchangeBridge] Could not cancel speech:', e);
       }
       
       // IMMEDIATE ACKNOWLEDGMENT - speak before opening window
@@ -2418,7 +2720,7 @@ function setupExchangeIPC() {
         const ack = description 
           ? `Got it, I'll help you build an agent for ${description}. Let me think about the best approach.`
           : `Got it, let me help you create a new agent.`;
-        realtimeSpeech.speak(ack);
+        speaker.speak(ack);
         console.log('[ExchangeBridge] Spoke acknowledgment:', ack);
       } catch (e) {
         console.warn('[ExchangeBridge] Could not speak acknowledgment:', e);
@@ -2690,4 +2992,8 @@ module.exports = {
   hotConnectAgent,
   disconnectAgent,
   DEFAULT_EXCHANGE_CONFIG,
+  // Voice system exports for agent creation
+  VOICE_DESCRIPTIONS,
+  searchVoices,
+  getAgentVoice,
 };

@@ -402,12 +402,28 @@ class ModuleManager {
     return this.loadWebTools();
   }
   
-  addWebTool(tool) {
+  async addWebTool(tool) {
     const tools = this.loadWebTools();
     tools.push(tool);
     this.saveWebTools(tools);
     this.updateApplicationMenu();
-    return tool;
+    
+    // Auto-generate agent if docs URL provided
+    let agentCreated = false;
+    if (tool.docsUrl) {
+      try {
+        const { generateAgentFromDocs } = require('./lib/tool-agent-generator');
+        console.log(`[ModuleManager] Generating agent from docs for: ${tool.name}`);
+        await generateAgentFromDocs(tool);
+        agentCreated = true;
+        console.log(`[ModuleManager] Agent created successfully for: ${tool.name}`);
+      } catch (error) {
+        console.warn(`[ModuleManager] Could not auto-create agent for ${tool.name}:`, error.message);
+        // Don't fail the tool addition if agent creation fails
+      }
+    }
+    
+    return { ...tool, agentCreated };
   }
   
   openWebTool(toolId) {
@@ -859,16 +875,30 @@ class ModuleManager {
     console.log(`Opened web tool: ${tool.name} (${tool.url}) - Size: ${tool.windowSize || 'medium'}`);
   }
   
-  deleteWebTool(toolId) {
+  async deleteWebTool(toolId) {
     const tools = this.loadWebTools();
+    const toolToDelete = tools.find(t => t.id === toolId);
     const filteredTools = tools.filter(t => t.id !== toolId);
-    
+
     if (tools.length === filteredTools.length) {
       throw new Error(`Web tool not found: ${toolId}`);
     }
-    
+
     this.saveWebTools(filteredTools);
     this.updateApplicationMenu();
+    
+    // Clean up any auto-generated agent for this tool
+    if (toolToDelete && toolToDelete.docsUrl) {
+      try {
+        const { deleteToolAgent } = require('./lib/tool-agent-generator');
+        await deleteToolAgent(toolId);
+        console.log(`[ModuleManager] Cleaned up agent for deleted tool: ${toolToDelete.name}`);
+      } catch (error) {
+        console.warn(`[ModuleManager] Could not clean up agent:`, error.message);
+        // Don't fail the tool deletion if agent cleanup fails
+      }
+    }
+    
     return true;
   }
 }

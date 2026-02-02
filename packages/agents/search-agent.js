@@ -109,7 +109,28 @@ const searchAgent = {
   id: 'search-agent',
   name: 'Search Agent',
   description: 'Searches the web for information - remembers your search history',
+  voice: 'echo',  // Authoritative, knowledgeable - see VOICE-GUIDE.md
+  acks: ["Let me look that up.", "Searching now."],
   categories: ['search', 'information', 'weather', 'knowledge'],
+  
+  // Prompt for LLM evaluation
+  prompt: `Search Agent searches the web for factual information and answers knowledge questions.
+
+HIGH CONFIDENCE (0.85+) for:
+- Factual questions: "Who invented the lightbulb?", "What is the capital of France?"
+- General knowledge: "How tall is Mount Everest?", "When did World War 2 end?"
+- Current events: "What happened in the news today?"
+- Definitions: "What is photosynthesis?", "What does API stand for?"
+- Research questions: "Tell me about quantum computing"
+
+LOW CONFIDENCE (0.00-0.20) - DO NOT BID on these:
+- Time queries: "What time is it?" (time agent)
+- Calendar queries: "What do I have on Tuesday?" (calendar agent)
+- Media control: "Play some music" (media/DJ agent)
+- Greetings: "Hello", "How are you?" (smalltalk agent)
+- App commands: "Open spaces", "Show my notes" (spaces agent)
+
+This agent searches the internet for information. It does NOT have access to the user's personal data, calendar, or local files.`,
   keywords: SEARCH_KEYWORDS,
   
   // Memory instance
@@ -149,75 +170,10 @@ const searchAgent = {
   },
   
   /**
-   * Bid on a task
-   * @param {Object} task - { content, ... }
-   * @returns {Object|null} - { confidence } or null to not bid
+   * Bid on a task - uses LLM-based unified bidder
    */
   bid(task) {
-    if (!task?.content) return null;
-    
-    const lower = task.content.toLowerCase();
-    
-    // Weather queries get high priority - we can search for them
-    const weatherKeywords = ['weather', 'temperature', 'forecast', 'rain', 'snow', 'sunny', 'cloudy', 'humid', 'cold', 'hot', 'warm'];
-    const hasWeatherKeyword = weatherKeywords.some(k => lower.includes(k));
-    
-    if (hasWeatherKeyword) {
-      return { confidence: 0.95 };  // High confidence for weather
-    }
-    
-    // Don't bid if it's clearly for media or help
-    const mediaKeywords = ['play', 'pause', 'stop', 'skip', 'volume', 'music', 'song'];
-    const helpKeywords = ['help', 'commands', 'what can you do'];
-    
-    if (mediaKeywords.some(k => lower.includes(k))) {
-      return null;
-    }
-    if (helpKeywords.some(k => lower.includes(k))) {
-      return null;
-    }
-    
-    // Time queries without weather/event context go to time-agent
-    const timeKeywords = ['what time is it', 'current time', 'what is the time'];
-    if (timeKeywords.some(k => lower.includes(k))) {
-      return null;  // Let time-agent handle these
-    }
-    
-    // Check for search keywords
-    const hasSearchKeyword = SEARCH_KEYWORDS.some(k => lower.includes(k));
-    
-    // Questions about people, places, things, events
-    const knowledgePatterns = [
-      'who is', 'who was', 'who invented', 'who created', 'who discovered',
-      'what is', 'what are', 'what was', 'what does', 'what happened',
-      'where is', 'where was', 'where did',
-      'when did', 'when was', 'when is',
-      'why is', 'why does', 'why did',
-      'how does', 'how did', 'how many', 'how much', 'how old', 'how tall', 'how far'
-    ];
-    const hasKnowledgePattern = knowledgePatterns.some(p => lower.includes(p));
-    
-    if (hasKnowledgePattern) {
-      return { confidence: 0.9 };  // High confidence for knowledge questions
-    }
-    
-    if (hasSearchKeyword) {
-      return { confidence: 0.85 };
-    }
-    
-    // Generic questions
-    const isQuestion = lower.includes('?') || 
-      lower.startsWith('what') || 
-      lower.startsWith('who') || 
-      lower.startsWith('where') || 
-      lower.startsWith('when') || 
-      lower.startsWith('why') || 
-      lower.startsWith('how');
-    
-    if (isQuestion) {
-      return { confidence: 0.6 };  // Lower confidence for generic questions
-    }
-    
+    // No fast bidding - let the unified bidder handle all evaluation via LLM
     return null;
   },
   

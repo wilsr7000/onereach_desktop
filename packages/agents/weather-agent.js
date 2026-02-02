@@ -28,6 +28,8 @@ const weatherAgent = {
   id: 'weather-agent',
   name: 'Weather Agent',
   description: 'Provides weather - remembers your home location and preferred units',
+  voice: 'verse',  // Natural, conversational - see VOICE-GUIDE.md
+  acks: ["Let me check the forecast.", "Checking the weather."],
   categories: ['system', 'weather'],
   keywords: ['weather', 'temperature', 'forecast', 'rain', 'sunny', 'cloudy', 'cold', 'hot', 'humid'],
   
@@ -70,22 +72,10 @@ const weatherAgent = {
   },
   
   /**
-   * Bid on a task
+   * Bid on a task - uses LLM-based unified bidder
    */
   bid(task) {
-    if (!task?.content) return null;
-    
-    const lower = task.content.toLowerCase();
-    const weatherKeywords = ['weather', 'temperature', 'forecast', 'rain', 'sunny', 'cloudy', 'cold', 'hot', 'humid', 'degrees'];
-    
-    if (weatherKeywords.some(k => lower.includes(k))) {
-      if (!this._getApiKey()) {
-        console.warn('[WeatherAgent] No API key configured - not bidding');
-        return null;
-      }
-      return { confidence: 0.9, reasoning: 'Weather query' };
-    }
-    
+    // No fast bidding - let the unified bidder handle all evaluation via LLM
     return null;
   },
   

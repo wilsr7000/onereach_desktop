@@ -867,6 +867,9 @@ async function handleGSX2FA(gsxWindow, state, environment, attempt = 0) {
  * @returns {BrowserWindow} The created window
  */
 function openGSXLargeWindow(url, title, windowTitle, loadingMessage = 'Loading...', idwEnvironment = null) {
+  // #region agent log
+  try{require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log',JSON.stringify({location:'menu.js:869',message:'openGSXLargeWindow ENTRY',data:{url,title,idwEnvironment,providedEnv:!!idwEnvironment},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1,H3'})+'\n');}catch(e){}
+  // #endregion
   const getLogger = require('./event-logger');
   const logger = getLogger();
   
@@ -890,6 +893,9 @@ function openGSXLargeWindow(url, title, windowTitle, loadingMessage = 'Loading..
       idwEnvironment = hostParts.find(part => 
         ['staging', 'edison', 'production', 'store'].includes(part)
       ) || 'default';
+      // #region agent log
+      try{require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log',JSON.stringify({location:'menu.js:893',message:'Environment extracted from URL',data:{url,hostname:urlObj.hostname,hostParts,extractedEnv:idwEnvironment},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})+'\n');}catch(e){}
+      // #endregion
     } catch (err) {
       console.error('Error parsing GSX URL to extract environment:', err);
       idwEnvironment = 'default';
@@ -907,8 +913,16 @@ function openGSXLargeWindow(url, title, windowTitle, loadingMessage = 'Loading..
   // Only register with multi-tenant store if idwEnvironment is set (actual GSX windows)
   if (idwEnvironment) {
     const multiTenantStore = require('./multi-tenant-store');
+    // #region agent log
+    const hasToken = multiTenantStore.hasValidToken(idwEnvironment);
+    const token = multiTenantStore.getToken(idwEnvironment);
+    try{require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log',JSON.stringify({location:'menu.js:910',message:'GSX token check BEFORE register',data:{idwEnvironment,fullPartition,hasToken,tokenExists:!!token,tokenValue:token?token.value?.substring(0,20)+'...':null},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2,H4'})+'\n');}catch(e){}
+    // #endregion
     multiTenantStore.registerPartition(idwEnvironment, fullPartition);
     multiTenantStore.attachCookieListener(fullPartition);
+    // #region agent log
+    try{require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log',JSON.stringify({location:'menu.js:916',message:'GSX partition registered - NO TOKEN INJECTION',data:{idwEnvironment,fullPartition,note:'Missing token injection code here'},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})+'\n');}catch(e){}
+    // #endregion
   }
   
   const gsxWindow = new BrowserWindow({
@@ -4384,6 +4398,343 @@ function refreshApplicationMenu() {
   setApplicationMenu(idwEnvironments);
 }
 
+/**
+ * Get all openable menu items for voice/agent access
+ * Returns a flat list of items the agent can open
+ */
+function getOpenableItems() {
+  const cachedData = menuCache.loadAll();
+  const items = [];
+  
+  // App features (built-in windows/features)
+  // Note: Spaces is handled by the dedicated Spaces Agent for smart summaries
+  const appFeatures = [
+    { name: 'Video Editor', type: 'app-feature', action: 'open-video-editor', keywords: ['video', 'editor', 'edit video', 'video edit'] },
+    { name: 'GSX Create', type: 'app-feature', action: 'open-gsx-create', keywords: ['gsx', 'create', 'aider', 'coding', 'development'] },
+    { name: 'Settings', type: 'app-feature', action: 'open-settings', keywords: ['settings', 'preferences', 'options', 'config'] },
+    { name: 'Budget Manager', type: 'app-feature', action: 'open-budget', keywords: ['budget', 'cost', 'spending', 'money', 'usage'] },
+    { name: 'App Health', type: 'app-feature', action: 'open-app-health', keywords: ['health', 'status', 'errors', 'diagnostics'] },
+    { name: 'Agent Manager', type: 'app-feature', action: 'open-agent-manager', keywords: ['agents', 'manage agents', 'custom agents'] },
+  ];
+  
+  items.push(...appFeatures);
+  
+  // External AI bots (ChatGPT, Claude, etc.)
+  if (cachedData.externalBots) {
+    cachedData.externalBots.forEach(bot => {
+      items.push({
+        name: bot.name,
+        type: 'external-bot',
+        url: bot.chatUrl,
+        keywords: [bot.name.toLowerCase(), ...(bot.name.toLowerCase().split(' '))]
+      });
+    });
+  }
+  
+  // Image creators (Midjourney, DALL-E, etc.)
+  if (cachedData.imageCreators) {
+    cachedData.imageCreators.forEach(creator => {
+      items.push({
+        name: creator.name,
+        type: 'image-creator',
+        url: creator.chatUrl || creator.url,
+        keywords: [creator.name.toLowerCase(), 'image', 'art', ...(creator.name.toLowerCase().split(' '))]
+      });
+    });
+  }
+  
+  // Video creators (Runway, Veo3, etc.)
+  if (cachedData.videoCreators) {
+    cachedData.videoCreators.forEach(creator => {
+      items.push({
+        name: creator.name,
+        type: 'video-creator',
+        url: creator.chatUrl || creator.url,
+        keywords: [creator.name.toLowerCase(), 'video', ...(creator.name.toLowerCase().split(' '))]
+      });
+    });
+  }
+  
+  // Audio generators (ElevenLabs, etc.)
+  if (cachedData.audioGenerators) {
+    cachedData.audioGenerators.forEach(generator => {
+      items.push({
+        name: generator.name,
+        type: 'audio-generator',
+        url: generator.chatUrl || generator.url,
+        keywords: [generator.name.toLowerCase(), 'audio', 'voice', ...(generator.name.toLowerCase().split(' '))]
+      });
+    });
+  }
+  
+  // IDW environments
+  if (cachedData.idwEnvironments) {
+    cachedData.idwEnvironments.forEach(env => {
+      items.push({
+        name: env.label || env.name,
+        type: 'idw-environment',
+        url: env.chatUrl || env.url,  // IDW environments use chatUrl
+        keywords: [(env.label || env.name || '').toLowerCase(), 'idw', 'environment']
+      });
+    });
+  }
+  
+  // Tools menu items (modules and web tools)
+  // Note: LLM uses item names for matching, no keywords needed
+  if (global.moduleManager) {
+    // Installed modules
+    const modules = global.moduleManager.getInstalledModules();
+    if (modules && modules.length > 0) {
+      modules.forEach(mod => {
+        items.push({
+          name: mod.name || mod.id,
+          type: 'tool-module',
+          action: 'open-module',
+          moduleId: mod.id,
+          keywords: [] // LLM matches by name
+        });
+      });
+    }
+    
+    // Web tools
+    const webTools = global.moduleManager.getWebTools();
+    if (webTools && webTools.length > 0) {
+      webTools.forEach(tool => {
+        items.push({
+          name: tool.name,
+          type: 'web-tool',
+          action: 'open-web-tool',
+          url: tool.url,
+          keywords: [] // LLM matches by name
+        });
+      });
+    }
+  }
+  
+  // Built-in tools
+  const builtInTools = [
+    { name: 'Black Hole', type: 'tool', action: 'open-black-hole', keywords: [] },
+    { name: 'Clipboard Viewer', type: 'tool', action: 'open-clipboard-viewer', keywords: [] },
+  ];
+  items.push(...builtInTools);
+  
+  return items;
+}
+
+/**
+ * Get OpenAI API key from app settings
+ */
+function getOpenAIApiKey() {
+  if (global.settingsManager) {
+    const openaiKey = global.settingsManager.get('openaiApiKey');
+    if (openaiKey) return openaiKey;
+    
+    const provider = global.settingsManager.get('llmProvider');
+    const llmKey = global.settingsManager.get('llmApiKey');
+    if (provider === 'openai' && llmKey) return llmKey;
+  }
+  return process.env.OPENAI_API_KEY;
+}
+
+/**
+ * Use LLM to find the best matching menu item for a user's request
+ * @param {string} userRequest - What the user said
+ * @returns {Promise<Object|null>} - Matching menu item or null
+ */
+async function findMenuItemWithLLM(userRequest) {
+  const items = getOpenableItems();
+  
+  if (items.length === 0) {
+    console.log('[Menu] No menu items available');
+    return null;
+  }
+  
+  const apiKey = getOpenAIApiKey();
+  if (!apiKey) {
+    console.log('[Menu] No OpenAI API key, falling back to simple matching');
+    return findMenuItemSimple(userRequest);
+  }
+  
+  // Build the list of available items for the LLM
+  const itemList = items.map((item, i) => `${i + 1}. "${item.name}" (${item.type})`).join('\n');
+  
+  const prompt = `You are a voice command interpreter matching garbled speech-to-text to menu items.
+
+AVAILABLE MENU ITEMS:
+${itemList}
+
+USER SAID: "${userRequest}"
+
+CRITICAL: Voice transcription is often VERY WRONG. Common errors:
+- "OpenGLAD" or "open glad" = "Open Claude" 
+- "OpenCLoud" or "open cloud" = "Open Claude"
+- "chat GBT" or "chat GPT" = "ChatGPT"
+- "mid journey" or "mid jerky" = "Midjourney"
+- "dolly" or "dally" = "DALL-E"
+- "eleven lab" = "ElevenLabs"
+- "Jim and I" or "gem in eye" = "Gemini"
+- "run way" = "Runway"
+- "perplexing" = "Perplexity"
+- Words often merged: "openclaude" "opengpt" "launchgemini"
+
+Your task: Find the INTENDED menu item despite transcription errors.
+- Look for phonetic similarity (sounds like)
+- Look for partial matches
+- Assume "open" or "launch" at the start means they want to open something
+- Be generous - if it COULD be a match, it probably is
+
+Respond with JSON only:
+{
+  "matchIndex": <1-based index of matching item, or 0 if truly no match>,
+  "confidence": <0.0-1.0>,
+  "reasoning": "<brief explanation>"
+}`;
+
+  try {
+    const { getBudgetManager } = require('./budget-manager');
+    const budgetManager = getBudgetManager();
+    
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.1,
+        max_tokens: 150
+      })
+    });
+    
+    if (!response.ok) {
+      console.error('[Menu] LLM API error:', response.status);
+      return findMenuItemSimple(userRequest);
+    }
+    
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || '';
+    
+    // Track usage
+    if (budgetManager && data.usage) {
+      budgetManager.trackUsage({
+        model: 'gpt-4o-mini',
+        inputTokens: data.usage.prompt_tokens || 0,
+        outputTokens: data.usage.completion_tokens || 0,
+        source: 'menu-matcher'
+      });
+    }
+    
+    // Parse JSON response
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      console.log('[Menu] LLM returned invalid JSON');
+      return findMenuItemSimple(userRequest);
+    }
+    
+    const result = JSON.parse(jsonMatch[0]);
+    console.log(`[Menu] LLM match result:`, result);
+    
+    if (result.matchIndex > 0 && result.matchIndex <= items.length && result.confidence >= 0.3) {
+      const matchedItem = items[result.matchIndex - 1];
+      console.log(`[Menu] LLM matched "${userRequest}" to "${matchedItem.name}" (confidence: ${result.confidence})`);
+      return matchedItem;
+    }
+    
+    // LLM didn't match - try phonetic fallback for common cases
+    console.log(`[Menu] LLM found no match, trying phonetic fallback for "${userRequest}"`);
+    return findMenuItemPhonetic(userRequest, items);
+    
+  } catch (error) {
+    console.error('[Menu] LLM matching error:', error.message);
+    return findMenuItemSimple(userRequest);
+  }
+}
+
+/**
+ * Phonetic/fuzzy fallback for common transcription errors
+ */
+function findMenuItemPhonetic(query, items) {
+  const lower = query.toLowerCase().replace(/[^a-z]/g, ''); // Remove non-letters
+  
+  // Common phonetic patterns: what it sounds like → what they meant
+  const phoneticMap = {
+    // Claude variations
+    'glad': 'claude', 'cloud': 'claude', 'clod': 'claude', 'claud': 'claude',
+    'claw': 'claude', 'clawed': 'claude', 'klad': 'claude',
+    // ChatGPT variations  
+    'gpt': 'chatgpt', 'gbt': 'chatgpt', 'chatgbt': 'chatgpt', 'chargpt': 'chatgpt',
+    'chatgp': 'chatgpt', 'chegg': 'chatgpt',
+    // Gemini variations
+    'gemini': 'gemini', 'jimini': 'gemini', 'jiminy': 'gemini', 'jemini': 'gemini',
+    // Midjourney variations
+    'journey': 'midjourney', 'midjerky': 'midjourney', 'midjourny': 'midjourney',
+    // DALL-E variations
+    'dolly': 'dall-e', 'dally': 'dall-e', 'dalle': 'dall-e', 'dali': 'dall-e',
+    // Perplexity variations
+    'perplexity': 'perplexity', 'perplexing': 'perplexity', 'perplex': 'perplexity',
+    // Runway variations
+    'runway': 'runway', 'runaway': 'runway',
+    // ElevenLabs variations
+    'elevenlabs': 'elevenlabs', 'elevenlab': 'elevenlabs', 'eleven': 'elevenlabs',
+    // Grok variations
+    'grok': 'grok', 'grock': 'grok', 'grawl': 'grok',
+  };
+  
+  // Check each phonetic pattern
+  for (const [sound, target] of Object.entries(phoneticMap)) {
+    if (lower.includes(sound)) {
+      // Find item matching the target
+      const match = items.find(item => 
+        item.name.toLowerCase().includes(target) ||
+        item.keywords.some(kw => kw.includes(target))
+      );
+      if (match) {
+        console.log(`[Menu] Phonetic match: "${sound}" in "${query}" → "${match.name}"`);
+        return match;
+      }
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Simple fallback matching (when LLM is unavailable)
+ */
+function findMenuItemSimple(query) {
+  const items = getOpenableItems();
+  const lower = query.toLowerCase();
+  
+  // Try exact name match
+  let match = items.find(item => item.name.toLowerCase() === lower);
+  if (match) return match;
+  
+  // Try contains
+  match = items.find(item => 
+    lower.includes(item.name.toLowerCase()) || 
+    item.name.toLowerCase().includes(lower)
+  );
+  if (match) return match;
+  
+  // Try keywords
+  match = items.find(item => 
+    item.keywords.some(kw => lower.includes(kw) || kw.includes(lower))
+  );
+  
+  return match || null;
+}
+
+/**
+ * Find menu item - uses LLM when available, falls back to simple matching
+ * @param {string} query - User's request
+ * @returns {Promise<Object|null>}
+ */
+async function findMenuItem(query) {
+  return findMenuItemWithLLM(query);
+}
+
 module.exports = {
   createMenu,
   setApplicationMenu,
@@ -4393,5 +4744,8 @@ module.exports = {
   // PERFORMANCE: Expose cache invalidation for when menu data files are updated
   invalidateMenuCache: () => menuCache.invalidate(),
   // Window management for app quit
-  closeAllGSXWindows
+  closeAllGSXWindows,
+  // For agent/voice access
+  getOpenableItems,
+  findMenuItem
 }; 

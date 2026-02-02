@@ -109,12 +109,28 @@ Think step-by-step about USER INTENT, not just keywords:
 - **0.20-0.49**: Weak match - tangentially related at best
 - **0.00-0.19**: No match - completely different domain
 
+## CRITICAL: Match Confidence to Your Analysis
+
+**THIS IS EXTREMELY IMPORTANT:**
+- If you determine the request is for a DIFFERENT agent's domain, you MUST return LOW confidence (0.00-0.20)
+- Do NOT say "this is a calendar query" and then return 0.85 - that's contradictory
+- Your confidence score MUST align with whether THIS agent can handle the request
+
+**Example of WRONG output:**
+"reasoning": "This is a calendar inquiry, not music related"
+"confidence": 0.95  <- WRONG! Should be 0.00
+
+**Example of CORRECT output:**
+"reasoning": "This is a calendar inquiry, not music related"  
+"confidence": 0.00  <- CORRECT! Matches the reasoning
+
 ## Critical Rules
 
-1. **Day names + question = likely calendar** (e.g., "What's happening Monday?" = 0.85+ for calendar)
+1. **Day names + question = likely calendar** (e.g., "What's happening Monday?" = 0.85+ for calendar, 0.00 for music/weather/etc.)
 2. **Don't be too literal** - "What's going on" about a day = schedule query, not small talk
 3. **Context matters** - a time reference in a question usually means schedule/calendar
 4. **When in doubt, consider what data the agent has access to**
+5. **If the request doesn't match this agent's domain, return confidence 0.00-0.15**
 
 Respond with JSON only:
 {
@@ -249,10 +265,37 @@ async function evaluateAgentBid(agent, task) {
     const evaluation = JSON.parse(content);
     
     // Validate and normalize
+    let confidence = Math.max(0, Math.min(1, parseFloat(evaluation.confidence) || 0));
+    const reasoning = evaluation.reasoning || '';
+    
+    // SANITY CHECK: Detect contradictory responses where reasoning says "doesn't match"
+    // but confidence is high. This is a common LLM failure mode.
+    const reasoningLower = reasoning.toLowerCase();
+    const indicatesNoMatch = 
+      reasoningLower.includes('does not align') ||
+      reasoningLower.includes('doesn\'t align') ||
+      reasoningLower.includes('not related') ||
+      reasoningLower.includes('not match') ||
+      reasoningLower.includes('doesn\'t match') ||
+      reasoningLower.includes('different domain') ||
+      reasoningLower.includes('outside the') ||
+      reasoningLower.includes('unsuitable') ||
+      reasoningLower.includes('falls under the domain of') ||
+      reasoningLower.includes('this is a calendar') ||
+      reasoningLower.includes('this is a weather') ||
+      reasoningLower.includes('this is a time') ||
+      reasoningLower.includes('this is a music');
+    
+    // If reasoning indicates no match but confidence is high, fix it
+    if (indicatesNoMatch && confidence > 0.3) {
+      console.log(`[UnifiedBidder] Correcting contradictory response for ${agent.name}: "${reasoning.substring(0, 50)}..." had confidence ${confidence}, setting to 0.05`);
+      confidence = 0.05;
+    }
+    
     const normalized = {
-      confidence: Math.max(0, Math.min(1, parseFloat(evaluation.confidence) || 0)),
+      confidence,
       plan: evaluation.plan || '',
-      reasoning: evaluation.reasoning || ''
+      reasoning
     };
     
     console.log(`[UnifiedBidder] ${agent.name} bid ${normalized.confidence.toFixed(2)} on "${(task.content || task.phrase || '').substring(0, 30)}..."`);

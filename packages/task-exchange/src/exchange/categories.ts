@@ -113,21 +113,17 @@ export class CategoryIndex {
   }
 
   /**
-   * Get all unique agents from matched categories (deduplicated)
-   * Always includes market maker
+   * Get all connected agents for bidding
+   * ALL agents bid on ALL tasks - LLM bidding determines winner
+   * Categories are used for context/logging only, not filtering
    */
   getAgentsForTask(task: Task): Set<string> {
-    const matchedCategories = this.findCategories(task);
+    // Return ALL connected agents - let LLM bidding determine who handles it
     const agents = new Set<string>();
-
-    // Add agents from all matched categories
-    for (const categoryName of matchedCategories) {
-      const categoryAgents = this.categoryAgents.get(categoryName);
-      if (categoryAgents) {
-        for (const agentId of categoryAgents) {
-          agents.add(agentId);
-        }
-      }
+    
+    // Add all agents that have registered with any category
+    for (const agentId of this.agentCategories.keys()) {
+      agents.add(agentId);
     }
 
     // Always include market maker if set

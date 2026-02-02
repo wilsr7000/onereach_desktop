@@ -65,6 +65,11 @@
 - [ ] **Keyboard shortcuts** - No shortcuts for switching agents
 
 ### Custom Agents
+- [x] **App Agent** - Voice agent that knows all app features (v3.10.x)
+  - Answers questions about any feature
+  - Guided tours for each product
+  - Tracks which features user has explored
+  - Files: `packages/agents/app-agent.js`, `packages/agents/agent-registry.js`
 - [ ] **Agent dashboard** - See which agents are working
 - [ ] **Agent chaining** - Connect agents to work together
 

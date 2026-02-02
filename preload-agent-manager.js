@@ -45,6 +45,9 @@ contextBridge.exposeInMainWorld('agentManagerAPI', {
   
   // ==================== BUILTIN AGENTS ====================
   
+  // Get all builtin agents from registry (single source of truth)
+  getBuiltinAgents: () => ipcRenderer.invoke('agents:get-builtin-list'),
+  
   // Get enabled states for all builtin agents
   getBuiltinAgentStates: () => ipcRenderer.invoke('agents:get-builtin-states'),
   
@@ -58,6 +61,12 @@ contextBridge.exposeInMainWorld('agentManagerAPI', {
   
   // Test all enabled agents with a phrase
   testPhraseAllAgents: (phrase) => ipcRenderer.invoke('agents:test-phrase-all', phrase),
+  
+  // Execute an agent directly (bypasses Exchange for testing)
+  executeAgent: (agentId, phrase) => ipcRenderer.invoke('agents:execute-direct', agentId, phrase),
+  
+  // Get API key for auto-test phrase generation
+  getApiKey: () => ipcRenderer.invoke('agents:get-api-key'),
   
   // ==================== VERSION HISTORY ====================
   
