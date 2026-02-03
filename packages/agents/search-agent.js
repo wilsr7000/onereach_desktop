@@ -108,29 +108,40 @@ const EXCLUDE_KEYWORDS = [
 const searchAgent = {
   id: 'search-agent',
   name: 'Search Agent',
-  description: 'Searches the web for information - remembers your search history',
+  description: 'Searches the web for any query requiring external information - podcasts, people, companies, facts, news, definitions',
   voice: 'echo',  // Authoritative, knowledgeable - see VOICE-GUIDE.md
   acks: ["Let me look that up.", "Searching now."],
   categories: ['search', 'information', 'weather', 'knowledge'],
   
   // Prompt for LLM evaluation
-  prompt: `Search Agent searches the web for factual information and answers knowledge questions.
+  prompt: `Search Agent handles ANY query that requires external or current information from the internet.
 
-HIGH CONFIDENCE (0.85+) for:
-- Factual questions: "Who invented the lightbulb?", "What is the capital of France?"
-- General knowledge: "How tall is Mount Everest?", "When did World War 2 end?"
-- Current events: "What happened in the news today?"
-- Definitions: "What is photosynthesis?", "What does API stand for?"
-- Research questions: "Tell me about quantum computing"
+HIGH CONFIDENCE (0.85+) - BID when the user:
+- Wants to LEARN about something: "Tell me about X", "What is X", "Who is X"
+- Mentions a SPECIFIC ENTITY: person, company, product, podcast, show, movie, book, band, place
+- Needs CURRENT information: news, prices, events, updates, scores, weather
+- Asks for FACTS that require lookup or verification
+- Explicitly requests search: "search for", "look up", "find out about", "google"
 
-LOW CONFIDENCE (0.00-0.20) - DO NOT BID on these:
-- Time queries: "What time is it?" (time agent)
-- Calendar queries: "What do I have on Tuesday?" (calendar agent)
-- Media control: "Play some music" (media/DJ agent)
+Examples that REQUIRE search (bid 0.85+):
+- "Tell me about the future of work podcast" → Info about a specific podcast
+- "Who is Elon Musk?" → Info about a specific person  
+- "What is the Joe Rogan Experience?" → Info about a specific show
+- "What's happening with Tesla?" → Current info about a company
+- "Tell me about quantum computing" → Knowledge lookup
+- "What is photosynthesis?" → Definition/explanation
+- "How tall is Mount Everest?" → Factual lookup
+
+KEY INSIGHT: If the user wants to KNOW about something external/specific, this agent handles it.
+
+LOW CONFIDENCE (0.00-0.20) - DO NOT BID:
+- Current time: "What time is it?" (time agent)
+- User's calendar: "What do I have Tuesday?" (calendar agent)  
+- Play media: "Play music", "Play the podcast" (DJ agent plays, Search Agent explains)
 - Greetings: "Hello", "How are you?" (smalltalk agent)
-- App commands: "Open spaces", "Show my notes" (spaces agent)
+- App commands: "Open spaces" (spaces agent)
 
-This agent searches the internet for information. It does NOT have access to the user's personal data, calendar, or local files.`,
+This agent searches the internet. It does NOT control media playback or access personal data.`,
   keywords: SEARCH_KEYWORDS,
   
   // Memory instance
@@ -184,6 +195,9 @@ This agent searches the internet for information. It does NOT have access to the
    * @returns {Object} - { success, message }
    */
   async execute(task, context = {}) {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'search-agent.js:execute',message:'SearchAgent execute called',data:{taskId:task.id,taskContent:task.content?.slice(0,80),timestamp:Date.now()},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
     // Wrap execution with overall timeout to prevent hanging
     return Promise.race([
       this._executeInternal(task, context),

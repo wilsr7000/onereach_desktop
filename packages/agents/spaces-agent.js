@@ -124,6 +124,31 @@ const spacesAgent = {
 
       onProgress('Checking your Spaces...');
 
+      // ==================== MULTI-TURN STATE HANDLING ====================
+      // Check if this is a follow-up response to a previous needsInput
+      const action = task.context?.action;
+      if (action) {
+        console.log(`[SpacesAgent] Handling follow-up for action: ${action}`);
+        
+        if (action === 'create-space') {
+          // User is providing the space name
+          return this._handleCreateSpaceResponse(task, onProgress);
+        }
+        
+        if (action === 'add-note') {
+          // User is providing the note content
+          return this._handleAddNoteResponse(task, onProgress);
+        }
+      }
+      
+      // Handle generic yes/no follow-ups (for "open spaces?" prompts)
+      if (task.context?.userInput) {
+        const userResponse = task.context.userInput.toLowerCase();
+        if (userResponse.includes('yes') || userResponse.includes('open') || userResponse.includes('sure')) {
+          return this._openWithSummary(task, onProgress);
+        }
+      }
+
       // Create space command
       if ((lower.includes('create') || lower.includes('make') || lower.includes('new')) &&
           (lower.includes('space') || lower.includes('folder'))) {
@@ -450,6 +475,125 @@ const spacesAgent = {
       return {
         success: false,
         message: `Sorry, I couldn't create the space: ${error.message}`
+      };
+    }
+  },
+
+  /**
+   * Handle create-space follow-up response (user providing space name)
+   */
+  async _handleCreateSpaceResponse(task, onProgress) {
+    const api = getSpacesAPI();
+    if (!api) {
+      return { success: false, message: 'Spaces is not available right now.' };
+    }
+
+    // The user's response IS the space name
+    const spaceName = (task.context?.userInput || task.content || '').trim();
+    
+    if (!spaceName || spaceName.length < 1) {
+      return {
+        success: true,
+        message: "I didn't catch the name. What would you like to call the space?",
+        needsInput: {
+          prompt: "Tell me the name for your new space.",
+          agentId: this.id,
+          context: { action: 'create-space' }
+        }
+      };
+    }
+
+    onProgress(`Creating space "${spaceName}"...`);
+
+    try {
+      // Check if space already exists
+      const existingSpaces = await api.list();
+      const existing = existingSpaces.find(s => 
+        s.name.toLowerCase() === spaceName.toLowerCase()
+      );
+
+      if (existing) {
+        return {
+          success: true,
+          message: `A space called "${existing.name}" already exists. Would you like me to open it?`
+        };
+      }
+
+      // Create the space
+      const newSpace = await api.create(spaceName);
+
+      // Track in memory
+      const timestamp = new Date().toISOString().split('T')[0];
+      this.memory.appendToSection('Recent Queries', `- ${timestamp}: Created space "${spaceName}"`, 20);
+      await this.memory.save();
+
+      return {
+        success: true,
+        message: `Done! I created a new space called "${newSpace.name}".`,
+        data: {
+          action: { type: 'open-spaces' },
+          created: newSpace
+        }
+      };
+    } catch (error) {
+      console.error('[SpacesAgent] Create space error:', error);
+      return {
+        success: false,
+        message: `Sorry, I couldn't create the space: ${error.message}`
+      };
+    }
+  },
+
+  /**
+   * Handle add-note follow-up response (user providing note content)
+   */
+  async _handleAddNoteResponse(task, onProgress) {
+    const api = getSpacesAPI();
+    if (!api) {
+      return { success: false, message: 'Spaces is not available right now.' };
+    }
+
+    // The user's response IS the note content
+    const noteContent = (task.context?.userInput || task.content || '').trim();
+    
+    if (!noteContent || noteContent.length < 1) {
+      return {
+        success: true,
+        message: "I didn't catch that. What would you like me to save?",
+        needsInput: {
+          prompt: "Tell me what to write in the note.",
+          agentId: this.id,
+          context: { action: 'add-note' }
+        }
+      };
+    }
+
+    onProgress('Saving your note...');
+
+    try {
+      // Save to the default "Unclassified" space
+      const title = noteContent.slice(0, 50) + (noteContent.length > 50 ? '...' : '');
+      
+      await api.addItem('unclassified', {
+        type: 'text',
+        title: title,
+        text: noteContent
+      });
+
+      // Track in memory
+      const timestamp = new Date().toISOString().split('T')[0];
+      this.memory.appendToSection('Recent Queries', `- ${timestamp}: Added note: "${title}"`, 20);
+      await this.memory.save();
+
+      return {
+        success: true,
+        message: `Done! I saved your note "${title}" to Unclassified.`
+      };
+    } catch (error) {
+      console.error('[SpacesAgent] Add note error:', error);
+      return {
+        success: false,
+        message: `Sorry, I couldn't save the note: ${error.message}`
       };
     }
   },

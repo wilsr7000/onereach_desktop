@@ -86,7 +86,7 @@ open dist/mac-arm64/Onereach.ai.app
 ```
 
 **Test drag:**
-1. Open Spaces Knowledge Manager
+1. Open Work Space Knowledge Manager
 2. Drag any item to a space
 3. Should highlight blue
 4. Drop → Success notification

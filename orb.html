@@ -1913,6 +1913,56 @@
             }
         });
         
+        // Explicit paste support for frameless window (Edit menu may not work in frameless windows)
+        chatInput.addEventListener('paste', (e) => {
+            console.log('[TextChat] Paste event received');
+            resetChatInactivityTimer();
+        });
+        
+        // Manual paste handler for frameless window where native Cmd+V may not work
+        chatInput.addEventListener('keydown', async (e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'v') {
+                // Prevent default to handle manually (native paste often fails in frameless windows)
+                e.preventDefault();
+                
+                let text = null;
+                
+                // Try Electron clipboard API first (most reliable in Electron)
+                if (window.clipboardAPI && window.clipboardAPI.readText) {
+                    try {
+                        text = window.clipboardAPI.readText();
+                        console.log('[TextChat] Got text from Electron clipboard API');
+                    } catch (err) {
+                        console.warn('[TextChat] Electron clipboard failed:', err.message);
+                    }
+                }
+                
+                // Fall back to browser Clipboard API
+                if (!text && navigator.clipboard && navigator.clipboard.readText) {
+                    try {
+                        text = await navigator.clipboard.readText();
+                        console.log('[TextChat] Got text from browser Clipboard API');
+                    } catch (err) {
+                        console.warn('[TextChat] Browser clipboard failed:', err.message);
+                    }
+                }
+                
+                if (text) {
+                    const start = chatInput.selectionStart;
+                    const end = chatInput.selectionEnd;
+                    const value = chatInput.value;
+                    chatInput.value = value.substring(0, start) + text + value.substring(end);
+                    chatInput.selectionStart = chatInput.selectionEnd = start + text.length;
+                    chatInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    console.log('[TextChat] Pasted text successfully');
+                } else {
+                    console.warn('[TextChat] Could not read clipboard');
+                }
+                
+                resetChatInactivityTimer();
+            }
+        });
+        
         // Update UI based on state
         function updateUI(state, text = '') {
             orb.classList.remove('listening', 'processing', 'error');

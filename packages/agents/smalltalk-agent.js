@@ -50,6 +50,7 @@ This agent is ONLY for casual social conversation. Any request for information, 
     'yes', 'no', 'okay', 'ok', 'sure', 'alright',
     'wow', 'cool', 'awesome', 'great', 'nice', 'amazing',
     'my name is', "i'm called", 'call me',
+    'your name', 'who are you', 'what are you',  // Asking assistant's identity
     // Emotional support - smalltalk can offer encouragement
     'cheer me up', 'feeling down', 'feeling sad', 'feeling lonely', 'feeling stressed',
     'need encouragement', 'having a bad day', 'rough day', 'tough day',
@@ -143,6 +144,16 @@ This agent is ONLY for casual social conversation. Any request for information, 
     const userName = prefs['User Name'];
     const hasName = userName && userName !== '*Not set*';
     const timeContext = getTimeContext();
+    
+    // Handle "what's your name" - asking the assistant's name
+    if (/what('?s| is) your name|who are you|what are you called|what should i call you/i.test(lower)) {
+      return this.randomResponse([
+        "I'm your voice assistant! You can call me whatever you like.",
+        "I don't have a specific name, but I'm here to help you with tasks, answer questions, and keep you company.",
+        "I'm your AI assistant. Some people give me nicknames - feel free to call me whatever works for you!",
+        "I'm the voice assistant built into this app. What can I help you with?"
+      ]);
+    }
     
     // Handle name introduction
     const nameMatch = task.content.match(/(?:my name is|i'm called|call me|i am)\s+(\w+)/i);

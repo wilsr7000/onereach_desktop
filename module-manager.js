@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { app, BrowserWindow, Menu, dialog } = require('electron');
+const { app, BrowserWindow, Menu, dialog, clipboard } = require('electron');
 const unzipper = require('unzipper');
 const https = require('https');
 const http = require('http');
@@ -453,6 +453,8 @@ class ModuleManager {
     
     // Create new window for the web tool
     // Use preload-spaces.js to give tools access to the full Spaces API (window.spaces)
+    // clipboard is imported at module level
+    
     const window = new BrowserWindow({
       width: size.width,
       height: size.height,
@@ -466,6 +468,23 @@ class ModuleManager {
         enableBlinkFeatures: 'MediaStreamAPI,WebRTC,AudioWorklet,WebAudio,MediaRecorder',
         experimentalFeatures: true
       }
+    });
+    
+    console.log(`[WebTool] Created window for: ${tool.name} (${tool.id})`);
+    console.log(`[WebTool] Window ID: ${window.id}`);
+    console.log(`[WebTool] Setting up keyboard event handlers...`);
+    
+    // Test clipboard access
+    const testClipboard = clipboard.readText();
+    console.log(`[WebTool] Clipboard test on window create: "${testClipboard ? testClipboard.substring(0, 30) + '...' : '(empty)'}"`);
+    
+    // Log focus events
+    window.on('focus', () => {
+      console.log(`[WebTool] Window FOCUSED: ${tool.name} (ID: ${window.id})`);
+    });
+    
+    window.on('blur', () => {
+      console.log(`[WebTool] Window BLURRED: ${tool.name} (ID: ${window.id})`);
     });
     
     // Set up permission handlers for microphone, speech recognition, etc.
@@ -770,6 +789,7 @@ class ModuleManager {
             <button id="gsx-back" title="Back">◀</button>
             <button id="gsx-forward" title="Forward">▶</button>
             <button id="gsx-refresh" title="Refresh">↻</button>
+            <button id="gsx-paste" title="Paste from clipboard (Cmd+V)">📋</button>
             <button id="gsx-mission-control" title="Show All Windows">⊞</button>
           \`;
           
@@ -826,6 +846,17 @@ class ModuleManager {
               opacity: 0.3;
               cursor: not-allowed;
             }
+            
+            /* Paste button highlight */
+            #gsx-paste {
+              background: rgba(99, 102, 241, 0.3) !important;
+              border: 1px solid rgba(99, 102, 241, 0.5) !important;
+            }
+            
+            #gsx-paste:hover {
+              background: rgba(99, 102, 241, 0.5) !important;
+              border-color: rgba(99, 102, 241, 0.8) !important;
+            }
           \`;
           
           document.head.appendChild(style);
@@ -856,6 +887,75 @@ class ModuleManager {
             }
           });
           
+          // Paste button - reads from clipboard and inserts into focused element
+          document.getElementById('gsx-paste').addEventListener('click', async () => {
+            console.log('[WebTool] Paste button clicked');
+            
+            let clipboardText = '';
+            
+            // Try Electron clipboard API first
+            if (window.clipboardAPI && window.clipboardAPI.readText) {
+              try {
+                clipboardText = window.clipboardAPI.readText();
+                console.log('[WebTool] Got text from Electron clipboard');
+              } catch (e) {
+                console.warn('[WebTool] Electron clipboard failed:', e);
+              }
+            }
+            
+            // Fallback to browser clipboard API
+            if (!clipboardText && navigator.clipboard) {
+              try {
+                clipboardText = await navigator.clipboard.readText();
+                console.log('[WebTool] Got text from browser clipboard');
+              } catch (e) {
+                console.warn('[WebTool] Browser clipboard failed:', e);
+              }
+            }
+            
+            if (!clipboardText) {
+              alert('Could not read clipboard.\\n\\nIf you copied from another Apple device (Universal Clipboard), try copying again directly on this Mac.');
+              return;
+            }
+            
+            // Find the focused element or the last focused input
+            let targetEl = document.activeElement;
+            
+            // If no editable element is focused, try to find an input/textarea
+            if (!targetEl || (targetEl.tagName !== 'INPUT' && targetEl.tagName !== 'TEXTAREA' && !targetEl.isContentEditable)) {
+              // Look for visible inputs
+              const inputs = document.querySelectorAll('input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), [contenteditable="true"]');
+              for (const input of inputs) {
+                if (input.offsetParent !== null) { // visible
+                  targetEl = input;
+                  targetEl.focus();
+                  break;
+                }
+              }
+            }
+            
+            if (targetEl && (targetEl.tagName === 'INPUT' || targetEl.tagName === 'TEXTAREA')) {
+              const start = targetEl.selectionStart || 0;
+              const end = targetEl.selectionEnd || 0;
+              const value = targetEl.value || '';
+              targetEl.value = value.substring(0, start) + clipboardText + value.substring(end);
+              targetEl.selectionStart = targetEl.selectionEnd = start + clipboardText.length;
+              targetEl.dispatchEvent(new Event('input', { bubbles: true }));
+              targetEl.dispatchEvent(new Event('change', { bubbles: true }));
+              console.log('[WebTool] Pasted into input/textarea');
+            } else if (targetEl && targetEl.isContentEditable) {
+              document.execCommand('insertText', false, clipboardText);
+              console.log('[WebTool] Pasted into contenteditable');
+            } else {
+              // Last resort: try execCommand on document
+              const success = document.execCommand('insertText', false, clipboardText);
+              console.log('[WebTool] execCommand paste result:', success);
+              if (!success) {
+                alert('Could not paste. Please click on a text field first, then click the paste button.');
+              }
+            }
+          });
+          
           // Update button states based on history
           function updateNavigationButtons() {
             const backBtn = document.getElementById('gsx-back');
@@ -867,12 +967,166 @@ class ModuleManager {
           
           updateNavigationButtons();
           window.addEventListener('popstate', updateNavigationButtons);
+          
+          // ========================================
+          // CLIPBOARD KEYBOARD SHORTCUTS
+          // (Edit menu paste may not work in some windows)
+          // ========================================
+          document.addEventListener('keydown', async (e) => {
+            // Handle Cmd+V / Ctrl+V for paste
+            if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'v') {
+              const activeEl = document.activeElement;
+              const isEditable = activeEl && (
+                activeEl.tagName === 'INPUT' ||
+                activeEl.tagName === 'TEXTAREA' ||
+                activeEl.contentEditable === 'true' ||
+                activeEl.isContentEditable
+              );
+              
+              if (isEditable && window.clipboardAPI && window.clipboardAPI.readText) {
+                e.preventDefault();
+                try {
+                  const text = window.clipboardAPI.readText();
+                  if (text) {
+                    if (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA') {
+                      const start = activeEl.selectionStart || 0;
+                      const end = activeEl.selectionEnd || 0;
+                      const value = activeEl.value || '';
+                      activeEl.value = value.substring(0, start) + text + value.substring(end);
+                      activeEl.selectionStart = activeEl.selectionEnd = start + text.length;
+                      activeEl.dispatchEvent(new Event('input', { bubbles: true }));
+                    } else {
+                      // ContentEditable
+                      document.execCommand('insertText', false, text);
+                    }
+                    console.log('[WebTool] Pasted via Electron clipboard API');
+                  }
+                } catch (err) {
+                  console.warn('[WebTool] Paste failed:', err);
+                }
+              }
+            }
+            
+            // Handle Cmd+C / Ctrl+C for copy
+            if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'c') {
+              const selection = window.getSelection();
+              if (selection && selection.toString() && window.clipboardAPI && window.clipboardAPI.writeText) {
+                e.preventDefault();
+                window.clipboardAPI.writeText(selection.toString());
+                console.log('[WebTool] Copied via Electron clipboard API');
+              }
+            }
+            
+            // Handle Cmd+X / Ctrl+X for cut
+            if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'x') {
+              const activeEl = document.activeElement;
+              const isEditable = activeEl && (
+                activeEl.tagName === 'INPUT' ||
+                activeEl.tagName === 'TEXTAREA' ||
+                activeEl.contentEditable === 'true'
+              );
+              
+              if (isEditable && window.clipboardAPI) {
+                const selection = window.getSelection();
+                if (selection && selection.toString()) {
+                  e.preventDefault();
+                  window.clipboardAPI.writeText(selection.toString());
+                  document.execCommand('delete');
+                  console.log('[WebTool] Cut via Electron clipboard API');
+                }
+              }
+            }
+            
+            // Handle Cmd+A / Ctrl+A for select all
+            if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') {
+              const activeEl = document.activeElement;
+              if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
+                e.preventDefault();
+                activeEl.select();
+              }
+            }
+          });
+          
+          console.log('[WebTool] Clipboard keyboard shortcuts enabled');
         })();
       `).catch(err => console.error('[Web Tool] Error injecting toolbar:', err));
     });
     
+    // Handle keyboard shortcuts at the Electron level for reliable paste/copy/cut
+    // clipboard is already imported at the top of this function
+    
+    // Log ALL keyboard events to see what's happening
+    window.webContents.on('before-input-event', (event, input) => {
+      // Log every keydown with modifier to debug
+      if (input.type === 'keyDown') {
+        console.log(`[WebTool KB] Key: "${input.key}" | meta: ${input.meta} | ctrl: ${input.control} | shift: ${input.shift} | alt: ${input.alt}`);
+      }
+      
+      // Only handle when modifier key is pressed
+      if (input.meta || input.control) {
+        const key = input.key.toLowerCase();
+        console.log(`[WebTool KB] Modifier key combo detected: ${input.meta ? 'Cmd' : 'Ctrl'}+${key}`);
+        
+        // Paste - Cmd+V / Ctrl+V
+        // Use native webContents.paste() which properly handles Universal Clipboard/Handoff
+        if (key === 'v' && input.type === 'keyDown') {
+          console.log('[WebTool] Cmd+V detected, using native paste...');
+          event.preventDefault();
+          window.webContents.paste();
+        }
+        
+        // Copy - Cmd+C / Ctrl+C  
+        if (key === 'c' && input.type === 'keyDown') {
+          // Let the page handle copy, but also sync to Electron clipboard
+          window.webContents.executeJavaScript(`
+            (function() {
+              const selection = window.getSelection();
+              return selection ? selection.toString() : '';
+            })();
+          `).then(selectedText => {
+            if (selectedText) {
+              clipboard.writeText(selectedText);
+              console.log('[WebTool] Copied to clipboard:', selectedText.substring(0, 50) + '...');
+            }
+          });
+        }
+        
+        // Cut - Cmd+X / Ctrl+X
+        if (key === 'x' && input.type === 'keyDown') {
+          event.preventDefault();
+          window.webContents.cut();
+        }
+        
+        // Select All - Cmd+A / Ctrl+A
+        if (key === 'a' && input.type === 'keyDown') {
+          event.preventDefault();
+          window.webContents.selectAll();
+        }
+        
+        // Undo - Cmd+Z / Ctrl+Z
+        if (key === 'z' && input.type === 'keyDown' && !input.shift) {
+          event.preventDefault();
+          window.webContents.undo();
+        }
+        
+        // Redo - Cmd+Shift+Z / Ctrl+Shift+Z or Cmd+Y / Ctrl+Y
+        if ((key === 'z' && input.shift) || key === 'y') {
+          if (input.type === 'keyDown') {
+            event.preventDefault();
+            window.webContents.redo();
+          }
+        }
+      }
+    });
+    
     window.loadURL(tool.url);
-    console.log(`Opened web tool: ${tool.name} (${tool.url}) - Size: ${tool.windowSize || 'medium'}`);
+    console.log(`[WebTool] ========================================`);
+    console.log(`[WebTool] Opened: ${tool.name}`);
+    console.log(`[WebTool] URL: ${tool.url}`);
+    console.log(`[WebTool] Window ID: ${window.id}`);
+    console.log(`[WebTool] Keyboard handlers: ACTIVE`);
+    console.log(`[WebTool] Try pressing Cmd+V - you should see logs in this terminal`);
+    console.log(`[WebTool] ========================================`);
   }
   
   async deleteWebTool(toolId) {

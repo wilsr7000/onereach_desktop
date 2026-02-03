@@ -20,7 +20,7 @@
  *   }
  */
 
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, clipboard } = require('electron');
 
 // ============================================
 // UNIFIED SPACES API
@@ -748,8 +748,39 @@ contextBridge.exposeInMainWorld('voiceTTS', {
   listVoices: () => ipcRenderer.invoke('voice:list-voices')
 });
 
+// ============================================
+// CLIPBOARD API
+// (For windows where Edit menu paste may not work)
+// ============================================
+
+contextBridge.exposeInMainWorld('clipboardAPI', {
+  /**
+   * Read text from clipboard
+   * @returns {string} Clipboard text
+   */
+  readText: () => clipboard.readText(),
+  
+  /**
+   * Write text to clipboard
+   * @param {string} text - Text to write
+   */
+  writeText: (text) => clipboard.writeText(text),
+  
+  /**
+   * Read HTML from clipboard
+   * @returns {string} Clipboard HTML
+   */
+  readHTML: () => clipboard.readHTML(),
+  
+  /**
+   * Check if clipboard has text
+   * @returns {boolean}
+   */
+  hasText: () => clipboard.readText().length > 0
+});
+
 // Debug flag to verify preload loaded (check with window.__preloadSpacesLoaded)
 contextBridge.exposeInMainWorld('__preloadSpacesLoaded', true);
 
-console.log('[preload-spaces] Spaces API loaded (with speech support)');
+console.log('[preload-spaces] Spaces API loaded (with speech and clipboard support)');
 

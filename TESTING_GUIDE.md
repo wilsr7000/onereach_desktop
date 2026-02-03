@@ -14,7 +14,7 @@
 - Fields area scrollable independently
 
 **How to test:**
-1. Open Spaces Knowledge Manager
+1. Open Work Space Knowledge Manager
 2. Click ✎ (Edit Metadata) on any item
 3. Modal opens
 4. Scroll down through the fields
@@ -135,7 +135,7 @@
 
 ### Test Drag-and-Drop
 
-1. Open Spaces Knowledge Manager
+1. Open Work Space Knowledge Manager
 2. Find any item in history
 3. Click and drag it
 4. Drag to a different Space in left sidebar

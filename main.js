@@ -8586,7 +8586,7 @@ function setupIPC() {
     } else {
       console.error('Failed to initialize clipboard manager');
       const { dialog } = require('electron');
-      dialog.showErrorBox('Error', 'Failed to open Spaces Knowledge Manager. Please try again.');
+      dialog.showErrorBox('Error', 'Failed to open Work Space Knowledge Manager. Please try again.');
     }
   });
 
@@ -10434,12 +10434,52 @@ function setupIPC() {
   });
 
   // Handle saving external bots
-  ipcMain.on('save-external-bots', (event, bots) => {
+  ipcMain.on('save-external-bots', async (event, bots) => {
     console.log(`Saving ${bots.length} external bots`);
     try {
       const botsPath = path.join(app.getPath('userData'), 'external-bots.json');
       fs.writeFileSync(botsPath, JSON.stringify(bots, null, 2));
       console.log('External bots saved successfully');
+      
+      // Create Conversations spaces for known AI services
+      const aiServiceSpaceConfig = {
+        'chatgpt': { name: 'ChatGPT Conversations', icon: '💬', color: '#10a37f' },
+        'claude': { name: 'Claude Conversations', icon: '🤖', color: '#ff6b35' },
+        'gemini': { name: 'Gemini Conversations', icon: '✨', color: '#4285f4' },
+        'perplexity': { name: 'Perplexity Conversations', icon: '🔍', color: '#8b5cf6' },
+        'grok': { name: 'Grok Conversations', icon: '🚀', color: '#6b7280' }
+      };
+      
+      // Check each bot and create spaces for AI services
+      for (const bot of bots) {
+        const botType = bot.botType?.toLowerCase();
+        const spaceConfig = aiServiceSpaceConfig[botType];
+        
+        if (spaceConfig) {
+          try {
+            const { getSpacesAPI } = require('./spaces-api');
+            const spacesAPI = getSpacesAPI();
+            
+            // Check if space already exists
+            const existingSpaces = await spacesAPI.list();
+            const spaceExists = existingSpaces.some(s => s.name === spaceConfig.name);
+            
+            if (!spaceExists) {
+              console.log(`[ExternalBots] Creating space for ${botType}: ${spaceConfig.name}`);
+              await spacesAPI.create(spaceConfig.name, {
+                icon: spaceConfig.icon,
+                color: spaceConfig.color
+              });
+              console.log(`[ExternalBots] Created space: ${spaceConfig.name}`);
+            } else {
+              console.log(`[ExternalBots] Space already exists: ${spaceConfig.name}`);
+            }
+          } catch (spaceError) {
+            console.error(`[ExternalBots] Error creating space for ${botType}:`, spaceError);
+            // Don't fail the whole save operation if space creation fails
+          }
+        }
+      }
       
       // Refresh the menu to show new bots
       const { refreshGSXLinks } = require('./menu');

@@ -37,7 +37,7 @@ For browsers, it also captures the domain (e.g., `web-github-com`).
 1. **AppleScript Integration**: Uses macOS System Events to get the frontmost application
 2. **Context Capture**: When content is added to clipboard, captures full context
 3. **Metadata Storage**: Stores context in item metadata
-4. **Display**: Shows source app in the Spaces Knowledge Manager UI
+4. **Display**: Shows source app in the Work Space Knowledge Manager UI
 
 ### Example Context Object
 ```javascript

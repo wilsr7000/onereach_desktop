@@ -7,7 +7,7 @@
  * - Window controls (drag, position)
  */
 
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, clipboard } = require('electron');
 
 // Expose Orb API to renderer
 contextBridge.exposeInMainWorld('orbAPI', {
@@ -370,4 +370,19 @@ contextBridge.exposeInMainWorld('orbAPI', {
   clearSearchCache: () => ipcRenderer.invoke('search:clear-cache')
 });
 
-console.log('[Orb Preload] Voice Orb preload script loaded with Agent Composer integration');
+// Expose clipboard API for frameless window paste support
+contextBridge.exposeInMainWorld('clipboardAPI', {
+  /**
+   * Read text from clipboard
+   * @returns {string}
+   */
+  readText: () => clipboard.readText(),
+  
+  /**
+   * Write text to clipboard
+   * @param {string} text
+   */
+  writeText: (text) => clipboard.writeText(text)
+});
+
+console.log('[Orb Preload] Voice Orb preload script loaded with Agent Composer integration and clipboard support');

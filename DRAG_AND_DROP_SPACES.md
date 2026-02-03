@@ -86,7 +86,7 @@ Right-click any Space to paste current clipboard content directly into it.
 
 ```
 ┌─────────────────────────────────────────────┐
-│ Spaces Knowledge Manager                    │
+│ Work Space Knowledge Manager                    │
 ├──────────────┬──────────────────────────────┤
 │ SPACES       │ CLIPBOARD HISTORY            │
 │              │                              │

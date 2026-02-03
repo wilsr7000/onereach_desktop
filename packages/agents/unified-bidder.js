@@ -7,6 +7,7 @@
 
 const { getCircuit } = require('./circuit-breaker');
 const { getBudgetManager } = require('../../budget-manager');
+const { getSpacesAPI } = require('../../spaces-api');
 
 // Circuit breaker for OpenAI API calls
 const bidderCircuit = getCircuit('unified-bidder', {
@@ -67,12 +68,34 @@ ${agent.prompt || agent.description || 'No description provided'}
 `.trim();
 
   const userRequest = task.content || task.phrase || task;
+  
+  // Read conversation history from file in GSX Agent space
+  // This is more reliable than passing through task metadata
+  let conversationText = '';
+  try {
+    const api = getSpacesAPI();
+    const historyContent = api.files.read('gsx-agent', 'conversation-history.md');
+    if (historyContent) {
+      // Extract just the conversation text (skip header and footer)
+      const lines = historyContent.split('\n');
+      const conversationLines = lines.filter(line => 
+        line.startsWith('User:') || line.startsWith('Assistant:')
+      );
+      conversationText = conversationLines.join('\n');
+    }
+  } catch (err) {
+    // No history file yet, that's okay
+  }
+  
+  const conversationSection = conversationText 
+    ? `\n\nRECENT CONVERSATION (for context - helps resolve pronouns like "it", "that", "this"):\n${conversationText}\n`
+    : '';
 
   return `You are an intelligent task router evaluating if an agent can handle a voice command.
 
 ${agentInfo}
-
-USER'S REQUEST: "${userRequest}"
+${conversationSection}
+USER'S CURRENT REQUEST: "${userRequest}"
 
 ## Evaluation Strategy
 
@@ -83,19 +106,26 @@ Think step-by-step about USER INTENT, not just keywords:
    - "What's happening Monday" = user wants to know their schedule for Monday
    - "Play something" = user wants music to play
    
-2. **Does this agent's domain cover that intent?**
+2. **Use CONVERSATION CONTEXT to resolve pronouns and references:**
+   - If user says "Play it" after asking about a podcast → they want to play THAT podcast
+   - If user says "Tell me more" after a search result → they want more info on THAT topic
+   - "it", "that", "this", "the same" often refer to something in recent conversation
+   - ALWAYS check the conversation history when the request contains pronouns
+   
+3. **Does this agent's domain cover that intent?**
    - Calendar agent handles: schedules, meetings, events, availability, what's happening when
-   - Music agent handles: playing, controlling, discovering music
+   - Music/DJ agent handles: playing, controlling, discovering music AND podcasts
+   - Search agent handles: information lookup, research, learning about things
    - Weather agent handles: conditions, forecasts, temperature
    
-3. **Semantic matching - go beyond keywords:**
+4. **Semantic matching - go beyond keywords:**
    - "What's happening Monday?" → Calendar (asking about schedule on a specific day)
    - "What's going on tomorrow?" → Calendar (schedule inquiry)
    - "Am I free at 3?" → Calendar (availability check)
    - "Put on some tunes" → Music (even though "tunes" might not be a keyword)
    - "What's the deal outside?" → Weather (asking about conditions)
 
-4. **Look for IMPLICIT signals:**
+5. **Look for IMPLICIT signals:**
    - Day names (Monday-Sunday) often signal calendar queries
    - Time references (today, tomorrow, this week) often signal calendar/scheduling
    - Mood words (relaxing, energetic) often signal music requests
@@ -142,11 +172,24 @@ Respond with JSON only:
 
 /**
  * Generate cache key for an evaluation
+ * Includes conversation context hash to handle pronouns correctly
  */
 function getCacheKey(agent, task) {
   const agentId = agent.id || agent.name;
   const taskContent = task.content || task.phrase || String(task);
-  return `${agentId}:${taskContent.toLowerCase().trim()}`;
+  // Include a hash of conversation context so "play it" with different contexts aren't cached together
+  // Read from file since that's the source of truth
+  let contextHash = '';
+  try {
+    const api = getSpacesAPI();
+    const historyContent = api.files.read('gsx-agent', 'conversation-history.md');
+    if (historyContent) {
+      contextHash = historyContent.slice(-100).replace(/\s+/g, ' ').trim();
+    }
+  } catch (err) {
+    // No history file
+  }
+  return `${agentId}:${taskContent.toLowerCase().trim()}:${contextHash}`;
 }
 
 /**

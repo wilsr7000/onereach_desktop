@@ -141,6 +141,57 @@ class SpacesAPI {
   }
 
   /**
+   * Ensure the GSX Agent space exists, creating it if necessary
+   * Called automatically when agents write .md files to gsx-agent space
+   * @returns {Promise<Object>} The GSX Agent space object
+   */
+  async ensureGSXAgentSpace() {
+    try {
+      const GSX_AGENT_SPACE_ID = 'gsx-agent';
+      const GSX_AGENT_SPACE_NAME = 'GSX Agent';
+      
+      // Check if space already exists
+      const spaces = await this.list();
+      const existingSpace = spaces.find(s => s.id === GSX_AGENT_SPACE_ID);
+      
+      if (existingSpace) {
+        return existingSpace;
+      }
+      
+      // Space doesn't exist - create it
+      console.log('[SpacesAPI] Creating GSX Agent space...');
+      
+      const space = this.storage.createSpace({
+        id: GSX_AGENT_SPACE_ID,
+        name: GSX_AGENT_SPACE_NAME,
+        icon: '🤖',
+        color: '#8b5cf6', // Purple for agent-related content
+        isSystem: true
+      });
+      
+      console.log('[SpacesAPI] Created GSX Agent space:', space.id);
+      this._emit('space:created', { space });
+      
+      // Trigger default files creation
+      if (this.storage.ensureGSXAgentDefaultFiles) {
+        this.storage.ensureGSXAgentDefaultFiles();
+      }
+      
+      return {
+        id: space.id,
+        name: space.name,
+        icon: space.icon,
+        color: space.color,
+        itemCount: 0,
+        path: path.join(this.storage.spacesDir, space.id)
+      };
+    } catch (error) {
+      console.error('[SpacesAPI] Error ensuring GSX Agent space:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Update a space's properties
    * @param {string} spaceId - The space ID
    * @param {Object} data - Properties to update
@@ -1866,6 +1917,11 @@ class SpacesAPI {
        */
       write: async (spaceId, filePath, content) => {
         try {
+          // If writing a .md file to gsx-agent space, ensure the space exists first
+          if (spaceId === 'gsx-agent' && filePath.endsWith('.md')) {
+            await this.ensureGSXAgentSpace();
+          }
+          
           const fullPath = path.join(this.storage.spacesDir, spaceId, filePath);
           const dir = path.dirname(fullPath);
           

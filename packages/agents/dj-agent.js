@@ -388,27 +388,37 @@ const djAgent = {
   ],
 
   // Prompt for LLM evaluation - describes what this agent does
-  prompt: `Personal DJ handles ALL music, audio, playback requests, AND music preference management. HIGH CONFIDENCE (0.8+) for:
-- Setting/managing music preferences ("set my music preferences", "my favorite genre is...")
-- Learning user's music taste ("I like jazz", "I prefer rock in the morning", "remember I like classical")
-- Favorite genres/artists ("my favorites", "what music do I like", "add to my preferences")
-- Time-based preferences ("morning music", "evening playlist preferences")
-- Speaker preferences for different rooms/times
-- ANY mention of music, songs, audio, sound, tracks, playlists, beats, tunes
+  prompt: `Personal DJ controls Apple Music and Apple Podcasts apps - playback, preferences, and discovery.
+
+HIGH CONFIDENCE (0.85+) - Apple Music/Podcasts ACTIONS:
+- PLAY music: "play jazz", "play something relaxing", "play Taylor Swift"
+- PLAY podcasts: "play the daily", "play a tech podcast", "play my podcasts"
 - Playback control: play, pause, stop, skip, next, previous, shuffle, repeat
 - Volume: louder, quieter, turn up, turn down, mute, unmute
-- Questions about current music: "what's playing", "what song is this", "what happened to the music"
-- Vague requests: "play something", "change it up", "something different", "surprise me"
-- Mood requests: "play something relaxing", "upbeat music", "focus music"
-- Feedback: "I like this", "I don't like this", "more like this", "not this"
-- Speaker/AirPlay: HomePod, speakers, AirPlay, living room, bedroom, kitchen
-- Genre/artist requests: jazz, rock, pop, classical, any artist name
+- What's playing: "what song is this", "what's playing", "who sings this"
+- Speakers/AirPlay: HomePod, speakers, living room, bedroom, kitchen
+- Music preferences: "I like jazz", "remember I prefer rock", "my favorite genre"
+- Mood/vibe requests (even without "play"): "set the mood for writing", "I need focus music", "something chill", "get me pumped up", "music for cooking", "background music"
+- Vague requests: "play something", "surprise me", "change it up", "something different"
+- Feedback: "I like this", "skip this", "more like this"
 
-IMPORTANT: This agent handles BOTH playing music AND managing music preferences/settings. If the user mentions music preferences, favorite music, music settings, or wants to configure their music taste, route to this agent with HIGH confidence (0.85+).`,
+LOW CONFIDENCE (0.00-0.20) - DO NOT BID on these:
+- INFORMATION about podcasts: "tell me about X podcast", "what is X podcast about", "who hosts X"
+- INFORMATION about artists: "tell me about Taylor Swift", "who is Drake"
+- Research queries: "what are the best podcasts about tech" (Search Agent finds info, DJ plays)
+- These are SEARCH queries - user wants to LEARN, not PLAY
+
+KEY DISTINCTION:
+- "Play the future of work podcast" → DJ Agent (Apple Podcasts action)
+- "Tell me about the future of work podcast" → Search Agent (information lookup)
+- "Find podcasts about AI" → Could be either - if they want to PLAY, DJ. If they want to LEARN, Search.
+
+This agent CONTROLS Apple Music and Podcasts apps. It does not provide information ABOUT media.`,
 
   capabilities: [
     'Play music by mood, genre, artist, or song',
-    'Control music playback (pause, stop, skip, next, previous)',
+    'Play podcasts from Apple Podcasts subscriptions',
+    'Control playback (pause, stop, skip, next, previous)',
     'Adjust volume (up, down, mute, unmute)',
     'Control AirPlay speakers and devices',
     'Make personalized music recommendations',
@@ -859,16 +869,52 @@ IMPORTANT: This agent handles BOTH playing music AND managing music preferences/
       const { runScript, getFullMusicStatus } = require('./applescript-helper');
       const clampedLevel = Math.min(100, Math.max(0, parseInt(level)));
       await runScript(`tell application "Music" to set sound volume to ${clampedLevel}`);
+      
+      // Brief delay to ensure volume change is processed
+      await new Promise(r => setTimeout(r, 100));
+      
+      // Verify music is still playing (volume change shouldn't stop it)
       const status = await getFullMusicStatus('Music');
-      return { success: true, newVolume: status.volume };
+      if (status.state === 'paused' || status.state === 'stopped') {
+        // Music stopped unexpectedly - restart it
+        console.warn('[DJAgent] Music stopped after volume change, restarting...');
+        await runScript(`tell application "Music" to play`);
+      }
+      
+      return { success: true, newVolume: clampedLevel };
     },
     
     async adjustVolume({ delta }) {
       const { runScript, getFullMusicStatus } = require('./applescript-helper');
-      const op = delta >= 0 ? '+' : '';
-      await runScript(`tell application "Music" to set sound volume to (sound volume ${op} ${delta})`);
+      
+      // Get current volume first, then calculate and set new volume
+      // This avoids issues with getting/setting in one AppleScript call
+      const script = `
+        tell application "Music"
+          set currentVol to sound volume
+          set newVol to currentVol + ${delta}
+          if newVol < 0 then set newVol to 0
+          if newVol > 100 then set newVol to 100
+          set sound volume to newVol
+          return newVol
+        end tell
+      `;
+      
+      const result = await runScript(script);
+      const newVolume = parseInt(result.output) || 0;
+      
+      // Brief delay to ensure volume change is processed
+      await new Promise(r => setTimeout(r, 100));
+      
+      // Verify music is still playing (volume change shouldn't stop it)
       const status = await getFullMusicStatus('Music');
-      return { success: true, newVolume: status.volume };
+      if (status.state === 'paused' || status.state === 'stopped') {
+        // Music stopped unexpectedly - restart it
+        console.warn('[DJAgent] Music stopped after volume change, restarting...');
+        await runScript(`tell application "Music" to play`);
+      }
+      
+      return { success: true, newVolume: newVolume };
     },
     
     async pause() {

@@ -60,7 +60,7 @@ invoke: (channel, ...args) => {
 **Right-click paste should now work:**
 
 1. Copy a file in Finder (Cmd+C on a file)
-2. Open Spaces Knowledge Manager
+2. Open Work Space Knowledge Manager
 3. Right-click any Space
 4. Select "📎 Paste File into [Space]"
 5. ✅ Should work without error!

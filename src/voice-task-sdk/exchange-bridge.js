@@ -30,6 +30,9 @@ const notificationManager = require('./notifications/notificationManager');
 // Agent Message Queue for proactive agent messages
 const { getAgentMessageQueue } = require('../../lib/agent-message-queue');
 
+// Spaces API for writing conversation history to file
+const { getSpacesAPI } = require('../../spaces-api');
+
 // ==================== BUILT-IN AGENT REGISTRY ====================
 // Centralized agent loading - see packages/agents/agent-registry.js
 // TO ADD A NEW AGENT: Just add the agent ID to BUILT_IN_AGENT_IDS in agent-registry.js
@@ -349,6 +352,9 @@ function addToHistory(role, content, agentId = null) {
   // Reset timeout
   resetHistoryTimeout();
   
+  // Write to file so all agents can read it during bidding
+  writeHistoryToFile();
+  
   console.log(`[ConversationHistory] Added ${role} turn, total: ${conversationHistory.length}`);
 }
 
@@ -391,10 +397,49 @@ function formatHistoryForAgent() {
 }
 
 /**
+ * Write conversation history to file in GSX Agent space
+ * This allows all agents to read the same conversation context during bidding
+ */
+async function writeHistoryToFile() {
+  try {
+    const api = getSpacesAPI();
+    const formattedHistory = formatHistoryForAgent();
+    
+    if (formattedHistory) {
+      const content = `# Conversation History
+
+${formattedHistory}
+
+_Last updated: ${new Date().toISOString()}_`;
+      
+      await api.files.write('gsx-agent', 'conversation-history.md', content);
+      console.log('[ConversationHistory] Written to gsx-agent/conversation-history.md');
+    }
+  } catch (err) {
+    console.warn('[ConversationHistory] Failed to write history file:', err.message);
+  }
+}
+
+/**
+ * Clear the conversation history file
+ */
+async function clearHistoryFile() {
+  try {
+    const api = getSpacesAPI();
+    await api.files.delete('gsx-agent', 'conversation-history.md');
+    console.log('[ConversationHistory] Deleted conversation-history.md');
+  } catch (err) {
+    // File may not exist, that's okay
+    console.log('[ConversationHistory] No history file to delete');
+  }
+}
+
+/**
  * Clear conversation history
  */
 function clearHistory() {
   conversationHistory = [];
+  clearHistoryFile(); // Also clear the file
   console.log('[ConversationHistory] Cleared');
 }
 
@@ -856,6 +901,9 @@ async function connectBuiltInAgentToExchange(wrappedAgent, port) {
         }
         // ==================== BUILT-IN AGENT EXECUTION ====================
         else if (msg.type === 'task_assignment') {
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange-bridge.js:task_assignment',message:'task_assignment received',data:{agentId:wrappedAgent.id,agentName:wrappedAgent.name,taskId:msg.taskId,taskContent:msg.task?.content?.slice(0,80)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'D'})}).catch(()=>{});
+          // #endregion
           console.log(`[BuiltIn:${wrappedAgent.name}] Executing task: ${msg.task?.content?.slice(0, 50)}...`);
           
           try {
@@ -1781,6 +1829,9 @@ function setupExchangeEvents() {
   
   // Task assigned to winner
   exchangeInstance.on('task:assigned', async ({ task, winner, backups, masterEvaluation }) => {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange-bridge.js:task:assigned',message:'task:assigned event fired',data:{taskId:task.id,winnerId:winner.agentId,taskContent:task.content?.slice(0,80)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'E'})}).catch(()=>{});
+    // #endregion
     console.log('[ExchangeBridge] Task assigned to:', winner.agentId);
     
     // Store master evaluation in task metadata for feedback phase
@@ -2293,10 +2344,47 @@ function setupExchangeIPC() {
     }
   }
   
+  // ==================== TASK DEDUPLICATION ====================
+  // Track recent submissions to prevent duplicate processing
+  const recentSubmissions = new Map(); // normalizedTranscript -> timestamp
+  const SUBMIT_DEDUP_WINDOW_MS = 1500; // Ignore duplicate within 1.5 seconds
+  
   ipcMain.handle('voice-task-sdk:submit', async (_event, transcript, options = {}) => {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange-bridge.js:submit',message:'Submit handler called',data:{transcript:transcript?.slice(0,80),timestamp:Date.now()},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
     console.log('[ExchangeBridge] Submit transcript:', transcript);
     console.log(`[ExchangeBridge] pendingInputContexts.size: ${pendingInputContexts.size}`);
     const log = getLogger();
+    
+    // ==================== DUPLICATE SUBMISSION CHECK ====================
+    const normalizedTranscript = transcript.toLowerCase().replace(/[.,!?;:'"]/g, '').trim();
+    const now = Date.now();
+    const lastSubmitTime = recentSubmissions.get(normalizedTranscript);
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange-bridge.js:dedup-check',message:'Dedup check',data:{normalized:normalizedTranscript?.slice(0,50),lastSubmitTime,timeSinceLast:lastSubmitTime?(now-lastSubmitTime):null,isDuplicate:!!(lastSubmitTime&&(now-lastSubmitTime)<SUBMIT_DEDUP_WINDOW_MS)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
+    
+    if (lastSubmitTime && (now - lastSubmitTime) < SUBMIT_DEDUP_WINDOW_MS) {
+      console.warn(`[ExchangeBridge] DUPLICATE SUBMISSION detected for "${transcript.slice(0, 50)}...", skipping (${now - lastSubmitTime}ms since last)`);
+      return {
+        transcript,
+        queued: false,
+        handled: true,
+        classified: true,
+        message: 'Already processing this request.',
+        suppressAIResponse: true,
+      };
+    }
+    recentSubmissions.set(normalizedTranscript, now);
+    
+    // Clean up old entries
+    for (const [key, timestamp] of recentSubmissions) {
+      if (now - timestamp > SUBMIT_DEDUP_WINDOW_MS * 5) {
+        recentSubmissions.delete(key);
+      }
+    }
     
     // Record activity for message queue (resets idle timer)
     const messageQueue = getAgentMessageQueue();
@@ -2556,6 +2644,12 @@ function setupExchangeIPC() {
       console.log(`[ExchangeBridge] Submitting to exchange: "${transcript.slice(0, 50)}..."`);
       console.log(`[ExchangeBridge] Connected agents: ${localAgentConnections.size}`);
       
+      const convHistory = getRecentHistory();
+      const convText = formatHistoryForAgent();
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange-bridge.js:submit-metadata',message:'Setting conversation metadata',data:{historyLength:convHistory?.length||0,textLength:convText?.length||0,textSample:convText?.slice(0,150)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'CONV-SUBMIT'})}).catch(()=>{});
+      // #endregion
+      
       const { taskId, task: submittedTask } = await exchangeInstance.submit({
         content: transcript,
         priority: 2, // NORMAL priority
@@ -2563,8 +2657,8 @@ function setupExchangeIPC() {
           source: 'voice',
           timestamp: Date.now(),
           // Include conversation history for agent context
-          conversationHistory: getRecentHistory(),
-          conversationText: formatHistoryForAgent(),
+          conversationHistory: convHistory,
+          conversationText: convText,
         },
       });
       

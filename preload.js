@@ -1558,6 +1558,11 @@ contextBridge.exposeInMainWorld('clipboard', {
     ipcRenderer.on('clipboard:active-space-changed', (event, data) => {
       callback(data);
     });
+  },
+  onTTSProgress: (callback) => {
+    ipcRenderer.on('tts-progress', (event, progress) => {
+      callback(progress);
+    });
   }
 });
 

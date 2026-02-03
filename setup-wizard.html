@@ -921,6 +921,14 @@
             background: rgba(255, 59, 48, 0.1);
         }
 
+        .action-btn.copy {
+            color: #34c759;
+        }
+
+        .action-btn.copy:hover {
+            background: rgba(52, 199, 89, 0.1);
+        }
+
         .empty-state {
             text-align: center;
             padding: 48px 20px;
@@ -3358,6 +3366,7 @@
                         ${shortcutInfo}
                     </div>
                     <div class="environment-actions">
+                        <button class="action-btn copy" onclick="copyItemUrl('${itemUrl.replace(/'/g, "\\'")}', this)" title="Copy link">Copy</button>
                         <button class="action-btn edit" onclick="editItem('${item.type}', '${item.id}')">Edit</button>
                         <button class="action-btn delete" onclick="deleteItem('${item.type}', '${item.id}')">Delete</button>
                     </div>
@@ -3389,6 +3398,24 @@
                     editUIDesign(id);
                     break;
             }
+        }
+
+        // Function to copy item URL to clipboard
+        function copyItemUrl(url, buttonElement) {
+            navigator.clipboard.writeText(url).then(() => {
+                // Visual feedback - change button text temporarily
+                const originalText = buttonElement.textContent;
+                buttonElement.textContent = 'Copied!';
+                buttonElement.style.color = '#34c759';
+                
+                setTimeout(() => {
+                    buttonElement.textContent = originalText;
+                    buttonElement.style.color = '';
+                }, 1500);
+            }).catch(err => {
+                console.error('Failed to copy URL:', err);
+                alert('Failed to copy URL to clipboard');
+            });
         }
 
         // Function to delete an item

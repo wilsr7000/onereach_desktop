@@ -54,7 +54,7 @@ class ClipboardManagerV2 {
     this.maxHistorySize = 1000;
     this.pinnedItems = new Set();
     this.spacesEnabled = true;
-    this.screenshotCaptureEnabled = true;
+    this.screenshotCaptureEnabled = false;
     this.currentSpace = 'unclassified';
     this.clipboardWindow = null;
     this.blackHoleWindow = null;
@@ -361,7 +361,7 @@ class ClipboardManagerV2 {
   loadPreferences() {
     const prefs = this.storage.getPreferences();
     this.spacesEnabled = prefs.spacesEnabled !== undefined ? prefs.spacesEnabled : true;
-    this.screenshotCaptureEnabled = prefs.screenshotCaptureEnabled !== undefined ? prefs.screenshotCaptureEnabled : true;
+    this.screenshotCaptureEnabled = prefs.screenshotCaptureEnabled !== undefined ? prefs.screenshotCaptureEnabled : false;
     this.currentSpace = prefs.currentSpace || 'unclassified';
   }
   
@@ -4010,7 +4010,11 @@ Respond in a helpful, conversational way.`
           return { success: false, error: 'OpenAI API key not configured. Please add it in Settings.' };
         }
         
-        console.log(`[TTS] Generating speech with voice: ${voice}, text length: ${text.length}`);
+        const textLength = text.length;
+        const estimatedChunks = Math.ceil(textLength / 4000);
+        const estimatedMinutes = Math.round(textLength / 150 / 60);
+        console.log(`[TTS] Generating speech with voice: ${voice}`);
+        console.log(`[TTS] Text length: ${textLength} chars, estimated ${estimatedChunks} chunks, ~${estimatedMinutes} min audio`);
         
         const https = require('https');
         
@@ -4048,10 +4052,21 @@ Respond in a helpful, conversational way.`
         
         // Generate audio for each chunk
         const audioBuffers = [];
+        const totalChunks = textChunks.length;
+        
+        // Send progress to renderer
+        const sendProgress = (current, total, status) => {
+          if (BrowserWindow) {
+            BrowserWindow.getAllWindows().forEach(window => {
+              window.webContents.send('tts-progress', { current, total, status });
+            });
+          }
+        };
         
         for (let i = 0; i < textChunks.length; i++) {
           const chunk = textChunks[i];
-          console.log(`[TTS] Generating chunk ${i + 1}/${textChunks.length}, length: ${chunk.length}`);
+          console.log(`[TTS] Generating chunk ${i + 1}/${totalChunks}, length: ${chunk.length}`);
+          sendProgress(i + 1, totalChunks, `Generating audio chunk ${i + 1} of ${totalChunks}...`);
           
           const requestBody = JSON.stringify({
             model: 'tts-1-hd',
@@ -4068,7 +4083,8 @@ Respond in a helpful, conversational way.`
               headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${openaiKey}`
-              }
+              },
+              timeout: 120000 // 2 minute timeout per chunk
             }, (res) => {
               const chunks = [];
               
@@ -4089,21 +4105,38 @@ Respond in a helpful, conversational way.`
               });
             });
             
-            req.on('error', reject);
+            req.on('error', (e) => {
+              console.error(`[TTS] Request error on chunk ${i + 1}:`, e.message);
+              reject(e);
+            });
+            
+            req.on('timeout', () => {
+              console.error(`[TTS] Timeout on chunk ${i + 1}`);
+              req.destroy();
+              reject(new Error(`Timeout generating chunk ${i + 1}`));
+            });
+            
             req.write(requestBody);
             req.end();
           });
           
           audioBuffers.push(chunkAudio);
+          const chunkSizeKB = Math.round(chunkAudio.length / 1024);
+          console.log(`[TTS] Chunk ${i + 1}/${totalChunks} complete (${chunkSizeKB} KB)`);
         }
         
         // Combine all audio buffers
+        sendProgress(totalChunks, totalChunks, 'Combining audio chunks...');
         const combinedBuffer = Buffer.concat(audioBuffers);
         const audioData = combinedBuffer.toString('base64');
         
-        console.log(`[TTS] Successfully generated audio, ${textChunks.length} chunks, total size: ${combinedBuffer.length} bytes`);
+        const totalSizeKB = Math.round(combinedBuffer.length / 1024);
+        const totalSizeMB = (combinedBuffer.length / (1024 * 1024)).toFixed(2);
+        console.log(`[TTS] Successfully generated audio: ${totalChunks} chunks, ${totalSizeKB} KB (${totalSizeMB} MB)`);
+        console.log(`[TTS] Base64 encoded size: ${Math.round(audioData.length / 1024)} KB`);
+        sendProgress(totalChunks, totalChunks, 'Complete!');
         
-        return { success: true, audioData };
+        return { success: true, audioData, totalChunks, totalSizeBytes: combinedBuffer.length };
         
       } catch (error) {
         console.error('[TTS] Error generating speech:', error);

@@ -43,6 +43,7 @@ const BUILT_IN_AGENT_IDS = [
   'search-agent',
   'smalltalk-agent',
   'dj-agent',
+  'email-agent',         // Email assistant - data-aware bidding for email communications
   // Add new agents here:
   // 'your-new-agent',
 ];

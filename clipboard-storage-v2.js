@@ -954,6 +954,13 @@ proactive_suggestions: true
         icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
         color: '#4a9eff',
         isSystem: true
+      },
+      {
+        id: 'gsx-agent',
+        name: 'GSX Agent',
+        icon: '●',
+        color: '#8b5cf6',
+        isSystem: true
       }
     ];
     
@@ -1064,7 +1071,7 @@ proactive_suggestions: true
       ],
       preferences: {
         spacesEnabled: true,
-        screenshotCaptureEnabled: true,
+        screenshotCaptureEnabled: false,
         currentSpace: 'unclassified'
       }
     };
@@ -1196,6 +1203,31 @@ proactive_suggestions: true
   
   // Add new item (transactional - files + DB in single operation)
   addItem(item) {
+    // Ensure GSX Agent space exists if adding to it
+    if (item.spaceId === 'gsx-agent') {
+      const spaceExists = this.index?.spaces?.find(s => s.id === 'gsx-agent');
+      if (!spaceExists) {
+        console.log('[Storage] GSX Agent space not in index, creating it...');
+        try {
+          this.createSpace({
+            id: 'gsx-agent',
+            name: 'GSX Agent',
+            icon: '🤖',
+            color: '#8b5cf6',
+            isSystem: true
+          });
+        } catch (e) {
+          // Space might already exist on disk, just ensure metadata
+          this.ensureSpaceMetadata('gsx-agent', {
+            name: 'GSX Agent',
+            icon: '🤖',
+            color: '#8b5cf6',
+            isSystem: true
+          });
+        }
+      }
+    }
+    
     const itemId = item.id || this.generateId();
     const itemDir = path.join(this.itemsDir, itemId);
     

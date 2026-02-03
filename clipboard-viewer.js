@@ -32,7 +32,7 @@ let contextMenuItem = null;
 let spacesEnabled = true;
 let activeSpaceId = null;
 let currentView = 'list'; // Add view state
-let screenshotCaptureEnabled = true;
+let screenshotCaptureEnabled = false;
 let selectedTags = []; // Tags currently selected for filtering
 let allTags = {}; // Map of tag -> count
 let selectedItems = new Set(); // Track selected item IDs for bulk operations
@@ -122,6 +122,16 @@ async function init() {
         // Load history (depends on currentSpace which may be set by spaces data)
         await loadHistory();
         console.log('Loaded history items:', history.length);
+        
+        // Listen for TTS progress updates
+        if (window.clipboard.onTTSProgress) {
+            window.clipboard.onTTSProgress((progress) => {
+                const statusEl = document.getElementById('ttsStatus');
+                if (statusEl && statusEl.style.display !== 'none') {
+                    showTTSStatus(progress.status, 'info');
+                }
+            });
+        }
         
         // Listen for history updates to automatically refresh when documents are saved
         window.clipboard.onHistoryUpdate(async (updatedHistory) => {
@@ -6736,6 +6746,9 @@ function resetTTSState() {
     window.currentTTSAudioData = null;
     window.currentTTSVoice = null;
     window.ttsAudioAttached = false;
+    
+    // Reset teleprompter
+    resetTeleprompter();
 }
 
 // Load attached TTS audio for an item
@@ -6800,6 +6813,14 @@ async function loadAttachedTTSAudio(itemId) {
             
             showTTSStatus('🔊 Audio attached to this item', 'success');
             
+            // Initialize teleprompter with item content
+            if (currentPreviewItem) {
+                const textContent = originalContent || currentPreviewItem.content || currentPreviewItem.preview || '';
+                if (textContent) {
+                    initializeTeleprompter(textContent);
+                }
+            }
+            
             return true;
         } else {
             console.log('[TTS] No audio attached - result:', result);
@@ -6835,6 +6856,9 @@ async function generateSpeech() {
         return;
     }
     
+    // Store original text for teleprompter display (before stripping)
+    const teleprompterText = textContent;
+    
     // Strip markdown/HTML for cleaner speech
     textContent = textContent
         .replace(/```[\s\S]*?```/g, '') // Remove code blocks
@@ -6845,17 +6869,27 @@ async function generateSpeech() {
         .replace(/\n{3,}/g, '\n\n') // Normalize line breaks
         .trim();
     
-    // OpenAI TTS has a limit of ~4096 characters
-    if (textContent.length > 4000) {
-        textContent = textContent.substring(0, 4000) + '...';
-        showTTSStatus('Text truncated to 4000 characters for TTS', 'warning');
+    // Check for reasonable upper limit (50,000 chars ~ 30+ minutes of audio)
+    const MAX_TTS_LENGTH = 50000;
+    if (textContent.length > MAX_TTS_LENGTH) {
+        showTTSStatus(`Text too long (${textContent.length.toLocaleString()} chars). Maximum is ${MAX_TTS_LENGTH.toLocaleString()} chars (~30 min audio).`, 'error');
+        return;
     }
+    
+    // Estimate chunks for user feedback
+    const estimatedChunks = Math.ceil(textContent.length / 4000);
+    const estimatedMinutes = Math.round(textContent.length / 150 / 60); // ~150 chars per minute of speech
     
     try {
         btn.disabled = true;
         btnIcon.textContent = '⏳';
         btnText.textContent = 'Generating...';
-        showTTSStatus('Generating speech with OpenAI TTS HD...', 'info');
+        
+        if (estimatedChunks > 1) {
+            showTTSStatus(`Processing ${textContent.length.toLocaleString()} chars in ${estimatedChunks} chunks (~${estimatedMinutes} min audio)...`, 'info');
+        } else {
+            showTTSStatus('Generating speech with OpenAI TTS HD...', 'info');
+        }
         
         // Call the backend to generate speech
         const result = await window.clipboard.generateSpeech({
@@ -6864,9 +6898,13 @@ async function generateSpeech() {
         });
         
         if (result.success && result.audioData) {
+            console.log(`[TTS] Received audio: ${result.totalChunks || '?'} chunks, ${Math.round(result.audioData.length / 1024)} KB base64`);
+            
             // Create audio blob and URL
             const audioBlob = base64ToBlob(result.audioData, 'audio/mpeg');
             const audioUrl = URL.createObjectURL(audioBlob);
+            
+            console.log(`[TTS] Created blob: ${Math.round(audioBlob.size / 1024)} KB`);
             
             // Set up audio player
             const audioPlayer = document.getElementById('ttsAudioPlayer');
@@ -6878,6 +6916,9 @@ async function generateSpeech() {
             
             // Show audio player
             document.getElementById('ttsAudioContainer').style.display = 'block';
+            
+            // Initialize teleprompter with the original text
+            initializeTeleprompter(teleprompterText);
             
             showTTSStatus('⏳ Saving audio...', 'info');
             
@@ -7012,6 +7053,296 @@ function base64ToBlob(base64, mimeType) {
     const byteArray = new Uint8Array(byteNumbers);
     return new Blob([byteArray], { type: mimeType });
 }
+
+// ============================================
+// TELEPROMPTER FUNCTIONALITY
+// ============================================
+
+// Teleprompter state
+window.teleprompterState = {
+    sentences: [],
+    isPlaying: false,
+    initialized: false
+};
+
+// Initialize teleprompter with text content
+function initializeTeleprompter(text) {
+    console.log('[Teleprompter] Initializing with text length:', text.length);
+    
+    const container = document.getElementById('teleprompterContainer');
+    const textContent = document.getElementById('teleprompterTextContent');
+    const audioPlayer = document.getElementById('ttsAudioPlayer');
+    
+    if (!container || !textContent || !audioPlayer) {
+        console.error('[Teleprompter] Missing required elements');
+        return;
+    }
+    
+    // Split text into sentences for granular tracking
+    const sentences = splitIntoSentences(text);
+    window.teleprompterState.sentences = sentences;
+    
+    // Build HTML with sentence spans
+    let html = '';
+    sentences.forEach((sentence, index) => {
+        const escapedSentence = sentence
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/\n/g, '<br>');
+        html += `<span class="teleprompter-sentence future" data-index="${index}">${escapedSentence}</span> `;
+    });
+    
+    textContent.innerHTML = html;
+    
+    // Show the teleprompter
+    container.style.display = 'block';
+    
+    // Set up audio event listeners (only once)
+    if (!window.teleprompterState.initialized) {
+        setupTeleprompterEvents();
+        window.teleprompterState.initialized = true;
+    }
+    
+    // Reset progress display
+    updateTeleprompterProgress(0, audioPlayer.duration || 0);
+    updateTeleprompterPlayButton(false);
+    
+    // Scroll to top
+    document.getElementById('teleprompterText').scrollTop = 0;
+    
+    console.log('[Teleprompter] Initialized with', sentences.length, 'sentences');
+}
+
+// Split text into sentences
+function splitIntoSentences(text) {
+    // Split on sentence-ending punctuation, keeping the punctuation
+    const rawSentences = text.split(/(?<=[.!?])\s+/);
+    
+    // Filter out empty strings and very short fragments
+    return rawSentences
+        .map(s => s.trim())
+        .filter(s => s.length > 0);
+}
+
+// Set up teleprompter event listeners
+function setupTeleprompterEvents() {
+    const audioPlayer = document.getElementById('ttsAudioPlayer');
+    const playBtn = document.getElementById('teleprompterPlayBtn');
+    const progressContainer = document.getElementById('teleprompterProgressContainer');
+    const speedSelect = document.getElementById('teleprompterSpeed');
+    const closeBtn = document.getElementById('teleprompterCloseBtn');
+    
+    // Audio time update - sync text scrolling
+    audioPlayer.addEventListener('timeupdate', handleTeleprompterTimeUpdate);
+    
+    // Audio play/pause state sync
+    audioPlayer.addEventListener('play', () => {
+        window.teleprompterState.isPlaying = true;
+        updateTeleprompterPlayButton(true);
+    });
+    
+    audioPlayer.addEventListener('pause', () => {
+        window.teleprompterState.isPlaying = false;
+        updateTeleprompterPlayButton(false);
+    });
+    
+    audioPlayer.addEventListener('ended', () => {
+        window.teleprompterState.isPlaying = false;
+        updateTeleprompterPlayButton(false);
+    });
+    
+    // Duration loaded
+    audioPlayer.addEventListener('loadedmetadata', () => {
+        updateTeleprompterProgress(0, audioPlayer.duration);
+    });
+    
+    // Play/Pause button
+    playBtn.addEventListener('click', () => {
+        if (audioPlayer.paused) {
+            audioPlayer.play();
+        } else {
+            audioPlayer.pause();
+        }
+    });
+    
+    // Progress bar seeking
+    progressContainer.addEventListener('click', (e) => {
+        const rect = progressContainer.getBoundingClientRect();
+        const percent = (e.clientX - rect.left) / rect.width;
+        const newTime = percent * audioPlayer.duration;
+        audioPlayer.currentTime = newTime;
+    });
+    
+    // Progress bar dragging
+    let isDragging = false;
+    progressContainer.addEventListener('mousedown', () => { isDragging = true; });
+    document.addEventListener('mouseup', () => { isDragging = false; });
+    document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        const rect = progressContainer.getBoundingClientRect();
+        const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        const newTime = percent * audioPlayer.duration;
+        audioPlayer.currentTime = newTime;
+    });
+    
+    // Speed control
+    speedSelect.addEventListener('change', (e) => {
+        audioPlayer.playbackRate = parseFloat(e.target.value);
+    });
+    
+    // Close button
+    closeBtn.addEventListener('click', closeTeleprompter);
+}
+
+// Handle audio time update for teleprompter sync
+function handleTeleprompterTimeUpdate() {
+    const audioPlayer = document.getElementById('ttsAudioPlayer');
+    const currentTime = audioPlayer.currentTime;
+    const duration = audioPlayer.duration;
+    
+    if (!duration || isNaN(duration)) return;
+    
+    // Update progress bar and time display
+    updateTeleprompterProgress(currentTime, duration);
+    
+    // Calculate which sentence should be active based on time
+    const progress = currentTime / duration;
+    const sentences = window.teleprompterState.sentences;
+    
+    if (sentences.length === 0) return;
+    
+    // Calculate total character count for proportional mapping
+    const totalChars = sentences.reduce((sum, s) => sum + s.length, 0);
+    const targetCharPosition = progress * totalChars;
+    
+    // Find the active sentence
+    let charCount = 0;
+    let activeSentenceIndex = 0;
+    
+    for (let i = 0; i < sentences.length; i++) {
+        charCount += sentences[i].length;
+        if (charCount >= targetCharPosition) {
+            activeSentenceIndex = i;
+            break;
+        }
+    }
+    
+    // Update sentence highlighting
+    updateSentenceHighlighting(activeSentenceIndex);
+    
+    // Scroll to keep active sentence centered
+    scrollToActiveSentence(activeSentenceIndex);
+}
+
+// Update sentence CSS classes for highlighting
+function updateSentenceHighlighting(activeIndex) {
+    const sentenceElements = document.querySelectorAll('.teleprompter-sentence');
+    
+    sentenceElements.forEach((el, index) => {
+        el.classList.remove('active', 'past', 'future');
+        
+        if (index < activeIndex) {
+            el.classList.add('past');
+        } else if (index === activeIndex) {
+            el.classList.add('active');
+        } else {
+            el.classList.add('future');
+        }
+    });
+}
+
+// Scroll to keep active sentence centered
+function scrollToActiveSentence(activeIndex) {
+    const container = document.getElementById('teleprompterText');
+    const activeElement = document.querySelector(`.teleprompter-sentence[data-index="${activeIndex}"]`);
+    
+    if (!container || !activeElement) return;
+    
+    const containerRect = container.getBoundingClientRect();
+    const elementRect = activeElement.getBoundingClientRect();
+    
+    // Calculate where we want the element (center of container)
+    const containerCenter = containerRect.height / 2;
+    const elementCenter = elementRect.top - containerRect.top + elementRect.height / 2;
+    
+    // Calculate scroll offset needed
+    const scrollOffset = elementCenter - containerCenter;
+    
+    // Smooth scroll
+    container.scrollTop += scrollOffset * 0.15; // Smooth easing factor
+}
+
+// Update progress bar and time displays
+function updateTeleprompterProgress(currentTime, duration) {
+    const progressBar = document.getElementById('teleprompterProgress');
+    const progressHandle = document.getElementById('teleprompterProgressHandle');
+    const currentTimeEl = document.getElementById('teleprompterCurrentTime');
+    const durationEl = document.getElementById('teleprompterDuration');
+    
+    if (!duration || isNaN(duration)) {
+        currentTimeEl.textContent = '0:00';
+        durationEl.textContent = '0:00';
+        return;
+    }
+    
+    const percent = (currentTime / duration) * 100;
+    progressBar.style.width = `${percent}%`;
+    progressHandle.style.left = `${percent}%`;
+    
+    currentTimeEl.textContent = formatTime(currentTime);
+    durationEl.textContent = formatTime(duration);
+}
+
+// Format seconds to M:SS
+function formatTime(seconds) {
+    if (isNaN(seconds)) return '0:00';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+// Update play/pause button icon
+function updateTeleprompterPlayButton(isPlaying) {
+    const playIcon = document.getElementById('teleprompterPlayIcon');
+    
+    if (isPlaying) {
+        // Show pause icon
+        playIcon.innerHTML = '<rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect>';
+    } else {
+        // Show play icon
+        playIcon.innerHTML = '<polygon points="5,3 19,12 5,21"></polygon>';
+    }
+}
+
+// Close teleprompter
+function closeTeleprompter() {
+    const container = document.getElementById('teleprompterContainer');
+    const audioPlayer = document.getElementById('ttsAudioPlayer');
+    
+    container.style.display = 'none';
+    
+    // Pause audio when closing
+    if (audioPlayer && !audioPlayer.paused) {
+        audioPlayer.pause();
+    }
+}
+
+// Reset teleprompter state (called when switching items)
+function resetTeleprompter() {
+    const container = document.getElementById('teleprompterContainer');
+    const textContent = document.getElementById('teleprompterTextContent');
+    
+    if (container) container.style.display = 'none';
+    if (textContent) textContent.innerHTML = '';
+    
+    window.teleprompterState.sentences = [];
+    window.teleprompterState.isPlaying = false;
+}
+
+// ============================================
+// END TELEPROMPTER FUNCTIONALITY
+// ============================================
 
 // Load media file for preview
 async function loadMediaForPreview(item) {

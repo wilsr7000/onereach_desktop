@@ -4072,7 +4072,7 @@ END OF AUTOMATED REPORT
           click: () => {
             console.log('[Share] Copy Download Link clicked');
             const { clipboard, dialog } = require('electron');
-            clipboard.writeText('https://github.com/wilsr7000/onereach_desktop/releases/latest');
+            clipboard.writeText('https://github.com/wilsr7000/Onereach_Desktop_App/releases/latest');
             const focusedWindow = BrowserWindow.getFocusedWindow();
             dialog.showMessageBox(focusedWindow, {
               type: 'info',
@@ -4088,7 +4088,7 @@ END OF AUTOMATED REPORT
             console.log('[Share] Share via Email clicked');
             const { shell } = require('electron');
             const subject = encodeURIComponent('Check out GSX Power User');
-            const body = encodeURIComponent('I\'m using GSX Power User - a powerful app for AI productivity. Download it here: https://github.com/wilsr7000/onereach_desktop/releases/latest');
+            const body = encodeURIComponent('I\'m using GSX Power User - a powerful app for AI productivity. Download it here: https://github.com/wilsr7000/Onereach_Desktop_App/releases/latest');
             shell.openExternal(`mailto:?subject=${subject}&body=${body}`);
           }
         },
@@ -4097,7 +4097,7 @@ END OF AUTOMATED REPORT
           click: () => {
             console.log('[Share] Open GitHub Page clicked');
             const { shell } = require('electron');
-            shell.openExternal('https://github.com/wilsr7000/onereach_desktop/releases/latest');
+            shell.openExternal('https://github.com/wilsr7000/Onereach_Desktop_App/releases/latest');
           }
         }
       ]
