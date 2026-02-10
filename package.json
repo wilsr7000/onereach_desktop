@@ -158,8 +158,15 @@
     },
     "extraResources": [
       {
-        "from": "resources/claude-code/${platform}-${arch}",
-        "to": "claude-code/${platform}-${arch}",
+        "from": "resources/claude-code/darwin-arm64",
+        "to": "claude-code/darwin-arm64",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "resources/claude-code/darwin-x64",
+        "to": "claude-code/darwin-x64",
         "filter": [
           "**/*"
         ]
