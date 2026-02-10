@@ -3,6 +3,8 @@
  * @module src/agentic-player/core/PlaybackController
  */
 
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 /**
  * Playback controller class
  */
@@ -39,7 +41,7 @@ export class PlaybackController {
     const videoUrl = clip.videoUrl || clip.videoSrc;
     const startTime = clip.inTime || 0;
 
-    console.log(`[PlaybackController] Loading: "${clip.name}" from ${videoUrl}`);
+    log.info('agent', '[PlaybackController] Loading: "" from', { v0: clip.name, v1: videoUrl });
 
     if (fromPreload) {
       // Already loaded, just set time
@@ -68,7 +70,7 @@ export class PlaybackController {
    * Play video
    */
   play() {
-    this.video.play().catch(e => console.warn('[PlaybackController] Autoplay blocked:', e));
+    this.video.play().catch(e => log.warn('agent', '[PlaybackController] Autoplay blocked', { error: e.message || e }));
   }
 
   /**
@@ -143,7 +145,7 @@ export class PlaybackController {
    * Handle video error
    */
   handleError(e) {
-    console.error('[PlaybackController] Video error:', e);
+    log.error('agent', '[PlaybackController] Video error', { error: e });
   }
 
   /**

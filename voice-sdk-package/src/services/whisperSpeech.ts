@@ -1,9 +1,12 @@
 /**
- * OpenAI Whisper Speech Service - Continuous Mode
+ * Whisper Speech Service - Continuous Mode (via unified ai-service)
  * 
- * Real-time speech-to-text using OpenAI's Whisper API.
+ * Real-time speech-to-text using the centralized AI service.
  * Accumulates ALL audio and sends the complete file each time.
  * Tracks the last transcript to only emit new content.
+ * 
+ * Supports an optional `transcribeFn` in config for IPC-proxied
+ * transcription via ai-service. Falls back to direct fetch if not provided.
  */
 
 export type WhisperEventType = 
@@ -23,6 +26,17 @@ export interface WhisperEvent {
 
 export type WhisperEventCallback = (event: WhisperEvent) => void
 
+/**
+ * Optional IPC-proxied transcription function.
+ * When provided, audio is sent to the main process via IPC and transcribed
+ * through the centralized ai-service (with retry, cost tracking, etc.).
+ * The function receives an ArrayBuffer of audio data and returns { text }.
+ */
+type TranscribeFn = (audioArrayBuffer: ArrayBuffer, opts: {
+  language?: string
+  filename?: string
+}) => Promise<{ text: string }>
+
 interface WhisperSpeechConfig {
   apiKey: string
   language?: string
@@ -31,6 +45,7 @@ interface WhisperSpeechConfig {
   silenceDuration?: number
   chunkInterval?: number
   deviceId?: string | null  // Specific microphone device ID
+  transcribeFn?: TranscribeFn  // Preferred: IPC-proxied ai-service transcription
 }
 
 export class WhisperSpeechService {
@@ -384,35 +399,35 @@ export class WhisperSpeechService {
     try {
       console.log(`[WhisperSpeech] Transcribing ${isFinal ? 'final' : 'partial'}:`, audioBlob.size, 'bytes')
 
-      const formData = new FormData()
-      
       const mimeType = audioBlob.type
       let extension = 'webm'
       if (mimeType.includes('ogg')) extension = 'ogg'
       else if (mimeType.includes('mp4')) extension = 'mp4'
       else if (mimeType.includes('wav')) extension = 'wav'
       
-      formData.append('file', audioBlob, `audio.${extension}`)
-      formData.append('model', 'whisper-1')
-      
-      if (this.config.language) {
-        formData.append('language', this.config.language)
+      let result: { text: string }
+
+      if (this.config.transcribeFn) {
+        // Preferred path: IPC-proxied transcription via centralized ai-service
+        const arrayBuffer = await audioBlob.arrayBuffer()
+        result = await this.config.transcribeFn(arrayBuffer, {
+          language: this.config.language,
+          filename: `audio.${extension}`,
+        })
+      } else if (typeof window !== 'undefined' && (window as any).ai?.transcribe) {
+        // Fallback: use window.ai.transcribe (IPC bridge to centralized ai-service)
+        console.warn('[WhisperSpeech] config.transcribeFn not provided, falling back to window.ai.transcribe')
+        const arrayBuffer = await audioBlob.arrayBuffer()
+        result = await (window as any).ai.transcribe(arrayBuffer, {
+          language: this.config.language,
+          filename: `audio.${extension}`,
+        })
+      } else {
+        throw new Error(
+          '[WhisperSpeech] No transcription method available. ' +
+          'Provide config.transcribeFn or ensure window.ai.transcribe is available via preload.'
+        )
       }
-
-      const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.config.apiKey}`
-        },
-        body: formData
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(errorData.error?.message || `Whisper API error: ${response.status}`)
-      }
-
-      const result = await response.json()
       
       if (result.text) {
         const fullTranscript = result.text.trim()

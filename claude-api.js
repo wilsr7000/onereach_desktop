@@ -1,3 +1,11 @@
+/**
+ * @deprecated Use lib/ai-service.js instead.
+ * This file is retained for backward compatibility but all consumers
+ * have been migrated to the centralized AI service.
+ * See: const ai = require('./lib/ai-service');
+ */
+console.warn('[ClaudeAPI] DEPRECATED — use lib/ai-service.js instead');
+
 const { app, net } = require('electron');
 const getLogger = require('./event-logger');
 const { getBudgetManager } = require('./budget-manager');
@@ -549,7 +557,24 @@ Respond with valid JSON only, no markdown formatting.`;
   async chat(messages, apiKey = null, options = {}) {
     const logger = getLogger();
     
-    // Get API key from settings if not provided
+    // Helper to extract valid Anthropic key from a string (handles copy-paste errors like "Anthr: sk-ant-...")
+    const extractAnthropicKey = (str) => {
+      if (!str) return null;
+      // Look for sk-ant- pattern anywhere in the string
+      const match = str.match(/sk-ant-[A-Za-z0-9_-]+/);
+      return match ? match[0] : null;
+    };
+    
+    // If apiKey was passed, clean it in case it has a prefix (e.g., "Anthr: sk-ant-...")
+    if (apiKey) {
+      const cleanedKey = extractAnthropicKey(apiKey);
+      if (cleanedKey) {
+        apiKey = cleanedKey;
+      }
+      // If cleanup found nothing but key exists, we'll let it proceed and validate later
+    }
+    
+    // Get API key from settings if not provided (or if provided key couldn't be cleaned)
     if (!apiKey) {
       const { getSettingsManager } = require('./settings-manager');
       const settingsManager = getSettingsManager();
@@ -559,14 +584,6 @@ Respond with valid JSON only, no markdown formatting.`;
       const nestedKey = settingsManager.get('llmConfig.anthropic.apiKey');
       const llmApiKey = settingsManager.get('llmApiKey');
       const provider = settingsManager.get('llmProvider');
-      
-      // Helper to extract valid Anthropic key from a string (handles copy-paste errors)
-      const extractAnthropicKey = (str) => {
-        if (!str) return null;
-        // Look for sk-ant- pattern anywhere in the string
-        const match = str.match(/sk-ant-[A-Za-z0-9_-]+/);
-        return match ? match[0] : null;
-      };
       
       // Priority: dedicated anthropic key > nested config > llmApiKey (only if it's an Anthropic key)
       const cleanAnthropicKey = extractAnthropicKey(anthropicApiKey);

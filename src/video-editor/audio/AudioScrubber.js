@@ -7,6 +7,8 @@
  * - Debounced to avoid audio glitches
  */
 
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 export class AudioScrubber {
   constructor(audioContext, audioBuffer) {
     this.ctx = audioContext;
@@ -20,7 +22,7 @@ export class AudioScrubber {
     
     this._initGain();
     
-    console.log('[AudioScrubber] Initialized');
+    log.info('video', '[AudioScrubber] Initialized');
   }
   
   /**
@@ -39,7 +41,7 @@ export class AudioScrubber {
    */
   setBuffer(audioBuffer) {
     this.buffer = audioBuffer;
-    console.log('[AudioScrubber] Buffer updated');
+    log.info('video', '[AudioScrubber] Buffer updated');
   }
   
   /**
@@ -81,7 +83,7 @@ export class AudioScrubber {
       this.scrubSource.start(0, safeTime, this.scrubDuration);
       
     } catch (error) {
-      console.warn('[AudioScrubber] Scrub error:', error.message);
+      log.warn('video', '[AudioScrubber] Scrub error', { data: error.message });
     }
   }
   
@@ -108,7 +110,7 @@ export class AudioScrubber {
     if (!enabled) {
       this.stop();
     }
-    console.log('[AudioScrubber] Enabled:', enabled);
+    log.info('video', '[AudioScrubber] Enabled', { data: enabled });
   }
   
   /**
@@ -143,7 +145,7 @@ export class AudioScrubber {
     this.buffer = null;
     this.ctx = null;
     
-    console.log('[AudioScrubber] Disposed');
+    log.info('video', '[AudioScrubber] Disposed');
   }
 }
 

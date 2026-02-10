@@ -7,6 +7,8 @@
  * - Preview generation for mini timeline
  * - Applying edits to video via FFmpeg
  */
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 export class VideoSyncEngine {
   constructor(appContext) {
     this.app = appContext;
@@ -265,7 +267,7 @@ export class VideoSyncEngine {
       // Generate edit decision list
       const editList = this.generateEditDecisionList();
       
-      console.log('[VideoSyncEngine] Applying edits:', editList);
+      log.info('video', '[VideoSyncEngine] Applying edits', { data: editList });
       
       // Call the video processor
       const result = await window.videoEditor.processEditList(videoPath, editList, {
@@ -296,7 +298,7 @@ export class VideoSyncEngine {
       return result;
       
     } catch (error) {
-      console.error('[VideoSyncEngine] Apply edits error:', error);
+      log.error('video', '[VideoSyncEngine] Apply edits error', { error: error });
       this.app.showToast?.('error', 'Failed to apply edits: ' + error.message);
       return { success: false, error: error.message };
     }
@@ -487,7 +489,7 @@ export class VideoSyncEngine {
     const timeline = this.generatePreviewTimeline(edits);
     
     if (!this.app.video) {
-      console.error('[VideoSyncEngine] No video element available for preview');
+      log.error('video', '[VideoSyncEngine] No video element available for preview');
       return;
     }
 
@@ -508,7 +510,7 @@ export class VideoSyncEngine {
     // Add preview time update listener
     this.app.video.addEventListener('timeupdate', this._previewTimeHandler);
 
-    console.log('[VideoSyncEngine] Preview mode activated', timeline);
+    log.info('video', '[VideoSyncEngine] Preview mode activated', { arg0: timeline });
     this.app.showToast?.('info', 'Preview mode - showing edited timeline');
     
     return timeline;
@@ -530,7 +532,7 @@ export class VideoSyncEngine {
       if (currentTime >= skip.originalStart && currentTime < skip.originalEnd) {
         // Skip to end of this region
         video.currentTime = skip.originalEnd;
-        console.log(`[VideoSyncEngine] Skipping ${skip.reason}: ${skip.originalStart.toFixed(2)}s -> ${skip.originalEnd.toFixed(2)}s`);
+        log.info('video', '[VideoSyncEngine] Skipping : s -> s', { v0: skip.reason, v1: skip.originalStart.toFixed(2), v2: skip.originalEnd.toFixed(2) });
         return;
       }
     }
@@ -553,7 +555,7 @@ export class VideoSyncEngine {
     this._previewState.active = false;
     this._previewState = null;
 
-    console.log('[VideoSyncEngine] Preview mode deactivated');
+    log.info('video', '[VideoSyncEngine] Preview mode deactivated');
     this.app.showToast?.('info', 'Preview mode ended');
   }
 

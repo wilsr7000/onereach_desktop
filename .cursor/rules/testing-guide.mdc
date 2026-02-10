@@ -1,0 +1,358 @@
+---
+description: Testing guide for the Onereach.ai Electron app. Covers how to run tests, monitor errors, and follow the iterative test protocol.
+globs:
+alwaysApply: true
+---
+
+# Testing Guide -- Onereach.ai
+
+This document is the authoritative reference for testing the app. It covers:
+1. Quick reference (ports, APIs, commands)
+2. Automated test suites
+3. Iterative test protocol (adaptive, not a checklist)
+4. State tracking and session management
+5. Loop prevention and token budget
+6. Error monitoring helpers
+
+---
+
+## 1. Quick Reference
+
+### Ports and APIs
+
+| Service | Port | Base URL | Purpose |
+|---|---|---|---|
+| Log Server | 47292 | `http://127.0.0.1:47292` | Structured logging REST + WebSocket |
+| Spaces API | 47291 | `http://127.0.0.1:47291` | Content storage CRUD |
+| Agent Exchange | 3456 | `ws://localhost:3456` | Agent registration and bidding |
+
+### Log Server Endpoints
+
+```
+GET  /health            -- App version, uptime, error counts, connections
+GET  /logs              -- Query logs (params: level, category, since, until, search, limit, offset)
+GET  /logs/stats        -- Aggregated counts by level and category
+GET  /logs/stream       -- SSE stream for real-time events
+GET  /logs/export       -- Export as JSON or text
+POST /logs              -- Push a log event from external source
+GET  /logging/level     -- Read current and persisted logging level
+POST /logging/level     -- Change level at runtime (body: {"level":"debug"})
+WS   ws://127.0.0.1:47292/ws  -- WebSocket for real-time streaming
+```
+
+### Spaces API Endpoints
+
+```
+GET    /api/spaces              -- List all spaces
+POST   /api/spaces              -- Create space (body: {name, description})
+GET    /api/spaces/:id          -- Get space by ID
+PUT    /api/spaces/:id          -- Update space
+DELETE /api/spaces/:id          -- Delete space
+GET    /api/spaces/:id/items    -- List items in space
+POST   /api/spaces/:id/items    -- Add item to space
+```
+
+### Key IPC Namespaces (renderer -> main)
+
+- `window.api` -- General app API (settings, navigation)
+- `window.logging` -- Structured logging (enqueue, query, setLevel, getLevel)
+- `window.clipboard` -- Clipboard/Spaces management
+- `window.spaces` -- Spaces CRUD
+- `window.ai` -- Centralized AI service
+- `window.convert` -- File conversion pipeline
+- `window.budgetAPI` -- AI cost tracking
+
+### Product Windows
+
+| Product | HTML File | Menu Path | Shortcut |
+|---|---|---|---|
+| Main Browser | tabbed-browser.html | (launches at start) | -- |
+| Spaces Manager | clipboard-viewer.html | Manage Spaces > Show Clipboard History | Cmd+Shift+V |
+| Settings | settings.html | App > Settings | Cmd+, |
+| Agent Manager | agent-manager.html | Tools > Manage Agents | -- |
+| Voice Orb | orb.html | Tools > Toggle Voice Orb | Cmd+Shift+O |
+| Video Editor | video-editor.html | Tools > Video Editor | -- |
+| GSX Create | aider-ui.html | Tools > GSX Create | Cmd+Shift+A |
+| Health Dashboard | app-health-dashboard.html | Help > App Health Dashboard | Cmd+Shift+H |
+| Black Hole | black-hole.html | Tools > Black Hole | Cmd+Shift+B |
+| Recorder | recorder.html | (from Video Editor) | -- |
+| Budget Dashboard | budget-dashboard.html | (from menu) | -- |
+| Agent Composer | claude-code-ui.html | Tools > Create Agent with AI | Cmd+Shift+G |
+
+### Known Benign Errors (filter these out)
+
+These errors appear during normal operation and are NOT bugs:
+- `Agent reconnect failed` -- transient during startup while WebSocket connects
+- `Built-in agent WebSocket error` -- same as above
+- `Failed to inject Chrome-like behavior` -- timing issue, non-critical
+- `Failed to check for Material Symbols` -- timing issue, non-critical
+- `Database IO error` -- Electron service worker storage, benign
+- `console-message arguments are deprecated` -- Electron API deprecation warning
+
+---
+
+## 2. Automated Test Suites
+
+### Commands
+
+```bash
+npm test                    # Unit tests (Vitest)
+npm run test:smoke          # Window smoke tests (Playwright) -- opens every window
+npm run test:api            # API integration tests -- log server + Spaces API
+npm run test:journey        # Full journey -- smoke + API + spaces flow + settings
+npm run test:e2e            # All E2E tests
+npm run test:all            # Unit + E2E
+npm run test:coverage       # Unit tests with coverage report
+```
+
+### Test Files
+
+```
+test/e2e/window-smoke.spec.js      -- Opens every major window, asserts no error logs
+test/e2e/api-integration.spec.js   -- Tests REST APIs on ports 47291 and 47292
+test/e2e/spaces-flow.spec.js       -- Spaces CRUD journey (create, add item, delete)
+test/e2e/settings-flow.spec.js     -- Settings window + diagnostic logging toggle
+test/e2e/helpers/electron-app.js   -- Shared harness (launch, teardown, error monitoring)
+```
+
+### Running against a live app
+
+The API integration tests (`test:api`) can run against an already-running app. Just start the app with `npm start`, then in another terminal run `npm run test:api`. The tests connect to the running log server and Spaces API.
+
+---
+
+## 3. Iterative Test Protocol
+
+### Core Loop
+
+This protocol is ADAPTIVE, not a fixed checklist. After every action, Cursor evaluates what to do next based on results.
+
+```
+   Check budget (System 4)
+       |
+       v
+   Test something
+       |
+       v
+   Analyze results (query log server for new errors)
+       |
+       v
+   Decide: fix, re-test, or move on (System 1 priority algorithm)
+       |
+       v
+   Update session state (System 2)
+       |
+       v
+   Repeat
+```
+
+### Priority Algorithm -- "What to test next"
+
+Evaluate this decision tree after EVERY action:
+
+```
+0. CHECK BUDGET
+   stepsUsed >= 90% of maxSteps -> Write summary and STOP.
+   stepsUsed >= 80% -> Run final smoke, write summary, STOP.
+   stepsUsed >= 60% -> Test-only mode (no more code fixes).
+
+1. BLOCKING errors? (app won't start, window crashes)
+   -> Fix the blocker first.
+
+2. REGRESSION from last fix? (smoke test fails in new area)
+   -> Fix the regression before anything else.
+
+3. Area that FAILED but hasn't been re-tested after a fix?
+   -> Re-test that area to confirm the fix.
+
+4. Which UNTESTED area has the most errors?
+   -> GET /logs/stats -> pick the category with most errors.
+
+5. No errors anywhere?
+   -> Pick the next untested area by priority:
+      Spaces Manager > Settings > Agent Manager > Voice Orb >
+      Video Editor > GSX Create > GSX/IDW Windows > Dashboard >
+      Black Hole > Recorder
+
+6. All areas tested and passing?
+   -> Run full regression: npm run test:journey
+   -> If clean: DONE.
+```
+
+### Pre-flight (always run first)
+
+```bash
+# 1. Verify app is running
+curl -s http://127.0.0.1:47292/health | python3 -m json.tool
+
+# 2. Enable debug logging
+curl -s -X POST http://127.0.0.1:47292/logging/level -d '{"level":"debug"}'
+
+# 3. Snapshot baseline error count
+curl -s http://127.0.0.1:47292/logs/stats | python3 -m json.tool
+
+# 4. Record app version
+curl -s http://127.0.0.1:47292/health | python3 -c "import sys,json; print(json.load(sys.stdin)['appVersion'])"
+```
+
+### Post-flight (always run last)
+
+```bash
+# 1. Full error summary since session start
+curl -s "http://127.0.0.1:47292/logs?level=error&since=SESSION_START_TIMESTAMP&limit=100" | python3 -m json.tool
+
+# 2. Reset logging level
+curl -s -X POST http://127.0.0.1:47292/logging/level -d '{"level":"info"}'
+
+# 3. Final stats
+curl -s http://127.0.0.1:47292/logs/stats | python3 -m json.tool
+```
+
+---
+
+## 4. State Tracking
+
+Cursor maintains a session state file at `.cursor/test-session.json`. This tracks what has been tested, what passed, what failed, all fix attempts, and the budget.
+
+### Session State Schema
+
+```json
+{
+  "sessionId": "ISO-timestamp",
+  "appVersion": "3.12.5",
+  "startedAt": "ISO-timestamp",
+  "baselineErrorCount": 0,
+  "currentPhase": "testing|test-only|wrapup|reporting|done",
+  "budget": {
+    "tier": "quick|standard|deep",
+    "maxSteps": 120,
+    "stepsUsed": 0,
+    "fixModeAllowed": true,
+    "newAreasAllowed": true,
+    "appAiCostBaseline": 0.0,
+    "appAiCostCurrent": 0.0,
+    "appAiCostDelta": 0.0,
+    "appAiCostWarnAt": 1.00,
+    "appAiCostPauseAt": 5.00
+  },
+  "areas": {
+    "spaces-manager": {
+      "status": "untested|testing|passed|failed|blocked|skipped",
+      "testedAt": null,
+      "errorCount": 0,
+      "fixAttempts": 0,
+      "maxFixAttempts": 3,
+      "fixes": [],
+      "notes": ""
+    }
+  },
+  "fixes": [],
+  "regressions": [],
+  "smokeResults": [],
+  "summary": {}
+}
+```
+
+### When to Update
+
+- Set `status: "testing"` when starting to test an area
+- Set `status: "passed"` when area tested with zero new errors
+- Set `status: "failed"` when errors found
+- Set `status: "blocked"` when max fix attempts exhausted
+- Increment `stepsUsed` after every tool call
+- Append to `fixes[]` after every code change
+- Append to `smokeResults[]` after every smoke run
+- Compute `summary` at session end
+
+---
+
+## 5. Loop Prevention
+
+### Per-Error Limits
+
+- **Max 3 fix attempts** per distinct error (same message + same file).
+- After 3 attempts: mark area as `blocked`, write detailed escalation note, MOVE ON.
+
+### Regression Limits
+
+- **Max 2 regression cycles.** If fix-A breaks area-B and fix-B breaks area-A, STOP both.
+- Mark both as `blocked` and report: "Circular regression -- needs manual investigation."
+
+### Time Limits
+
+- **Max 5 minutes per area** during fix phase.
+- No time limit on testing itself -- only on fix attempts.
+
+### Budget (Token Spend Control)
+
+Three tiers (user picks at session start, default: standard):
+
+| Tier | Max Steps | Fix Cutoff (60%) | Test-Only (80%) | Summary (90%) |
+|---|---|---|---|---|
+| quick | 30 | 18 | 24 | 27 |
+| standard | 120 | 72 | 96 | 108 |
+| deep | 300 | 180 | 240 | 270 |
+
+Phase transitions:
+- Under 60%: full testing + fixing
+- 60-79%: test-only (no new fixes, finish current area)
+- 80-89%: wrapup (final smoke + summary)
+- 90%+: write summary immediately, stop
+
+User can override: "extend budget", "switch to deep", etc.
+
+### App AI Cost Guard
+
+Some test actions trigger AI calls (App Manager Agent, voice processing). The test harness monitors app AI costs:
+- Snapshot baseline at session start via `budget:getCostSummary('daily')`
+- Check delta after each area test
+- WARN user if delta exceeds $1.00
+- PAUSE and ask user if delta exceeds $5.00
+
+---
+
+## 6. Error Monitoring Helpers
+
+### Check for new errors since a timestamp
+
+```bash
+curl -s "http://127.0.0.1:47292/logs?level=error&since=2026-02-08T21:00:00Z&limit=50" | python3 -m json.tool
+```
+
+### Get error counts by category
+
+```bash
+curl -s http://127.0.0.1:47292/logs/stats | python3 -c "
+import sys, json
+stats = json.load(sys.stdin)
+print('Errors by category:')
+for cat, count in sorted(stats.get('byCategory', {}).items(), key=lambda x: -x[1]):
+    print(f'  {cat}: {count}')
+print(f'Total errors: {stats[\"byLevel\"].get(\"error\", 0)}')
+"
+```
+
+### Stream errors in real time (SSE)
+
+```bash
+curl -N http://127.0.0.1:47292/logs/stream?level=error
+```
+
+### Toggle logging level
+
+```bash
+# Enable verbose
+curl -s -X POST http://127.0.0.1:47292/logging/level -d '{"level":"debug"}'
+
+# Disable (errors only captured internally)
+curl -s -X POST http://127.0.0.1:47292/logging/level -d '{"level":"off"}'
+
+# Check current
+curl -s http://127.0.0.1:47292/logging/level
+```
+
+### Export full session logs
+
+```bash
+curl -s "http://127.0.0.1:47292/logs/export?format=json&since=SESSION_START" > test-session-logs.json
+```

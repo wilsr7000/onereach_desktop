@@ -3,6 +3,8 @@
  * @module src/agentic-player/services/QueueManager
  */
 
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 /**
  * Queue manager class
  */
@@ -21,7 +23,7 @@ export class QueueManager {
     if (!clips || clips.length === 0) return;
     
     this.queue.push(...clips);
-    console.log(`[QueueManager] Added ${clips.length} clips (total: ${this.queue.length})`);
+    log.info('agent', '[QueueManager] Added clips (total: )', { v0: clips.length, v1: this.queue.length });
   }
 
   /**
@@ -49,7 +51,7 @@ export class QueueManager {
    */
   signalEnd() {
     this.endSignaled = true;
-    console.log('[QueueManager] End signaled');
+    log.info('agent', '[QueueManager] End signaled');
   }
 
   /**

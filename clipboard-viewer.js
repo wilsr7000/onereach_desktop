@@ -43,6 +43,49 @@ function getAssetPath(filename) {
     return `assets/${filename}`;
 }
 
+/**
+ * Initialize GSX Push (OmniGraph) for cloud sync
+ * This sets up the connection to the graph API so push operations work
+ */
+async function initGSXPush() {
+    try {
+        // Check if spaces API is available
+        if (!window.spaces || !window.spaces.gsx) {
+            console.warn('[GSX] Spaces GSX API not available');
+            return;
+        }
+        
+        // Get settings to determine environment and refresh URL
+        const settings = await window.api.getSettings();
+        const refreshUrl = settings.gsxRefreshUrl ? settings.gsxRefreshUrl.trim() : null;
+        
+        // Derive OmniGraph endpoint from refresh URL
+        // Format: https://em.edison.api.onereach.ai/http/{accountId}/refresh_token
+        // Target: https://em.edison.api.onereach.ai/http/{accountId}/omnigraph
+        if (!refreshUrl) {
+            console.warn('[GSX] No gsxRefreshUrl configured in settings');
+            return;
+        }
+        
+        const endpoint = refreshUrl.replace('/refresh_token', '/omnigraph');
+        
+        // Get current user for provenance tracking
+        const currentUser = await window.clipboard.getCurrentUser();
+        
+        // Initialize GSX push with endpoint and user
+        const result = await window.spaces.gsx.initialize(endpoint, currentUser);
+        
+        if (result.success) {
+            console.log('[GSX] Push initialized with endpoint:', endpoint, 'user:', currentUser);
+        } else {
+            console.warn('[GSX] Push initialization failed:', result.error);
+        }
+    } catch (error) {
+        // Non-fatal - GSX push is optional functionality
+        console.warn('[GSX] Push initialization error:', error.message);
+    }
+}
+
 // Initialize
 async function init() {
     
@@ -50,10 +93,17 @@ async function init() {
     const errorDisplay = document.getElementById('errorDisplay');
     const errorMessage = document.getElementById('errorMessage');
     
+    // Safe logging helper -- uses structured log queue when available, falls back to console
+    const slog = window.logging || { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} };
+    
     try {
+        slog.info('clipboard', 'Spaces Manager init started', {
+            hasClipboardAPI: !!window.clipboard,
+            hasLogging: !!window.logging,
+            hasApi: !!window.api,
+            clipboardMethods: window.clipboard ? Object.keys(window.clipboard).length : 0
+        });
         console.log('Initializing clipboard viewer...');
-        console.log('window object keys:', Object.keys(window));
-        console.log('window.api available?', !!window.api);
         console.log('window.clipboard available?', !!window.clipboard);
         console.log('window.clipboard methods:', window.clipboard ? Object.keys(window.clipboard) : 'N/A');
         
@@ -71,10 +121,12 @@ async function init() {
         
         // If clipboard API is still not available, show a helpful error
         if (!window.clipboard) {
+            slog.error('clipboard', 'Clipboard API not available after backoff', { attempts: 10 });
             throw new Error('The clipboard manager is not initialized. Please restart the app and try again.');
         }
         
-        console.log('✓ Clipboard API is available');
+        slog.info('clipboard', 'Clipboard API bridge ready');
+        console.log('Clipboard API is available');
         
         // PERFORMANCE: Hide loading overlay immediately to show UI shell
         // This makes the app feel much more responsive
@@ -91,37 +143,70 @@ async function init() {
         document.getElementById('searchInput').focus();
         
         
-        // PERFORMANCE: Parallelize independent API calls
+        // PERFORMANCE: Parallelize independent API calls with fault tolerance
+        // Use Promise.allSettled so one failing call doesn't crash the entire viewer
         console.log('Loading data in parallel...');
-        const [spacesEnabledResult, screenshotResult, activeSpaceResult, spacesResult] = await Promise.all([
+        const results = await Promise.allSettled([
             window.clipboard.getSpacesEnabled(),
             window.clipboard.getScreenshotCaptureEnabled(),
             window.clipboard.getActiveSpace(),
             window.clipboard.getSpaces()
         ]);
         
-        // Apply results
-        spacesEnabled = spacesEnabledResult;
+        const safeValue = (result, fallback) => result.status === 'fulfilled' ? result.value : fallback;
+        
+        // Log results -- each IPC call's outcome goes to the structured log
+        const ipcNames = ['getSpacesEnabled', 'getScreenshotCaptureEnabled', 'getActiveSpace', 'getSpaces'];
+        const failedCalls = [];
+        results.forEach((r, i) => {
+            if (r.status === 'rejected') {
+                failedCalls.push(ipcNames[i]);
+                slog.error('clipboard', `IPC call failed: ${ipcNames[i]}`, { error: r.reason?.message || String(r.reason) });
+                console.error(`[Init] ${ipcNames[i]} failed:`, r.reason);
+            }
+        });
+        if (failedCalls.length === 0) {
+            slog.info('clipboard', 'All 4 init IPC calls succeeded');
+        } else {
+            slog.warn('clipboard', `${failedCalls.length}/4 init IPC calls failed`, { failed: failedCalls });
+        }
+        
+        // Apply results with safe fallbacks
+        spacesEnabled = safeValue(results[0], true);
         console.log('Spaces enabled:', spacesEnabled);
         updateSpacesVisibility();
         
-        screenshotCaptureEnabled = screenshotResult;
+        screenshotCaptureEnabled = safeValue(results[1], false);
         console.log('Screenshot capture enabled:', screenshotCaptureEnabled);
         updateScreenshotIndicator();
         
         // Set active space from result
-        activeSpaceId = activeSpaceResult?.spaceId || null;
+        activeSpaceId = safeValue(results[2], null)?.spaceId || null;
         updateActiveSpaceIndicator();
         console.log('Active space ID:', activeSpaceId);
         
         // Set spaces data and render
-        spacesData = spacesResult || [];
+        spacesData = safeValue(results[3], []) || [];
         renderSpaces();
-        console.log('Loaded spaces:', spacesData.length);
+        slog.info('clipboard', 'Spaces loaded and rendered', { count: spacesData.length });
         
         // Load history (depends on currentSpace which may be set by spaces data)
-        await loadHistory();
-        console.log('Loaded history items:', history.length);
+        try {
+            await loadHistory();
+            slog.info('clipboard', 'History loaded', { count: history.length, space: currentSpace || 'all' });
+        } catch (historyError) {
+            slog.error('clipboard', 'loadHistory failed', { error: historyError.message, stack: historyError.stack?.substring(0, 300) });
+            console.error('[Init] loadHistory failed:', historyError);
+        }
+        
+        // Initialize GSX Push (OmniGraph) for cloud sync
+        try {
+            await initGSXPush();
+            slog.info('clipboard', 'GSX Push initialized');
+        } catch (gsxError) {
+            slog.warn('clipboard', 'GSX Push init failed (non-fatal)', { error: gsxError.message });
+            console.error('[Init] initGSXPush failed:', gsxError);
+        }
         
         // Listen for TTS progress updates
         if (window.clipboard.onTTSProgress) {
@@ -132,6 +217,13 @@ async function init() {
                 }
             });
         }
+        
+        slog.info('clipboard', 'Spaces Manager fully initialized', {
+            spacesCount: spacesData.length,
+            historyCount: history.length,
+            activeSpace: activeSpaceId,
+            spacesEnabled
+        });
         
         // Listen for history updates to automatically refresh when documents are saved
         window.clipboard.onHistoryUpdate(async (updatedHistory) => {
@@ -157,6 +249,7 @@ async function init() {
             await loadHistory();
         });
     } catch (error) {
+        slog.error('clipboard', 'Spaces Manager init FAILED', { error: error.message, stack: error.stack?.substring(0, 500) });
         console.error('Error initializing clipboard viewer:', error);
         
         // Hide loading overlay
@@ -290,6 +383,8 @@ async function loadHistory() {
         renderHistory();
         await updateItemCounts();
     } catch (error) {
+        const slog = window.logging || { error: () => {} };
+        slog.error('clipboard', 'loadHistory failed', { error: error.message, stack: error.stack?.substring(0, 300), space: currentSpace });
         console.error('Error loading history:', error);
         console.error('Error stack:', error.stack);
         // Show error to user
@@ -1437,6 +1532,68 @@ function renderHistoryItemToHtml(item) {
                         </div>
                     </div>
                 `;
+            } else if (item.type === 'data-source') {
+                // Data Source preview card
+                const ds = item.dataSource || {};
+                const dsName = item.name || (ds.mcp && ds.mcp.serverName) || 'Data Source';
+                const dsUrl = (ds.connection && ds.connection.url) || item.dataSourceUrl || '';
+                const sourceType = ds.sourceType || item.sourceType || 'api';
+                const protocol = (ds.connection && ds.connection.protocol) || '';
+                const authType = (ds.auth && ds.auth.type) || 'none';
+                const dsStatus = ds.status || item.dataSourceStatus || 'inactive';
+                const docVisibility = (ds.document && ds.document.visibility) || item.documentVisibility || 'private';
+                
+                let domain = '';
+                try {
+                    if (dsUrl) domain = new URL(dsUrl).hostname;
+                } catch (e) {
+                    domain = dsUrl;
+                }
+                
+                const statusColor = dsStatus === 'active' ? '#10b981' : dsStatus === 'error' ? '#ef4444' : '#6b7280';
+                const statusLabel = dsStatus.charAt(0).toUpperCase() + dsStatus.slice(1);
+                
+                // Subtype icon and label
+                const subtypeIcons = {
+                    mcp: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:20px;height:20px;"><path d="M12 2v4"/><path d="M8 4h8"/><rect x="7" y="6" width="10" height="6" rx="1"/><path d="M9 12v3"/><path d="M15 12v3"/><path d="M6 15h12"/><path d="M12 15v5"/><circle cx="12" cy="21" r="1"/></svg>',
+                    api: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:20px;height:20px;"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/><line x1="12" y1="2" x2="12" y2="22"/></svg>',
+                    'web-scraping': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:20px;height:20px;"><circle cx="11" cy="11" r="8"/><path d="M11 3a13 13 0 0 1 3 8 13 13 0 0 1-3 8"/><path d="M11 3a13 13 0 0 0-3 8 13 13 0 0 0 3 8"/><path d="M3 11h16"/><path d="M18 18l4 4"/><path d="M22 18v4h-4"/></svg>'
+                };
+                const subtypeLabels = { mcp: 'MCP', api: 'API', 'web-scraping': 'Web Scraping' };
+                const subtypeIcon = subtypeIcons[sourceType] || subtypeIcons.api;
+                const subtypeLabel = subtypeLabels[sourceType] || sourceType;
+                
+                // Enabled operations
+                const ops = ds.operations || {};
+                const enabledOps = ['create', 'read', 'update', 'delete', 'list']
+                    .filter(op => ops[op] && ops[op].enabled)
+                    .map(op => op.charAt(0).toUpperCase())
+                    .join(' ');
+                
+                contentHtml = `
+                    <div class="data-source-card">
+                        <div class="data-source-header">
+                            <div class="data-source-icon" style="color: #6366f1;">
+                                ${subtypeIcon}
+                            </div>
+                            <div class="data-source-info">
+                                <div class="data-source-name">${escapeHtml(dsName)}</div>
+                                <div class="data-source-url">${escapeHtml(domain || dsUrl)}</div>
+                            </div>
+                            <div class="data-source-status" style="background: ${statusColor}20; color: ${statusColor};">
+                                <span class="status-dot" style="background: ${statusColor};"></span>
+                                ${statusLabel}
+                            </div>
+                        </div>
+                        <div class="data-source-badges">
+                            <span class="ds-badge ds-badge-type">${subtypeLabel}</span>
+                            ${protocol ? `<span class="ds-badge ds-badge-protocol">${escapeHtml(protocol)}</span>` : ''}
+                            ${authType !== 'none' ? `<span class="ds-badge ds-badge-auth">${escapeHtml(authType)}</span>` : ''}
+                            ${enabledOps ? `<span class="ds-badge ds-badge-ops">${enabledOps}</span>` : ''}
+                            <span class="ds-badge ds-badge-vis">${docVisibility}</span>
+                        </div>
+                    </div>
+                `;
             } else {
                 const title = generateTitleForItem(item);
                 contentHtml = `
@@ -1491,6 +1648,7 @@ function renderHistoryItemToHtml(item) {
                 if (item.type === 'html') return 'html';
                 if (item.source === 'code') return 'code';
                 if (item.source === 'url' || item.type === 'url') return 'url';
+                if (item.type === 'data-source') return 'data-source';
                 return item.type || 'text';
             };
             const displayType = getDisplayType();
@@ -1943,6 +2101,7 @@ function getTypeIcon(type, source, fileType, fileCategory, metadata, jsonSubtype
     if (type === 'image') return '▣';
     if (type === 'html') return '◔';
     if (type === 'web-monitor') return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:14px;height:14px;"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>';
+    if (type === 'data-source') return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:14px;height:14px;"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M20 5v6c0 1.66-3.58 3-8 3s-8-1.34-8-3V5"/><path d="M20 11v6c0 1.66-3.58 3-8 3s-8-1.34-8-3v-6"/></svg>';
     return '▬';
 }
 
@@ -2797,6 +2956,7 @@ function filterItems() {
             if (currentFilter === 'video') return item.type === 'file' && item.fileType === 'video';
             if (currentFilter === 'audio') return item.type === 'file' && item.fileType === 'audio';
             if (currentFilter === 'file') return item.type === 'file';
+            if (currentFilter === 'data-source') return item.type === 'data-source';
             if (currentFilter === 'screenshot') return item.isScreenshot === true;
             return false;
         });
@@ -2864,6 +3024,7 @@ async function searchItems(query) {
                 if (item.type === 'file' && (item.fileExt === '.html' || item.fileExt === '.htm')) return true;
                 return false;
             }
+            if (currentFilter === 'data-source') return item.type === 'data-source';
             if (currentFilter === 'screenshot') return item.isScreenshot === true;
             return false;
         });
@@ -2889,6 +3050,9 @@ function showContextMenu(e, itemId) {
     
     const contextMenu = document.getElementById('contextMenu');
     contextMenuItem = itemId;
+    
+    // Update GSX menu items based on push status
+    updateGsxContextMenuItems(itemId);
     
     const padding = 8;
     const vw = window.innerWidth;
@@ -4417,10 +4581,16 @@ async function showMetadataModal(itemId) {
     const monitorTab = document.getElementById('monitorTab');
     const aiTab = document.getElementById('aiTab');
     
-    // Show/hide AI tab based on item type
+    // Show AI tab for ALL items - it contains different content based on type:
+    // - Web monitors: AI Watch instructions
+    // - All other items: Generate Metadata with AI button
     console.log('[MetadataModal] AI Tab setup:', { aiTab: !!aiTab, isWebMonitor });
     if (aiTab) {
-        aiTab.style.display = isWebMonitor ? 'inline-flex' : 'none';
+        aiTab.style.display = 'inline-flex';  // Always show AI tab
+        // Update tab label based on item type
+        aiTab.innerHTML = isWebMonitor 
+            ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 6px;"><path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z"/><circle cx="7.5" cy="14.5" r="1.5"/><circle cx="16.5" cy="14.5" r="1.5"/></svg>AI Watch'
+            : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 6px;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>AI';
         console.log('[MetadataModal] AI tab display set to:', aiTab.style.display);
     }
     
@@ -4452,6 +4622,19 @@ async function showMetadataModal(itemId) {
     
     if (monitorTab) {
         monitorTab.style.display = isWebMonitor ? 'inline-flex' : 'none';
+    }
+    
+    // Data Source tab visibility
+    const isDataSource = item.type === 'data-source';
+    const dataSourceTab = document.getElementById('dataSourceTab');
+    if (dataSourceTab) {
+        dataSourceTab.style.display = isDataSource ? 'inline-flex' : 'none';
+    }
+    
+    if (isDataSource) {
+        // Switch to data source tab for data-source items
+        switchMetadataTab('datasource');
+        populateDataSourceTab(item, metadata);
     }
     
     if (isWebMonitor) {
@@ -4716,6 +4899,22 @@ async function showMetadataModal(itemId) {
             contextEl.value = metadata.ai_context;
         } else {
             contextEl.value = '';
+        }
+    }
+    
+    // Setup GSX tab
+    const gsxTab = document.getElementById('gsxTab');
+    if (gsxTab) {
+        // Always show GSX tab - all items can be pushed
+        gsxTab.style.display = 'inline-flex';
+        
+        // Load GSX status for this item
+        try {
+            const gsxStatus = await window.spaces.gsx.getPushStatus(itemId);
+            populateGsxTab(gsxStatus, itemId);
+        } catch (error) {
+            console.error('[GSX Tab] Error loading status:', error);
+            populateGsxTab({ status: 'not_pushed' }, itemId);
         }
     }
     
@@ -5071,6 +5270,424 @@ function switchMetadataTab(tabName) {
     if (targetPanel) {
         targetPanel.classList.add('active');
     }
+}
+
+// ─── Data Source Tab ──────────────────────────────────────────
+function populateDataSourceTab(item, metadata) {
+    const ds = item.dataSource || metadata?.dataSource || {};
+    const conn = ds.connection || {};
+    const auth = ds.auth || {};
+    const ops = ds.operations || {};
+    const mcp = ds.mcp || {};
+    const scraping = ds.scraping || {};
+    const doc = ds.document || {};
+    
+    // Status bar
+    const statusEl = document.getElementById('dsStatusValue');
+    const lastTestedEl = document.getElementById('dsLastTestedValue');
+    const sourceTypeEl = document.getElementById('dsSourceTypeValue');
+    
+    const dsStatus = ds.status || 'inactive';
+    const statusColor = dsStatus === 'active' ? '#10b981' : dsStatus === 'error' ? '#ef4444' : '#6b7280';
+    if (statusEl) statusEl.innerHTML = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${statusColor};margin-right:6px;"></span>${dsStatus.charAt(0).toUpperCase() + dsStatus.slice(1)}`;
+    if (lastTestedEl) lastTestedEl.textContent = ds.lastTestedAt ? new Date(ds.lastTestedAt).toLocaleString() : 'Never';
+    if (sourceTypeEl) {
+        const labels = { mcp: 'MCP', api: 'API', 'web-scraping': 'Web Scraping' };
+        sourceTypeEl.textContent = labels[ds.sourceType] || ds.sourceType || '-';
+    }
+    
+    // Show/hide test credential input based on auth type
+    const testCredsEl = document.getElementById('dsTestCredentials');
+    if (testCredsEl) testCredsEl.style.display = auth.type && auth.type !== 'none' ? 'block' : 'none';
+    
+    // Connection
+    const urlEl = document.getElementById('dsConnectionUrl');
+    const protocolEl = document.getElementById('dsConnectionProtocol');
+    const methodEl = document.getElementById('dsConnectionMethod');
+    const headersEl = document.getElementById('dsConnectionHeaders');
+    const timeoutEl = document.getElementById('dsConnectionTimeout');
+    
+    if (urlEl) urlEl.value = conn.url || '';
+    if (protocolEl) protocolEl.value = conn.protocol || '';
+    if (methodEl) methodEl.value = conn.method || 'GET';
+    if (headersEl) headersEl.value = conn.headers && Object.keys(conn.headers).length > 0 ? JSON.stringify(conn.headers, null, 2) : '';
+    if (timeoutEl) timeoutEl.value = conn.timeout || 30000;
+    
+    // Auth
+    const authTypeEl = document.getElementById('dsAuthType');
+    const authLabelEl = document.getElementById('dsAuthLabel');
+    const authHeaderNameEl = document.getElementById('dsAuthHeaderName');
+    const authTokenUrlEl = document.getElementById('dsAuthTokenUrl');
+    const authScopesEl = document.getElementById('dsAuthScopes');
+    const authNotesEl = document.getElementById('dsAuthNotes');
+    
+    if (authTypeEl) authTypeEl.value = auth.type || 'none';
+    if (authLabelEl) authLabelEl.value = auth.label || '';
+    if (authHeaderNameEl) authHeaderNameEl.value = auth.headerName || '';
+    if (authTokenUrlEl) authTokenUrlEl.value = auth.tokenUrl || '';
+    if (authScopesEl) authScopesEl.value = (auth.scopes || []).join(', ');
+    if (authNotesEl) authNotesEl.value = auth.notes || '';
+    
+    // Show/hide auth-type-specific fields
+    updateDataSourceAuthFields(auth.type || 'none');
+    if (authTypeEl) {
+        authTypeEl.addEventListener('change', () => {
+            updateDataSourceAuthFields(authTypeEl.value);
+            // Update test credentials visibility
+            if (testCredsEl) testCredsEl.style.display = authTypeEl.value !== 'none' ? 'block' : 'none';
+        });
+    }
+    
+    // Operations
+    const opsGrid = document.getElementById('dsOperationsGrid');
+    if (opsGrid) {
+        const opNames = ['create', 'read', 'update', 'delete', 'list'];
+        const defaultMethods = { create: 'POST', read: 'GET', update: 'PUT', delete: 'DELETE', list: 'GET' };
+        
+        opsGrid.innerHTML = opNames.map(op => {
+            const opConfig = ops[op] || {};
+            return `
+                <div class="ds-operation-row">
+                    <input type="checkbox" id="dsOp_${op}" ${opConfig.enabled ? 'checked' : ''}>
+                    <label for="dsOp_${op}">${op.toUpperCase()}</label>
+                    <select id="dsOpMethod_${op}">
+                        ${['GET','POST','PUT','PATCH','DELETE'].map(m => `<option value="${m}" ${(opConfig.method || defaultMethods[op]) === m ? 'selected' : ''}>${m}</option>`).join('')}
+                    </select>
+                    <input type="text" id="dsOpEndpoint_${op}" value="${escapeHtml(opConfig.endpoint || '')}" placeholder="/${op === 'list' ? 'items' : op === 'read' ? 'items/:id' : op === 'create' ? 'items' : op === 'update' ? 'items/:id' : 'items/:id'}">
+                </div>
+            `;
+        }).join('');
+    }
+    
+    // MCP section
+    const mcpSection = document.getElementById('dsMcpSection');
+    const scrapingSection = document.getElementById('dsScrapingSection');
+    
+    if (mcpSection) mcpSection.style.display = ds.sourceType === 'mcp' ? 'block' : 'none';
+    if (scrapingSection) scrapingSection.style.display = ds.sourceType === 'web-scraping' ? 'block' : 'none';
+    
+    // MCP fields
+    const mcpServerNameEl = document.getElementById('dsMcpServerName');
+    const mcpTransportEl = document.getElementById('dsMcpTransport');
+    const mcpCommandEl = document.getElementById('dsMcpCommand');
+    const mcpArgsEl = document.getElementById('dsMcpArgs');
+    const mcpEnvEl = document.getElementById('dsMcpEnv');
+    const mcpCapsEl = document.getElementById('dsMcpCapabilities');
+    
+    if (mcpServerNameEl) mcpServerNameEl.value = mcp.serverName || '';
+    if (mcpTransportEl) mcpTransportEl.value = mcp.transport || 'stdio';
+    if (mcpCommandEl) mcpCommandEl.value = mcp.command || '';
+    if (mcpArgsEl) mcpArgsEl.value = (mcp.args || []).join('\n');
+    if (mcpEnvEl) mcpEnvEl.value = mcp.env && Object.keys(mcp.env).length > 0 ? JSON.stringify(mcp.env, null, 2) : '';
+    if (mcpCapsEl) {
+        const caps = mcp.capabilities || [];
+        mcpCapsEl.innerHTML = caps.length > 0 
+            ? caps.map(c => `<span class="ds-cap-tag">${escapeHtml(c)}</span>`).join('') 
+            : 'None discovered';
+    }
+    
+    // Show/hide MCP command fields based on transport
+    const mcpCmdField = document.getElementById('dsMcpCommandField');
+    const mcpArgsField = document.getElementById('dsMcpArgsField');
+    if (mcpCmdField) mcpCmdField.style.display = mcp.transport === 'stdio' ? 'block' : 'none';
+    if (mcpArgsField) mcpArgsField.style.display = mcp.transport === 'stdio' ? 'block' : 'none';
+    if (mcpTransportEl) {
+        mcpTransportEl.addEventListener('change', () => {
+            if (mcpCmdField) mcpCmdField.style.display = mcpTransportEl.value === 'stdio' ? 'block' : 'none';
+            if (mcpArgsField) mcpArgsField.style.display = mcpTransportEl.value === 'stdio' ? 'block' : 'none';
+        });
+    }
+    
+    // Scraping fields
+    const scrapingSelectorsEl = document.getElementById('dsScrapingSelectors');
+    const scrapingScheduleEl = document.getElementById('dsScrapingSchedule');
+    const scrapingRateLimitEl = document.getElementById('dsScrapingRateLimit');
+    const scrapingUserAgentEl = document.getElementById('dsScrapingUserAgent');
+    
+    if (scrapingSelectorsEl) scrapingSelectorsEl.value = scraping.selectors && Object.keys(scraping.selectors).length > 0 ? JSON.stringify(scraping.selectors, null, 2) : '';
+    if (scrapingScheduleEl) scrapingScheduleEl.value = scraping.schedule || '';
+    if (scrapingRateLimitEl) scrapingRateLimitEl.value = (scraping.rateLimit && scraping.rateLimit.requestsPerMinute) || 10;
+    if (scrapingUserAgentEl) scrapingUserAgentEl.value = scraping.userAgent || '';
+    
+    // Document
+    const docContentEl = document.getElementById('dsDocContent');
+    const docVisibilityEl = document.getElementById('dsDocVisibility');
+    const docPreviewEl = document.getElementById('dsDocPreview');
+    
+    if (docContentEl) docContentEl.value = doc.content || '';
+    if (docVisibilityEl) docVisibilityEl.value = doc.visibility || 'private';
+    
+    // Document edit/preview tabs
+    document.querySelectorAll('.ds-doc-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('.ds-doc-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            const mode = tab.dataset.mode;
+            if (docContentEl) docContentEl.style.display = mode === 'edit' ? 'block' : 'none';
+            if (docPreviewEl) {
+                docPreviewEl.style.display = mode === 'preview' ? 'block' : 'none';
+                if (mode === 'preview' && docContentEl) {
+                    // Render markdown (basic)
+                    if (typeof marked !== 'undefined') {
+                        docPreviewEl.innerHTML = marked.parse(docContentEl.value || '');
+                    } else {
+                        docPreviewEl.textContent = docContentEl.value || '';
+                    }
+                }
+            }
+        });
+    });
+    
+    // Test button
+    const testBtn = document.getElementById('dsTestBtn');
+    if (testBtn) {
+        testBtn.onclick = async () => {
+            const resultEl = document.getElementById('dsTestResult');
+            const credInput = document.getElementById('dsTestCredentialInput');
+            testBtn.disabled = true;
+            testBtn.textContent = 'Testing...';
+            if (resultEl) { resultEl.style.display = 'none'; }
+            
+            try {
+                const cred = credInput ? credInput.value : '';
+                const result = await window.clipboard.testDataSource(item.id, cred);
+                if (resultEl) {
+                    resultEl.style.display = 'block';
+                    resultEl.className = 'ds-test-result ' + (result.success ? 'success' : 'error');
+                    resultEl.textContent = result.success 
+                        ? `Connected successfully (${result.responseTime || 0}ms)` 
+                        : `Failed: ${result.error || 'Unknown error'}`;
+                }
+            } catch (err) {
+                if (resultEl) {
+                    resultEl.style.display = 'block';
+                    resultEl.className = 'ds-test-result error';
+                    resultEl.textContent = 'Error: ' + err.message;
+                }
+            }
+            testBtn.disabled = false;
+            testBtn.textContent = 'Test';
+        };
+    }
+    
+    // Save button
+    const saveBtn = document.getElementById('dsSaveConfigBtn');
+    if (saveBtn) {
+        saveBtn.onclick = () => saveDataSourceConfig(item.id);
+    }
+}
+
+function updateDataSourceAuthFields(authType) {
+    const headerNameField = document.getElementById('dsAuthHeaderNameField');
+    const tokenUrlField = document.getElementById('dsAuthTokenUrlField');
+    const scopesField = document.getElementById('dsAuthScopesField');
+    
+    if (headerNameField) headerNameField.style.display = authType === 'api-key' ? 'block' : 'none';
+    if (tokenUrlField) tokenUrlField.style.display = authType === 'oauth2' ? 'block' : 'none';
+    if (scopesField) scopesField.style.display = authType === 'oauth2' ? 'block' : 'none';
+}
+
+async function saveDataSourceConfig(itemId) {
+    const saveBtn = document.getElementById('dsSaveConfigBtn');
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving...'; }
+    
+    try {
+        // Collect all form values
+        const dataSource = {
+            sourceType: document.getElementById('dsSourceTypeValue')?.textContent?.toLowerCase().replace(/\s+/g, '-') || 'api',
+            connection: {
+                url: document.getElementById('dsConnectionUrl')?.value || '',
+                protocol: document.getElementById('dsConnectionProtocol')?.value || '',
+                method: document.getElementById('dsConnectionMethod')?.value || 'GET',
+                headers: (() => { try { return JSON.parse(document.getElementById('dsConnectionHeaders')?.value || '{}'); } catch { return {}; } })(),
+                timeout: parseInt(document.getElementById('dsConnectionTimeout')?.value) || 30000
+            },
+            auth: {
+                type: document.getElementById('dsAuthType')?.value || 'none',
+                label: document.getElementById('dsAuthLabel')?.value || '',
+                headerName: document.getElementById('dsAuthHeaderName')?.value || '',
+                tokenUrl: document.getElementById('dsAuthTokenUrl')?.value || '',
+                scopes: (document.getElementById('dsAuthScopes')?.value || '').split(',').map(s => s.trim()).filter(Boolean),
+                notes: document.getElementById('dsAuthNotes')?.value || ''
+            },
+            operations: {},
+            mcp: {
+                serverName: document.getElementById('dsMcpServerName')?.value || '',
+                transport: document.getElementById('dsMcpTransport')?.value || 'stdio',
+                command: document.getElementById('dsMcpCommand')?.value || '',
+                args: (document.getElementById('dsMcpArgs')?.value || '').split('\n').filter(Boolean),
+                env: (() => { try { return JSON.parse(document.getElementById('dsMcpEnv')?.value || '{}'); } catch { return {}; } })()
+            },
+            scraping: {
+                selectors: (() => { try { return JSON.parse(document.getElementById('dsScrapingSelectors')?.value || '{}'); } catch { return {}; } })(),
+                schedule: document.getElementById('dsScrapingSchedule')?.value || '',
+                rateLimit: { requestsPerMinute: parseInt(document.getElementById('dsScrapingRateLimit')?.value) || 10 },
+                userAgent: document.getElementById('dsScrapingUserAgent')?.value || ''
+            },
+            document: {
+                content: document.getElementById('dsDocContent')?.value || '',
+                visibility: document.getElementById('dsDocVisibility')?.value || 'private',
+                lastUpdated: new Date().toISOString()
+            }
+        };
+        
+        // Collect operations
+        ['create', 'read', 'update', 'delete', 'list'].forEach(op => {
+            dataSource.operations[op] = {
+                enabled: document.getElementById(`dsOp_${op}`)?.checked || false,
+                method: document.getElementById(`dsOpMethod_${op}`)?.value || 'GET',
+                endpoint: document.getElementById(`dsOpEndpoint_${op}`)?.value || ''
+            };
+        });
+        
+        // Save via IPC
+        await window.clipboard.updateMetadata(itemId, { dataSource });
+        showNotification('Data source configuration saved');
+    } catch (err) {
+        console.error('[DataSource] Save error:', err);
+        showNotification('Error saving: ' + err.message, 'error');
+    }
+    
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save Configuration'; }
+}
+
+// ─── Create Data Source Dialog ──────────────────────────────
+function showCreateDataSourceDialog() {
+    const spaceId = currentSpace || 'unclassified';
+    
+    // Build and show modal
+    const overlay = document.createElement('div');
+    overlay.id = 'createDataSourceOverlay';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:10000;display:flex;align-items:center;justify-content:center;';
+    
+    overlay.innerHTML = `
+        <div style="background:#1e1e2e;border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:24px;width:440px;max-height:80vh;overflow-y:auto;">
+            <h3 style="margin:0 0 16px;color:rgba(255,255,255,0.95);font-size:16px;">New Data Source</h3>
+            
+            <div style="margin-bottom:16px;">
+                <label style="display:block;font-size:12px;color:rgba(255,255,255,0.6);margin-bottom:6px;">Name</label>
+                <input type="text" id="newDsName" placeholder="My API" style="width:100%;padding:8px 12px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:rgba(255,255,255,0.9);font-size:13px;box-sizing:border-box;">
+            </div>
+            
+            <div style="margin-bottom:16px;">
+                <label style="display:block;font-size:12px;color:rgba(255,255,255,0.6);margin-bottom:6px;">Type</label>
+                <div style="display:flex;gap:8px;" id="newDsTypeSelector">
+                    <button class="ds-type-btn active" data-type="api" style="flex:1;padding:12px;background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);border-radius:8px;color:rgba(255,255,255,0.9);cursor:pointer;text-align:center;">
+                        <div style="font-size:13px;font-weight:600;">API</div>
+                        <div style="font-size:10px;color:rgba(255,255,255,0.5);margin-top:2px;">REST / GraphQL</div>
+                    </button>
+                    <button class="ds-type-btn" data-type="mcp" style="flex:1;padding:12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:rgba(255,255,255,0.9);cursor:pointer;text-align:center;">
+                        <div style="font-size:13px;font-weight:600;">MCP</div>
+                        <div style="font-size:10px;color:rgba(255,255,255,0.5);margin-top:2px;">Model Context Protocol</div>
+                    </button>
+                    <button class="ds-type-btn" data-type="web-scraping" style="flex:1;padding:12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:rgba(255,255,255,0.9);cursor:pointer;text-align:center;">
+                        <div style="font-size:13px;font-weight:600;">Web Scraping</div>
+                        <div style="font-size:10px;color:rgba(255,255,255,0.5);margin-top:2px;">HTML extraction</div>
+                    </button>
+                </div>
+            </div>
+            
+            <div style="margin-bottom:16px;">
+                <label style="display:block;font-size:12px;color:rgba(255,255,255,0.6);margin-bottom:6px;">URL</label>
+                <input type="text" id="newDsUrl" placeholder="https://api.example.com/v1" style="width:100%;padding:8px 12px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:rgba(255,255,255,0.9);font-size:13px;box-sizing:border-box;">
+            </div>
+            
+            <div style="margin-bottom:16px;">
+                <label style="display:block;font-size:12px;color:rgba(255,255,255,0.6);margin-bottom:6px;">Description</label>
+                <textarea id="newDsDescription" rows="3" placeholder="What does this data source provide?" style="width:100%;padding:8px 12px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:rgba(255,255,255,0.9);font-size:13px;resize:vertical;box-sizing:border-box;"></textarea>
+            </div>
+            
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button id="newDsCancelBtn" style="padding:8px 16px;background:transparent;border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:rgba(255,255,255,0.7);cursor:pointer;font-size:13px;">Cancel</button>
+                <button id="newDsCreateBtn" style="padding:8px 16px;background:linear-gradient(135deg,#6366f1 0%,#4f46e5 100%);border:none;border-radius:6px;color:white;cursor:pointer;font-size:13px;font-weight:500;">Create</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(overlay);
+    
+    // Type selector toggle
+    let selectedType = 'api';
+    overlay.querySelectorAll('.ds-type-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            overlay.querySelectorAll('.ds-type-btn').forEach(b => {
+                b.style.background = 'rgba(255,255,255,0.04)';
+                b.style.borderColor = 'rgba(255,255,255,0.1)';
+                b.classList.remove('active');
+            });
+            btn.style.background = 'rgba(99,102,241,0.15)';
+            btn.style.borderColor = 'rgba(99,102,241,0.3)';
+            btn.classList.add('active');
+            selectedType = btn.dataset.type;
+        });
+    });
+    
+    // Cancel
+    document.getElementById('newDsCancelBtn').onclick = () => overlay.remove();
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    
+    // Create
+    document.getElementById('newDsCreateBtn').onclick = async () => {
+        const name = document.getElementById('newDsName').value.trim();
+        const url = document.getElementById('newDsUrl').value.trim();
+        const description = document.getElementById('newDsDescription').value.trim();
+        
+        if (!name) {
+            showNotification('Please enter a name for the data source', 'error');
+            return;
+        }
+        
+        const protocolMap = {
+            api: url.includes('graphql') ? 'graphql' : 'rest',
+            mcp: 'mcp-stdio',
+            'web-scraping': 'http-scrape'
+        };
+        
+        const dataSource = {
+            sourceType: selectedType,
+            connection: {
+                url: url,
+                protocol: protocolMap[selectedType],
+                method: 'GET',
+                headers: {},
+                queryParams: {},
+                timeout: 30000
+            },
+            auth: { type: 'none', label: '', headerName: '', tokenUrl: '', scopes: [], notes: '' },
+            operations: {
+                create: { enabled: false, endpoint: '', method: 'POST', bodyTemplate: '' },
+                read: { enabled: true, endpoint: '', method: 'GET', params: '' },
+                update: { enabled: false, endpoint: '', method: 'PUT', bodyTemplate: '' },
+                delete: { enabled: false, endpoint: '', method: 'DELETE' },
+                list: { enabled: true, endpoint: '', method: 'GET', paginationType: 'none' }
+            },
+            mcp: { serverName: selectedType === 'mcp' ? name : '', transport: 'stdio', command: '', args: [], env: {}, capabilities: [] },
+            scraping: { selectors: {}, schedule: '', pagination: { type: 'none', selector: '', maxPages: 1 }, rateLimit: { requestsPerMinute: 10 }, userAgent: '' },
+            document: { content: description, visibility: 'private', lastUpdated: new Date().toISOString() },
+            status: 'inactive',
+            lastTestedAt: null,
+            lastError: null
+        };
+        
+        try {
+            const result = await window.clipboard.addDataSource({
+                name: name,
+                spaceId: spaceId,
+                dataSource: dataSource
+            });
+            
+            overlay.remove();
+            showNotification(`Data source "${name}" created`);
+            await loadHistory();
+            filterItems();
+        } catch (err) {
+            console.error('[DataSource] Create error:', err);
+            showNotification('Error creating data source: ' + err.message, 'error');
+        }
+    };
+    
+    // Focus name input
+    document.getElementById('newDsName').focus();
 }
 
 // Toggle transcript section expanded/collapsed
@@ -5448,6 +6065,28 @@ function setupEventListeners() {
         await bulkDeleteItems();
     });
     
+    // Bulk push to GSX
+    document.getElementById('bulkPushBtn').addEventListener('click', async () => {
+        await showGsxPushModal(Array.from(selectedItems));
+    });
+    
+    // GSX Push modal buttons
+    document.getElementById('gsxPushCancel').addEventListener('click', () => {
+        hideGsxPushModal();
+    });
+    
+    document.getElementById('gsxPushConfirm').addEventListener('click', async () => {
+        await executeGsxPush();
+    });
+    
+    // GSX Visibility options
+    document.querySelectorAll('.gsx-visibility-option').forEach(opt => {
+        opt.addEventListener('click', () => {
+            document.querySelectorAll('.gsx-visibility-option').forEach(o => o.classList.remove('selected'));
+            opt.classList.add('selected');
+        });
+    });
+    
     // Close bulk move dropdown when clicking outside
     document.addEventListener('click', (e) => {
         const dropdown = document.getElementById('bulkMoveDropdown');
@@ -5535,38 +6174,29 @@ function setupEventListeners() {
     });
     
     // AI Search score badge tooltip handler
-    // Strategy: Look for badge as CHILD of the hovered history-item, not as ancestor
     let scoreTooltip = null;
     let tooltipTarget = null;
     
     document.getElementById('historyList').addEventListener('mouseover', (e) => {
-        // Find the history item (parent container)
         const historyItem = e.target.closest('.history-item');
         if (!historyItem) return;
         
         // Look for a badge CHILD element inside this history item
         const badge = historyItem.querySelector('.gs-score-badge');
         
-        
         if (badge && badge.dataset.tooltip && tooltipTarget !== historyItem) {
-            // Remove existing tooltip
             if (scoreTooltip) scoreTooltip.remove();
             
             tooltipTarget = historyItem;
-            
-            // Create tooltip
             scoreTooltip = document.createElement('div');
             scoreTooltip.className = 'gs-score-tooltip';
             scoreTooltip.textContent = decodeURIComponent(badge.dataset.tooltip);
             document.body.appendChild(scoreTooltip);
             
-            // Position near the badge
             const rect = badge.getBoundingClientRect();
             scoreTooltip.style.left = `${rect.left}px`;
             scoreTooltip.style.top = `${rect.bottom + 8}px`;
             
-            
-            // Adjust if off-screen
             const tooltipRect = scoreTooltip.getBoundingClientRect();
             if (tooltipRect.right > window.innerWidth) {
                 scoreTooltip.style.left = `${window.innerWidth - tooltipRect.width - 10}px`;
@@ -5852,6 +6482,9 @@ function setupEventListeners() {
             await loadHistory();
             // Force refresh spaces to ensure counts are updated
             await loadSpaces();
+        } else if (action.dataset.action?.startsWith('gsx-')) {
+            // Handle GSX actions
+            await handleGsxContextAction(action.dataset.action, contextMenuItem);
         }
         
         hideContextMenu();
@@ -6312,6 +6945,13 @@ async function showPreviewModal(itemId) {
         return;
     }
     
+    // Use metadata modal for data-source items (shows Data Source tab with config)
+    if (historyItem.type === 'data-source') {
+        console.log('[Preview] Redirecting data-source item to metadata modal');
+        showMetadataModal(itemId);
+        return;
+    }
+    
     const modal = document.getElementById('previewModal');
     currentPreviewItem = historyItem;
     isEditMode = false;
@@ -6589,10 +7229,28 @@ async function showPreviewModal(itemId) {
         // Show TTS for markdown
         document.getElementById('textToSpeechSection').style.display = 'block';
     } else if (historyItem.type === 'file' && historyItem.fileCategory === 'document') {
-        // Show document file preview - handle DOCX specially
+        // Show document file preview - handle DOCX and PDF specially
         const isDocx = historyItem.fileExt === '.docx';
+        const isPdf = historyItem.fileType === 'pdf' || historyItem.fileExt === '.pdf';
         
-        if (isDocx && window.clipboard.convertDocxToHtml) {
+        if (isPdf) {
+            // PDF files - use PDF.js for multi-page preview
+            const pdfPath = fullContent; // fullContent is the file path for file items
+            
+            // Show PDF preview mode
+            document.getElementById('previewPdfMode').style.display = 'flex';
+            document.getElementById('pdfFileName').textContent = historyItem.fileName || 'PDF Document';
+            document.getElementById('pdfFileInfo').textContent = `${formatFileSize(historyItem.fileSize)}`;
+            
+            // Set up open external button
+            const openBtn = document.getElementById('pdfOpenExternal');
+            openBtn.onclick = () => openFileInSystem(pdfPath);
+            
+            // Initialize PDF viewer
+            initPdfViewer(pdfPath, historyItem);
+            
+            document.getElementById('previewModeBtn').style.display = 'none';
+        } else if (isDocx && window.clipboard.convertDocxToHtml) {
             // Show loading state
             const viewMode = document.getElementById('previewViewMode');
             viewMode.innerHTML = `
@@ -6725,10 +7383,770 @@ function hideAllPreviewModes() {
     document.getElementById('previewImageMode').style.display = 'none';
     document.getElementById('previewHtmlMode').style.display = 'none';
     document.getElementById('previewMarkdownMode').style.display = 'none';
+    document.getElementById('previewPdfMode').style.display = 'none';
     document.getElementById('textToSpeechSection').style.display = 'none';
     document.getElementById('transcriptionSection').style.display = 'none';
     document.getElementById('videoEditorSection').style.display = 'none';
+    
+    // Hide PDF text extraction panel
+    const pdfTextPanel = document.getElementById('pdfTextPanel');
+    if (pdfTextPanel) {
+        pdfTextPanel.style.display = 'none';
+    }
+    
+    // Hide PDF images extraction panel
+    const pdfImagesPanel = document.getElementById('pdfImagesPanel');
+    if (pdfImagesPanel) {
+        pdfImagesPanel.style.display = 'none';
+    }
+    
+    // Clean up PDF viewer state
+    if (window.currentPdfDoc) {
+        window.currentPdfDoc = null;
+        window.currentPdfPage = 1;
+    }
+    window.currentPdfExtractedText = null;
+    window.currentPdfExtractedImages = null;
 }
+
+// ============================================
+// PDF VIEWER FUNCTIONALITY
+// ============================================
+
+// PDF viewer state
+window.currentPdfDoc = null;
+window.currentPdfPage = 1;
+window.pdfScale = 1.5;
+
+// Initialize PDF viewer with PDF.js
+async function initPdfViewer(pdfPath, historyItem) {
+    const canvas = document.getElementById('pdfCanvas');
+    const pageInfo = document.getElementById('pdfPageInfo');
+    const prevBtn = document.getElementById('pdfPrevPage');
+    const nextBtn = document.getElementById('pdfNextPage');
+    const fileInfo = document.getElementById('pdfFileInfo');
+    
+    // Show loading state
+    const ctx = canvas.getContext('2d');
+    canvas.width = 400;
+    canvas.height = 100;
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = '14px system-ui';
+    ctx.textAlign = 'center';
+    ctx.fillText('Loading PDF...', 200, 50);
+    
+    try {
+        // Request PDF data from main process
+        const result = await window.clipboard.getPdfData(historyItem.id);
+        
+        if (!result || !result.success || !result.data) {
+            throw new Error(result?.error || 'Failed to load PDF data');
+        }
+        
+        // Load PDF.js library dynamically if not already loaded
+        if (!window.pdfjsLib) {
+            await loadPdfJsLibrary();
+        }
+        
+        // Configure PDF.js worker
+        if (window.pdfjsLib.GlobalWorkerOptions) {
+            // Use fake worker for Electron
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+        }
+        
+        // Load the PDF document from base64 data
+        const pdfData = atob(result.data);
+        const pdfArray = new Uint8Array(pdfData.length);
+        for (let i = 0; i < pdfData.length; i++) {
+            pdfArray[i] = pdfData.charCodeAt(i);
+        }
+        
+        const loadingTask = window.pdfjsLib.getDocument({ data: pdfArray });
+        const pdfDoc = await loadingTask.promise;
+        
+        window.currentPdfDoc = pdfDoc;
+        window.currentPdfPage = 1;
+        
+        const totalPages = pdfDoc.numPages;
+        
+        // Update file info with page count
+        fileInfo.textContent = `${formatFileSize(historyItem.fileSize)} • ${totalPages} page${totalPages > 1 ? 's' : ''}`;
+        
+        // Set up navigation buttons
+        prevBtn.onclick = () => {
+            if (window.currentPdfPage > 1) {
+                window.currentPdfPage--;
+                renderPdfPage(window.currentPdfPage);
+            }
+        };
+        
+        nextBtn.onclick = () => {
+            if (window.currentPdfPage < totalPages) {
+                window.currentPdfPage++;
+                renderPdfPage(window.currentPdfPage);
+            }
+        };
+        
+        // Render first page
+        await renderPdfPage(1);
+        
+    } catch (error) {
+        console.error('[PDF Viewer] Error loading PDF:', error);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        canvas.width = 400;
+        canvas.height = 150;
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.font = '14px system-ui';
+        ctx.textAlign = 'center';
+        ctx.fillText('Unable to preview PDF', 200, 60);
+        ctx.font = '12px system-ui';
+        ctx.fillText('Click "Open in Preview" to view', 200, 85);
+        ctx.fillText(error.message || '', 200, 110);
+        
+        pageInfo.textContent = 'Preview unavailable';
+        prevBtn.disabled = true;
+        nextBtn.disabled = true;
+    }
+}
+
+// Render a specific page of the PDF
+async function renderPdfPage(pageNum) {
+    if (!window.currentPdfDoc) return;
+    
+    const canvas = document.getElementById('pdfCanvas');
+    const pageInfo = document.getElementById('pdfPageInfo');
+    const prevBtn = document.getElementById('pdfPrevPage');
+    const nextBtn = document.getElementById('pdfNextPage');
+    
+    const totalPages = window.currentPdfDoc.numPages;
+    
+    try {
+        const page = await window.currentPdfDoc.getPage(pageNum);
+        
+        // Calculate scale to fit container width
+        const container = document.getElementById('pdfCanvasContainer');
+        const containerWidth = container.clientWidth - 32; // Account for padding
+        const viewport = page.getViewport({ scale: 1 });
+        const scale = Math.min(containerWidth / viewport.width, 2); // Max 2x scale
+        
+        const scaledViewport = page.getViewport({ scale });
+        
+        canvas.height = scaledViewport.height;
+        canvas.width = scaledViewport.width;
+        
+        const ctx = canvas.getContext('2d');
+        
+        const renderContext = {
+            canvasContext: ctx,
+            viewport: scaledViewport
+        };
+        
+        await page.render(renderContext).promise;
+        
+        // Update navigation
+        pageInfo.textContent = `Page ${pageNum} of ${totalPages}`;
+        prevBtn.disabled = pageNum <= 1;
+        nextBtn.disabled = pageNum >= totalPages;
+        
+    } catch (error) {
+        console.error('[PDF Viewer] Error rendering page:', error);
+    }
+}
+
+// Load PDF.js library dynamically
+async function loadPdfJsLibrary() {
+    return new Promise((resolve, reject) => {
+        if (window.pdfjsLib) {
+            resolve();
+            return;
+        }
+        
+        // Try to load from node_modules (Electron)
+        try {
+            const pdfjs = require('pdfjs-dist');
+            window.pdfjsLib = pdfjs;
+            // Disable worker for Electron
+            pdfjs.GlobalWorkerOptions.workerSrc = '';
+            console.log('[PDF Viewer] Loaded PDF.js from node_modules');
+            resolve();
+        } catch (e) {
+            // Fallback to CDN
+            const script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+            script.onload = () => {
+                window.pdfjsLib = window['pdfjs-dist/build/pdf'] || window.pdfjsLib;
+                if (window.pdfjsLib && window.pdfjsLib.GlobalWorkerOptions) {
+                    window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+                }
+                console.log('[PDF Viewer] Loaded PDF.js from CDN');
+                resolve();
+            };
+            script.onerror = () => reject(new Error('Failed to load PDF.js'));
+            document.head.appendChild(script);
+        }
+    });
+}
+
+// Extract text from all pages of the current PDF
+async function extractPdfText() {
+    if (!window.currentPdfDoc) {
+        showNotification({ type: 'error', title: 'Error', message: 'No PDF loaded' });
+        return null;
+    }
+    
+    const totalPages = window.currentPdfDoc.numPages;
+    const extractBtn = document.getElementById('pdfExtractText');
+    const textPanel = document.getElementById('pdfTextPanel');
+    const textContainer = document.getElementById('pdfExtractedText');
+    
+    // Show loading state
+    extractBtn.textContent = 'Extracting...';
+    extractBtn.disabled = true;
+    
+    try {
+        let fullText = '';
+        
+        for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+            const page = await window.currentPdfDoc.getPage(pageNum);
+            const textContent = await page.getTextContent();
+            
+            // Extract text items and join them
+            const pageText = textContent.items
+                .map(item => item.str)
+                .join(' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+            
+            if (pageText) {
+                if (totalPages > 1) {
+                    fullText += `--- Page ${pageNum} ---\n\n`;
+                }
+                fullText += pageText + '\n\n';
+            }
+        }
+        
+        // Clean up extra whitespace
+        fullText = fullText.trim();
+        
+        if (!fullText) {
+            textContainer.innerHTML = '<span style="color: rgba(255,255,255,0.5); font-style: italic;">No text content found in this PDF. It may be a scanned document or contain only images.</span>';
+        } else {
+            textContainer.textContent = fullText;
+        }
+        
+        // Show the text panel
+        textPanel.style.display = 'flex';
+        
+        // Store the extracted text for copy/save operations
+        window.currentPdfExtractedText = fullText;
+        
+        return fullText;
+        
+    } catch (error) {
+        console.error('[PDF Text Extraction] Error:', error);
+        textContainer.innerHTML = `<span style="color: rgba(255,100,100,0.9);">Error extracting text: ${error.message}</span>`;
+        textPanel.style.display = 'flex';
+        return null;
+        
+    } finally {
+        extractBtn.textContent = 'Extract Text';
+        extractBtn.disabled = false;
+    }
+}
+
+// Convert extracted PDF text to Markdown format
+function convertPdfTextToMarkdown(text, pdfFileName) {
+    if (!text) return '';
+    
+    const lines = text.split('\n');
+    const markdownLines = [];
+    let inList = false;
+    let prevLineEmpty = true;
+    
+    // Add document title from filename
+    const cleanName = (pdfFileName || 'Document').replace(/\.pdf$/i, '');
+    markdownLines.push(`# ${cleanName}`);
+    markdownLines.push('');
+    markdownLines.push(`> Extracted from PDF: ${pdfFileName || 'Unknown'}`);
+    markdownLines.push('');
+    markdownLines.push('---');
+    markdownLines.push('');
+    
+    for (let i = 0; i < lines.length; i++) {
+        let line = lines[i].trim();
+        
+        // Skip page markers but add a horizontal rule
+        if (line.match(/^---\s*Page\s+\d+\s*---$/i)) {
+            if (markdownLines.length > 0 && markdownLines[markdownLines.length - 1] !== '') {
+                markdownLines.push('');
+            }
+            markdownLines.push('---');
+            markdownLines.push('');
+            prevLineEmpty = true;
+            continue;
+        }
+        
+        // Empty line
+        if (!line) {
+            if (!prevLineEmpty) {
+                markdownLines.push('');
+                prevLineEmpty = true;
+            }
+            inList = false;
+            continue;
+        }
+        
+        // Detect bullet points and convert to Markdown lists
+        if (line.match(/^[\u2022\u2023\u25E6\u2043\u2219•◦‣⁃]\s*/)) {
+            line = '- ' + line.replace(/^[\u2022\u2023\u25E6\u2043\u2219•◦‣⁃]\s*/, '');
+            inList = true;
+        }
+        // Detect numbered lists
+        else if (line.match(/^\d+[\.\)]\s+/)) {
+            // Keep numbered list format
+            line = line.replace(/^(\d+)[\.\)]\s+/, '$1. ');
+            inList = true;
+        }
+        // Detect potential headings (short lines, possibly ALL CAPS or Title Case)
+        else if (!inList && line.length < 80 && prevLineEmpty) {
+            const nextLine = lines[i + 1]?.trim() || '';
+            const isFollowedByEmpty = !nextLine;
+            const isAllCaps = line === line.toUpperCase() && line.length > 3;
+            const isTitleCase = line.match(/^[A-Z][a-z]*(\s+[A-Z][a-z]*)*$/);
+            const hasNoPunctuation = !line.match(/[.,:;]$/);
+            
+            // Likely a main heading
+            if (isAllCaps && hasNoPunctuation && line.length < 50) {
+                line = `## ${line.charAt(0) + line.slice(1).toLowerCase()}`;
+            }
+            // Likely a subheading
+            else if (isTitleCase && hasNoPunctuation && isFollowedByEmpty) {
+                line = `### ${line}`;
+            }
+        }
+        
+        // Detect URLs and make them clickable
+        line = line.replace(/(https?:\/\/[^\s]+)/g, '<$1>');
+        
+        // Detect email addresses
+        line = line.replace(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g, '<$1>');
+        
+        markdownLines.push(line);
+        prevLineEmpty = false;
+    }
+    
+    // Clean up multiple consecutive empty lines
+    let result = markdownLines.join('\n');
+    result = result.replace(/\n{3,}/g, '\n\n');
+    
+    return result.trim();
+}
+
+// Extract images from all pages of the current PDF
+async function extractPdfImages() {
+    if (!window.currentPdfDoc) {
+        showNotification({ type: 'error', title: 'Error', message: 'No PDF loaded' });
+        return null;
+    }
+    
+    const totalPages = window.currentPdfDoc.numPages;
+    const extractBtn = document.getElementById('pdfExtractImages');
+    const imagesPanel = document.getElementById('pdfImagesPanel');
+    const imagesContainer = document.getElementById('pdfExtractedImages');
+    const imagesCount = document.getElementById('pdfImagesCount');
+    
+    // Show loading state
+    extractBtn.textContent = 'Extracting...';
+    extractBtn.disabled = true;
+    imagesContainer.innerHTML = '<div style="color: rgba(255,255,255,0.5); padding: 20px; text-align: center; width: 100%;">Scanning PDF for images...</div>';
+    imagesPanel.style.display = 'flex';
+    
+    try {
+        const extractedImages = [];
+        
+        for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+            const page = await window.currentPdfDoc.getPage(pageNum);
+            const operatorList = await page.getOperatorList();
+            
+            // Get page resources to access images
+            const pageImages = await extractImagesFromPage(page, operatorList, pageNum);
+            extractedImages.push(...pageImages);
+        }
+        
+        // Store extracted images for save operations
+        window.currentPdfExtractedImages = extractedImages;
+        
+        if (extractedImages.length === 0) {
+            imagesContainer.innerHTML = '<div style="color: rgba(255,255,255,0.5); padding: 20px; text-align: center; width: 100%; font-style: italic;">No images found in this PDF.</div>';
+            imagesCount.textContent = 'No Images Found';
+        } else {
+            imagesCount.textContent = `Extracted Images (${extractedImages.length})`;
+            imagesContainer.innerHTML = '';
+            
+            extractedImages.forEach((img, index) => {
+                const imgWrapper = document.createElement('div');
+                imgWrapper.style.cssText = 'position: relative; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 8px;';
+                
+                const imgEl = document.createElement('img');
+                imgEl.src = img.dataUrl;
+                imgEl.style.cssText = 'max-width: 200px; max-height: 150px; object-fit: contain; border-radius: 4px; cursor: pointer;';
+                imgEl.title = `Page ${img.pageNum} - ${img.width}x${img.height}`;
+                imgEl.onclick = () => {
+                    // Open image in new window for full view
+                    const win = window.open('', '_blank');
+                    win.document.write(`<html><head><title>PDF Image - Page ${img.pageNum}</title><style>body{margin:0;display:flex;justify-content:center;align-items:center;min-height:100vh;background:#1a1a1a;}</style></head><body><img src="${img.dataUrl}" style="max-width:100%;max-height:100vh;"></body></html>`);
+                };
+                
+                const infoEl = document.createElement('div');
+                infoEl.style.cssText = 'font-size: 10px; color: rgba(255,255,255,0.6); text-align: center;';
+                infoEl.textContent = `Page ${img.pageNum} • ${img.width}x${img.height}`;
+                
+                const btnWrapper = document.createElement('div');
+                btnWrapper.style.cssText = 'display: flex; gap: 4px;';
+                
+                const copyBtn = document.createElement('button');
+                copyBtn.textContent = 'Copy';
+                copyBtn.style.cssText = 'flex: 1; padding: 4px 8px; background: rgba(99,102,241,0.2); border: 1px solid rgba(99,102,241,0.3); border-radius: 4px; color: rgba(255,255,255,0.9); cursor: pointer; font-size: 10px;';
+                copyBtn.onclick = async () => {
+                    try {
+                        const response = await fetch(img.dataUrl);
+                        const blob = await response.blob();
+                        await navigator.clipboard.write([
+                            new ClipboardItem({ [blob.type]: blob })
+                        ]);
+                        showNotification({ type: 'success', title: 'Copied', message: 'Image copied to clipboard' });
+                    } catch (error) {
+                        console.error('Failed to copy image:', error);
+                        showNotification({ type: 'error', title: 'Error', message: 'Failed to copy image' });
+                    }
+                };
+                
+                const saveBtn = document.createElement('button');
+                saveBtn.textContent = 'Save';
+                saveBtn.style.cssText = 'flex: 1; padding: 4px 8px; background: rgba(34,197,94,0.2); border: 1px solid rgba(34,197,94,0.3); border-radius: 4px; color: rgba(255,255,255,0.9); cursor: pointer; font-size: 10px;';
+                saveBtn.onclick = async () => {
+                    await savePdfImageAsAsset(img, index);
+                };
+                
+                btnWrapper.appendChild(copyBtn);
+                btnWrapper.appendChild(saveBtn);
+                
+                imgWrapper.appendChild(imgEl);
+                imgWrapper.appendChild(infoEl);
+                imgWrapper.appendChild(btnWrapper);
+                imagesContainer.appendChild(imgWrapper);
+            });
+        }
+        
+        return extractedImages;
+        
+    } catch (error) {
+        console.error('[PDF Image Extraction] Error:', error);
+        imagesContainer.innerHTML = `<div style="color: rgba(255,100,100,0.9); padding: 20px; text-align: center; width: 100%;">Error extracting images: ${error.message}</div>`;
+        return null;
+        
+    } finally {
+        extractBtn.textContent = 'Extract Images';
+        extractBtn.disabled = false;
+    }
+}
+
+// Extract images from a single PDF page
+async function extractImagesFromPage(page, operatorList, pageNum) {
+    const images = [];
+    const OPS = window.pdfjsLib.OPS;
+    
+    try {
+        // Get the page's object resources
+        const resources = await page.getOperatorList();
+        const commonObjs = page.commonObjs;
+        const objs = page.objs;
+        
+        // Track which images we've seen (by their object name)
+        const seenImages = new Set();
+        
+        for (let i = 0; i < operatorList.fnArray.length; i++) {
+            const fn = operatorList.fnArray[i];
+            
+            // Check for image operations
+            if (fn === OPS.paintImageXObject || fn === OPS.paintJpegXObject) {
+                const imgName = operatorList.argsArray[i][0];
+                
+                if (seenImages.has(imgName)) continue;
+                seenImages.add(imgName);
+                
+                try {
+                    // Try to get the image from page objects
+                    let imgData = null;
+                    
+                    try {
+                        imgData = objs.get(imgName);
+                    } catch (e) {
+                        // Try common objects
+                        try {
+                            imgData = commonObjs.get(imgName);
+                        } catch (e2) {
+                            continue;
+                        }
+                    }
+                    
+                    if (!imgData || !imgData.width || !imgData.height) continue;
+                    
+                    // Skip very small images (likely artifacts or icons)
+                    if (imgData.width < 50 || imgData.height < 50) continue;
+                    
+                    // Convert image data to canvas and then to data URL
+                    const canvas = document.createElement('canvas');
+                    canvas.width = imgData.width;
+                    canvas.height = imgData.height;
+                    const ctx = canvas.getContext('2d');
+                    
+                    if (imgData.data) {
+                        // Raw image data (RGBA)
+                        const imageData = ctx.createImageData(imgData.width, imgData.height);
+                        
+                        if (imgData.data.length === imgData.width * imgData.height * 4) {
+                            // Already RGBA
+                            imageData.data.set(imgData.data);
+                        } else if (imgData.data.length === imgData.width * imgData.height * 3) {
+                            // RGB - convert to RGBA
+                            for (let j = 0, k = 0; j < imgData.data.length; j += 3, k += 4) {
+                                imageData.data[k] = imgData.data[j];
+                                imageData.data[k + 1] = imgData.data[j + 1];
+                                imageData.data[k + 2] = imgData.data[j + 2];
+                                imageData.data[k + 3] = 255;
+                            }
+                        } else {
+                            continue; // Unknown format
+                        }
+                        
+                        ctx.putImageData(imageData, 0, 0);
+                    } else if (imgData.bitmap) {
+                        // ImageBitmap
+                        ctx.drawImage(imgData.bitmap, 0, 0);
+                    } else {
+                        continue;
+                    }
+                    
+                    const dataUrl = canvas.toDataURL('image/png');
+                    
+                    images.push({
+                        pageNum,
+                        width: imgData.width,
+                        height: imgData.height,
+                        dataUrl,
+                        name: imgName
+                    });
+                    
+                } catch (imgError) {
+                    console.warn(`[PDF Image Extraction] Skipping image ${imgName}:`, imgError.message);
+                }
+            }
+        }
+    } catch (error) {
+        console.error(`[PDF Image Extraction] Error processing page ${pageNum}:`, error);
+    }
+    
+    return images;
+}
+
+// Save a single PDF image as an asset
+async function savePdfImageAsAsset(img, index) {
+    try {
+        const pdfName = currentPreviewItem?.fileName || 'PDF';
+        const cleanName = pdfName.replace(/\.pdf$/i, '');
+        
+        // Use saveImageAsNew API to create a new image item
+        // Pass spaceId to save in same space as source PDF
+        const result = await window.clipboard.saveImageAsNew(img.dataUrl, {
+            sourceItemId: currentPreviewItem?.id,
+            description: `Image ${index + 1} from: ${cleanName} (Page ${img.pageNum})`,
+            spaceId: currentPreviewItem?.spaceId  // Save to same space as source PDF
+        });
+        
+        if (result.success) {
+            showNotification({ type: 'success', title: 'Saved', message: 'Image saved to Space' });
+            await loadHistory();
+        } else {
+            throw new Error(result.error || 'Failed to save image');
+        }
+        
+    } catch (error) {
+        console.error('Failed to save image:', error);
+        showNotification({ type: 'error', title: 'Error', message: 'Failed to save image' });
+    }
+}
+
+// Save all extracted images as assets
+async function saveAllPdfImages() {
+    if (!window.currentPdfExtractedImages || window.currentPdfExtractedImages.length === 0) {
+        showNotification({ type: 'error', title: 'Error', message: 'No images to save' });
+        return;
+    }
+    
+    const saveBtn = document.getElementById('pdfSaveAllImages');
+    saveBtn.textContent = 'Saving...';
+    saveBtn.disabled = true;
+    
+    try {
+        let saved = 0;
+        for (let i = 0; i < window.currentPdfExtractedImages.length; i++) {
+            await savePdfImageAsAsset(window.currentPdfExtractedImages[i], i);
+            saved++;
+        }
+        
+        showNotification({ type: 'success', title: 'Saved', message: `${saved} images saved as assets` });
+        
+    } catch (error) {
+        console.error('Failed to save images:', error);
+        showNotification({ type: 'error', title: 'Error', message: 'Failed to save some images' });
+    } finally {
+        saveBtn.textContent = 'Save All as Assets';
+        saveBtn.disabled = false;
+    }
+}
+
+// Initialize PDF text and image extraction button handlers
+function initPdfTextExtraction() {
+    const extractBtn = document.getElementById('pdfExtractText');
+    const copyBtn = document.getElementById('pdfCopyText');
+    const saveBtn = document.getElementById('pdfSaveAsAsset');
+    const closeBtn = document.getElementById('pdfCloseText');
+    const textPanel = document.getElementById('pdfTextPanel');
+    
+    // Image extraction buttons
+    const extractImagesBtn = document.getElementById('pdfExtractImages');
+    const saveAllImagesBtn = document.getElementById('pdfSaveAllImages');
+    const closeImagesBtn = document.getElementById('pdfCloseImages');
+    const imagesPanel = document.getElementById('pdfImagesPanel');
+    
+    if (extractBtn) {
+        extractBtn.onclick = extractPdfText;
+    }
+    
+    if (copyBtn) {
+        copyBtn.onclick = async () => {
+            if (window.currentPdfExtractedText) {
+                try {
+                    await navigator.clipboard.writeText(window.currentPdfExtractedText);
+                    showNotification({ type: 'success', title: 'Copied', message: 'PDF text copied to clipboard' });
+                } catch (error) {
+                    console.error('Failed to copy:', error);
+                    showNotification({ type: 'error', title: 'Error', message: 'Failed to copy text' });
+                }
+            }
+        };
+    }
+    
+    if (saveBtn) {
+        saveBtn.onclick = async () => {
+            if (window.currentPdfExtractedText && currentPreviewItem) {
+                try {
+                    // Create a new text asset from the extracted PDF text
+                    const pdfName = currentPreviewItem.fileName || 'PDF';
+                    const cleanName = pdfName.replace(/\.pdf$/i, '');
+                    
+                    // Use saveTranscription API to create a new text item
+                    // Pass spaceId to save in same space as source PDF
+                    const result = await window.clipboard.saveTranscription({
+                        transcription: window.currentPdfExtractedText,
+                        sourceItemId: currentPreviewItem.id,
+                        sourceFileName: `Text extracted from: ${cleanName}`,
+                        attachToSource: false,  // Create as new item, don't attach to PDF
+                        spaceId: currentPreviewItem.spaceId  // Save to same space as source PDF
+                    });
+                    
+                    if (result.success) {
+                        showNotification({ type: 'success', title: 'Saved', message: 'PDF text saved to Space' });
+                        // Reload history to show the new item
+                        await loadHistory();
+                    } else {
+                        throw new Error(result.error || 'Failed to save');
+                    }
+                    
+                } catch (error) {
+                    console.error('Failed to save:', error);
+                    showNotification({ type: 'error', title: 'Error', message: 'Failed to save text as asset' });
+                }
+            }
+        };
+    }
+    
+    if (closeBtn) {
+        closeBtn.onclick = () => {
+            textPanel.style.display = 'none';
+        };
+    }
+    
+    // Save as Markdown handler
+    const saveMarkdownBtn = document.getElementById('pdfSaveAsMarkdown');
+    if (saveMarkdownBtn) {
+        saveMarkdownBtn.onclick = async () => {
+            if (window.currentPdfExtractedText && currentPreviewItem) {
+                try {
+                    saveMarkdownBtn.textContent = 'Converting...';
+                    saveMarkdownBtn.disabled = true;
+                    
+                    const pdfName = currentPreviewItem.fileName || 'PDF';
+                    const cleanName = pdfName.replace(/\.pdf$/i, '');
+                    
+                    // Convert to Markdown
+                    const markdownText = convertPdfTextToMarkdown(window.currentPdfExtractedText, pdfName);
+                    
+                    // Use saveTranscription API to create a new text item
+                    // Pass spaceId to save in same space as source PDF
+                    const result = await window.clipboard.saveTranscription({
+                        transcription: markdownText,
+                        sourceItemId: currentPreviewItem.id,
+                        sourceFileName: `${cleanName}.md`,
+                        attachToSource: false,
+                        spaceId: currentPreviewItem.spaceId  // Save to same space as source PDF
+                    });
+                    
+                    if (result.success) {
+                        showNotification({ type: 'success', title: 'Saved', message: 'Markdown saved to Space' });
+                        await loadHistory();
+                    } else {
+                        throw new Error(result.error || 'Failed to save');
+                    }
+                    
+                } catch (error) {
+                    console.error('Failed to save as Markdown:', error);
+                    showNotification({ type: 'error', title: 'Error', message: 'Failed to save as Markdown' });
+                } finally {
+                    saveMarkdownBtn.textContent = 'Save as Markdown';
+                    saveMarkdownBtn.disabled = false;
+                }
+            }
+        };
+    }
+    
+    // Image extraction handlers
+    if (extractImagesBtn) {
+        extractImagesBtn.onclick = extractPdfImages;
+    }
+    
+    if (saveAllImagesBtn) {
+        saveAllImagesBtn.onclick = saveAllPdfImages;
+    }
+    
+    if (closeImagesBtn) {
+        closeImagesBtn.onclick = () => {
+            imagesPanel.style.display = 'none';
+        };
+    }
+}
+
+// Call init when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initPdfTextExtraction);
+} else {
+    initPdfTextExtraction();
+}
+
+// ============================================
+// END PDF VIEWER FUNCTIONALITY
+// ============================================
 
 // Reset TTS state
 function resetTTSState() {
@@ -9567,11 +10985,563 @@ async function bulkMoveItems(targetSpaceId) {
 }
 
 // ============================================
+// GSX PUSH FUNCTIONS
+// ============================================
+
+let gsxPushItemIds = [];
+let gsxCurrentItemId = null;
+
+/**
+ * Populate the GSX tab in the metadata modal
+ * @param {Object} gsxStatus - GSX push status
+ * @param {string} itemId - Item ID
+ */
+function populateGsxTab(gsxStatus, itemId) {
+    gsxCurrentItemId = itemId;
+    
+    const status = gsxStatus?.status || 'not_pushed';
+    const isPushed = status === 'pushed' || status === 'changed_locally';
+    
+    // Update status indicator
+    const statusIndicator = document.getElementById('gsxStatusIndicator');
+    if (statusIndicator) {
+        const statusConfig = {
+            not_pushed: { text: 'Not pushed to GSX', class: 'not-pushed' },
+            pushed: { text: 'Pushed to GSX', class: 'pushed' },
+            changed_locally: { text: 'Local changes not synced', class: 'changed' },
+            unpushed: { text: 'Removed from GSX', class: 'unpushed' }
+        };
+        const cfg = statusConfig[status] || statusConfig.not_pushed;
+        statusIndicator.innerHTML = `
+            <div class="gsx-status-icon ${cfg.class}" style="width: 32px; height: 32px;">${getGsxStatusIconHtml(status)}</div>
+            <span class="gsx-status-text">${cfg.text}</span>
+        `;
+    }
+    
+    // Show/hide links section
+    const linksSection = document.getElementById('gsxLinksSection');
+    const infoSection = document.getElementById('gsxInfoSection');
+    
+    if (linksSection) {
+        linksSection.style.display = isPushed ? 'block' : 'none';
+        
+        if (isPushed && gsxStatus) {
+            // Populate file URL
+            const fileUrlInput = document.getElementById('gsxFileUrlInput');
+            const fileOpenBtn = document.querySelector('#gsxLinkFile .gsx-link-open-btn');
+            if (fileUrlInput && gsxStatus.fileUrl) {
+                fileUrlInput.value = gsxStatus.fileUrl;
+                if (fileOpenBtn) fileOpenBtn.href = gsxStatus.fileUrl;
+            }
+            
+            // Populate share link
+            const shareLinkInput = document.getElementById('gsxShareLinkInput');
+            const shareOpenBtn = document.querySelector('#gsxLinkShare .gsx-link-open-btn');
+            if (shareLinkInput && gsxStatus.shareLink) {
+                shareLinkInput.value = gsxStatus.shareLink;
+                if (shareOpenBtn) shareOpenBtn.href = gsxStatus.shareLink;
+            }
+            
+            // Populate graph node ID
+            const graphNodeInput = document.getElementById('gsxGraphNodeInput');
+            if (graphNodeInput && gsxStatus.graphNodeId) {
+                graphNodeInput.value = gsxStatus.graphNodeId;
+            }
+        }
+    }
+    
+    if (infoSection) {
+        infoSection.style.display = isPushed ? 'block' : 'none';
+        
+        if (isPushed && gsxStatus) {
+            const versionEl = document.getElementById('gsxVersion');
+            const visibilityEl = document.getElementById('gsxVisibility');
+            const pushedAtEl = document.getElementById('gsxPushedAt');
+            const pushedByEl = document.getElementById('gsxPushedBy');
+            
+            if (versionEl) versionEl.textContent = gsxStatus.version || '-';
+            if (visibilityEl) visibilityEl.textContent = gsxStatus.visibility === 'public' ? 'Public' : 'Private';
+            if (pushedAtEl && gsxStatus.pushedAt) {
+                pushedAtEl.textContent = new Date(gsxStatus.pushedAt).toLocaleString();
+            }
+            if (pushedByEl) pushedByEl.textContent = gsxStatus.pushedBy || '-';
+        }
+    }
+    
+    // Update action buttons
+    const pushBtn = document.getElementById('gsxPushBtn');
+    const visibilityBtn = document.getElementById('gsxVisibilityBtn');
+    const unpushBtn = document.getElementById('gsxUnpushBtn');
+    
+    if (pushBtn) {
+        if (status === 'not_pushed' || status === 'unpushed') {
+            pushBtn.style.display = 'flex';
+            pushBtn.innerHTML = '<span class="gsx-icon">⬡</span> Push to GSX';
+        } else if (status === 'changed_locally') {
+            pushBtn.style.display = 'flex';
+            pushBtn.innerHTML = '<span class="gsx-icon">⬡</span> Push Changes';
+        } else {
+            pushBtn.style.display = 'none';
+        }
+    }
+    
+    if (visibilityBtn) {
+        visibilityBtn.style.display = isPushed ? 'flex' : 'none';
+        if (isPushed && gsxStatus) {
+            visibilityBtn.textContent = gsxStatus.visibility === 'public' ? 'Make Private' : 'Make Public';
+        }
+    }
+    
+    if (unpushBtn) {
+        unpushBtn.style.display = isPushed ? 'flex' : 'none';
+    }
+    
+    // Setup button handlers
+    if (pushBtn) {
+        pushBtn.onclick = async () => {
+            await showGsxPushModal([itemId]);
+        };
+    }
+    
+    if (visibilityBtn) {
+        visibilityBtn.onclick = async () => {
+            const newVisibility = gsxStatus?.visibility !== 'public';
+            try {
+                const result = await window.spaces.gsx.changeVisibility(itemId, newVisibility);
+                if (result.success) {
+                    showToast(`Visibility changed to ${newVisibility ? 'public' : 'private'}`);
+                    // Refresh the tab
+                    const newStatus = await window.spaces.gsx.getPushStatus(itemId);
+                    populateGsxTab(newStatus, itemId);
+                } else {
+                    showToast(`Failed: ${result.message}`, 'error');
+                }
+            } catch (error) {
+                showToast(`Error: ${error.message}`, 'error');
+            }
+        };
+    }
+    
+    if (unpushBtn) {
+        unpushBtn.onclick = async () => {
+            if (confirm('Unpush this item from GSX? The file will remain but will be marked as inactive.')) {
+                try {
+                    const result = await window.spaces.gsx.unpushAsset(itemId);
+                    if (result.success) {
+                        showToast('Item unpushed from GSX');
+                        // Refresh the tab
+                        const newStatus = await window.spaces.gsx.getPushStatus(itemId);
+                        populateGsxTab(newStatus, itemId);
+                    } else {
+                        showToast(`Failed: ${result.message}`, 'error');
+                    }
+                } catch (error) {
+                    showToast(`Error: ${error.message}`, 'error');
+                }
+            }
+        };
+    }
+    
+    // Setup copy buttons
+    document.querySelectorAll('.gsx-link-copy-btn').forEach(btn => {
+        btn.onclick = async () => {
+            const linkType = btn.dataset.linkType;
+            let value = '';
+            
+            if (linkType === 'file') {
+                value = document.getElementById('gsxFileUrlInput')?.value;
+            } else if (linkType === 'share') {
+                value = document.getElementById('gsxShareLinkInput')?.value;
+            } else if (linkType === 'graph') {
+                value = document.getElementById('gsxGraphNodeInput')?.value;
+            }
+            
+            if (value) {
+                await navigator.clipboard.writeText(value);
+                showToast('Copied to clipboard');
+            }
+        };
+    });
+}
+
+/**
+ * Show the GSX Push modal
+ * @param {string[]} itemIds - Items to push
+ */
+async function showGsxPushModal(itemIds) {
+    if (!itemIds || itemIds.length === 0) return;
+    
+    gsxPushItemIds = itemIds;
+    
+    // Update modal info
+    document.getElementById('gsxPushCount').textContent = itemIds.length;
+    
+    // Get space name
+    const item = history.find(h => h.id === itemIds[0]);
+    const spaceName = item?.spaceId ? 
+        (spacesData.find(s => s.id === item.spaceId)?.name || 'Unclassified') : 
+        'Unclassified';
+    document.getElementById('gsxPushSpace').textContent = spaceName;
+    
+    // Reset visibility selection
+    document.querySelectorAll('.gsx-visibility-option').forEach(o => o.classList.remove('selected'));
+    document.getElementById('gsxVisPrivate').classList.add('selected');
+    
+    // Reset progress/result display
+    document.getElementById('gsxPushProgress').style.display = 'none';
+    document.getElementById('gsxPushResult').style.display = 'none';
+    document.getElementById('gsxPushConfirm').disabled = false;
+    
+    // Show modal
+    document.getElementById('gsxPushModal').style.display = 'flex';
+}
+
+/**
+ * Hide the GSX Push modal
+ */
+function hideGsxPushModal() {
+    document.getElementById('gsxPushModal').style.display = 'none';
+    gsxPushItemIds = [];
+}
+
+/**
+ * Execute the GSX push operation
+ */
+async function executeGsxPush() {
+    if (!gsxPushItemIds || gsxPushItemIds.length === 0) return;
+    
+    const isPublic = document.querySelector('.gsx-visibility-option.selected')?.dataset.visibility === 'public';
+    
+    // Disable button, show progress
+    document.getElementById('gsxPushConfirm').disabled = true;
+    document.getElementById('gsxPushProgress').style.display = 'block';
+    
+    const progressBar = document.getElementById('gsxPushProgressBar');
+    const progressText = document.getElementById('gsxPushProgressText');
+    
+    try {
+        if (gsxPushItemIds.length === 1) {
+            // Single item push
+            progressText.textContent = '1/1';
+            progressBar.style.width = '50%';
+            
+            const result = await window.spaces.gsx.pushAsset(gsxPushItemIds[0], { isPublic });
+            
+            progressBar.style.width = '100%';
+            
+            // Show result
+            showGsxPushResult(result.success ? {
+                pushed: result.skipped ? [] : [gsxPushItemIds[0]],
+                skipped: result.skipped ? [gsxPushItemIds[0]] : [],
+                failed: []
+            } : {
+                pushed: [],
+                skipped: [],
+                failed: [{ itemId: gsxPushItemIds[0], error: result.error }]
+            });
+        } else {
+            // Bulk push
+            let current = 0;
+            const result = await window.spaces.gsx.pushAssets(gsxPushItemIds, { 
+                isPublic,
+                onProgress: (curr, total) => {
+                    current = curr;
+                    progressText.textContent = `${curr}/${total}`;
+                    progressBar.style.width = `${(curr / total) * 100}%`;
+                }
+            });
+            
+            showGsxPushResult(result);
+        }
+        
+        // Clear selection after successful push
+        if (gsxPushItemIds.length > 1) {
+            selectedItems.clear();
+            updateBulkActionToolbar();
+        }
+        
+        // Reload to show updated status icons
+        await loadHistory();
+        
+    } catch (error) {
+        console.error('[GSX Push] Error:', error);
+        showGsxPushResult({
+            pushed: [],
+            skipped: [],
+            failed: gsxPushItemIds.map(id => ({ itemId: id, error: error.message }))
+        });
+    }
+}
+
+/**
+ * Show push result in modal
+ */
+function showGsxPushResult(result) {
+    const resultDiv = document.getElementById('gsxPushResult');
+    
+    let html = '';
+    
+    if (result.pushed.length > 0) {
+        html += `<div style="color: #10B981; margin-bottom: 8px;">Pushed: ${result.pushed.length} item${result.pushed.length !== 1 ? 's' : ''}</div>`;
+    }
+    
+    if (result.skipped.length > 0) {
+        html += `<div style="color: #999; margin-bottom: 8px;">Skipped (already synced): ${result.skipped.length}</div>`;
+    }
+    
+    if (result.failed.length > 0) {
+        html += `<div style="color: #EF4444; margin-bottom: 8px;">Failed: ${result.failed.length}</div>`;
+        if (result.failed[0]?.error) {
+            html += `<div style="color: #999; font-size: 12px;">${escapeHtml(result.failed[0].error)}</div>`;
+        }
+    }
+    
+    if (result.pushed.length === 0 && result.skipped.length === 0 && result.failed.length === 0) {
+        html = '<div style="color: #999;">No items to push</div>';
+    }
+    
+    resultDiv.innerHTML = html;
+    resultDiv.style.display = 'block';
+    
+    // Change button to "Done"
+    const confirmBtn = document.getElementById('gsxPushConfirm');
+    confirmBtn.textContent = 'Done';
+    confirmBtn.disabled = false;
+    confirmBtn.onclick = hideGsxPushModal;
+}
+
+/**
+ * Get GSX status icon HTML for an item
+ * @param {string} status - Push status (not_pushed, pushed, changed_locally, unpushed)
+ * @returns {string} HTML for the icon
+ */
+function getGsxStatusIconHtml(status) {
+    const icons = {
+        not_pushed: `<div class="gsx-status-icon not-pushed" title="Not pushed to GSX">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M12 3c0 1.5-1 2.5-2.5 3.5" stroke-linecap="round" opacity="0.4"/>
+                <circle cx="12" cy="12" r="5" stroke-width="1.5"/>
+                <text x="12" y="13" font-size="4.5" font-weight="700" fill="currentColor" text-anchor="middle">GSX</text>
+            </svg>
+        </div>`,
+        pushed: `<div class="gsx-status-icon pushed" title="Pushed to GSX">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M12 3c0 2 1.5 3 4 4" stroke-linecap="round"/>
+                <path d="M21 12c-2 0-3 1.5-4 4" stroke-linecap="round"/>
+                <path d="M12 21c0-2-1.5-3-4-4" stroke-linecap="round"/>
+                <path d="M3 12c2 0 3-1.5 4-4" stroke-linecap="round"/>
+                <circle cx="4" cy="4" r="1.5" fill="currentColor"/>
+                <circle cx="20" cy="4" r="1.5" fill="currentColor"/>
+                <circle cx="20" cy="20" r="1.5" fill="currentColor"/>
+                <circle cx="4" cy="20" r="1.5" fill="currentColor"/>
+                <circle cx="12" cy="12" r="5" fill="currentColor" opacity="0.15" stroke-width="1.5"/>
+                <text x="12" y="13" font-size="4.5" font-weight="700" fill="currentColor" text-anchor="middle">GSX</text>
+            </svg>
+        </div>`,
+        changed_locally: `<div class="gsx-status-icon changed" title="Local changes not pushed">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M12 3c0 2 1.5 3 4 4" stroke-linecap="round" opacity="0.35"/>
+                <circle cx="12" cy="12" r="5" stroke-width="1.5"/>
+                <text x="12" y="12" font-size="4.5" font-weight="700" fill="currentColor" text-anchor="middle">GSX</text>
+                <circle cx="12" cy="17" r="1.5" fill="currentColor" class="gsx-pulse"/>
+            </svg>
+        </div>`,
+        unpushed: `<div class="gsx-status-icon unpushed" title="Unpushed from GSX">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <circle cx="12" cy="12" r="5" stroke-width="1.5" stroke-dasharray="3 2"/>
+                <text x="12" y="13" font-size="4.5" font-weight="700" fill="currentColor" text-anchor="middle" opacity="0.5">GSX</text>
+            </svg>
+        </div>`
+    };
+    
+    return icons[status] || icons.not_pushed;
+}
+
+/**
+ * Update context menu GSX items based on item push status
+ * @param {string} itemId - Item ID
+ */
+async function updateGsxContextMenuItems(itemId) {
+    try {
+        const status = await window.spaces.gsx.getPushStatus(itemId);
+        
+        const ctxPush = document.getElementById('ctxPushToGsx');
+        const ctxPushChanges = document.getElementById('ctxPushChanges');
+        const ctxCopyLink = document.getElementById('ctxCopyLink');
+        const ctxCopyShareLink = document.getElementById('ctxCopyShareLink');
+        const ctxVisibility = document.getElementById('ctxChangeVisibility');
+        const ctxUnpush = document.getElementById('ctxUnpush');
+        
+        // Reset all to hidden
+        ctxPush.style.display = 'none';
+        ctxPushChanges.style.display = 'none';
+        ctxCopyLink.style.display = 'none';
+        ctxCopyShareLink.style.display = 'none';
+        ctxVisibility.style.display = 'none';
+        ctxUnpush.style.display = 'none';
+        
+        switch (status.status) {
+            case 'not_pushed':
+            case 'unpushed':
+                ctxPush.style.display = 'flex';
+                break;
+            case 'pushed':
+                ctxCopyLink.style.display = 'flex';
+                ctxCopyShareLink.style.display = 'flex';
+                ctxVisibility.style.display = 'flex';
+                ctxVisibility.querySelector('span:last-child').textContent = 
+                    status.visibility === 'public' ? 'Make Private' : 'Make Public';
+                ctxUnpush.style.display = 'flex';
+                break;
+            case 'changed_locally':
+                ctxPushChanges.style.display = 'flex';
+                ctxCopyLink.style.display = 'flex';
+                ctxCopyShareLink.style.display = 'flex';
+                ctxVisibility.style.display = 'flex';
+                ctxVisibility.querySelector('span:last-child').textContent = 
+                    status.visibility === 'public' ? 'Make Private' : 'Make Public';
+                ctxUnpush.style.display = 'flex';
+                break;
+        }
+    } catch (error) {
+        console.error('[GSX] Error updating context menu:', error);
+        // Show default state
+        document.getElementById('ctxPushToGsx').style.display = 'flex';
+    }
+}
+
+/**
+ * Handle GSX context menu action
+ * @param {string} action - Action name
+ * @param {string} itemId - Item ID
+ */
+async function handleGsxContextAction(action, itemId) {
+    try {
+        switch (action) {
+            case 'gsx-push':
+                await showGsxPushModal([itemId]);
+                break;
+                
+            case 'gsx-push-changes':
+                // Get current status to maintain visibility
+                const status = await window.spaces.gsx.getPushStatus(itemId);
+                const result = await window.spaces.gsx.pushAsset(itemId, { 
+                    isPublic: status.visibility === 'public',
+                    force: true 
+                });
+                if (result.success) {
+                    showToast('Changes pushed to GSX');
+                    await loadHistory();
+                } else {
+                    showToast(`Push failed: ${result.message}`, 'error');
+                }
+                break;
+                
+            case 'gsx-copy-link':
+                const links = await window.spaces.gsx.getLinks(itemId);
+                if (links.fileUrl) {
+                    await navigator.clipboard.writeText(links.fileUrl);
+                    showToast('File URL copied to clipboard');
+                }
+                break;
+                
+            case 'gsx-copy-share-link':
+                const shareLink = await window.spaces.gsx.getShareLink(itemId);
+                if (shareLink.url) {
+                    await navigator.clipboard.writeText(shareLink.url);
+                    showToast('Share link copied to clipboard');
+                }
+                break;
+                
+            case 'gsx-visibility':
+                const currentStatus = await window.spaces.gsx.getPushStatus(itemId);
+                const newVisibility = currentStatus.visibility !== 'public';
+                const visResult = await window.spaces.gsx.changeVisibility(itemId, newVisibility);
+                if (visResult.success) {
+                    showToast(`Visibility changed to ${newVisibility ? 'public' : 'private'}`);
+                } else {
+                    showToast(`Failed: ${visResult.message}`, 'error');
+                }
+                break;
+                
+            case 'gsx-unpush':
+                if (confirm('Unpush this item from GSX? The file will remain but will be marked as inactive.')) {
+                    const unpushResult = await window.spaces.gsx.unpushAsset(itemId);
+                    if (unpushResult.success) {
+                        showToast('Item unpushed from GSX');
+                        await loadHistory();
+                    } else {
+                        showToast(`Unpush failed: ${unpushResult.message}`, 'error');
+                    }
+                }
+                break;
+        }
+    } catch (error) {
+        console.error('[GSX] Context action error:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    }
+}
+
+/**
+ * Simple toast notification (fallback if not already defined)
+ */
+function showToast(message, type = 'success') {
+    // Check if toast already exists
+    let toast = document.querySelector('.toast-notification');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.className = 'toast-notification';
+        toast.style.cssText = `
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            z-index: 10000;
+            transition: opacity 0.3s, transform 0.3s;
+        `;
+        document.body.appendChild(toast);
+    }
+    
+    toast.textContent = message;
+    toast.style.background = type === 'error' ? 'rgba(239, 68, 68, 0.9)' : 'rgba(16, 185, 129, 0.9)';
+    toast.style.color = '#fff';
+    toast.style.opacity = '1';
+    toast.style.transform = 'translateX(-50%) translateY(0)';
+    
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateX(-50%) translateY(10px)';
+    }, 3000);
+}
+
+// ============================================
 // INITIALIZATION
 // ============================================
+
+// Global error handlers -- catch anything that slips through try/catch
+window.addEventListener('error', (event) => {
+    const slog = window.logging || { error: () => {} };
+    slog.error('clipboard', 'Uncaught renderer error', {
+        message: event.message,
+        filename: event.filename?.split('/').pop(),
+        lineno: event.lineno,
+        colno: event.colno
+    });
+});
+window.addEventListener('unhandledrejection', (event) => {
+    const slog = window.logging || { error: () => {} };
+    slog.error('clipboard', 'Unhandled promise rejection', {
+        reason: event.reason?.message || String(event.reason),
+        stack: event.reason?.stack?.substring(0, 300)
+    });
+});
 
 document.addEventListener('DOMContentLoaded', () => {
     init();
     setupVideoModalListeners();
     setupHistoryItemDrag();
+    
 }); 

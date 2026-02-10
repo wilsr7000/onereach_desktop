@@ -12,8 +12,12 @@ import type {
   BidRequest,
   BidResponse,
   TaskAssignment,
+  TaskAckMessage,
+  TaskHeartbeatMessage,
   TaskResultMessage,
   AuctionConfig,
+  BiddingContext,
+  ConversationMessage,
 } from '../types/index.js';
 import { TaskStatus as Status, TaskPriority, PROTOCOL_VERSION } from '../types/index.js';
 import { TypedEventEmitter } from '../utils/events.js';
@@ -26,13 +30,15 @@ import { RateLimiter } from '../queue/rate-limiter.js';
 import type { StorageAdapter } from '../storage/adapter.js';
 
 const DEFAULT_AUCTION_CONFIG: AuctionConfig = {
-  defaultWindowMs: 1000,
-  minWindowMs: 100,
-  maxWindowMs: 5000,
+  defaultWindowMs: 4000,
+  minWindowMs: 1000,
+  maxWindowMs: 8000,
   instantWinThreshold: 0.85,
   dominanceMargin: 0.3,
   maxAuctionAttempts: 3,
-  executionTimeoutMs: 30000,
+  executionTimeoutMs: 120000,     // Generous base timeout (agents manage their own via ack/heartbeat)
+  ackTimeoutMs: 10000,            // Agent must ack within 10s or it's considered dead
+  heartbeatExtensionMs: 30000,    // Each heartbeat grants 30s more
 };
 
 /**
@@ -62,7 +68,7 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
   private storage: StorageAdapter;
 
   private tasks: Map<string, Task> = new Map();
-  private activeAuctions: Map<string, { task: Task; orderBook: OrderBook }> = new Map();
+  private activeAuctions: Map<string, { task: Task; orderBook: OrderBook; expectedResponses?: number; responseCount?: number; resolveEarly?: (() => void) | null }> = new Map();
   private isShuttingDown = false;
   private isProcessing = false;  // Guard against concurrent processQueue calls
   private processingLoop: NodeJS.Timeout | null = null;
@@ -215,6 +221,8 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
       assignedAt: null,
       timeoutAt: null,
       completedAt: null,
+      lockedAt: null,
+      lockedBy: null,
       result: null,
       error: null,
     };
@@ -326,6 +334,7 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
       console.error(`[Exchange] Auction error for task ${task.id}:`, error);
       task.status = Status.DEAD_LETTER;
       task.error = error instanceof Error ? error.message : String(error);
+      this.emit('task:route_to_error_agent', { task, reason: 'Auction error' });
       this.emit('task:dead_letter', {
         task,
         reason: 'Auction error',
@@ -337,9 +346,68 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
   }
 
   private async runAuction(task: Task): Promise<void> {
+    // ==================== LOCKED SUBTASK HANDLING ====================
+    // If this is a subtask with locked routing, skip auction and assign directly
+    const isLockedSubtask = task.metadata?.source === 'subtask' && 
+                           task.metadata?.routingMode === 'locked' &&
+                           task.metadata?.lockedAgentId;
+    
+    if (isLockedSubtask) {
+      const lockedAgentId = task.metadata.lockedAgentId as string;
+      console.log(`[Exchange] Locked subtask detected, direct assign to: ${lockedAgentId}`);
+      
+      // Check if agent is connected
+      const agent = (this.agentRegistry as any).getAgent?.(lockedAgentId) ?? this.agentRegistry.get(lockedAgentId);
+      if (!agent) {
+        console.error(`[Exchange] Locked agent ${lockedAgentId} not found, failing subtask`);
+        task.status = Status.DEAD_LETTER;
+        this.emit('task:route_to_error_agent', { task, reason: `Locked agent ${lockedAgentId} not available` });
+        this.emit('task:dead_letter', {
+          task,
+          reason: `Locked agent ${lockedAgentId} not available`,
+          totalAttempts: 1,
+        });
+        return;
+      }
+      
+      // Direct assignment (no auction)
+      task.status = Status.ASSIGNED;
+      task.assignedAgent = lockedAgentId;
+      task.backupQueue = [];
+      task.currentBackupIndex = 0;
+      task.assignedAt = Date.now();
+      task.auctionAttempt = 1;
+      
+      // Create a synthetic winner bid
+      const syntheticBid: EvaluatedBid = {
+        agentId: lockedAgentId,
+        agentVersion: agent.version || '1.0.0',
+        confidence: 1.0,
+        reasoning: 'Locked subtask - direct assignment',
+        estimatedTimeMs: 5000,
+        timestamp: Date.now(),
+        score: 1.0,
+        reputation: 1.0,
+        rank: 1,
+        tier: 'builtin',
+      };
+      
+      this.emit('task:assigned', { 
+        task, 
+        winner: syntheticBid, 
+        backups: [],
+        masterEvaluation: null 
+      });
+      
+      // Execute directly
+      await this.executeWithCascade(task, syntheticBid);
+      return;
+    }
+    
     // Circuit breaker check
     if (task.auctionAttempt >= this.auctionConfig.maxAuctionAttempts) {
       task.status = Status.DEAD_LETTER;
+      this.emit('task:route_to_error_agent', { task, reason: 'Max auction attempts exceeded' });
       this.emit('task:dead_letter', {
         task,
         reason: 'Max auction attempts exceeded',
@@ -356,8 +424,17 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
     this.rateLimiter.auctionStarted();
 
     // Get candidate agents
-    const agentIds = this.categoryIndex.getAgentsForTask(task);
+    let agentIds = this.categoryIndex.getAgentsForTask(task);
     const matchedCategories = this.categoryIndex.findCategories(task);
+    
+    // Apply agent space filter if provided (HUD API scopes agents by space)
+    const agentFilter = task.metadata?.agentFilter as string[] | undefined;
+    if (agentFilter && Array.isArray(agentFilter) && agentFilter.length > 0) {
+      const filterSet = new Set(agentFilter);
+      const filteredIds = new Set(Array.from(agentIds).filter(id => filterSet.has(id)));
+      console.log(`[Exchange] Agent space filter applied: ${agentIds.size} -> ${filteredIds.size} agents`);
+      agentIds = filteredIds;
+    }
     
     console.log(`[Exchange] Task "${task.content?.slice(0, 40)}..." matched categories:`, matchedCategories);
     console.log(`[Exchange] Candidate agents (${agentIds.size}):`, Array.from(agentIds));
@@ -405,7 +482,8 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
     let winner: EvaluatedBid;
     let backups: EvaluatedBid[];
     let masterEvaluation: {
-      executionMode?: string;
+      winners?: string[];
+      executionMode?: 'single' | 'parallel' | 'series';
       reasoning?: string;
       rejectedBids?: { agentId: string; reason: string }[];
       agentFeedback?: { agentId: string; feedback: string }[];
@@ -454,6 +532,15 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
       [winner, ...backups] = rankedBids;
     }
 
+    // Store execution mode from master evaluator
+    if (masterEvaluation) {
+      task.executionMode = masterEvaluation.executionMode || 'single';
+      task.selectedWinners = masterEvaluation.winners || [winner.agentId];
+    } else {
+      task.executionMode = 'single';
+      task.selectedWinners = [winner.agentId];
+    }
+
     // Assign winner
     task.status = Status.ASSIGNED;
     task.assignedAgent = winner.agentId;
@@ -470,6 +557,27 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
       masterEvaluation 
     });
 
+    // Fast-path: if winning bid includes a direct result (informational agent),
+    // settle immediately without execution. Saves an entire LLM round trip.
+    if (winner.result) {
+      console.log(`[Exchange] Fast-path settlement: ${winner.agentId} answered in bid`);
+      task.status = Status.SETTLED;
+      task.result = { 
+        success: true, 
+        message: winner.result,
+        data: { output: winner.result, fastPath: true },
+      };
+      task.completedAt = Date.now();
+      this.emit('task:settled', { 
+        task, 
+        result: task.result, 
+        agentId: winner.agentId, 
+        attempt: 0,
+        fastPath: true,
+      });
+      return;
+    }
+
     // Execute
     await this.executeWithCascade(task, winner);
   }
@@ -483,10 +591,14 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
     const abortController = new AbortController();
     const deadline = Date.now() + windowMs;
 
-    // Build context
-    const context = {
+    // Build context -- pass conversation history from task metadata through to bidders
+    const taskHistory = Array.isArray(task.metadata?.conversationHistory)
+      ? task.metadata.conversationHistory as ConversationMessage[]
+      : [];
+    const context: BiddingContext = {
       queueDepth: this.taskQueue.getDepth().total,
-      conversationHistory: [], // TODO: integrate with conversation history
+      conversationHistory: taskHistory,
+      conversationText: (task.metadata?.conversationText as string) || '',
       participatingAgents: Array.from(agentIds),
     };
 
@@ -528,8 +640,26 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
 
     await Promise.allSettled(bidPromises);
 
-    // Wait for bids or timeout
-    await this.sleep(windowMs);
+    // Track expected responses for early close
+    const auction = this.activeAuctions.get(task.auctionId!);
+    if (auction) {
+      auction.expectedResponses = agentIds.size;
+      auction.responseCount = 0;
+    }
+
+    // Wait for all bids or timeout (whichever comes first)
+    await Promise.race([
+      this.sleep(windowMs),
+      new Promise<void>((resolve) => {
+        if (auction) {
+          auction.resolveEarly = resolve;
+          // Check if all responses already arrived
+          if ((auction.responseCount ?? 0) >= agentIds.size) {
+            resolve();
+          }
+        }
+      }),
+    ]);
 
     // Abort any remaining operations
     abortController.abort();
@@ -554,11 +684,31 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
         estimatedTimeMs: response.bid.estimatedTimeMs,
         timestamp: Date.now(),
         tier: response.bid.tier,
+        result: response.bid.result || null,  // Fast-path result from informational agents
       });
+    }
+
+    // Track responses for early close
+    auction.responseCount = (auction.responseCount ?? 0) + 1;
+    if (auction.expectedResponses && auction.responseCount >= auction.expectedResponses && auction.resolveEarly) {
+      auction.resolveEarly();
+      auction.resolveEarly = null;
     }
   }
 
   private async executeWithCascade(task: Task, winner: EvaluatedBid): Promise<void> {
+    // Multi-winner execution: if master evaluator selected multiple winners
+    if (task.selectedWinners && task.selectedWinners.length > 1 && task.executionMode !== 'single') {
+      if (task.executionMode === 'parallel') {
+        await this.executeParallel(task, task.selectedWinners);
+        return;
+      } else if (task.executionMode === 'series') {
+        await this.executeSeries(task, task.selectedWinners);
+        return;
+      }
+    }
+
+    // Single-winner cascade execution (original behavior)
     const agents = [task.assignedAgent!, ...task.backupQueue];
 
     for (let i = 0; i < agents.length; i++) {
@@ -581,9 +731,12 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
       task.status = Status.ASSIGNED;
       task.currentBackupIndex = i;
       task.timeoutAt = Date.now() + this.auctionConfig.executionTimeoutMs;
+      task.lockedAt = Date.now();
+      task.lockedBy = agentId;
 
       this.agentRegistry.incrementTaskCount(agentId);
       this.emit('task:executing', { task, agentId, attempt: i + 1 });
+      this.emit('task:locked', { task, agentId, timeoutMs: this.auctionConfig.executionTimeoutMs });
 
       // Send assignment
       const assignment: TaskAssignment = {
@@ -604,7 +757,11 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
       this.agentRegistry.decrementTaskCount(agentId);
 
       if (result && result.success) {
-        // Success!
+        // Success -- unlock and settle
+        task.lockedAt = null;
+        task.lockedBy = null;
+        this.emit('task:unlocked', { task, reason: 'completed' });
+
         task.status = Status.SETTLED;
         task.result = result;
         task.completedAt = Date.now();
@@ -615,9 +772,13 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
         return;
       }
 
-      // Failure
+      // Failure -- unlock so cascading can try next agent
+      task.lockedAt = null;
+      task.lockedBy = null;
       const error = result?.error ?? 'Execution timeout';
       const isTimeout = !result;
+      this.emit('task:unlocked', { task, reason: isTimeout ? 'timeout' : 'failed' });
+
       task.status = Status.BUSTED;
       task.error = error;
 
@@ -642,9 +803,13 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
       return;
     }
 
-    // Circuit breaker
+    // Circuit breaker -- route to error agent for graceful handling
     task.status = Status.DEAD_LETTER;
     task.completedAt = Date.now();
+    this.emit('task:route_to_error_agent', {
+      task,
+      reason: 'All agents and auction attempts exhausted',
+    });
     this.emit('task:dead_letter', {
       task,
       reason: 'All agents and auction attempts exhausted',
@@ -652,24 +817,209 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
     });
   }
 
-  // Pending result handlers
-  private pendingResults: Map<string, { resolve: (result: TaskResult | null) => void }> = new Map();
+  /**
+   * Execute multiple agents in series -- each runs after the previous completes.
+   * Results are aggregated. If any agent fails, it's skipped and the next runs.
+   */
+  private async executeSeries(task: Task, agentIds: string[]): Promise<void> {
+    const results: Array<{ agentId: string; result: TaskResult }> = [];
 
-  private waitForResult(taskId: string, timeoutMs: number): Promise<TaskResult | null> {
+    for (const agentId of agentIds) {
+      if (!this.agentRegistry.isHealthy(agentId)) continue;
+      const ws = this.agentRegistry.getSocket(agentId);
+      if (!ws) continue;
+
+      task.lockedAt = Date.now();
+      task.lockedBy = agentId;
+      this.emit('task:locked', { task, agentId, timeoutMs: this.auctionConfig.executionTimeoutMs });
+      this.agentRegistry.incrementTaskCount(agentId);
+
+      const assignment: TaskAssignment = {
+        type: 'task_assignment',
+        taskId: task.id,
+        task,
+        isBackup: false,
+        backupIndex: 0,
+        timeout: this.auctionConfig.executionTimeoutMs,
+        previousErrors: [],
+      };
+
+      ws.send(JSON.stringify(assignment));
+      const result = await this.waitForResult(task.id, this.auctionConfig.executionTimeoutMs);
+      this.agentRegistry.decrementTaskCount(agentId);
+      task.lockedAt = null;
+      task.lockedBy = null;
+      this.emit('task:unlocked', { task, reason: result?.success ? 'completed' : 'failed' });
+
+      if (result?.success) {
+        results.push({ agentId, result });
+      } else {
+        console.warn(`[Exchange] Series agent ${agentId} failed, continuing`);
+      }
+    }
+
+    // Aggregate results
+    if (results.length > 0) {
+      task.status = Status.SETTLED;
+      task.result = {
+        success: true,
+        data: { multiAgent: true, mode: 'series', results },
+      };
+      task.completedAt = Date.now();
+      this.emit('task:settled', { task, result: task.result, agentId: results[0].agentId, attempt: 1 });
+    } else {
+      task.status = Status.DEAD_LETTER;
+      this.emit('task:route_to_error_agent', { task, reason: 'All series agents failed' });
+      this.emit('task:dead_letter', { task, reason: 'All series agents failed', totalAttempts: 1 });
+    }
+  }
+
+  /**
+   * Execute multiple agents in parallel -- all run concurrently.
+   * Task settles once all agents complete (or timeout).
+   */
+  private async executeParallel(task: Task, agentIds: string[]): Promise<void> {
+    // Each parallel agent gets a unique subtask ID so waitForResult entries
+    // don't overwrite each other in the pendingResults map.
+    const promises = agentIds.map(async (agentId, idx) => {
+      if (!this.agentRegistry.isHealthy(agentId)) return { agentId, result: null };
+      const ws = this.agentRegistry.getSocket(agentId);
+      if (!ws) return { agentId, result: null };
+
+      this.agentRegistry.incrementTaskCount(agentId);
+
+      const subtaskId = `${task.id}__parallel_${idx}`;
+      const assignment: TaskAssignment = {
+        type: 'task_assignment',
+        taskId: subtaskId,
+        task: { ...task, id: subtaskId, _parentTaskId: task.id },
+        isBackup: false,
+        backupIndex: 0,
+        timeout: this.auctionConfig.executionTimeoutMs,
+        previousErrors: [],
+      };
+
+      ws.send(JSON.stringify(assignment));
+      const result = await this.waitForResult(subtaskId, this.auctionConfig.executionTimeoutMs);
+      this.agentRegistry.decrementTaskCount(agentId);
+      return { agentId, result };
+    });
+
+    task.lockedAt = Date.now();
+    task.lockedBy = 'parallel-execution';
+    this.emit('task:locked', { task, agentId: 'parallel-execution', timeoutMs: this.auctionConfig.executionTimeoutMs });
+
+    const outcomes = await Promise.all(promises);
+    const successes = outcomes.filter(o => o.result?.success);
+
+    task.lockedAt = null;
+    task.lockedBy = null;
+    this.emit('task:unlocked', { task, reason: successes.length > 0 ? 'completed' : 'failed' });
+
+    if (successes.length > 0) {
+      task.status = Status.SETTLED;
+      // Combine messages from all successful agents into a single result
+      const messages = successes
+        .map(s => s.result?.message || (s.result?.data as any)?.message || '')
+        .filter(Boolean);
+      task.result = {
+        success: true,
+        message: messages.join('\n'),
+        data: { multiAgent: true, mode: 'parallel', results: successes },
+      };
+      task.completedAt = Date.now();
+      this.emit('task:settled', { task, result: task.result, agentId: successes[0].agentId, attempt: 1 });
+    } else {
+      task.status = Status.DEAD_LETTER;
+      this.emit('task:route_to_error_agent', { task, reason: 'All parallel agents failed' });
+      this.emit('task:dead_letter', { task, reason: 'All parallel agents failed', totalAttempts: 1 });
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Ack / Heartbeat / Result protocol
+  //
+  // Flow:  Exchange sends task_assignment
+  //    →   Agent sends task_ack       (resets timer to executionTimeoutMs)
+  //    →   Agent sends task_heartbeat (resets timer to heartbeatExtensionMs, repeatable)
+  //    →   Agent sends task_result    (resolves the promise)
+  //
+  // If no ack arrives within ackTimeoutMs the agent is considered dead and
+  // the exchange cascades to the next backup.
+  // ---------------------------------------------------------------------------
+  private pendingResults: Map<string, {
+    resolve: (result: TaskResult | null) => void;
+    ack: (estimatedMs?: number) => void;
+    heartbeat: (progress?: string, extendMs?: number) => void;
+    acked: boolean;
+  }> = new Map();
+
+  private waitForResult(taskId: string, _executionTimeoutMs: number): Promise<TaskResult | null> {
+    const ackTimeoutMs = this.auctionConfig.ackTimeoutMs;
+    const execTimeoutMs = this.auctionConfig.executionTimeoutMs;
+    const heartbeatExtMs = this.auctionConfig.heartbeatExtensionMs;
+
     return new Promise((resolve) => {
-      const timeoutId = setTimeout(() => {
-        this.pendingResults.delete(taskId);
-        resolve(null);
-      }, timeoutMs);
+      let currentTimer: ReturnType<typeof setTimeout>;
+
+      const resetTimer = (ms: number) => {
+        clearTimeout(currentTimer);
+        currentTimer = setTimeout(() => {
+          this.pendingResults.delete(taskId);
+          resolve(null); // timeout → cascade
+        }, ms);
+      };
+
+      // Phase 1: wait for ack (short)
+      resetTimer(ackTimeoutMs);
 
       this.pendingResults.set(taskId, {
+        acked: false,
+
         resolve: (result) => {
-          clearTimeout(timeoutId);
+          clearTimeout(currentTimer);
           this.pendingResults.delete(taskId);
           resolve(result);
         },
+
+        ack: (estimatedMs?: number) => {
+          const entry = this.pendingResults.get(taskId);
+          if (entry) entry.acked = true;
+          // Phase 2: switch to generous execution timeout
+          // If the agent provided an estimate, use that + buffer; otherwise default
+          const timeout = estimatedMs ? Math.min(estimatedMs + 15000, execTimeoutMs) : execTimeoutMs;
+          resetTimer(timeout);
+          this.emit('task:acked' as any, { taskId, estimatedMs });
+        },
+
+        heartbeat: (progress?: string, extendMs?: number) => {
+          const entry = this.pendingResults.get(taskId);
+          if (!entry?.acked) return; // ignore heartbeats before ack
+          resetTimer(extendMs || heartbeatExtMs);
+          this.emit('task:heartbeat' as any, { taskId, progress });
+        },
       });
     });
+  }
+
+  /**
+   * Handle incoming task acknowledgment
+   */
+  handleTaskAck(msg: TaskAckMessage): void {
+    const pending = this.pendingResults.get(msg.taskId);
+    if (pending) {
+      pending.ack(msg.estimatedMs);
+    }
+  }
+
+  /**
+   * Handle incoming task heartbeat (resets timeout)
+   */
+  handleTaskHeartbeat(msg: TaskHeartbeatMessage): void {
+    const pending = this.pendingResults.get(msg.taskId);
+    if (pending) {
+      pending.heartbeat(msg.progress, msg.extendMs);
+    }
   }
 
   /**
@@ -706,7 +1056,7 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
     const words = task.content.toLowerCase().split(/\s+/);
     const isSimple = words.some(w => simpleActions.includes(w)) && words.length < 5;
 
-    if (isSimple) return 200;
+    if (isSimple) return this.auctionConfig.minWindowMs;
 
     // Complex task detection
     const isComplex = task.content.length > 100 ||

@@ -9,6 +9,8 @@ import path from 'path';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { app } = require('electron');
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 /**
  * Service for generating audio waveform visualization data
@@ -49,13 +51,13 @@ export class WaveformService {
           return;
         }
 
-        console.log('[WaveformService] Generating waveform with', samples, 'samples for', duration.toFixed(2), 'seconds');
+        log.info('video', '[WaveformService] Generating waveform', { samples, duration: duration.toFixed(2) });
 
         // Use fast and reliable method
         this.generateWaveformFast(inputPath, samples, duration, audioStream)
           .then(resolve)
           .catch((err) => {
-            console.warn('[WaveformService] Fast method failed, using fallback:', err.message);
+            log.warn('video', '[WaveformService] Fast method failed, using fallback', { data: err.message });
             this.generateFallbackWaveform(inputPath, samples, duration)
               .then(resolve)
               .catch(reject);
@@ -74,7 +76,7 @@ export class WaveformService {
    */
   async generateWaveformFast(inputPath, samples, duration, audioStream) {
     return new Promise((resolve, reject) => {
-      console.log('[WaveformService] Extracting real audio waveform data...');
+      log.info('video', '[WaveformService] Extracting real audio waveform data...');
       
       const tempAudio = path.join(this.outputDir, `waveform_audio_${Date.now()}.wav`);
       
@@ -86,7 +88,7 @@ export class WaveformService {
         .format('wav')
         .output(tempAudio)
         .on('end', () => {
-          console.log('[WaveformService] Audio extracted, analyzing levels...');
+          log.info('video', '[WaveformService] Audio extracted, analyzing levels...');
           
           // Step 2: Analyze audio levels using astats filter
           const segmentSize = Math.ceil(8000 * duration / samples);
@@ -110,7 +112,7 @@ export class WaveformService {
                 
                 const levels = rmsMatches.length > 0 ? rmsMatches : peakMatches;
                 
-                console.log('[WaveformService] Found', levels.length, 'audio level measurements');
+                log.info('video', '[WaveformService] Found', { arg0: levels.length, arg1: 'audio level measurements' });
                 
                 const peaks = levels.map(match => {
                   const db = parseFloat(match[1]);
@@ -126,7 +128,7 @@ export class WaveformService {
                 // Cleanup temp files
                 if (fs.existsSync(tempAudio)) fs.unlinkSync(tempAudio);
                 
-                console.log('[WaveformService] Real waveform extracted:', finalPeaks.length, 'samples');
+                log.info('video', '[WaveformService] Real waveform extracted', { arg0: finalPeaks.length, arg1: 'samples' });
                 
                 resolve({
                   peaks: finalPeaks,
@@ -137,20 +139,20 @@ export class WaveformService {
                 });
                 
               } catch (error) {
-                console.error('[WaveformService] Error parsing waveform data:', error);
+                log.error('video', '[WaveformService] Error parsing waveform data', { error: error });
                 if (fs.existsSync(tempAudio)) fs.unlinkSync(tempAudio);
                 reject(error);
               }
             })
             .on('error', (err) => {
-              console.error('[WaveformService] Audio analysis failed:', err);
+              log.error('video', '[WaveformService] Audio analysis failed', { error: err });
               if (fs.existsSync(tempAudio)) fs.unlinkSync(tempAudio);
               reject(err);
             })
             .run();
         })
         .on('error', (err) => {
-          console.error('[WaveformService] Audio extraction failed:', err);
+          log.error('video', '[WaveformService] Audio extraction failed', { error: err });
           if (fs.existsSync(tempAudio)) fs.unlinkSync(tempAudio);
           reject(err);
         })

@@ -19,6 +19,13 @@ const {
   checkPreferencesAndClarify
 } = require('../../lib/thinking-agent');
 const { getCircuit } = require('./circuit-breaker');
+const ai = require('../../lib/ai-service');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
+const { renderAgentUI } = require('../../lib/agent-ui-renderer');
+
+// Local calendar store: persistent events, recurring, conflicts, briefs
+const { getCalendarStore } = require('../../lib/calendar-store');
 
 // Omnical API endpoints
 const OMNICAL_API_URL = 'https://em.edison.api.onereach.ai/http/35254342-4a2e-475b-aec1-18547e517e29/omnical';
@@ -43,8 +50,16 @@ const THINKING_CONFIG = {
     'List meetings by time period',
     'Proactive meeting reminders',
     'Add/create new calendar events',
-    'Delete/cancel/remove calendar events',
-    'Get detailed event information (attendees, description, location, etc.)'
+    'Create recurring events (daily, weekly, biweekly, monthly, yearly, weekdays)',
+    'Delete/cancel/remove calendar events: "cancel the standup", "delete my 3pm meeting", "remove the team sync"',
+    'Skip or modify a single occurrence of a recurring event',
+    'Get detailed event information (attendees, description, location, etc.)',
+    'Resolve calendar conflicts for a time period (cancel, move, or skip overlapping events)',
+    'Morning brief: time, date, weather, full day rundown with conflicts, back-to-back, free time, recurring vs one-off',
+    'Find free time slots within working hours',
+    'Suggest alternative meeting times when there are conflicts',
+    'Week overview with busiest day, free days, total meeting count',
+    'Tomorrow preview and end-of-day lookahead',
   ],
   useMemory: true,
   useAIClarification: true,
@@ -76,20 +91,6 @@ const POLLER_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 const DEFAULT_REMINDER_MINUTES = 15;
 
 /**
- * Get OpenAI API key
- */
-function getOpenAIApiKey() {
-  if (global.settingsManager) {
-    const openaiKey = global.settingsManager.get('openaiApiKey');
-    if (openaiKey) return openaiKey;
-    const provider = global.settingsManager.get('llmProvider');
-    const llmKey = global.settingsManager.get('llmApiKey');
-    if (provider === 'openai' && llmKey) return llmKey;
-  }
-  return process.env.OPENAI_API_KEY;
-}
-
-/**
  * AI-driven calendar query understanding
  * Takes a raw user request and uses LLM to understand what they want
  * 
@@ -98,13 +99,6 @@ function getOpenAIApiKey() {
  * @returns {Promise<Object>} - { action, timeframe, specificTime, needsClarification, clarificationPrompt, message }
  */
 async function aiUnderstandCalendarRequest(userRequest, context) {
-  const apiKey = getOpenAIApiKey();
-  
-  if (!apiKey) {
-    console.log('[CalendarAgent] No API key, falling back to pattern matching');
-    return null;
-  }
-  
   const { partOfDay, memory, events, conversationHistory } = context;
   
   // Build events summary for context
@@ -148,7 +142,7 @@ ONLY ask for clarification when:
 Respond with JSON:
 {
   "understood": true/false,
-  "action": "today" | "tomorrow" | "week" | "next_meeting" | "availability" | "time_period" | "specific_day" | "add_event" | "delete_event" | "event_details" | "find_availability" | "clarify",
+  "action": "today" | "tomorrow" | "week" | "next_meeting" | "availability" | "time_period" | "specific_day" | "add_event" | "add_recurring" | "delete_event" | "event_details" | "find_availability" | "morning_brief" | "find_free_slots" | "week_summary" | "resolve_conflicts" | "clarify",
   "timeframe": "today" | "tomorrow" | "this_week" | "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday" | "sunday" | null,
   "timePeriod": "morning" | "afternoon" | "evening" | null,
   "specificTime": "3pm" | null,
@@ -159,7 +153,13 @@ Respond with JSON:
     "duration": "e.g. 30m, 1h, 90m",
     "location": "optional location",
     "description": "optional description",
-    "guests": "comma-delimited email addresses (e.g. 'john@example.com,sarah@example.com')"
+    "guests": "comma-delimited email addresses (e.g. 'john@example.com,sarah@example.com')",
+    "recurring": {
+      "pattern": "daily | weekdays | weekly | biweekly | monthly | yearly",
+      "daysOfWeek": [1],
+      "endDate": "YYYY-MM-DD or null for forever",
+      "endAfter": "number of occurrences or null"
+    }
   },
   "deleteDetails": {
     "searchText": "Event title or partial match to find",
@@ -215,6 +215,34 @@ EXAMPLES - FIND MUTUAL AVAILABILITY (NO CLARIFICATION NEEDED):
 - "when are Josh and I both free Monday?" → action: "find_availability", availabilityQuery: {contactName: "Josh", date: "[Monday's date]", duration: 60}, needsClarification: false
 - "check Josh's availability this week" → action: "find_availability", availabilityQuery: {contactName: "Josh", date: null, duration: 60}, needsClarification: false
 
+EXAMPLES - RECURRING EVENTS (NO CLARIFICATION NEEDED):
+- "standup every weekday at 9am" → action: "add_recurring", eventDetails: {title: "standup", time: "09:00", duration: "15m", recurring: {pattern: "weekdays"}}
+- "set up a weekly sync every Monday at 2pm" → action: "add_recurring", eventDetails: {title: "weekly sync", time: "14:00", duration: "60m", recurring: {pattern: "weekly", daysOfWeek: [1]}}
+- "schedule biweekly 1:1 with John every other Tuesday" → action: "add_recurring", eventDetails: {title: "1:1 with John", time: null, duration: "30m", recurring: {pattern: "biweekly", daysOfWeek: [2]}, guests: "John"}, needsClarification: true if no time given
+- "monthly team review on the 15th at 3pm" → action: "add_recurring", eventDetails: {title: "team review", time: "15:00", duration: "60m", recurring: {pattern: "monthly", dayOfMonth: 15}}
+- "daily check-in at 8:30am" → action: "add_recurring", eventDetails: {title: "daily check-in", time: "08:30", duration: "15m", recurring: {pattern: "daily"}}
+
+EXAMPLES - MORNING BRIEF (NO CLARIFICATION NEEDED):
+- "give me my morning brief" → action: "morning_brief"
+- "what does my day look like" → action: "morning_brief"
+- "run me through today" → action: "morning_brief"
+- "daily rundown" → action: "morning_brief"
+- "brief me on today" → action: "morning_brief"
+- "how's my day" → action: "morning_brief"
+
+EXAMPLES - FREE TIME / SMART SCHEDULING:
+- "when am I free today" → action: "find_free_slots", timeframe: "today"
+- "find me an open slot this week" → action: "find_free_slots", timeframe: "this_week"
+- "suggest a time for a 1 hour meeting tomorrow" → action: "find_free_slots", timeframe: "tomorrow", specificTime: null, eventDetails: {duration: "60m"}
+- "what's my week look like" → action: "week_summary"
+- "week overview" → action: "week_summary"
+- "busiest day this week" → action: "week_summary"
+
+EXAMPLES - CONFLICT RESOLUTION:
+- "any conflicts today" → action: "resolve_conflicts", timeframe: "today"
+- "check for overlapping meetings this week" → action: "resolve_conflicts", timeframe: "this_week"
+- "resolve my scheduling conflicts" → action: "resolve_conflicts", timeframe: "today"
+
 EXAMPLES - CLARIFICATION NEEDED:
 - "check my calendar" (no time at all) → needsClarification: true
 - "am I free" (no time specified) → needsClarification: true
@@ -227,67 +255,38 @@ What calendar information does the user want?`;
 
   try {
     const result = await calendarCircuit.execute(async () => {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt }
-          ],
-          temperature: 0.3,
-          max_tokens: 300,
-          response_format: { type: 'json_object' }
-        })
+      return await ai.chat({
+        profile: 'powerful',
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+        thinking: true,
+        maxTokens: 16000,
+        jsonMode: true,
+        feature: 'calendar-agent'
       });
-      
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status}`);
-      }
-      
-      return response.json();
     });
     
-    const content = result.choices?.[0]?.message?.content;
-    if (!content) {
-      throw new Error('No content in AI response');
-    }
-    
-    const parsed = JSON.parse(content);
-    console.log('[CalendarAgent] AI understood request:', parsed.reasoning);
-    
-    // Track cost
-    if (global.budgetManager) {
-      global.budgetManager.trackUsage({
-        model: 'gpt-4o-mini',
-        inputTokens: result.usage?.prompt_tokens || 0,
-        outputTokens: result.usage?.completion_tokens || 0,
-        feature: 'calendar-agent-understanding'
-      });
-    }
+    const parsed = JSON.parse(result.content);
+    log.info('agent', 'AI understood request', { reasoning: parsed.reasoning });
     
     return parsed;
     
   } catch (error) {
-    console.warn('[CalendarAgent] AI understanding failed:', error.message);
+    log.warn('agent', 'AI understanding failed', { error: error.message });
     return null;
   }
 }
 
 // Track recent task executions to detect duplicates
-const _recentExecutions = new Map(); // taskId -> timestamp
-const EXECUTION_DEDUP_WINDOW_MS = 2000; // Ignore duplicate within 2 seconds
+const _recentExecutions = new Map(); // normalizedContent -> timestamp
+const EXECUTION_DEDUP_WINDOW_MS = 5000; // Ignore duplicate within 5 seconds
 
 const calendarAgent = {
   id: 'calendar-agent',
   name: 'Calendar Agent',
   description: 'Answers calendar and meeting questions - shows your schedule, checks availability, creates and deletes events, and provides proactive reminders',
   voice: 'coral',  // Professional, clear - see VOICE-GUIDE.md
-  acks: ["Let me check your calendar.", "Checking your schedule."],
+  acks: ["Let me check your calendar.", "Checking your schedule.", "Looking at your calendar."],
   categories: ['system', 'calendar'],
   keywords: [
     'calendar', 'meeting', 'meetings', 'schedule', 'event', 'events', 
@@ -295,9 +294,40 @@ const calendarAgent = {
     'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
     'today', 'tomorrow', 'happening', 'going on', 'scheduled', 'planned',
     'add', 'create', 'book', 'set up', 'schedule a', 'put on', 'block', 'reserve',
+    'recurring', 'every week', 'every day', 'weekly', 'daily', 'biweekly', 'monthly',
     'delete', 'cancel', 'remove', 'clear', 'drop', 'get rid of',
-    'details', 'attendees', 'who is', 'where is', 'more info', 'tell me about'
+    'details', 'attendees', 'who is', 'where is', 'more info', 'tell me about',
+    'brief', 'morning brief', 'rundown', 'day look like', 'week look like',
+    'conflict', 'overlap', 'double book', 'free slot', 'open slot',
   ],
+  executionType: 'action',  // Needs calendar API for data
+  estimatedExecutionMs: 4000,
+  dataSources: ['calendar-store', 'system-clock'],
+  
+  /**
+   * Briefing contribution: today's schedule, conflicts, free time.
+   * Priority 3 = appears after weather in the daily brief.
+   */
+  async getBriefing() {
+    try {
+      const store = this._calStore || getCalendarStore();
+      const now = new Date();
+      const brief = store.generateMorningBrief(now, []);
+      const calendarSpeech = store.renderBriefForSpeech(brief);
+      // Strip the store's own greeting (we compose our own)
+      const calendarBody = calendarSpeech
+        .replace(/^Good (morning|afternoon|evening)\.\s*Here'?s?\s*(your day|the rest of your day|a look at your schedule)\.?\s*/i, '')
+        .trim();
+      return {
+        section: 'Calendar',
+        priority: 3,
+        content: calendarBody || 'Your calendar is clear today. No meetings scheduled.',
+        data: brief,  // Structured data for the composer
+      };
+    } catch (e) {
+      return { section: 'Calendar', priority: 3, content: 'Calendar data unavailable.' };
+    }
+  },
   
   // Prompt for LLM evaluation
   prompt: `Calendar Agent handles ALL calendar, meeting, and scheduling requests.
@@ -305,23 +335,39 @@ const calendarAgent = {
 HIGH CONFIDENCE (0.85+) for:
 - Calendar queries: "what's on my calendar", "check my schedule"
 - Meeting queries: "when is my next meeting", "do I have meetings today"
-- Availability: "am I free", "am I busy", "available at 3pm"
+- Availability: "am I free", "am I busy", "available at 3pm", "find free time"
 - Time periods: "this morning", "this afternoon", "tomorrow", "this week"
 - Day-specific: "what's happening Monday", "anything on Tuesday", "what do I have Friday"
 - Generic schedule: "what's happening", "what's going on", "anything scheduled", "what do I have"
 - Event creation: "add a meeting", "schedule an appointment", "create an event", "book time", "put X on my calendar"
+- Recurring events: "standup every Monday at 9am", "set up a weekly sync", "schedule daily standup", "recurring meeting every Friday"
 - Event deletion: "delete the meeting", "cancel my appointment", "remove the event", "clear my calendar"
-- Event details: "tell me more about the meeting", "who's attending", "where is the meeting", "what's the meeting about"
+- Event details: "tell me more about the meeting", "who's attending", "where is the meeting"
+- Conflict resolution: "any conflicts today", "resolve scheduling conflicts", "overlapping meetings"
+- Free time: "when am I free", "find me an open slot", "suggest a time for a meeting"
+- Week overview: "how's my week looking", "week summary", "busiest day this week"
 
 CRITICAL PATTERNS THIS AGENT HANDLES:
-- "What's happening [day name]?" - e.g., "What's happening Monday?"
-- "What's going on [time]?" - e.g., "What's going on tomorrow?"
-- "Anything on [day]?" - e.g., "Anything on Friday?"
+- "What's happening [day name]?" e.g. "What's happening Monday?"
+- "What's going on [time]?" e.g. "What's going on tomorrow?"
+- "Anything on [day]?" e.g. "Anything on Friday?"
 - Questions about any specific day of the week (Monday through Sunday)
 - Questions about today, tomorrow, this week, this morning, this afternoon
-- Event creation: "Add [event] to my calendar", "Schedule [meeting] for [time]", "Create an event for [date]"
+- "Add [event] to my calendar", "Schedule [meeting] for [time]", "Create an event for [date]"
+- "Set up a [recurring] meeting every [day/week/month]"
+- "Am I free at [time]", "Find me a free slot on [day]"
+- DELETE/CANCEL: "cancel the standup", "delete my 3pm meeting", "remove the team sync", "cancel the test meeting", "get rid of the appointment"
 
-If the user asks about what's happening on ANY day or time period, this is a calendar query. Day names like Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday are strong calendar signals.
+IMPORTANT -- "cancel" + event noun = CALENDAR DELETE (0.90+):
+When a user says "cancel the [meeting/event/appointment/standup/sync/call]", they want to DELETE that event from their calendar. This is NOT a system cancel command. "cancel" followed by a noun phrase referring to a meeting or event is ALWAYS a calendar operation. Similarly "delete the X", "remove the X", "get rid of the X".
+
+Day names (Monday-Sunday), schedule, brief, recurring, free/busy, conflict are strong calendar signals.
+
+LOW CONFIDENCE (0.00) -- do NOT bid on:
+- Daily brief / morning brief / daily rundown / "brief me": "give me my daily brief" -> daily-brief-agent
+- Current date/time only (no events): "what day is it" -> time agent
+- Weather: "what's the weather" -> weather agent
+- General knowledge: "who invented the calendar" -> search agent
 
 If the user wants to ADD, CREATE, BOOK, or SCHEDULE something on the calendar, this agent handles it.
 If the user wants to DELETE, CANCEL, REMOVE, or CLEAR an event from the calendar, this agent handles it.`,
@@ -346,7 +392,7 @@ If the user wants to DELETE, CANCEL, REMOVE, or CLEAR an event from the calendar
   async initialize() {
     // Guard against concurrent initialization
     if (this._initializing) {
-      console.log('[CalendarAgent] Initialize already in progress, waiting...');
+      log.info('agent', 'Initialize already in progress, waiting...');
       while (this._initializing) {
         await new Promise(resolve => setTimeout(resolve, 50));
       }
@@ -355,29 +401,44 @@ If the user wants to DELETE, CANCEL, REMOVE, or CLEAR an event from the calendar
     
     // Guard against re-initialization when already initialized
     if (this.memory && this._pollerInterval) {
-      console.log('[CalendarAgent] Already initialized, skipping');
+      log.info('agent', 'Already initialized, skipping');
       return this.memory;
     }
     
     this._initializing = true;
-    console.log('[CalendarAgent] Initializing...');
+    log.info('agent', 'Initializing...');
     
     try {
       if (!this.memory) {
         this.memory = getAgentMemory('calendar-agent', { displayName: 'Calendar Agent' });
         await this.memory.load();
         this._ensureMemorySections();
-        console.log('[CalendarAgent] Memory loaded');
+        log.info('agent', 'Memory loaded');
       }
       
       // Clear cache on initialize to force fresh data fetch
       this._cache.events = null;
       this._cache.fetchedAt = 0;
       
+      // Initialize local calendar store (persistent events, recurring, briefs)
+      this._calStore = getCalendarStore();
+      
       // Start meeting poller for proactive reminders
       this._startMeetingPoller();
       
-      console.log('[CalendarAgent] Initialization complete');
+      // Start morning brief scheduler
+      this._calStore.startBriefScheduler((speechText, briefData) => {
+        log.info('agent', 'Morning brief ready', { eventCount: briefData.summary.totalEvents });
+        try {
+          const { getVoiceSpeaker } = require('../../voice-speaker');
+          const speaker = getVoiceSpeaker();
+          if (speaker) {
+            speaker.speak(speechText, { voice: this.voice || 'coral' });
+          }
+        } catch (_) {}
+      });
+      
+      log.info('agent', 'Initialization complete (with CalendarStore)');
       return this.memory;
     } finally {
       this._initializing = false;
@@ -581,7 +642,7 @@ If the user wants to DELETE, CANCEL, REMOVE, or CLEAR an event from the calendar
       return; // Already running
     }
     
-    console.log('[CalendarAgent] Starting meeting poller (every 5 minutes)');
+    log.info('agent', 'Starting meeting poller (every 5 minutes)');
     
     // Check immediately
     this._checkUpcomingMeetings();
@@ -599,7 +660,7 @@ If the user wants to DELETE, CANCEL, REMOVE, or CLEAR an event from the calendar
     if (this._pollerInterval) {
       clearInterval(this._pollerInterval);
       this._pollerInterval = null;
-      console.log('[CalendarAgent] Meeting poller stopped');
+      log.info('agent', 'Meeting poller stopped');
     }
   },
   
@@ -628,7 +689,7 @@ If the user wants to DELETE, CANCEL, REMOVE, or CLEAR an event from the calendar
       try {
         notificationManager = require('../../src/voice-task-sdk/notifications/notificationManager');
       } catch (e) {
-        console.warn('[CalendarAgent] Notification manager not available');
+        log.warn('agent', 'Notification manager not available');
         return;
       }
       
@@ -655,13 +716,13 @@ If the user wants to DELETE, CANCEL, REMOVE, or CLEAR an event from the calendar
         const formattedTime = start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
         const message = `Your meeting "${meeting.summary}" starts at ${formattedTime}`;
         
-        console.log(`[CalendarAgent] Scheduling reminder for "${meeting.summary}" in ${Math.round(reminderTime / 60000)} minutes`);
+        log.info('agent', `Scheduling reminder for "${meeting.summary}" in ${Math.round(reminderTime / 60000)} minutes`);
         
         notificationManager.schedule(notificationId, message, {
           delay: reminderTime,
-          priority: 3, // HIGH priority
+          priority: 1, // URGENT priority (TaskPriority.URGENT = 1)
           onDelivered: () => {
-            console.log(`[CalendarAgent] Reminder delivered for "${meeting.summary}"`);
+            log.info('agent', `Reminder delivered for "${meeting.summary}"`);
           }
         });
         
@@ -669,198 +730,33 @@ If the user wants to DELETE, CANCEL, REMOVE, or CLEAR an event from the calendar
       }
       
     } catch (error) {
-      console.error('[CalendarAgent] Error checking upcoming meetings:', error);
+      log.error('agent', 'Error checking upcoming meetings', { error });
     }
   },
   
   // ==================== DATA-AWARE BIDDING ====================
   
-  /**
-   * Bid on a task - uses cached data for context-aware bidding
-   * 
-   * This is data-aware: we check our cache to see if we have
-   * relevant data before bidding. "Anything urgent?" only gets a high
-   * bid if we actually HAVE an imminent meeting.
-   * 
-   * @param {Object} task - The task to bid on
-   * @returns {Object|null} - { confidence, reasoning } or null to defer to unified bidder
-   */
-  bid(task) {
-    const content = (task.content || task.phrase || '').toLowerCase();
-    
-    // Quick check: is this even calendar-related?
-    const calendarSignals = [
-      'calendar', 'meeting', 'schedule', 'event', 'appointment',
-      'busy', 'free', 'available', 'urgent', 'important',
-      'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
-      'today', 'tomorrow', 'week', 'happening', 'going on'
-    ];
-    
-    // Event creation signals
-    const eventCreationSignals = [
-      'add', 'create', 'book', 'set up', 'put on', 'block', 'reserve'
-    ];
-    const hasCreationSignal = eventCreationSignals.some(s => content.includes(s));
-    
-    // Event deletion signals
-    const eventDeletionSignals = [
-      'delete', 'cancel', 'remove', 'clear', 'drop', 'get rid of'
-    ];
-    const hasDeletionSignal = eventDeletionSignals.some(s => content.includes(s));
-    
-    // Check for event deletion with calendar context
-    if (hasDeletionSignal && (content.includes('calendar') || content.includes('meeting') || 
-        content.includes('event') || content.includes('appointment') || content.includes('the'))) {
-      return {
-        confidence: 0.90,
-        reasoning: 'Event deletion request detected'
-      };
-    }
-    
-    // Check for event creation with calendar context
-    if (hasCreationSignal && (content.includes('calendar') || content.includes('meeting') || 
-        content.includes('event') || content.includes('appointment'))) {
-      return {
-        confidence: 0.90,
-        reasoning: 'Event creation request detected'
-      };
-    }
-    
-    const hasCalendarSignal = calendarSignals.some(s => content.includes(s));
-    
-    // If no calendar signals, let unified bidder handle
-    if (!hasCalendarSignal) {
-      return null;
-    }
-    
-    // Data-aware bidding based on cache
-    const events = this._cache.events || [];
-    const now = new Date();
-    
-    // Find upcoming events (next 24 hours)
-    const upcomingEvents = events.filter(e => {
-      const start = new Date(e.start?.dateTime || e.start?.date);
-      return start > now && start <= new Date(now.getTime() + 24 * 60 * 60 * 1000);
-    });
-    
-    // Find imminent meeting (next 30 minutes)
-    const imminentMeeting = events.find(e => {
-      const start = new Date(e.start?.dateTime || e.start?.date);
-      const minutesUntil = (start - now) / 60000;
-      return minutesUntil > 0 && minutesUntil <= 30;
-    });
-    
-    // "Anything urgent?" type queries - bid based on actual data
-    if (content.includes('urgent') || content.includes('important') || content.includes('coming up')) {
-      if (imminentMeeting) {
-        const start = new Date(imminentMeeting.start?.dateTime || imminentMeeting.start?.date);
-        const minutesUntil = Math.round((start - now) / 60000);
-        return {
-          confidence: 0.92,
-          reasoning: `Meeting "${imminentMeeting.summary}" in ${minutesUntil} minutes`
-        };
-      } else if (upcomingEvents.length > 0) {
-        return {
-          confidence: 0.75,
-          reasoning: `${upcomingEvents.length} event${upcomingEvents.length > 1 ? 's' : ''} in next 24 hours`
-        };
-      } else {
-        // We're the right agent for calendar stuff, but nothing urgent
-        return {
-          confidence: 0.60,
-          reasoning: 'Calendar agent - no imminent meetings'
-        };
-      }
-    }
-    
-    // Day-specific queries (Monday, Tuesday, etc.)
-    const dayNames = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
-    const mentionedDay = dayNames.find(d => content.includes(d));
-    if (mentionedDay || content.includes('today') || content.includes('tomorrow') || content.includes('week')) {
-      // Get events for that specific timeframe
-      const dayEvents = this._getEventsForQueryTimeframe(events, content);
-      if (dayEvents.length > 0) {
-        return {
-          confidence: 0.88,
-          reasoning: `${dayEvents.length} event${dayEvents.length > 1 ? 's' : ''} found for requested timeframe`
-        };
-      } else {
-        return {
-          confidence: 0.80,
-          reasoning: 'Calendar query - checking schedule'
-        };
-      }
-    }
-    
-    // Generic calendar query
-    if (upcomingEvents.length > 0) {
-      return {
-        confidence: 0.80,
-        reasoning: `${upcomingEvents.length} upcoming event${upcomingEvents.length > 1 ? 's' : ''}`
-      };
-    }
-    
-    return {
-      confidence: 0.70,
-      reasoning: 'Calendar agent - schedule appears clear'
-    };
-  },
-  
-  /**
-   * Helper to get events for a query timeframe (for bidding)
-   */
-  _getEventsForQueryTimeframe(events, query) {
-    const now = new Date();
-    const lower = query.toLowerCase();
-    
-    let startDate = new Date(now);
-    let endDate = new Date(now);
-    
-    if (lower.includes('today')) {
-      startDate.setHours(0, 0, 0, 0);
-      endDate.setHours(23, 59, 59, 999);
-    } else if (lower.includes('tomorrow')) {
-      startDate.setDate(startDate.getDate() + 1);
-      startDate.setHours(0, 0, 0, 0);
-      endDate.setDate(endDate.getDate() + 1);
-      endDate.setHours(23, 59, 59, 999);
-    } else if (lower.includes('week')) {
-      endDate.setDate(endDate.getDate() + 7);
-    } else {
-      // Day of week
-      const dayMap = { 'sunday': 0, 'monday': 1, 'tuesday': 2, 'wednesday': 3, 'thursday': 4, 'friday': 5, 'saturday': 6 };
-      const day = Object.keys(dayMap).find(d => lower.includes(d));
-      if (day) {
-        const targetDay = dayMap[day];
-        const currentDay = now.getDay();
-        let daysUntil = targetDay - currentDay;
-        if (daysUntil <= 0) daysUntil += 7;
-        startDate.setDate(startDate.getDate() + daysUntil);
-        startDate.setHours(0, 0, 0, 0);
-        endDate = new Date(startDate);
-        endDate.setHours(23, 59, 59, 999);
-      }
-    }
-    
-    return events.filter(e => {
-      const eventStart = new Date(e.start?.dateTime || e.start?.date);
-      return eventStart >= startDate && eventStart <= endDate;
-    });
-  },
+  // No bid() method - routing is handled entirely by the unified bidder (LLM-based).
+  // The unified bidder evaluates this agent's description, capabilities, and the user's
+  // intent semantically via GPT-4o-mini. No keyword matching. See unified-bidder.js.
   
   // ==================== EXECUTION ====================
   
   /**
    * Execute the task with full agentic capabilities
+   * @param {Object} task - The task to execute
+   * @param {Object} executionContext - Execution context with submitSubtask callback
    */
-  async execute(task) {
+  async execute(task, executionContext = {}) {
     // ==================== DUPLICATE EXECUTION DETECTION ====================
-    const taskKey = `${task.id}_${task.content?.slice(0, 50)}`;
+    // Use normalized content as key (NOT task.id, which is unique per submission)
+    const normalizedContent = (task.content || '').toLowerCase().replace(/[.,!?;:'"]/g, '').trim().slice(0, 100);
+    const taskKey = normalizedContent;
     const now = Date.now();
     const lastExecution = _recentExecutions.get(taskKey);
     
     if (lastExecution && (now - lastExecution) < EXECUTION_DEDUP_WINDOW_MS) {
-      console.warn(`[CalendarAgent] DUPLICATE EXECUTION DETECTED for task ${task.id}, skipping (${now - lastExecution}ms since last)`);
+      log.warn('agent', `DUPLICATE EXECUTION DETECTED for "${normalizedContent.slice(0, 40)}...", skipping (${now - lastExecution}ms since last)`);
       return { success: true, message: "Already processing this request." };
     }
     _recentExecutions.set(taskKey, now);
@@ -872,7 +768,7 @@ If the user wants to DELETE, CANCEL, REMOVE, or CLEAR an event from the calendar
       }
     }
     
-    console.log(`[CalendarAgent] Execute called for task ${task.id}: "${task.content?.slice(0, 50)}..."`);
+    log.info('agent', `Execute called for task ${task.id}: "${task.content?.slice(0, 50)}..."`);
     // #region agent log
     fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'calendar-agent.js:800',message:'Agent execute called',data:{taskContent:task.content?.slice(0,100)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'ALL'})}).catch(()=>{});
     // #endregion
@@ -883,13 +779,16 @@ If the user wants to DELETE, CANCEL, REMOVE, or CLEAR an event from the calendar
         await this.initialize();
       }
       
+      // Store execution context for methods that need it (like _resolveConflicts)
+      this._currentExecutionContext = executionContext;
+      
       const context = getTimeContext();
       
       // ==================== MULTI-TURN STATE HANDLING ====================
       // Check if this is a follow-up response to a previous needsInput
       const calendarState = task.context?.calendarState;
       if (calendarState) {
-        console.log(`[CalendarAgent] Handling multi-turn state: ${calendarState}`);
+        log.info('agent', `Handling multi-turn state: ${calendarState}`);
         
         switch (calendarState) {
           case 'awaiting_delete_selection':
@@ -916,24 +815,89 @@ If the user wants to DELETE, CANCEL, REMOVE, or CLEAR an event from the calendar
           case 'awaiting_schedule_confirmation':
             return this._handleScheduleConfirmation(task);
           
+          case 'awaiting_recurring_details':
+            return this._handleRecurringDetailsResponse(task, context);
+          
+          // ==================== CONFLICT RESOLUTION STATES ====================
+          case 'awaiting_conflict_resolution':
+            // This is a subtask asking user to cancel/move/skip a conflict
+            return this._handleConflictChoice(task, executionContext);
+          
+          case 'awaiting_conflict_move_time':
+            // User is providing a new time for moving an event
+            return this._handleConflictMoveTime(task);
+          
           default:
-            console.log(`[CalendarAgent] Unknown calendar state: ${calendarState}, processing as new request`);
+            log.info('agent', `Unknown calendar state: ${calendarState}, processing as new request`);
         }
       }
       
-      // Fetch calendar events
-      const events = await this._fetchEvents();
+      // ==================== FETCH EVENTS (EXTERNAL + LOCAL) ====================
+      const externalEvents = await this._fetchEvents();
       
-      if (!events || events.length === 0) {
-        const result = { success: true, message: "Your calendar is clear - no upcoming events." };
-        await this._recordQuery(task.content, result.message);
-        return result;
+      // Ensure CalendarStore is initialized
+      if (!this._calStore) {
+        this._calStore = getCalendarStore();
       }
       
-      // ==================== SIMPLE LLM APPROACH ====================
-      // Feed the events directly to the LLM and let it answer
-      console.log('[CalendarAgent] Asking LLM to answer calendar question with', events.length, 'events');
-      const result = await this._askLLMAboutCalendar(task.content, events, context);
+      const userQuery = (task.content || '').toLowerCase().trim();
+      
+      // ==================== NEW ACTION ROUTING ====================
+      // Check for new CalendarStore-powered actions before falling through
+      // to the general LLM approach.
+      
+      // --- Morning Brief → handled by daily-brief-agent now ---
+      // Calendar-agent's getBriefing() contributes schedule data.
+      // If a brief request somehow reaches here, return the calendar contribution only.
+      if (this._isBriefRequest(userQuery)) {
+        const briefData = await this.getBriefing();
+        const briefSpec = this._buildBriefUISpec(briefData.data);
+        const briefHtml = briefSpec.events.length > 0 ? renderAgentUI(briefSpec) : undefined;
+        return { success: true, message: briefData.content || 'Your calendar is clear today.', html: briefHtml };
+      }
+      
+      // --- Week Summary ---
+      if (this._isWeekSummaryRequest(userQuery)) {
+        return this._handleWeekSummary(externalEvents);
+      }
+      
+      // --- Free Slot Finder ---
+      if (this._isFreeSlotRequest(userQuery)) {
+        return this._handleFreeSlots(userQuery, externalEvents);
+      }
+      
+      // --- Recurring Event Creation (detect before general LLM) ---
+      if (this._isRecurringRequest(userQuery)) {
+        return this._handleRecurringCreation(task, context);
+      }
+      
+      // --- Conflict Check ---
+      if (this._isConflictCheckRequest(userQuery)) {
+        return this._handleConflictCheck(userQuery, externalEvents);
+      }
+      
+      // ==================== GENERAL LLM APPROACH ====================
+      // Merge local + external events and let the LLM answer
+      const allEvents = externalEvents || [];
+      
+      if (allEvents.length === 0) {
+        // Check if CalendarStore has local events for today/this week
+        const localToday = this._calStore.getEventsToday();
+        if (localToday.length === 0) {
+          const result = { success: true, message: "Your calendar is clear - no upcoming events." };
+          await this._recordQuery(task.content, result.message);
+          return result;
+        }
+        // Fall through to general LLM approach with local events
+      }
+      
+      log.info('agent', 'Asking LLM to answer calendar question with', { length: allEvents.length, detail: 'events' });
+      const result = await this._askLLMAboutCalendar(task.content, allEvents, context);
+      
+      // If the LLM detected a recurring creation or local action, handle it
+      if (result._localAction) {
+        return this._handleLocalAction(result._localAction, externalEvents);
+      }
       
       // Learn from this interaction
       await this._learnFromQuery(task.content, result, context);
@@ -941,7 +905,7 @@ If the user wants to DELETE, CANCEL, REMOVE, or CLEAR an event from the calendar
       return result;
       
     } catch (error) {
-      console.error('[CalendarAgent] Error:', error);
+      log.error('agent', 'Error', { error });
       return { 
         success: false, 
         message: THINKING_CONFIG.errorMessage 
@@ -953,13 +917,6 @@ If the user wants to DELETE, CANCEL, REMOVE, or CLEAR an event from the calendar
    * Simple LLM approach - feed events and let LLM answer
    */
   async _askLLMAboutCalendar(userQuestion, events, context) {
-    const apiKey = getOpenAIApiKey();
-    
-    if (!apiKey) {
-      console.log('[CalendarAgent] No API key, cannot use LLM');
-      return { success: false, message: "I need an API key to check your calendar." };
-    }
-    
     // Format events for LLM - separate past and future events clearly
     const now = new Date();
     const startOfToday = new Date(now);
@@ -983,7 +940,7 @@ If the user wants to DELETE, CANCEL, REMOVE, or CLEAR an event from the calendar
       return new Date(a.start?.dateTime || a.start?.date) - new Date(b.start?.dateTime || b.start?.date);
     });
     
-    console.log(`[CalendarAgent] Events: ${futureEvents.length} future, ${pastEvents.length} past (${events.length} total)`);
+    log.info('agent', `Events: ${futureEvents.length} future, ${pastEvents.length} past (${events.length} total)`);
     
     // Format future events for LLM with full details
     const formatEvent = (e) => {
@@ -1078,75 +1035,136 @@ CRITICAL INSTRUCTIONS FOR EVENT DETAILS:
 - Extract: searchText (event name/title), date if specified, and what info they want
 - Respond with JSON: {"action":"event_details","detailsQuery":{"searchText":"...","date":"YYYY-MM-DD or null","infoRequested":"attendees|location|description|time|all"}}
 
-If this is NOT an event creation, deletion, or details request, respond with normal text (not JSON)`;
+CRITICAL INSTRUCTIONS FOR CONFLICT RESOLUTION:
+- If the user wants to RESOLVE CONFLICTS, FIX SCHEDULE, or CLEAR UP OVERLAPPING events, respond with a special JSON format
+- This is for finding and resolving events that overlap in time
+- Extract the time period: today, tomorrow, this week, a specific day, or date range
+- For relative dates, calculate the actual date based on TODAY
+- Respond with JSON: {"action":"resolve_conflicts","period":{"startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD"}}
+- Examples of conflict resolution requests:
+  - "resolve conflicts for this week" -> action: resolve_conflicts, period for this week
+  - "fix my schedule for Monday" -> action: resolve_conflicts, period for Monday
+  - "any overlapping meetings today?" -> action: resolve_conflicts, period for today
+
+CRITICAL INSTRUCTIONS FOR RECURRING EVENT CREATION:
+- If the user wants to create a RECURRING event (every day, every week, every Monday, etc.), respond with JSON:
+  {"action":"add_recurring","eventDetails":{"title":"...","date":"YYYY-MM-DD","time":"HH:MM","duration":"30m","recurring":{"pattern":"weekly","daysOfWeek":[1]}}}
+- Patterns: "daily", "weekdays", "weekly", "biweekly", "monthly", "yearly"
+- daysOfWeek: 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
+
+CRITICAL INSTRUCTIONS FOR SPECIAL ACTIONS:
+- Morning brief / daily rundown / "what does my day look like" -> respond with JSON: {"action":"morning_brief"}
+- Week summary / "how's my week" -> respond with JSON: {"action":"week_summary"}
+- Free slots / "when am I free" -> respond with JSON: {"action":"find_free_slots","query":"original user query"}
+
+If this is NOT one of the above special requests, respond with normal text (not JSON).`;
 
     try {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userQuestion }
-          ],
-          temperature: 0.7,
-          max_tokens: 200
-        })
+      const result = await ai.chat({
+        profile: 'powerful',
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userQuestion }],
+        thinking: true,
+        maxTokens: 16000,
+        feature: 'calendar-agent'
       });
       
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      const answer = data.choices?.[0]?.message?.content?.trim();
+      const answer = result.content?.trim();
       
       if (!answer) {
         throw new Error('No response from LLM');
       }
       
-      // Track cost
-      if (global.budgetManager) {
-        global.budgetManager.trackUsage({
-          model: 'gpt-4o-mini',
-          inputTokens: data.usage?.prompt_tokens || 0,
-          outputTokens: data.usage?.completion_tokens || 0,
-          context: 'calendar-query'
-        });
-      }
-      
-      console.log('[CalendarAgent] LLM response:', answer);
+      log.info('agent', 'LLM response', { answer });
       
       // Check if this is an event creation/deletion response (JSON format)
       if (answer.startsWith('{') && answer.includes('"action"')) {
         try {
           const parsed = JSON.parse(answer);
           if (parsed.action === 'add_event' && parsed.eventDetails) {
-            console.log('[CalendarAgent] Detected event creation request:', parsed.eventDetails);
+            log.info('agent', 'Detected event creation request', { eventDetails: parsed.eventDetails });
             return this._createEvent(parsed.eventDetails);
           }
           if (parsed.action === 'delete_event' && parsed.deleteDetails) {
-            console.log('[CalendarAgent] Detected event deletion request:', parsed.deleteDetails);
+            log.info('agent', 'Detected event deletion request', { deleteDetails: parsed.deleteDetails });
             return this._deleteEvent(parsed.deleteDetails, futureEvents);
           }
           if (parsed.action === 'event_details' && parsed.detailsQuery) {
-            console.log('[CalendarAgent] Detected event details request:', parsed.detailsQuery);
+            log.info('agent', 'Detected event details request', { detailsQuery: parsed.detailsQuery });
             return this._getEventDetails(parsed.detailsQuery, futureEvents);
+          }
+          if (parsed.action === 'resolve_conflicts' && parsed.period) {
+            log.info('agent', 'Detected conflict resolution request', { period: parsed.period });
+            // Convert period dates to Date objects
+            const period = {
+              startDate: new Date(parsed.period.startDate),
+              endDate: new Date(parsed.period.endDate + 'T23:59:59') // End of the day
+            };
+            // Pass executionContext from closure (set via _askLLMAboutCalendar's caller)
+            return this._resolveConflicts(period, futureEvents, this._currentExecutionContext);
+          }
+          // New CalendarStore-powered actions from LLM
+          if (parsed.action === 'add_recurring' && parsed.eventDetails) {
+            log.info('agent', 'LLM detected recurring creation request');
+            return { _localAction: { type: 'recurring_create', details: parsed.eventDetails } };
+          }
+          if (parsed.action === 'morning_brief') {
+            log.info('agent', 'LLM detected morning brief request');
+            return { _localAction: { type: 'morning_brief' } };
+          }
+          if (parsed.action === 'week_summary') {
+            log.info('agent', 'LLM detected week summary request');
+            return { _localAction: { type: 'week_summary' } };
+          }
+          if (parsed.action === 'find_free_slots') {
+            log.info('agent', 'LLM detected free slots request');
+            return { _localAction: { type: 'find_free_slots', query: parsed.query || '' } };
           }
         } catch (parseErr) {
           // Not valid JSON, treat as normal response
-          console.log('[CalendarAgent] Response looked like JSON but failed to parse:', parseErr.message);
+          log.info('agent', 'Response looked like JSON but failed to parse', { message: parseErr.message });
         }
       }
       
-      return { success: true, message: answer };
+      // Build rich UI panel alongside the LLM text answer.
+      // Detect the timeframe from the user question and filter events.
+      const q = userQuestion.toLowerCase();
+      let relevantEvents = futureEvents;
+      let uiLabel = 'Upcoming';
+
+      const endOfToday = new Date(startOfToday);
+      endOfToday.setHours(23, 59, 59, 999);
+      const startOfTomorrow = new Date(startOfToday);
+      startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
+      const endOfTomorrow = new Date(startOfTomorrow);
+      endOfTomorrow.setHours(23, 59, 59, 999);
+
+      if (q.includes('today') || q.includes('this morning') || q.includes('this afternoon')) {
+        relevantEvents = futureEvents.filter(e => new Date(e.start?.dateTime || e.start?.date) <= endOfToday);
+        uiLabel = 'Today';
+      } else if (q.includes('tomorrow')) {
+        relevantEvents = futureEvents.filter(e => {
+          const s = new Date(e.start?.dateTime || e.start?.date);
+          return s >= startOfTomorrow && s <= endOfTomorrow;
+        });
+        uiLabel = 'Tomorrow';
+      } else if (q.includes('next meeting') || q.includes('next call')) {
+        relevantEvents = futureEvents.slice(0, 1);
+        uiLabel = 'Next Meeting';
+      } else if (q.includes('week')) {
+        const weekEnd = new Date(now);
+        weekEnd.setDate(weekEnd.getDate() + 7);
+        relevantEvents = futureEvents.filter(e => new Date(e.start?.dateTime || e.start?.date) <= weekEnd);
+        uiLabel = 'This Week';
+      }
+
+      const uiSpec = this._buildEventsUISpec(relevantEvents, uiLabel);
+      const html = relevantEvents.length > 0 ? renderAgentUI(uiSpec) : undefined;
+
+      return { success: true, message: answer, html };
       
     } catch (error) {
-      console.error('[CalendarAgent] LLM error:', error);
+      log.error('agent', 'LLM error', { error });
       return { success: false, message: "Sorry, I couldn't check your calendar right now." };
     }
   },
@@ -1255,6 +1273,57 @@ If this is NOT an event creation, deletion, or details request, respond with nor
           }
         };
       
+      case 'morning_brief': {
+        const briefData = await this.getBriefing();
+        const briefSpec = this._buildBriefUISpec(briefData.data);
+        const briefHtml = briefSpec.events.length > 0 ? renderAgentUI(briefSpec) : undefined;
+        return { success: true, message: briefData.content || 'Your calendar is clear today.', html: briefHtml };
+      }
+      
+      case 'week_summary':
+        return this._handleWeekSummary(events);
+      
+      case 'find_free_slots':
+        return this._handleFreeSlots(aiResult.timeframe || 'today', events);
+      
+      case 'add_recurring':
+        if (aiResult.eventDetails) {
+          // Already parsed -- pass through
+          const store = this._calStore || getCalendarStore();
+          const ed = aiResult.eventDetails;
+          const startDate = ed.date || new Date().toISOString().slice(0, 10);
+          const startTime = ed.time || '09:00';
+          const durationMs = this._parseDuration(ed.duration || '30m');
+          const startISO = new Date(`${startDate}T${startTime}:00`).toISOString();
+          const endISO = new Date(new Date(startISO).getTime() + durationMs).toISOString();
+          
+          const { event, conflicts } = store.addEvent({
+            title: ed.title,
+            startTime: startISO,
+            endTime: endISO,
+            recurring: ed.recurring,
+            guests: ed.guests ? ed.guests.split(',').map(g => g.trim()) : [],
+          });
+          
+          const patternLabel = this._describeRecurrence(event.recurring);
+          let msg = `Created recurring event "${event.title}" ${patternLabel}.`;
+          if (conflicts.length > 0) {
+            msg += ` Note: ${conflicts.length} conflict${conflicts.length > 1 ? 's' : ''} detected.`;
+          }
+          return { success: true, message: msg };
+        }
+        return {
+          success: true,
+          needsInput: {
+            prompt: 'What should I call this recurring event, and how often? For example: "Team standup every weekday at 9am".',
+            agentId: this.id,
+            context: { calendarState: 'awaiting_recurring_details', originalRequest: 'add recurring' },
+          },
+        };
+      
+      case 'resolve_conflicts':
+        return this._handleConflictCheck(aiResult.timeframe || 'today', events);
+      
       default:
         // If timeframe is set, use it (handles cases where action might be 'clarify' but we have a day)
         if (aiResult.timeframe && !aiResult.needsClarification) {
@@ -1337,6 +1406,363 @@ If this is NOT an event creation, deletion, or details request, respond with nor
         }
       }
     };
+  },
+  
+  // ==================== CALENDARSTORE-POWERED HANDLERS ====================
+  
+  /**
+   * Request detection helpers (fast, no LLM call needed).
+   */
+  _isBriefRequest(q) {
+    return /\b(morning\s*brief|daily\s*rundown|brief\s*me|run\s*me\s*through\s*today|what\s*does\s*my\s*day\s*look\s*like|how'?s\s*my\s*day|day\s*look\s*like|give\s*me\s*(?:a\s+)?(?:my\s+)?brief)\b/i.test(q);
+  },
+  
+  _isWeekSummaryRequest(q) {
+    return /\b(week\s*(?:summary|overview|look|recap)|how'?s\s*my\s*week|busiest\s*day\s*this\s*week|week\s*at\s*a\s*glance)\b/i.test(q);
+  },
+  
+  _isFreeSlotRequest(q) {
+    return /\b(when\s*am\s*i\s*free|find\s*(?:me\s+)?(?:a\s+)?(?:an\s+)?(?:free|open)\s*(?:slot|time|block)|suggest\s*a\s*time|free\s*slots?|open\s*slots?)\b/i.test(q);
+  },
+  
+  _isRecurringRequest(q) {
+    return /\b(every\s*(?:day|weekday|week|other\s*week|monday|tuesday|wednesday|thursday|friday|saturday|sunday|month|year)|daily\s*(?:standup|check|sync|meeting)|weekly\s*(?:sync|standup|meeting|review)|biweekly|recurring|repeating)\b/i.test(q);
+  },
+  
+  _isConflictCheckRequest(q) {
+    return /\b(conflict|overlapping|double.?book|schedule\s*conflict|any\s*conflicts|resolve\s*conflict|check\s*for\s*overlap)\b/i.test(q);
+  },
+  
+  /**
+   * Week Summary handler.
+   */
+  async _handleWeekSummary(externalEvents) {
+    const store = this._calStore || getCalendarStore();
+    const summary = store.generateWeekSummary(externalEvents);
+    return { success: true, message: summary };
+  },
+  
+  /**
+   * Free Slot finder handler.
+   */
+  async _handleFreeSlots(query, externalEvents) {
+    const store = this._calStore || getCalendarStore();
+    
+    // Determine which day to check
+    let targetDate = new Date();
+    if (/tomorrow/i.test(query)) {
+      targetDate = new Date(targetDate.getTime() + 86400000);
+    } else if (/monday|tuesday|wednesday|thursday|friday|saturday|sunday/i.test(query)) {
+      const dayNames = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+      const match = query.match(/monday|tuesday|wednesday|thursday|friday|saturday|sunday/i);
+      if (match) {
+        const targetDay = dayNames.indexOf(match[0].toLowerCase());
+        const today = targetDate.getDay();
+        let diff = targetDay - today;
+        if (diff <= 0) diff += 7;
+        targetDate = new Date(targetDate.getTime() + diff * 86400000);
+      }
+    }
+    
+    // Parse desired duration from query
+    let minDuration = 30;
+    const durMatch = query.match(/(\d+)\s*(?:min|minute|hour|hr)/i);
+    if (durMatch) {
+      minDuration = parseInt(durMatch[1]);
+      if (/hour|hr/i.test(durMatch[0])) minDuration *= 60;
+    }
+    
+    const slots = store.getFreeSlots(targetDate, minDuration, externalEvents);
+    const dayLabel = store.constructor.name ? 
+      targetDate.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }) :
+      'that day';
+    
+    if (slots.length === 0) {
+      return { 
+        success: true, 
+        message: `You don't have any free blocks of ${minDuration} minutes or more on ${dayLabel}.`,
+      };
+    }
+    
+    const slotDescriptions = slots.slice(0, 4).map(s => {
+      const sTime = new Date(s.start).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+      const eTime = new Date(s.end).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+      return `${sTime} to ${eTime} (${s.durationMinutes} minutes)`;
+    });
+    
+    const balance = store.getDayBalance(targetDate, externalEvents);
+    const intro = `On ${dayLabel} you have ${balance.freeHours} hours free during working hours.`;
+    const detail = `Open blocks: ${slotDescriptions.join('; ')}.`;
+    
+    return {
+      success: true,
+      message: `${intro} ${detail}`,
+      data: { type: 'free_slots', slots, balance },
+    };
+  },
+  
+  /**
+   * Recurring event creation handler.
+   * Uses LLM to parse the natural-language request into structured recurring event data.
+   */
+  async _handleRecurringCreation(task, context) {
+    const store = this._calStore || getCalendarStore();
+    const userRequest = task.content || '';
+    
+    // Use LLM to parse the recurring request
+    const parsed = await this._parseRecurringWithLLM(userRequest);
+    
+    if (!parsed || parsed.needsClarification) {
+      return {
+        success: true,
+        needsInput: {
+          prompt: parsed?.clarificationPrompt || 'What time should this recurring event be? And which days?',
+          agentId: this.id,
+          context: {
+            calendarState: 'awaiting_recurring_details',
+            originalRequest: userRequest,
+            partialEvent: parsed?.eventDetails || {},
+          },
+        },
+      };
+    }
+    
+    // Build the event
+    const eventData = parsed.eventDetails;
+    const startDate = eventData.date || new Date().toISOString().slice(0, 10);
+    const startTime = eventData.time || '09:00';
+    const durationMs = this._parseDuration(eventData.duration || '30m');
+    
+    const startISO = new Date(`${startDate}T${startTime}:00`).toISOString();
+    const endISO = new Date(new Date(startISO).getTime() + durationMs).toISOString();
+    
+    const { event, conflicts } = store.addEvent({
+      title: eventData.title,
+      startTime: startISO,
+      endTime: endISO,
+      location: eventData.location || '',
+      description: eventData.description || '',
+      guests: eventData.guests ? eventData.guests.split(',').map(g => g.trim()) : [],
+      recurring: eventData.recurring,
+    });
+    
+    // Build response
+    const patternLabel = this._describeRecurrence(event.recurring);
+    let msg = `Created recurring event "${event.title}" ${patternLabel}`;
+    if (eventData.time) {
+      msg += ` at ${new Date(startISO).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+    }
+    msg += '.';
+    
+    if (conflicts.length > 0) {
+      msg += ` Note: this conflicts with ${conflicts.length} existing event${conflicts.length > 1 ? 's' : ''}.`;
+      const firstConflict = conflicts[0];
+      msg += ` "${firstConflict.title}" at ${new Date(firstConflict.startTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}.`;
+      msg += ' Would you like me to resolve these conflicts?';
+    }
+    
+    return {
+      success: true,
+      message: msg,
+      data: {
+        type: 'recurring_created',
+        event,
+        conflicts,
+      },
+    };
+  },
+  
+  /**
+   * Conflict check handler -- finds and reports all conflicts for a day/week.
+   */
+  async _handleConflictCheck(query, externalEvents) {
+    const store = this._calStore || getCalendarStore();
+    
+    // Determine period
+    let targetDate = new Date();
+    if (/tomorrow/i.test(query)) {
+      targetDate = new Date(targetDate.getTime() + 86400000);
+    }
+    
+    const isWeek = /week/i.test(query);
+    
+    if (isWeek) {
+      // Check whole week
+      const dayOfWeek = targetDate.getDay();
+      const monday = new Date(targetDate);
+      monday.setDate(monday.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+      
+      let totalConflicts = 0;
+      const conflictDays = [];
+      
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(monday);
+        d.setDate(d.getDate() + i);
+        const dayConflicts = store.findDayConflicts(d, externalEvents);
+        if (dayConflicts.length > 0) {
+          totalConflicts += dayConflicts.length;
+          const dayName = d.toLocaleDateString('en-US', { weekday: 'long' });
+          for (const c of dayConflicts) {
+            conflictDays.push(`${dayName}: "${c.event1.title}" and "${c.event2.title}" overlap by ${c.overlapMinutes} minutes`);
+          }
+        }
+      }
+      
+      if (totalConflicts === 0) {
+        return { success: true, message: 'No scheduling conflicts this week. Your calendar is clean.' };
+      }
+      
+      return {
+        success: true,
+        message: `Found ${totalConflicts} conflict${totalConflicts > 1 ? 's' : ''} this week. ${conflictDays.join('. ')}.`,
+      };
+    }
+    
+    // Single day
+    const conflicts = store.findDayConflicts(targetDate, externalEvents);
+    const dayLabel = targetDate.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+    
+    if (conflicts.length === 0) {
+      return { success: true, message: `No conflicts on ${dayLabel}. Your schedule is clear.` };
+    }
+    
+    const details = conflicts.map(c => 
+      `"${c.event1.title}" and "${c.event2.title}" overlap by ${c.overlapMinutes} minutes around ${new Date(c.event1.startTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
+    );
+    
+    const suggestions = store.suggestAlternatives(30, targetDate, 2);
+    let suggestMsg = '';
+    if (suggestions.length > 0) {
+      suggestMsg = ` I can suggest moving one: ${suggestions.map(s => `${s.day} at ${s.time}`).join(' or ')}.`;
+    }
+    
+    return {
+      success: true,
+      message: `${conflicts.length} conflict${conflicts.length > 1 ? 's' : ''} on ${dayLabel}. ${details.join('. ')}.${suggestMsg}`,
+    };
+  },
+  
+  /**
+   * Handle local actions detected by the LLM.
+   */
+  async _handleLocalAction(action, externalEvents) {
+    switch (action.type) {
+      case 'morning_brief': {
+        const briefData = await this.getBriefing();
+        const briefSpec = this._buildBriefUISpec(briefData.data);
+        const briefHtml = briefSpec.events.length > 0 ? renderAgentUI(briefSpec) : undefined;
+        return { success: true, message: briefData.content || 'Your calendar is clear today.', html: briefHtml };
+      }
+      case 'week_summary':
+        return this._handleWeekSummary(externalEvents);
+      case 'find_free_slots':
+        return this._handleFreeSlots(action.query || '', externalEvents);
+      case 'resolve_conflicts':
+        return this._handleConflictCheck(action.query || 'today', externalEvents);
+      default:
+        return { success: true, message: "I'm not sure how to handle that calendar request." };
+    }
+  },
+  
+  /**
+   * Use LLM to parse a natural-language recurring event request.
+   */
+  async _parseRecurringWithLLM(userRequest) {
+    const now = new Date();
+    const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    
+    try {
+      const result = await calendarCircuit.execute(async () => {
+        return await ai.chat({
+          profile: 'powerful',
+          system: `You parse recurring event requests into structured JSON. Today is ${now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}.
+
+Return JSON:
+{
+  "eventDetails": {
+    "title": "event title",
+    "date": "YYYY-MM-DD (first occurrence)",
+    "time": "HH:MM (24-hour) or null if not specified",
+    "duration": "e.g. 15m, 30m, 1h",
+    "location": "",
+    "description": "",
+    "guests": "comma-separated names/emails or empty",
+    "recurring": {
+      "pattern": "daily|weekdays|weekly|biweekly|monthly|yearly",
+      "daysOfWeek": [0-6 indices, 0=Sun],
+      "dayOfMonth": null,
+      "interval": 1,
+      "endDate": null,
+      "endAfter": null
+    }
+  },
+  "needsClarification": false,
+  "clarificationPrompt": null
+}
+
+Day mapping: Sunday=0, Monday=1, Tuesday=2, Wednesday=3, Thursday=4, Friday=5, Saturday=6.
+"every weekday" → pattern "weekdays".
+"every other week" → pattern "biweekly".
+If time is missing, set needsClarification=true.
+Default duration: 30m for meetings, 15m for standups/check-ins.`,
+          messages: [{ role: 'user', content: userRequest }],
+          thinking: true,
+          maxTokens: 16000,
+          jsonMode: true,
+          feature: 'calendar-recurring',
+        });
+      });
+      
+      return JSON.parse(result.content);
+    } catch (err) {
+      log.warn('agent', 'Failed to parse recurring request', { error: err.message });
+      return null;
+    }
+  },
+  
+  /**
+   * Parse a duration string like "30m", "1h", "90m" into milliseconds.
+   */
+  _parseDuration(dur) {
+    if (!dur) return 30 * 60000;
+    const match = dur.match(/(\d+)\s*(m|h|min|hour|hr)/i);
+    if (!match) return 30 * 60000;
+    let minutes = parseInt(match[1]);
+    if (/h/i.test(match[2])) minutes *= 60;
+    return minutes * 60000;
+  },
+  
+  /**
+   * Describe a recurrence pattern in natural language.
+   */
+  _describeRecurrence(rec) {
+    if (!rec) return '';
+    const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    switch (rec.pattern) {
+      case 'daily': return 'every day';
+      case 'weekdays': return 'every weekday';
+      case 'weekly':
+        if (rec.daysOfWeek && rec.daysOfWeek.length > 0) {
+          return `every ${rec.daysOfWeek.map(d => dayNames[d]).join(' and ')}`;
+        }
+        return 'every week';
+      case 'biweekly':
+        if (rec.daysOfWeek && rec.daysOfWeek.length > 0) {
+          return `every other ${rec.daysOfWeek.map(d => dayNames[d]).join(' and ')}`;
+        }
+        return 'every other week';
+      case 'monthly':
+        if (rec.dayOfMonth) return `on the ${rec.dayOfMonth}${this._ordinalSuffix(rec.dayOfMonth)} of every month`;
+        return 'every month';
+      case 'yearly': return 'every year';
+      default: return `on a ${rec.pattern} schedule`;
+    }
+  },
+  
+  _ordinalSuffix(n) {
+    const s = ['th', 'st', 'nd', 'rd'];
+    const v = n % 100;
+    return s[(v - 20) % 10] || s[v] || s[0];
   },
   
   // ==================== MULTI-TURN HANDLERS ====================
@@ -1466,7 +1892,7 @@ If this is NOT an event creation, deletion, or details request, respond with nor
       return { success: false, message: "I lost track of the events. Please try again." };
     }
     
-    console.log(`[CalendarAgent] Handling delete selection: "${userResponse}" from ${matches.length} matches`);
+    log.info('agent', `Handling delete selection: "${userResponse}" from ${matches.length} matches`);
     
     // Try to find a match based on user's response
     let selectedEvent = null;
@@ -1640,6 +2066,62 @@ If this is NOT an event creation, deletion, or details request, respond with nor
   },
   
   /**
+   * Handle follow-up response for recurring event creation (when time/details were missing).
+   */
+  async _handleRecurringDetailsResponse(task, context) {
+    const userInput = task.context?.userInput || task.content || '';
+    const partialEvent = task.context?.partialEvent || {};
+    const originalRequest = task.context?.originalRequest || '';
+    
+    // Combine original + follow-up for LLM parsing
+    const combined = `${originalRequest}. ${userInput}`;
+    const parsed = await this._parseRecurringWithLLM(combined);
+    
+    if (!parsed || parsed.needsClarification) {
+      return {
+        success: true,
+        needsInput: {
+          prompt: parsed?.clarificationPrompt || 'I still need the time. What time should this recurring event be?',
+          agentId: this.id,
+          context: {
+            calendarState: 'awaiting_recurring_details',
+            originalRequest: combined,
+            partialEvent: { ...partialEvent, ...(parsed?.eventDetails || {}) },
+          },
+        },
+      };
+    }
+    
+    // We have enough details now -- create the event
+    const store = this._calStore || getCalendarStore();
+    const eventData = { ...partialEvent, ...parsed.eventDetails };
+    const startDate = eventData.date || new Date().toISOString().slice(0, 10);
+    const startTime = eventData.time || '09:00';
+    const durationMs = this._parseDuration(eventData.duration || '30m');
+    
+    const startISO = new Date(`${startDate}T${startTime}:00`).toISOString();
+    const endISO = new Date(new Date(startISO).getTime() + durationMs).toISOString();
+    
+    const { event, conflicts } = store.addEvent({
+      title: eventData.title,
+      startTime: startISO,
+      endTime: endISO,
+      location: eventData.location || '',
+      guests: eventData.guests ? eventData.guests.split(',').map(g => g.trim()) : [],
+      recurring: eventData.recurring,
+    });
+    
+    const patternLabel = this._describeRecurrence(event.recurring);
+    let msg = `Created recurring event "${event.title}" ${patternLabel} at ${new Date(startISO).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}.`;
+    
+    if (conflicts.length > 0) {
+      msg += ` Heads up: conflicts with ${conflicts.length} existing event${conflicts.length > 1 ? 's' : ''}.`;
+    }
+    
+    return { success: true, message: msg, data: { type: 'recurring_created', event, conflicts } };
+  },
+  
+  /**
    * Learn a new contact and save to memory
    */
   async _learnContact(name, email) {
@@ -1663,7 +2145,7 @@ If this is NOT an event creation, deletion, or details request, respond with nor
     
     this.memory.updateSection('Contacts', updatedContacts);
     await this.memory.save();
-    console.log(`[CalendarAgent] Learned new contact: ${name} -> ${email}`);
+    log.info('agent', `Learned new contact: ${name} -> ${email}`);
   },
   
   /**
@@ -1755,7 +2237,7 @@ If this is NOT an event creation, deletion, or details request, respond with nor
     if (lines.length > 0) {
       this.memory.updateSection('Learned Patterns', lines.join('\n'));
       await this.memory.save();
-      console.log(`[CalendarAgent] Learned pattern: ${key} = ${value}`);
+      log.info('agent', `Learned pattern: ${key} = ${value}`);
     }
   },
   
@@ -1802,7 +2284,7 @@ If this is NOT an event creation, deletion, or details request, respond with nor
     
     // Return cached events if still valid
     if (this._cache.events && (now - this._cache.fetchedAt) < CACHE_TTL_MS) {
-      console.log('[CalendarAgent] Using cached events');
+      log.info('agent', 'Using cached events');
       return this._cache.events;
     }
     
@@ -1818,8 +2300,8 @@ If this is NOT an event creation, deletion, or details request, respond with nor
         return `${months[d.getMonth()]} ${d.getDate()} ${d.getFullYear()}`;
       };
       
-      console.log(`[CalendarAgent] Fetching events from omnical API`);
-      console.log(`[CalendarAgent] Date range: ${formatDate(startDate)} to ${formatDate(endDate)}`);
+      log.info('agent', `Fetching events from omnical API`);
+      log.info('agent', `Date range: ${formatDate(startDate)} to ${formatDate(endDate)}`);
       
       // API requires POST with JSON body containing ALL fields (even empty ones)
       const requestBody = {
@@ -1848,7 +2330,7 @@ If this is NOT an event creation, deletion, or details request, respond with nor
       
       // Handle "not found" response (empty calendar)
       if (data?.result === 'not found') {
-        console.log('[CalendarAgent] No events found in calendar');
+        log.info('agent', 'No events found in calendar');
         this._cache.events = [];
         this._cache.fetchedAt = now;
         return [];
@@ -1863,7 +2345,7 @@ If this is NOT an event creation, deletion, or details request, respond with nor
       
       // Enrich events with full details (attendees, description, etc.)
       if (includeDetails && events.length > 0) {
-        console.log(`[CalendarAgent] Fetching details for ${events.length} events...`);
+        log.info('agent', `Fetching details for ${events.length} events...`);
         events = await this._enrichEventsWithDetails(events);
       }
       
@@ -1874,21 +2356,21 @@ If this is NOT an event creation, deletion, or details request, respond with nor
           const attendeeCount = e.attendees?.length || 0;
           return `${e.summary?.slice(0, 20)}: ${d} (${attendeeCount} attendees)`;
         });
-        console.log(`[CalendarAgent] Sample events returned:`, sample);
+        log.info('agent', `Sample events returned`, { sample });
       }
       
       // Cache the enriched events
       this._cache.events = events;
       this._cache.fetchedAt = now;
       
-      console.log(`[CalendarAgent] Fetched ${events.length} events with details`);
+      log.info('agent', `Fetched ${events.length} events with details`);
       return events;
       
     } catch (error) {
-      console.error('[CalendarAgent] Failed to fetch events:', error);
+      log.error('agent', 'Failed to fetch events', { error });
       // Return cached events if available, even if stale
       if (this._cache.events) {
-        console.log('[CalendarAgent] Returning stale cached events');
+        log.info('agent', 'Returning stale cached events');
         return this._cache.events;
       }
       throw error;
@@ -1904,8 +2386,8 @@ If this is NOT an event creation, deletion, or details request, respond with nor
    */
   async _fetchEventsFromUrl(apiUrl, startDate, endDate) {
     try {
-      console.log(`[CalendarAgent] Fetching events from external calendar: ${apiUrl}`);
-      console.log(`[CalendarAgent] Date range: ${startDate} to ${endDate}`);
+      log.info('agent', `Fetching events from external calendar: ${apiUrl}`);
+      log.info('agent', `Date range: ${startDate} to ${endDate}`);
       
       // API requires POST with JSON body containing ALL fields
       const requestBody = {
@@ -1934,18 +2416,18 @@ If this is NOT an event creation, deletion, or details request, respond with nor
       
       // Handle "not found" response (empty calendar)
       if (data?.result === 'not found') {
-        console.log('[CalendarAgent] No events found in external calendar');
+        log.info('agent', 'No events found in external calendar');
         return [];
       }
       
       // Ensure we have an array
       const events = Array.isArray(data) ? data : [];
-      console.log(`[CalendarAgent] Fetched ${events.length} events from external calendar`);
+      log.info('agent', `Fetched ${events.length} events from external calendar`);
       
       return events;
       
     } catch (error) {
-      console.error('[CalendarAgent] Failed to fetch external calendar:', error);
+      log.error('agent', 'Failed to fetch external calendar', { error });
       throw error;
     }
   },
@@ -1999,7 +2481,7 @@ If this is NOT an event creation, deletion, or details request, respond with nor
     };
     
     const dateStr = formatDate(date);
-    console.log(`[CalendarAgent] Finding mutual availability with ${contactName} on ${dateStr}`);
+    log.info('agent', `Finding mutual availability with ${contactName} on ${dateStr}`);
     
     // Check contact's calendar access
     const contactResult = await this._checkContactAvailability(contactName, dateStr, dateStr);
@@ -2020,7 +2502,7 @@ If this is NOT an event creation, deletion, or details request, respond with nor
       return eventStart >= dateStart && eventStart <= dateEnd;
     });
     
-    console.log(`[CalendarAgent] User has ${userEventsOnDate.length} events, contact has ${contactResult.events.length} events on ${dateStr}`);
+    log.info('agent', `User has ${userEventsOnDate.length} events, contact has ${contactResult.events.length} events on ${dateStr}`);
     
     // Find free slots
     const freeSlots = this._findOverlappingFreeSlots(userEventsOnDate, contactResult.events, date, duration);
@@ -2117,8 +2599,400 @@ If this is NOT an event creation, deletion, or details request, respond with nor
       });
     }
     
-    console.log(`[CalendarAgent] Found ${freeSlots.length} mutual free slots of ${duration}+ minutes`);
+    log.info('agent', `Found ${freeSlots.length} mutual free slots of ${duration}+ minutes`);
     return freeSlots;
+  },
+
+  // ==================== CONFLICT RESOLUTION ====================
+  
+  /**
+   * Find overlapping (conflicting) events within a time range
+   * Two events overlap if: event1Start < event2End AND event2Start < event1End
+   * 
+   * @param {Array} events - Array of calendar events
+   * @param {Date} startDate - Start of the range to check
+   * @param {Date} endDate - End of the range to check
+   * @returns {Array} - Array of conflict objects { event1, event2, overlapMinutes }
+   */
+  _findOverlappingEvents(events, startDate, endDate) {
+    // Filter events within the date range
+    const rangeEvents = events.filter(event => {
+      const eventStart = new Date(event.start?.dateTime || event.start?.date);
+      return eventStart >= startDate && eventStart <= endDate;
+    });
+    
+    // Sort by start time
+    rangeEvents.sort((a, b) => {
+      const aStart = new Date(a.start?.dateTime || a.start?.date);
+      const bStart = new Date(b.start?.dateTime || b.start?.date);
+      return aStart - bStart;
+    });
+    
+    const conflicts = [];
+    
+    // Check each pair for overlap
+    for (let i = 0; i < rangeEvents.length - 1; i++) {
+      const event1 = rangeEvents[i];
+      const event1Start = new Date(event1.start?.dateTime || event1.start?.date);
+      const event1End = new Date(event1.end?.dateTime || event1.end?.date || event1Start.getTime() + 3600000);
+      
+      for (let j = i + 1; j < rangeEvents.length; j++) {
+        const event2 = rangeEvents[j];
+        const event2Start = new Date(event2.start?.dateTime || event2.start?.date);
+        const event2End = new Date(event2.end?.dateTime || event2.end?.date || event2Start.getTime() + 3600000);
+        
+        // Check for overlap: event1Start < event2End AND event2Start < event1End
+        if (event1Start < event2End && event2Start < event1End) {
+          // Calculate overlap duration
+          const overlapStart = Math.max(event1Start.getTime(), event2Start.getTime());
+          const overlapEnd = Math.min(event1End.getTime(), event2End.getTime());
+          const overlapMinutes = Math.round((overlapEnd - overlapStart) / 60000);
+          
+          conflicts.push({
+            event1: {
+              id: event1.id,
+              summary: event1.summary,
+              start: event1.start,
+              end: event1.end,
+              calendarId: event1.calendarId || 'primary'
+            },
+            event2: {
+              id: event2.id,
+              summary: event2.summary,
+              start: event2.start,
+              end: event2.end,
+              calendarId: event2.calendarId || 'primary'
+            },
+            overlapMinutes
+          });
+        }
+      }
+    }
+    
+    log.info('agent', `Found ${conflicts.length} conflicts in ${rangeEvents.length} events`);
+    return conflicts;
+  },
+
+  /**
+   * Resolve calendar conflicts by spawning subtasks for each conflict
+   * Uses the subtask API to create independent tasks for user decisions
+   * 
+   * @param {Object} period - { startDate, endDate }
+   * @param {Array} events - Calendar events
+   * @param {Object} executionContext - Contains submitSubtask callback
+   * @returns {Object} - Result with message about conflicts found
+   */
+  async _resolveConflicts(period, events, executionContext) {
+    const { submitSubtask } = executionContext || {};
+    
+    if (!submitSubtask) {
+      log.error('agent', 'No submitSubtask callback available');
+      return {
+        success: false,
+        message: "I can't process conflicts right now. Please try again."
+      };
+    }
+    
+    const conflicts = this._findOverlappingEvents(events, period.startDate, period.endDate);
+    
+    if (conflicts.length === 0) {
+      return {
+        success: true,
+        message: "Good news! You have no scheduling conflicts in that time period."
+      };
+    }
+    
+    log.info('agent', `Creating ${conflicts.length} subtasks for conflict resolution`);
+    
+    // Create one subtask per conflict
+    const subtaskPromises = conflicts.map(async (conflict, index) => {
+      const { event1, event2, overlapMinutes } = conflict;
+      
+      // Format the conflict time
+      const conflictDate = new Date(event1.start?.dateTime || event1.start?.date);
+      const dayName = conflictDate.toLocaleDateString('en-US', { weekday: 'long' });
+      const dateStr = conflictDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const time1 = new Date(event1.start?.dateTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+      const time2 = new Date(event2.start?.dateTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+      
+      const content = `Conflict ${index + 1}: "${event1.summary}" (${time1}) overlaps with "${event2.summary}" (${time2}) on ${dayName} ${dateStr}`;
+      
+      const result = await submitSubtask({
+        content,
+        routingMode: 'locked',
+        context: {
+          calendarState: 'awaiting_conflict_resolution',
+          conflictIndex: index,
+          totalConflicts: conflicts.length,
+          event1,
+          event2,
+          overlapMinutes,
+          conflictDate: conflictDate.toISOString()
+        }
+      });
+      
+      return result;
+    });
+    
+    await Promise.all(subtaskPromises);
+    
+    const periodDesc = this._formatPeriodDescription(period);
+    return {
+      success: true,
+      message: `I found ${conflicts.length} scheduling conflict${conflicts.length > 1 ? 's' : ''} ${periodDesc}. I'll walk you through each one.`
+    };
+  },
+
+  /**
+   * Format a period description for user-friendly output
+   */
+  _formatPeriodDescription(period) {
+    const now = new Date();
+    const start = new Date(period.startDate);
+    const end = new Date(period.endDate);
+    
+    // Check if it's today
+    if (start.toDateString() === now.toDateString()) {
+      return 'today';
+    }
+    
+    // Check if it's tomorrow
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    if (start.toDateString() === tomorrow.toDateString()) {
+      return 'tomorrow';
+    }
+    
+    // Check if it's a single day
+    if (start.toDateString() === end.toDateString()) {
+      return `on ${start.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}`;
+    }
+    
+    // It's a range
+    return `this week`;
+  },
+
+  /**
+   * Handle user's conflict resolution choice
+   * Called when user responds to a conflict subtask with cancel/move/skip
+   */
+  async _handleConflictChoice(task, executionContext) {
+    const { event1, event2, conflictIndex, totalConflicts } = task.context || {};
+    const userResponse = (task.content || '').toLowerCase().trim();
+    
+    if (!event1 || !event2) {
+      return {
+        success: false,
+        message: "I lost track of the conflict details. Let's start over."
+      };
+    }
+    
+    log.info('agent', `Handling conflict choice: "${userResponse}" for conflict ${conflictIndex + 1}/${totalConflicts}`);
+    
+    // Determine which event is being acted on (default to first mentioned)
+    // User might say "cancel the standup" or "move the first one"
+    let targetEvent = event1;
+    let targetName = event1.summary.toLowerCase();
+    let otherEvent = event2;
+    
+    // Check if user referenced the second event
+    const event2Name = event2.summary.toLowerCase();
+    if (userResponse.includes(event2Name) || 
+        userResponse.includes('second') || 
+        userResponse.includes('other') ||
+        userResponse.includes('latter')) {
+      targetEvent = event2;
+      targetName = event2Name;
+      otherEvent = event1;
+    }
+    
+    // Parse the action
+    if (userResponse.includes('cancel') || userResponse.includes('delete') || userResponse.includes('remove')) {
+      // Cancel the target event
+      log.info('agent', `Cancelling event: ${targetEvent.summary}`);
+      const deleteResult = await this._deleteEvent({
+        eventId: targetEvent.id,
+        calendarId: targetEvent.calendarId || 'primary'
+      });
+      
+      if (deleteResult.success) {
+        return {
+          success: true,
+          message: `Done! I've cancelled "${targetEvent.summary}". Conflict ${conflictIndex + 1} of ${totalConflicts} resolved.`
+        };
+      } else {
+        return {
+          success: false,
+          message: `I couldn't cancel "${targetEvent.summary}": ${deleteResult.message}`
+        };
+      }
+    }
+    
+    if (userResponse.includes('move') || userResponse.includes('reschedule') || userResponse.includes('change')) {
+      // Need to ask for new time
+      return {
+        success: true,
+        needsInput: {
+          prompt: `When would you like to move "${targetEvent.summary}" to?`,
+          agentId: this.id,
+          context: {
+            calendarState: 'awaiting_conflict_move_time',
+            eventToMove: targetEvent,
+            conflictIndex,
+            totalConflicts
+          }
+        }
+      };
+    }
+    
+    if (userResponse.includes('skip') || userResponse.includes('ignore') || userResponse.includes('leave') || userResponse.includes('keep')) {
+      return {
+        success: true,
+        message: `Skipped. "${targetEvent.summary}" and "${otherEvent.summary}" will remain overlapping. Conflict ${conflictIndex + 1} of ${totalConflicts} skipped.`
+      };
+    }
+    
+    // User didn't give a clear action - prompt them
+    return {
+      success: true,
+      needsInput: {
+        prompt: `For "${event1.summary}" overlapping with "${event2.summary}": Would you like to cancel, move, or skip?`,
+        agentId: this.id,
+        context: task.context
+      }
+    };
+  },
+
+  /**
+   * Handle user's response for moving a conflicting event to a new time
+   */
+  async _handleConflictMoveTime(task) {
+    const { eventToMove, conflictIndex, totalConflicts } = task.context || {};
+    const userResponse = (task.content || '').trim();
+    
+    if (!eventToMove) {
+      return {
+        success: false,
+        message: "I lost track of which event to move. Let's start over."
+      };
+    }
+    
+    log.info('agent', `Moving event "${eventToMove.summary}" to new time: "${userResponse}"`);
+    
+    // Parse the new time from user response
+    // This is simplified - in production you'd want more robust parsing
+    const newTime = this._parseTimeFromResponse(userResponse, eventToMove);
+    
+    if (!newTime) {
+      return {
+        success: true,
+        needsInput: {
+          prompt: `I didn't understand the time "${userResponse}". Please say something like "9am" or "tomorrow at 3pm".`,
+          agentId: this.id,
+          context: task.context
+        }
+      };
+    }
+    
+    // Calculate duration of original event
+    const originalStart = new Date(eventToMove.start?.dateTime || eventToMove.start?.date);
+    const originalEnd = new Date(eventToMove.end?.dateTime || eventToMove.end?.date);
+    const durationMs = originalEnd - originalStart;
+    const durationMinutes = Math.round(durationMs / 60000);
+    
+    // Create the new event
+    const createResult = await this._createEvent({
+      title: eventToMove.summary,
+      date: newTime.toISOString().split('T')[0],
+      time: newTime.toTimeString().slice(0, 5),
+      duration: `${durationMinutes}m`,
+      description: eventToMove.description || '',
+      location: eventToMove.location || ''
+    });
+    
+    if (!createResult.success) {
+      return {
+        success: false,
+        message: `I couldn't create the new event: ${createResult.message}`
+      };
+    }
+    
+    // Delete the old event
+    const deleteResult = await this._deleteEvent({
+      eventId: eventToMove.id,
+      calendarId: eventToMove.calendarId || 'primary'
+    });
+    
+    if (!deleteResult.success) {
+      return {
+        success: false,
+        message: `Created new event but couldn't delete the old one: ${deleteResult.message}`
+      };
+    }
+    
+    const newTimeStr = newTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    const newDateStr = newTime.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    
+    return {
+      success: true,
+      message: `Done! Moved "${eventToMove.summary}" to ${newDateStr} at ${newTimeStr}. Conflict ${conflictIndex + 1} of ${totalConflicts} resolved.`
+    };
+  },
+
+  /**
+   * Parse a time reference from user response
+   * @param {string} response - User's response like "9am", "tomorrow at 3pm"
+   * @param {Object} originalEvent - Original event for date reference
+   * @returns {Date|null}
+   */
+  _parseTimeFromResponse(response, originalEvent) {
+    const now = new Date();
+    const responseLower = response.toLowerCase();
+    
+    // Start with the original event's date as base
+    let baseDate = new Date(originalEvent.start?.dateTime || originalEvent.start?.date);
+    
+    // Check for day references
+    if (responseLower.includes('tomorrow')) {
+      baseDate = new Date(now);
+      baseDate.setDate(baseDate.getDate() + 1);
+    } else if (responseLower.includes('today')) {
+      baseDate = new Date(now);
+    } else if (responseLower.includes('same day')) {
+      // Keep original date
+    }
+    
+    // Check for day names
+    const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    for (let i = 0; i < days.length; i++) {
+      if (responseLower.includes(days[i])) {
+        // Find next occurrence of this day
+        const daysUntil = (i - now.getDay() + 7) % 7 || 7;
+        baseDate = new Date(now);
+        baseDate.setDate(baseDate.getDate() + daysUntil);
+        break;
+      }
+    }
+    
+    // Parse time
+    const timeMatch = responseLower.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
+    if (!timeMatch) {
+      return null;
+    }
+    
+    let hours = parseInt(timeMatch[1]);
+    const minutes = parseInt(timeMatch[2]) || 0;
+    const ampm = timeMatch[3];
+    
+    // Handle 12-hour format
+    if (ampm === 'pm' && hours !== 12) hours += 12;
+    if (ampm === 'am' && hours === 12) hours = 0;
+    // If no am/pm and hours <= 6, assume PM for business hours
+    if (!ampm && hours >= 1 && hours <= 6) hours += 12;
+    
+    baseDate.setHours(hours, minutes, 0, 0);
+    
+    return baseDate;
   },
 
   /**
@@ -2185,7 +3059,7 @@ If this is NOT an event creation, deletion, or details request, respond with nor
           // If details fetch fails, return the basic event
           return event;
         } catch (err) {
-          console.warn(`[CalendarAgent] Failed to fetch details for event ${event.id}:`, err.message);
+          log.warn('agent', `Failed to fetch details for event ${event.id}`, { error: err.message });
           // #region agent log
           fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'calendar-agent.js:1640',message:'Details API error',data:{eventId:event.id,error:err.message},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
           // #endregion
@@ -2262,7 +3136,7 @@ If this is NOT an event creation, deletion, or details request, respond with nor
         timeZone: 'America/Los_Angeles'
       };
       
-      console.log('[CalendarAgent] Creating event:', requestBody);
+      log.info('agent', 'Creating event', { requestBody });
       
       // #region agent log
       fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'calendar-agent.js:1700',message:'Create event API request',data:{requestBody,guestListType:Array.isArray(guestList)?'array':'other',guestCount:guestList.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'D'})}).catch(()=>{});
@@ -2278,7 +3152,7 @@ If this is NOT an event creation, deletion, or details request, respond with nor
       
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('[CalendarAgent] Create event API error:', response.status, errorText);
+        log.error('agent', 'Create event API error', { status: response.status, errorText });
         
         // #region agent log
         fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'calendar-agent.js:1717',message:'Create event API failed',data:{status:response.status,errorText},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'E'})}).catch(()=>{});
@@ -2301,7 +3175,7 @@ If this is NOT an event creation, deletion, or details request, respond with nor
       }
       
       const createdEvent = await response.json();
-      console.log('[CalendarAgent] Event created:', createdEvent);
+      log.info('agent', 'Event created', { createdEvent });
       
       // #region agent log
       fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'calendar-agent.js:1740',message:'Create event API success',data:{responseKeys:Object.keys(createdEvent||{}),hasId:!!createdEvent?.id,responseSample:JSON.stringify(createdEvent).slice(0,500)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'E'})}).catch(()=>{});
@@ -2342,7 +3216,7 @@ If this is NOT an event creation, deletion, or details request, respond with nor
       };
       
     } catch (error) {
-      console.error('[CalendarAgent] Failed to create event:', error);
+      log.error('agent', 'Failed to create event', { error });
       return {
         success: false,
         message: "Sorry, I couldn't create that event. Please try again."
@@ -2448,7 +3322,7 @@ If this is NOT an event creation, deletion, or details request, respond with nor
         };
       }
       
-      console.log('[CalendarAgent] Deleting event:', targetEventId, 'from calendar:', calendarId);
+      log.info('agent', 'Deleting event', { targetEventId, from_calendar: calendarId });
       
       const deleteRequestBody = {
         calendarId: calendarId,
@@ -2470,7 +3344,7 @@ If this is NOT an event creation, deletion, or details request, respond with nor
       
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('[CalendarAgent] Delete event API error:', response.status, errorText);
+        log.error('agent', 'Delete event API error', { status: response.status, errorText });
         
         // #region agent log
         fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'calendar-agent.js:1895',message:'Delete API failed',data:{status:response.status,errorText},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
@@ -2495,7 +3369,7 @@ If this is NOT an event creation, deletion, or details request, respond with nor
       
       // Success response is boolean true
       const result = await response.json();
-      console.log('[CalendarAgent] Event deleted successfully, result:', result);
+      log.info('agent', 'Event deleted successfully, result', { result });
       
       // #region agent log
       fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'calendar-agent.js:1920',message:'Delete API success',data:{result,resultType:typeof result},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
@@ -2515,7 +3389,7 @@ If this is NOT an event creation, deletion, or details request, respond with nor
       };
       
     } catch (error) {
-      console.error('[CalendarAgent] Failed to delete event:', error);
+      log.error('agent', 'Failed to delete event', { error });
       // #region agent log
       fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'calendar-agent.js:1940',message:'Delete API exception',data:{error:error.message},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
       // #endregion
@@ -2623,7 +3497,7 @@ If this is NOT an event creation, deletion, or details request, respond with nor
         };
       }
       
-      console.log('[CalendarAgent] Getting details for event:', targetEventId);
+      log.info('agent', 'Getting details for event', { targetEventId });
       
       const detailsRequestBody = {
         CalendarId: calendarId,
@@ -2645,7 +3519,7 @@ If this is NOT an event creation, deletion, or details request, respond with nor
       
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('[CalendarAgent] Get details API error:', response.status, errorText);
+        log.error('agent', 'Get details API error', { status: response.status, errorText });
         
         // #region agent log
         fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'calendar-agent.js:2070',message:'GetDetails API failed',data:{status:response.status,errorText},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
@@ -2662,7 +3536,7 @@ If this is NOT an event creation, deletion, or details request, respond with nor
       }
       
       const eventDetails = await response.json();
-      console.log('[CalendarAgent] Event details retrieved:', eventDetails);
+      log.info('agent', 'Event details retrieved', { eventDetails });
       
       // #region agent log
       fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'calendar-agent.js:2088',message:'GetDetails API success',data:{responseKeys:Object.keys(eventDetails||{}),hasEventProp:!!eventDetails?.event,hasAttendees:!!eventDetails?.attendees,responseSample:JSON.stringify(eventDetails).slice(0,500)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
@@ -2672,7 +3546,7 @@ If this is NOT an event creation, deletion, or details request, respond with nor
       return this._formatEventDetails(eventDetails, infoRequested);
       
     } catch (error) {
-      console.error('[CalendarAgent] Failed to get event details:', error);
+      log.error('agent', 'Failed to get event details', { error });
       return {
         success: false,
         message: "Sorry, I couldn't get the event details. Please try again."
@@ -2797,7 +3671,7 @@ If this is NOT an event creation, deletion, or details request, respond with nor
         targetDate = new Date();
       }
       
-      console.log(`[CalendarAgent] Finding availability with ${contactName} on ${targetDate.toDateString()}`);
+      log.info('agent', `Finding availability with ${contactName} on ${targetDate.toDateString()}`);
       
       // Find mutual availability
       const result = await this._findMutualAvailability(contactName, targetDate, duration);
@@ -2851,7 +3725,7 @@ If this is NOT an event creation, deletion, or details request, respond with nor
       };
       
     } catch (error) {
-      console.error('[CalendarAgent] Failed to find availability:', error);
+      log.error('agent', 'Failed to find availability', { error });
       return {
         success: false,
         message: `Sorry, I had trouble checking availability: ${error.message}`
@@ -2906,7 +3780,10 @@ If this is NOT an event creation, deletion, or details request, respond with nor
       message += ` with ${attendeeCount} attendee${attendeeCount > 1 ? 's' : ''}`;
     }
     
-    return { success: true, message };
+    // Show next meeting as a single-event panel
+    const html = renderAgentUI(this._buildEventsUISpec([next], 'Next Meeting'));
+    
+    return { success: true, message, html };
   },
   
   /**
@@ -3039,9 +3916,10 @@ If this is NOT an event creation, deletion, or details request, respond with nor
     });
     
     const dayLabel = day === 'today' ? 'today' : 'tomorrow';
+    const html = renderAgentUI(this._buildEventsUISpec(dayEvents, dayLabel.charAt(0).toUpperCase() + dayLabel.slice(1)));
     
     if (dayEvents.length === 0) {
-      return { success: true, message: `You have no events ${dayLabel}.` };
+      return { success: true, message: `You have no events ${dayLabel}.`, html };
     }
     
     const prefs = this._getPreferences();
@@ -3049,7 +3927,7 @@ If this is NOT an event creation, deletion, or details request, respond with nor
     if (dayEvents.length === 1) {
       const e = dayEvents[0];
       const time = this._formatEventTime(e, prefs);
-      return { success: true, message: `You have one meeting ${dayLabel}: "${e.summary}" at ${time}.` };
+      return { success: true, message: `You have one meeting ${dayLabel}: "${e.summary}" at ${time}.`, html };
     }
     
     // Multiple events
@@ -3063,7 +3941,8 @@ If this is NOT an event creation, deletion, or details request, respond with nor
     
     return { 
       success: true, 
-      message: `You have ${count} meetings ${dayLabel}: ${eventList}${more}.` 
+      message: `You have ${count} meetings ${dayLabel}: ${eventList}${more}.`,
+      html,
     };
   },
   
@@ -3091,8 +3970,8 @@ If this is NOT an event creation, deletion, or details request, respond with nor
     const dayEnd = new Date(targetDate);
     dayEnd.setHours(23, 59, 59, 999);
     
-    console.log(`[CalendarAgent] Looking for ${dayName}: ${targetDate.toDateString()} (${daysUntil} days from today)`);
-    console.log(`[CalendarAgent] Date range: ${dayStart.toISOString()} to ${dayEnd.toISOString()}`);
+    log.info('agent', `Looking for ${dayName}: ${targetDate.toDateString()} (${daysUntil} days from today)`);
+    log.info('agent', `Date range: ${dayStart.toISOString()} to ${dayEnd.toISOString()}`);
     
     // Debug: show first few event dates
     if (events.length > 0) {
@@ -3100,7 +3979,7 @@ If this is NOT an event creation, deletion, or details request, respond with nor
         const d = new Date(e.start?.dateTime || e.start?.date);
         return `${e.summary?.slice(0, 20)}: ${d.toDateString()}`;
       });
-      console.log(`[CalendarAgent] Sample events:`, sampleDates);
+      log.info('agent', `Sample events`, { sampleDates });
     }
     
     const dayEvents = events.filter(e => {
@@ -3110,12 +3989,13 @@ If this is NOT an event creation, deletion, or details request, respond with nor
       return new Date(a.start?.dateTime || a.start?.date) - new Date(b.start?.dateTime || b.start?.date);
     });
     
-    console.log(`[CalendarAgent] Found ${dayEvents.length} events for ${dayName}`);
+    log.info('agent', `Found ${dayEvents.length} events for ${dayName}`);
     
     const dayLabel = dayName.charAt(0).toUpperCase() + dayName.slice(1);
+    const html = renderAgentUI(this._buildEventsUISpec(dayEvents, dayLabel));
     
     if (dayEvents.length === 0) {
-      return { success: true, message: `You have no events on ${dayLabel}.` };
+      return { success: true, message: `You have no events on ${dayLabel}.`, html };
     }
     
     const prefs = this._getPreferences();
@@ -3123,7 +4003,7 @@ If this is NOT an event creation, deletion, or details request, respond with nor
     if (dayEvents.length === 1) {
       const e = dayEvents[0];
       const time = this._formatEventTime(e, prefs);
-      return { success: true, message: `On ${dayLabel} you have: "${e.summary}" at ${time}.` };
+      return { success: true, message: `On ${dayLabel} you have: "${e.summary}" at ${time}.`, html };
     }
     
     const eventList = dayEvents.slice(0, 5).map(e => {
@@ -3136,7 +4016,8 @@ If this is NOT an event creation, deletion, or details request, respond with nor
     
     return { 
       success: true, 
-      message: `On ${dayLabel} you have ${count} meetings: ${eventList}${more}.` 
+      message: `On ${dayLabel} you have ${count} meetings: ${eventList}${more}.`,
+      html,
     };
   },
   
@@ -3155,8 +4036,10 @@ If this is NOT an event creation, deletion, or details request, respond with nor
       return new Date(a.start?.dateTime || a.start?.date) - new Date(b.start?.dateTime || b.start?.date);
     });
     
+    const html = renderAgentUI(this._buildEventsUISpec(weekEvents, 'This Week'));
+    
     if (weekEvents.length === 0) {
-      return { success: true, message: "You have no events this week." };
+      return { success: true, message: "You have no events this week.", html };
     }
     
     if (weekEvents.length <= 3) {
@@ -3165,7 +4048,7 @@ If this is NOT an event creation, deletion, or details request, respond with nor
         return `"${e.summary}" ${time}`;
       }).join(', ');
       
-      return { success: true, message: `This week you have: ${eventList}.` };
+      return { success: true, message: `This week you have: ${eventList}.`, html };
     }
     
     // Summarize by day count
@@ -3182,7 +4065,8 @@ If this is NOT an event creation, deletion, or details request, respond with nor
     
     return { 
       success: true, 
-      message: `You have ${weekEvents.length} meetings this week: ${summary}.` 
+      message: `You have ${weekEvents.length} meetings this week: ${summary}.`,
+      html,
     };
   },
   
@@ -3339,6 +4223,121 @@ If this is NOT an event creation, deletion, or details request, respond with nor
     }
     
     this._scheduledReminders.clear();
+  },
+
+  // ==================== HUD UI RENDERING ====================
+
+  /**
+   * Calculate importance score (1-5) for an event.
+   * Factors: attendee count, duration, description presence, recurring.
+   */
+  _calcImportance(event) {
+    let score = 1;
+
+    // Attendee count
+    const attendees = event.attendees?.length || 0;
+    if (attendees >= 6) score += 2;
+    else if (attendees >= 3) score += 1;
+
+    // Duration in minutes
+    const start = new Date(event.start?.dateTime || event.start?.date);
+    const end = new Date(event.end?.dateTime || event.end?.date || start);
+    const durationMins = (end - start) / 60000;
+    if (durationMins >= 60) score += 1;
+
+    // Has description (usually means prepared meeting)
+    if (event.description && event.description.trim().length > 20) score += 1;
+
+    // Recurring gets a slight bump (established meeting)
+    if (event.recurringEventId) score += 0.5;
+
+    return Math.min(5, Math.round(score));
+  },
+
+  /**
+   * Build a declarative eventList UI spec from raw API events.
+   * Returns an object suitable for renderAgentUI({ type: 'eventList', ... }).
+   *
+   * @param {Array} events - Raw calendar API event objects
+   * @param {string} label - Panel header (e.g. "Today", "This Week")
+   * @returns {Object} eventList UI spec
+   */
+  _buildEventsUISpec(events, label) {
+    const prefs = this._getPreferences();
+
+    const mapped = (events || []).map(e => {
+      const time = this._formatEventTime(e, prefs);
+      const title = e.summary || 'Untitled';
+      const importance = this._calcImportance(e);
+      const recurring = !!e.recurringEventId;
+
+      // Build attendee initials array
+      const attendees = (e.attendees || []).map(a => {
+        const email = a.email || '';
+        const name = a.displayName || email.split('@')[0] || '?';
+        return { initial: name.charAt(0).toUpperCase(), name };
+      });
+
+      return {
+        time,
+        title,
+        recurring,
+        importance,
+        attendees,
+        actionValue: `tell me more about ${title}`,
+      };
+    });
+
+    return {
+      type: 'eventList',
+      title: label || 'Events',
+      events: mapped,
+    };
+  },
+
+  /**
+   * Build an eventList UI spec from CalendarStore brief data.
+   * The brief's timeline uses { title, start, end, duration, isRecurring, guests }
+   * which differs from the Omnical API format.
+   *
+   * @param {Object} briefData - Output of generateMorningBrief()
+   * @returns {Object} eventList UI spec
+   */
+  _buildBriefUISpec(briefData) {
+    if (!briefData || !briefData.timeline || briefData.timeline.length === 0) {
+      return { type: 'eventList', title: 'Today', events: [] };
+    }
+
+    const mapped = briefData.timeline.map(ev => {
+      // Importance heuristic from brief timeline fields
+      let importance = 1;
+      const guests = ev.guests || [];
+      if (guests.length >= 6) importance += 2;
+      else if (guests.length >= 3) importance += 1;
+      if (ev.duration >= 60) importance += 1;
+      if (ev.isRecurring) importance += 0.5;
+      importance = Math.min(5, Math.round(importance));
+
+      const attendees = guests.map(g => {
+        const name = typeof g === 'string' ? g : (g.displayName || g.email?.split('@')[0] || '?');
+        return { initial: name.charAt(0).toUpperCase(), name };
+      });
+
+      return {
+        time: ev.start || '',
+        title: ev.title || 'Untitled',
+        recurring: !!ev.isRecurring,
+        importance,
+        attendees,
+        actionValue: `tell me more about ${ev.title || 'this event'}`,
+      };
+    });
+
+    return {
+      type: 'eventList',
+      title: briefData.dayLabel || 'Today',
+      events: mapped,
+    };
   }
 };
 

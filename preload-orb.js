@@ -214,6 +214,20 @@ contextBridge.exposeInMainWorld('orbAPI', {
    */
   notifyClicked: () => ipcRenderer.send('orb:clicked'),
   
+  /**
+   * Toggle OS-level click-through for transparent areas.
+   * When true, clicks on transparent pixels pass through to windows behind.
+   * When false, the orb window receives all clicks normally.
+   * @param {boolean} clickThrough
+   * @returns {Promise<void>}
+   */
+  setClickThrough: (clickThrough) => ipcRenderer.invoke('orb:set-click-through', clickThrough),
+
+  /**
+   * Open the app settings window
+   */
+  openSettings: () => ipcRenderer.send('open-settings'),
+  
   // ==========================================================================
   // TEXT-TO-SPEECH (OpenAI Realtime Voice)
   // ==========================================================================
@@ -294,35 +308,11 @@ contextBridge.exposeInMainWorld('orbAPI', {
   // ==========================================================================
   
   /**
-   * Show disambiguation options in the HUD
-   * @param {Object} state - Disambiguation state with question and options
-   * @returns {Promise<void>}
-   */
-  showDisambiguation: (state) => ipcRenderer.invoke('command-hud:disambiguation', state),
-  
-  /**
-   * Cancel pending disambiguation
-   * @returns {Promise<void>}
-   */
-  cancelDisambiguation: () => ipcRenderer.invoke('command-hud:disambiguation:cancel'),
-  
-  /**
    * Submit a specific action (used after disambiguation)
    * @param {Object} actionData - { action, params, originalTranscript, clarification }
    * @returns {Promise<Object>}
    */
   submitAction: (actionData) => ipcRenderer.invoke('voice-task-sdk:submit-action', actionData),
-  
-  /**
-   * Listen for disambiguation option selection from HUD
-   * @param {Function} callback - Called with { optionIndex, option, mergedTranscript }
-   * @returns {Function} Unsubscribe function
-   */
-  onDisambiguationSelected: (callback) => {
-    const handler = (event, selection) => callback(selection);
-    ipcRenderer.on('orb:disambiguation:selected', handler);
-    return () => ipcRenderer.removeListener('orb:disambiguation:selected', handler);
-  },
   
   // ==========================================================================
   // AGENT COMPOSER INTEGRATION
@@ -352,22 +342,6 @@ contextBridge.exposeInMainWorld('orbAPI', {
    */
   isComposerActive: () => ipcRenderer.invoke('orb:is-composer-active'),
   
-  // ==========================================================================
-  // WEB SEARCH (from webview-search-service.js via main process)
-  // ==========================================================================
-  
-  /**
-   * Perform a web search using the hidden webview
-   * @param {string} query - Search query
-   * @returns {Promise<{success: boolean, results: Array<{title, url, snippet}>, error?: string}>}
-   */
-  webSearch: (query) => ipcRenderer.invoke('search:web-query', query),
-  
-  /**
-   * Clear the search cache
-   * @returns {Promise<{success: boolean}>}
-   */
-  clearSearchCache: () => ipcRenderer.invoke('search:clear-cache')
 });
 
 // Expose clipboard API for frameless window paste support
@@ -385,4 +359,24 @@ contextBridge.exposeInMainWorld('clipboardAPI', {
   writeText: (text) => clipboard.writeText(text)
 });
 
-console.log('[Orb Preload] Voice Orb preload script loaded with Agent Composer integration and clipboard support');
+// ==========================================
+// CENTRALIZED HUD API (general-agents space)
+// ==========================================
+try {
+  const path = require('path');
+  const { getHudApiMethods } = require(path.join(__dirname, 'preload-hud-api'));
+  const methods = getHudApiMethods();
+  contextBridge.exposeInMainWorld('agentHUD', methods);
+  console.log('[Orb Preload] agentHUD exposed with', Object.keys(methods).length, 'methods');
+} catch (hudErr) {
+  console.error('[Orb Preload] FAILED to load agentHUD:', hudErr.message);
+  console.error('[Orb Preload] Stack:', hudErr.stack?.split('\n').slice(0, 3).join(' | '));
+  // Expose a stub so the orb doesn't crash when checking window.agentHUD
+  try {
+    contextBridge.exposeInMainWorld('agentHUD', {
+      submitTask: () => Promise.reject(new Error('HUD API failed to load: ' + hudErr.message)),
+    });
+  } catch (_) { /* already exposed or sandbox issue */ }
+}
+
+console.log('[Orb Preload] Voice Orb preload script loaded');

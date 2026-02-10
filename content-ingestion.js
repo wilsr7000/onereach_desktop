@@ -14,7 +14,7 @@ const fs = require('fs');
 const path = require('path');
 
 // Valid content types
-const VALID_TYPES = ['text', 'html', 'image', 'file', 'code'];
+const VALID_TYPES = ['text', 'html', 'image', 'file', 'code', 'url', 'web-monitor', 'data-source'];
 
 // Max retry attempts for transient failures
 const MAX_RETRIES = 3;

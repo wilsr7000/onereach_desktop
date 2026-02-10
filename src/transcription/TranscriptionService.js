@@ -18,9 +18,11 @@
 import { ElevenLabsService } from '../video/audio/ElevenLabsService.js';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
-const { getOpenAIAPI } = require('../../openai-api.js');
+const ai = require('../../lib/ai-service');
 const { getSettingsManager } = require('../../settings-manager.js');
 const { getBudgetManager } = require('../../budget-manager.js');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 
 /**
  * Unified transcription service
@@ -62,8 +64,7 @@ export class TranscriptionService {
       projectId = null
     } = options;
 
-    console.log('[TranscriptionService] Starting transcription:', audioPath);
-    console.log('[TranscriptionService] Options:', { language, diarize, numSpeakers, multiChannel });
+    log.info('voice', 'TranscriptionService starting transcription', { audioPath, language, diarize, numSpeakers, multiChannel });
 
     try {
       const result = await this.elevenLabs.transcribeAudio(audioPath, {
@@ -111,11 +112,11 @@ export class TranscriptionService {
         wordCount: (result.words || []).length
       };
 
-      console.log(`[TranscriptionService] Completed: ${transcriptionResult.wordCount} words, ${transcriptionResult.speakerCount} speakers`);
+      log.info('voice', 'TranscriptionService completed', { wordCount: transcriptionResult.wordCount, speakerCount: transcriptionResult.speakerCount });
 
       return transcriptionResult;
     } catch (error) {
-      console.error('[TranscriptionService] Error:', error);
+      log.error('voice', 'TranscriptionService error', { error: error.message });
       return {
         success: false,
         error: error.message,
@@ -139,7 +140,7 @@ export class TranscriptionService {
   async transcribeRange(inputPath, options = {}) {
     const { startTime = 0, endTime, language, diarize = true, projectId } = options;
 
-    console.log(`[TranscriptionService] Transcribing range: ${startTime}s - ${endTime}s`);
+    log.info('voice', 'TranscriptionService transcribing range', { startTime, endTime });
 
     // For range transcription, we need to extract audio first
     // This requires ffmpeg - delegate to video editor for audio extraction
@@ -219,7 +220,7 @@ export class TranscriptionService {
     // Check if there are speakers to identify
     const speakers = transcriptionResult.speakers || [];
     if (speakers.length === 0) {
-      console.log('[TranscriptionService] No speakers to identify in transcription');
+      log.info('voice', 'TranscriptionService no speakers to identify');
       return {
         success: true,
         speakerMap: {},
@@ -234,7 +235,7 @@ export class TranscriptionService {
       const settingsManager = getSettingsManager();
       apiKey = settingsManager.get('openaiApiKey');
     } catch (e) {
-      console.warn('[TranscriptionService] Could not get OpenAI API key from settings:', e.message);
+      log.warn('voice', 'TranscriptionService could not get OpenAI API key', { error: e.message });
     }
 
     if (!apiKey) {
@@ -245,7 +246,7 @@ export class TranscriptionService {
       };
     }
 
-    console.log(`[TranscriptionService] Identifying ${speakers.length} speakers using LLM...`);
+    log.info('voice', 'TranscriptionService identifying speakers via LLM', { speakerCount: speakers.length });
 
     // Format transcript as a conversation for the LLM
     const formattedTranscript = this._formatTranscriptForSpeakerIdentification(transcriptionResult);
@@ -259,13 +260,13 @@ export class TranscriptionService {
 
       // Apply speaker names to the transcription result if requested
       if (result.success && result.speakerMap) {
-        console.log('[TranscriptionService] Speaker identification complete:', result.speakerMap);
+        log.info('voice', 'TranscriptionService speaker identification complete', { speakerMap: result.speakerMap });
       }
 
       return result;
 
     } catch (error) {
-      console.error('[TranscriptionService] Speaker identification error:', error);
+      log.error('voice', 'TranscriptionService speaker identification error', { error: error.message });
       return {
         success: false,
         error: error.message,
@@ -387,7 +388,7 @@ export class TranscriptionService {
     const https = require('https');
 
     // Step 1: First pass - analyze transcript and determine if web search would help
-    console.log('[TranscriptionService] Step 1: Analyzing transcript for speaker clues...');
+    log.info('voice', 'TranscriptionService step 1: analyzing transcript for speaker clues');
     
     const analysisPrompt = `You are an expert at analyzing conversations to identify speakers.
 
@@ -421,12 +422,12 @@ Analyze and respond with JSON:
 }`;
 
     const analysisResult = await this._makeOpenAIRequest(apiKey, analysisPrompt, 'gpt-4o-mini');
-    console.log('[TranscriptionService] Analysis result:', JSON.stringify(analysisResult, null, 2));
+    log.info('voice', 'TranscriptionService analysis result', { analysisResult });
 
     // Step 2: If web search would help, perform searches
     let webSearchResults = [];
     if (analysisResult.needsWebSearch && analysisResult.suggestedSearchQueries?.length > 0) {
-      console.log('[TranscriptionService] Step 2: Performing web searches...');
+      log.info('voice', 'TranscriptionService step 2: performing web searches');
       
       // Combine context for smarter searches
       const searchQueries = analysisResult.suggestedSearchQueries.slice(0, 3); // Limit to 3 searches
@@ -438,7 +439,7 @@ Analyze and respond with JSON:
       
       for (const query of searchQueries) {
         try {
-          console.log(`[TranscriptionService] Searching: "${query}"`);
+          log.info('voice', 'TranscriptionService web search', { query });
           const searchResult = await this._performWebSearch(query);
           if (searchResult) {
             webSearchResults.push({
@@ -447,14 +448,14 @@ Analyze and respond with JSON:
             });
           }
         } catch (searchError) {
-          console.warn(`[TranscriptionService] Search failed for "${query}":`, searchError.message);
+          log.warn('voice', 'TranscriptionService search failed', { query, error: searchError.message });
         }
       }
-      console.log(`[TranscriptionService] Got ${webSearchResults.length} search results`);
+      log.info('voice', 'TranscriptionService search results', { count: webSearchResults.length });
     }
 
     // Step 3: Final identification with all gathered information
-    console.log('[TranscriptionService] Step 3: Final speaker identification...');
+    log.info('voice', 'TranscriptionService step 3: final speaker identification');
     
     let finalPrompt = `You are an expert at identifying speakers in conversations.
 
@@ -532,90 +533,19 @@ Be confident in your identification if the evidence is strong. Use full names wh
    * @private
    */
   async _makeOpenAIRequest(apiKey, prompt, model = 'gpt-4o-mini') {
-    const https = require('https');
-    
-    return new Promise((resolve, reject) => {
-      const postData = JSON.stringify({
-        model: model,
-        messages: [
-          {
-            role: 'system',
-            content: 'You are an expert analyst. Always respond with valid JSON only, no markdown formatting or extra text.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        max_tokens: 2000,
+    try {
+      const result = await ai.json(prompt, {
+        profile: 'fast',
+        system: 'You are an expert analyst. Always respond with valid JSON only, no markdown formatting or extra text.',
+        maxTokens: 2000,
         temperature: 0.3,
-        response_format: { type: 'json_object' }
+        feature: 'transcription'
       });
-
-      const requestOptions = {
-        hostname: 'api.openai.com',
-        port: 443,
-        path: '/v1/chat/completions',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Length': Buffer.byteLength(postData)
-        }
-      };
-
-      const req = https.request(requestOptions, (res) => {
-        let data = '';
-
-        res.on('data', (chunk) => {
-          data += chunk;
-        });
-
-        res.on('end', () => {
-          try {
-            const response = JSON.parse(data);
-            
-            if (res.statusCode !== 200) {
-              const errorMsg = response.error?.message || `API error: ${res.statusCode}`;
-              reject(new Error(errorMsg));
-              return;
-            }
-
-            // Track API usage for cost monitoring
-            if (response.usage) {
-              try {
-                const budgetManager = getBudgetManager();
-                budgetManager.trackUsage({
-                  provider: 'openai',
-                  model: model,
-                  inputTokens: response.usage.prompt_tokens || 0,
-                  outputTokens: response.usage.completion_tokens || 0,
-                  feature: 'speaker-identification',
-                  operation: 'identify-speakers',
-                  projectId: null
-                });
-              } catch (trackError) {
-                console.warn('[TranscriptionService] Failed to track usage:', trackError.message);
-              }
-            }
-
-            const content = response.choices[0]?.message?.content;
-            if (!content) {
-              reject(new Error('No content in API response'));
-              return;
-            }
-
-            resolve(JSON.parse(content));
-          } catch (error) {
-            reject(new Error('Failed to parse API response: ' + error.message));
-          }
-        });
-      });
-
-      req.on('error', reject);
-      req.write(postData);
-      req.end();
-    });
+      
+      return result;
+    } catch (error) {
+      throw new Error('Failed to parse API response: ' + error.message);
+    }
   }
 
   /**
@@ -630,7 +560,7 @@ Be confident in your identification if the evidence is strong. Use full names wh
       const encodedQuery = encodeURIComponent(query);
       const url = `https://api.duckduckgo.com/?q=${encodedQuery}&format=json&no_html=1&skip_disambig=1`;
       
-      console.log(`[TranscriptionService] Web search: ${query}`);
+      log.info('voice', 'TranscriptionService DuckDuckGo search', { query });
       
       const req = https.get(url, (res) => {
         let data = '';
@@ -681,14 +611,14 @@ Be confident in your identification if the evidence is strong. Use full names wh
             
             resolve(searchSummary || null);
           } catch (error) {
-            console.warn('[TranscriptionService] Search parse error:', error.message);
+            log.warn('voice', 'TranscriptionService search parse error', { error: error.message });
             resolve(null);
           }
         });
       });
       
       req.on('error', (error) => {
-        console.warn('[TranscriptionService] Search request error:', error.message);
+        log.warn('voice', 'TranscriptionService search request error', { error: error.message });
         resolve(null); // Don't reject, just return null
       });
       
@@ -756,89 +686,29 @@ Provide your analysis in JSON format:
 If you cannot confidently identify a speaker, use a descriptive label like "Host", "Guest 1", "Interviewer", etc.
 Respond with valid JSON only.`;
 
-    return new Promise((resolve, reject) => {
-      const postData = JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          {
-            role: 'system',
-            content: 'You are an expert conversation analyst. Always respond with valid JSON only, no markdown formatting or extra text.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        max_tokens: 1000,
+    try {
+      const result = await ai.json(prompt, {
+        profile: 'fast',
+        system: 'You are an expert conversation analyst. Always respond with valid JSON only, no markdown formatting or extra text.',
+        maxTokens: 1000,
         temperature: 0.3,
-        response_format: { type: 'json_object' }
+        feature: 'transcription'
       });
-
-      const requestOptions = {
-        hostname: 'api.openai.com',
-        port: 443,
-        path: '/v1/chat/completions',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Length': Buffer.byteLength(postData)
-        }
+      
+      return {
+        success: true,
+        speakerMap: result.speakerMap || {},
+        confidence: result.confidence || 0.5,
+        reasoning: result.reasoning || '',
+        roles: result.roles || {},
+        clues: result.clues || [],
+        _model: 'gpt-4o-mini',
+        _provider: 'openai'
       };
-
-      const req = https.request(requestOptions, (res) => {
-        let data = '';
-
-        res.on('data', (chunk) => {
-          data += chunk;
-        });
-
-        res.on('end', () => {
-          try {
-            const response = JSON.parse(data);
-            
-            if (res.statusCode !== 200) {
-              const errorMsg = response.error?.message || `API error: ${res.statusCode}`;
-              console.error('[TranscriptionService] OpenAI API Error:', errorMsg);
-              reject(new Error(errorMsg));
-              return;
-            }
-
-            const content = response.choices[0]?.message?.content;
-            if (!content) {
-              reject(new Error('No content in API response'));
-              return;
-            }
-
-            // Parse the JSON response
-            const result = JSON.parse(content);
-            
-            resolve({
-              success: true,
-              speakerMap: result.speakerMap || {},
-              confidence: result.confidence || 0.5,
-              reasoning: result.reasoning || '',
-              roles: result.roles || {},
-              clues: result.clues || [],
-              _model: 'gpt-4o-mini',
-              _provider: 'openai'
-            });
-            
-          } catch (error) {
-            console.error('[TranscriptionService] Parse error:', error.message);
-            reject(new Error('Failed to parse API response: ' + error.message));
-          }
-        });
-      });
-
-      req.on('error', (error) => {
-        console.error('[TranscriptionService] Request error:', error.message);
-        reject(error);
-      });
-
-      req.write(postData);
-      req.end();
-    });
+    } catch (error) {
+      log.error('voice', 'TranscriptionService request error', { error: error.message });
+      throw error;
+    }
   }
 
   /**

@@ -357,7 +357,10 @@ class IDWManagementTester {
     
     try {
       // This tests that the menu can be refreshed programmatically
-      const { refreshApplicationMenu } = require('./menu');
+      const refreshMenu = () => {
+        if (global.menuDataManager) { global.menuDataManager.refresh(); }
+        else { const { refreshApplicationMenu } = require('./menu'); refreshApplicationMenu(); }
+      };
       
       // Add test IDW
       const before = this.settingsManager.get('idwEnvironments') || [];
@@ -371,7 +374,7 @@ class IDWManagementTester {
       this.settingsManager.set('idwEnvironments', [...before, testEntry]);
       
       // Refresh menu
-      refreshApplicationMenu();
+      refreshMenu();
       
       // Clean up
       const cleaned = before.filter(idw => idw.id !== 'menu-test-idw');

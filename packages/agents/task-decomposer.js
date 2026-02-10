@@ -6,7 +6,9 @@
  */
 
 const { getCircuit } = require('./circuit-breaker');
-const { getBudgetManager } = require('../../budget-manager');
+const ai = require('../../lib/ai-service');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 
 // Circuit breaker for OpenAI API calls
 const openaiCircuit = getCircuit('openai-decomposer', {
@@ -15,23 +17,6 @@ const openaiCircuit = getCircuit('openai-decomposer', {
   windowMs: 60000
 });
 
-/**
- * Get OpenAI API key from app settings (same as realtime-speech.js)
- */
-function getOpenAIApiKey() {
-  if (global.settingsManager) {
-    // First try the dedicated OpenAI key
-    const openaiKey = global.settingsManager.get('openaiApiKey');
-    if (openaiKey) return openaiKey;
-    
-    // Fall back to LLM API key if provider is OpenAI
-    const provider = global.settingsManager.get('llmProvider');
-    const llmKey = global.settingsManager.get('llmApiKey');
-    if (provider === 'openai' && llmKey) return llmKey;
-  }
-  // Final fallback to env var
-  return process.env.OPENAI_API_KEY;
-}
 
 /**
  * Decompose user phrase into discrete tasks
@@ -40,8 +25,6 @@ function getOpenAIApiKey() {
  * @returns {Promise<{tasks: Array, acknowledgment: string}>}
  */
 async function decomposeTasks(phrase, history = []) {
-  const OPENAI_API_KEY = getOpenAIApiKey();
-  
   if (!phrase || typeof phrase !== 'string') {
     return { tasks: [], acknowledgment: null };
   }
@@ -62,88 +45,44 @@ async function decomposeTasks(phrase, history = []) {
     };
   }
 
-  if (!OPENAI_API_KEY) {
-    return {
-      tasks: [{
-        id: `task_${Date.now()}`,
-        type: 'error',
-        content: phrase,
-        error: 'OpenAI API key required. Please set OPENAI_API_KEY environment variable.'
-      }],
-      acknowledgment: null,
-      error: 'API key required'
-    };
-  }
-
   try {
     // Use circuit breaker to protect against cascading failures
-    const data = await openaiCircuit.execute(async () => {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${OPENAI_API_KEY}`
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [
-            { role: 'system', content: buildDecomposerPrompt() },
-            ...formatHistory(history),
-            { role: 'user', content: phrase }
-          ],
-          temperature: 0,
-          max_tokens: 500,
-          response_format: { type: 'json_object' }
-        })
+    const result = await openaiCircuit.execute(async () => {
+      return await ai.chat({
+        profile: 'fast',
+        system: buildDecomposerPrompt(),
+        messages: [
+          ...formatHistory(history),
+          { role: 'user', content: phrase }
+        ],
+        temperature: 0,
+        maxTokens: 500,
+        jsonMode: true,
+        feature: 'task-decomposer'
       });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`API error: ${errText}`);
-      }
-
-      return response.json();
     });
 
-    // Track API usage for cost monitoring
-    if (data.usage) {
-      try {
-        const budgetManager = getBudgetManager();
-        budgetManager.trackUsage({
-          provider: 'openai',
-          model: 'gpt-4o-mini',
-          inputTokens: data.usage.prompt_tokens || 0,
-          outputTokens: data.usage.completion_tokens || 0,
-          feature: 'task-decomposer',
-          operation: 'decompose-tasks',
-          projectId: null
-        });
-      } catch (trackError) {
-        console.warn('[TaskDecomposer] Failed to track usage:', trackError.message);
-      }
-    }
-
-    const content = data.choices?.[0]?.message?.content;
+    const content = result.content;
     
     if (!content) {
       throw new Error('Empty response from OpenAI');
     }
 
-    const result = JSON.parse(content);
+    const parsed = typeof content === 'string' ? JSON.parse(content) : content;
     
     // Add IDs to tasks
-    const tasks = (result.tasks || []).map((task, i) => ({
+    const tasks = (parsed.tasks || []).map((task, i) => ({
       id: `task_${Date.now()}_${i}`,
       ...task
     }));
 
     return {
       tasks,
-      acknowledgment: result.acknowledgment || null
+      acknowledgment: parsed.acknowledgment || null
     };
 
   } catch (error) {
-    console.error('[TaskDecomposer] Error:', error.message);
+    log.error('agent', 'Error', { error: error.message });
     return {
       tasks: [{
         id: `task_${Date.now()}`,

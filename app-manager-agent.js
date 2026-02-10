@@ -15,6 +15,9 @@
 const { app } = require('electron');
 const fs = require('fs');
 const path = require('path');
+const ai = require('./lib/ai-service');
+const { getLogQueue } = require('./lib/log-event-queue');
+const log = getLogQueue();
 
 // Agent configuration
 const CONFIG = {
@@ -189,7 +192,7 @@ class AppManagerAgent {
           this.contextHistory = data.contextHistory.filter(ctx => 
             new Date(ctx.timestamp).getTime() > oneDayAgo
           ).slice(0, CONFIG.contextWindowSize);
-          console.log(`[Agent] Loaded ${this.contextHistory.length} context entries from previous session`);
+          log.info('agent', 'Loaded ... context entries from previous session', { contextHistoryCount: this.contextHistory.length })
         }
         
         // Load processed event IDs (recent ones only)
@@ -203,7 +206,7 @@ class AppManagerAgent {
               this.processedEventTimestamps.set(id, timestamp);
             }
           }
-          console.log(`[Agent] Loaded ${this.processedEventIds.size} processed event IDs`);
+          log.info('agent', 'Loaded ... processed event IDs', { processedEventIdsSize: this.processedEventIds.size })
         }
         
         if (data.lastContextSummary) {
@@ -219,19 +222,19 @@ class AppManagerAgent {
               this.eventFingerprints.set(fingerprint, timestamp);
             }
           }
-          console.log(`[Agent] Loaded ${this.eventFingerprints.size} event fingerprints`);
+          log.info('agent', 'Loaded ... event fingerprints', { eventFingerprintsSize: this.eventFingerprints.size })
         }
         
         // Load external API config (if previously configured)
         if (data.externalAPIConfig) {
           this.externalAPIConfig = { ...CONFIG.externalAPI, ...data.externalAPIConfig };
-          console.log('[Agent] Loaded external API config, enabled:', this.externalAPIConfig.enabled);
+          log.info('agent', 'Loaded external API config, enabled', { enabled: this.externalAPIConfig.enabled })
         }
         
         // Load broken items registry
         if (data.brokenItemsRegistry) {
           this.brokenItemsRegistry = data.brokenItemsRegistry.slice(0, this.maxBrokenItems);
-          console.log(`[Agent] Loaded ${this.brokenItemsRegistry.length} broken items from registry`);
+          log.info('agent', 'Loaded ... broken items from registry', { brokenItemsRegistryCount: this.brokenItemsRegistry.length })
         }
         
         // Load last known app version
@@ -240,7 +243,7 @@ class AppManagerAgent {
         }
       }
     } catch (error) {
-      console.error('[Agent] Error loading state:', error);
+      log.error('agent', 'Error loading state', { error: error.message || error })
     }
   }
 
@@ -286,7 +289,7 @@ class AppManagerAgent {
       };
       fs.writeFileSync(statePath, JSON.stringify(data, null, 2));
     } catch (error) {
-      console.error('[Agent] Error saving state:', error);
+      log.error('agent', 'Error saving state', { error: error.message || error })
     }
   }
 
@@ -295,11 +298,11 @@ class AppManagerAgent {
    */
   start() {
     if (this.active) {
-      console.log('[Agent] Already running');
+      log.info('agent', 'Already running')
       return;
     }
     
-    console.log('[Agent] Starting App Manager Agent...');
+    log.info('agent', 'Starting App Manager Agent...')
     this.active = true;
     this.paused = false;
     this.startTime = Date.now();
@@ -322,7 +325,7 @@ class AppManagerAgent {
       this._startStatusReporting();
     }
     
-    console.log(`[Agent] Started. Scanning every ${CONFIG.scanIntervalMs / 1000}s`);
+    log.info('agent', 'Started. Scanning every ...s', { detail: CONFIG.scanIntervalMs / 1000 })
   }
 
   /**
@@ -332,8 +335,8 @@ class AppManagerAgent {
     const currentVersion = app.getVersion();
     
     if (this.lastKnownAppVersion && this.lastKnownAppVersion !== currentVersion) {
-      console.log(`[Agent] App updated: ${this.lastKnownAppVersion} -> ${currentVersion}`);
-      console.log(`[Agent] Clearing ${this.brokenItemsRegistry.length} broken items from previous version`);
+      log.info('agent', 'App updated: ... -> ...', { lastKnownAppVersion: this.lastKnownAppVersion, currentVersion })
+      log.info('agent', 'Clearing ... broken items from previous version', { brokenItemsRegistryCount: this.brokenItemsRegistry.length })
       
       // Archive old broken items before clearing (for reference)
       this._archiveBrokenItems(this.lastKnownAppVersion);
@@ -356,7 +359,7 @@ class AppManagerAgent {
         lastReset: new Date().toDateString()
       };
       
-      console.log('[Agent] Registry cleared for new version');
+      log.info('agent', 'Registry cleared for new version')
     }
     
     this.lastKnownAppVersion = currentVersion;
@@ -377,9 +380,9 @@ class AppManagerAgent {
         items: this.brokenItemsRegistry
       };
       fs.writeFileSync(archivePath, JSON.stringify(archiveData, null, 2));
-      console.log(`[Agent] Archived ${this.brokenItemsRegistry.length} broken items to ${archivePath}`);
+      log.info('agent', 'Archived broken items', { count: this.brokenItemsRegistry.length, archivePath })
     } catch (error) {
-      console.error('[Agent] Error archiving broken items:', error.message);
+      log.error('agent', 'Error archiving broken items', { error: error.message })
     }
   }
 
@@ -389,7 +392,7 @@ class AppManagerAgent {
   stop() {
     if (!this.active) return;
     
-    console.log('[Agent] Stopping...');
+    log.info('agent', 'Stopping...')
     this.active = false;
     
     if (this.scanInterval) {
@@ -403,12 +406,12 @@ class AppManagerAgent {
     // Send final status report if enabled
     if (this.externalAPIConfig.enabled && this.externalAPIConfig.statusEndpoint) {
       this.reportStatus().catch(err => 
-        console.warn('[Agent] Failed to send final status report:', err.message)
+        log.warn('agent', 'Failed to send final status report', { error: err.message })
       );
     }
     
     this._saveState();
-    console.log('[Agent] Stopped');
+    log.info('agent', 'Stopped')
   }
 
   /**
@@ -416,7 +419,7 @@ class AppManagerAgent {
    */
   pause() {
     this.paused = true;
-    console.log('[Agent] Paused');
+    log.info('agent', 'Paused')
   }
 
   /**
@@ -424,7 +427,7 @@ class AppManagerAgent {
    */
   resume() {
     this.paused = false;
-    console.log('[Agent] Resumed');
+    log.info('agent', 'Resumed')
   }
 
   /**
@@ -436,7 +439,7 @@ class AppManagerAgent {
     }
     
     const scanStart = Date.now();
-    console.log('[Agent] Starting scan...');
+    log.info('agent', 'Starting scan...')
     
     // Broadcast HUD: scan starting
     this._broadcastHUD({
@@ -462,13 +465,13 @@ class AppManagerAgent {
       result.errorsFound = errors.length;
       
       if (errors.length === 0) {
-        console.log('[Agent] No errors found');
+        log.info('agent', 'No errors found')
         this.stats.scansCompleted++;
         this.lastScanTime = Date.now();
         return result;
       }
       
-      console.log(`[Agent] Found ${errors.length} errors to analyze`);
+      log.info('agent', 'Found ... errors to analyze', { errorsCount: errors.length })
       
       // Broadcast HUD: errors found
       this._broadcastHUD({
@@ -545,12 +548,12 @@ class AppManagerAgent {
               
               // Report fix to external API
               this.reportIssue(diagnosis, 'fixed').catch(err =>
-                console.warn('[Agent] Failed to report fixed issue:', err.message)
+                log.warn('agent', 'Failed to report fixed issue', { error: err.message })
               );
             } else if (fixResult.escalated) {
               // Error was escalated to user - don't count as failed, just waiting
               result.escalated = (result.escalated || 0) + 1;
-              console.log(`[Agent] Error escalated to user, awaiting intervention`);
+              log.info('agent', `[Agent] Error escalated to user, awaiting intervention`)
               
               // Update context history
               this._updateContextHistoryResult(diagnosis, false, { escalated: true });
@@ -563,7 +566,7 @@ class AppManagerAgent {
               
               // Report failure to external API
               this.reportIssue(diagnosis, 'failed').catch(err =>
-                console.warn('[Agent] Failed to report fix failure:', err.message)
+                log.warn('agent', 'Failed to report fix failure', { error: err.message })
               );
             }
           } else if (diagnosis.strategy === FIX_STRATEGIES.ESCALATE) {
@@ -574,12 +577,12 @@ class AppManagerAgent {
           this._recordDiagnosis(diagnosis);
           
         } catch (diagError) {
-          console.error('[Agent] Diagnosis error:', diagError);
+          log.error('agent', 'Diagnosis error', { diagError })
         }
       }
       
     } catch (error) {
-      console.error('[Agent] Scan error:', error);
+      log.error('agent', 'Scan error', { error: error.message || error })
     }
     
     result.duration = Date.now() - scanStart;
@@ -587,7 +590,7 @@ class AppManagerAgent {
     this.lastScanTime = Date.now();
     this._saveState();
     
-    console.log(`[Agent] Scan complete. Fixed: ${result.fixesApplied}, Failed: ${result.fixesFailed}`);
+    log.info('agent', 'Scan complete. Fixed: ..., Failed: ...', { fixesApplied: result.fixesApplied, fixesFailed: result.fixesFailed })
     
     // Broadcast HUD: scan complete
     this._broadcastHUD({
@@ -613,10 +616,11 @@ class AppManagerAgent {
     try {
       const { getSettingsManager } = require('./settings-manager');
       const settingsManager = getSettingsManager();
-      const apiKey = settingsManager.get('llmApiKey') || settingsManager.get('anthropicApiKey');
+      // Prefer anthropicApiKey for Claude API calls
+      const apiKey = settingsManager.get('anthropicApiKey') || settingsManager.get('llmApiKey');
       
       if (!apiKey) {
-        console.log('[Agent] No API key for activity summary');
+        log.info('agent', 'No API key for activity summary')
         return;
       }
 
@@ -628,11 +632,6 @@ class AppManagerAgent {
         return;
       }
 
-      const ClaudeAPI = require('./claude-api');
-      const claude = new ClaudeAPI();
-      claude.defaultModel = 'claude-sonnet-4-5-20250929'; // Use Sonnet for cost efficiency
-      claude.maxTokens = 150; // Keep summaries concise
-      
       const prompt = `You are a helpful AI assistant summarizing app activity for a developer.
 
 Current App State:
@@ -652,15 +651,18 @@ Examples:
 Summary:`;
 
       const startTime = Date.now();
-      const response = await claude.complete(prompt, { 
-        systemPrompt: 'You are a concise status summarizer. Respond with only the summary, nothing else.' 
+      const response = await ai.complete(prompt, {
+        profile: 'standard',
+        maxTokens: 150,
+        system: 'You are a concise status summarizer. Respond with only the summary, nothing else.',
+        feature: 'app-manager-agent'
       });
       const elapsed = Date.now() - startTime;
       
       if (response) {
         const summary = response.trim().replace(/^["']|["']$/g, '').substring(0, 100);
         
-        console.log(`[Agent] AI Summary (${elapsed}ms): ${summary}`);
+        log.info('agent', 'AI Summary (...ms): ...', { elapsed, summary })
         
         // Broadcast summary to HUD
         this._broadcastHUD({
@@ -692,7 +694,7 @@ Summary:`;
         });
       }
     } catch (error) {
-      console.error('[Agent] Activity summary error:', error.message);
+      log.error('agent', 'Activity summary error', { error: error.message })
     }
   }
 
@@ -811,7 +813,7 @@ Summary:`;
       
       allErrors.push(...eventDbErrors);
     } catch (error) {
-      console.warn('[Agent] Error fetching event-db logs:', error.message);
+      log.warn('agent', 'Error fetching event-db logs', { error: error.message })
     }
     
     // 2. Get errors from console log files (NDJSON format)
@@ -819,7 +821,7 @@ Summary:`;
       const consoleErrors = await this._getConsoleErrors(oneHourAgo);
       allErrors.push(...consoleErrors);
     } catch (error) {
-      console.warn('[Agent] Error fetching console logs:', error.message);
+      log.warn('agent', 'Error fetching console logs', { error: error.message })
     }
     
     // Sort by timestamp (newest first) and deduplicate
@@ -899,7 +901,7 @@ Summary:`;
         }
       }
     } catch (error) {
-      console.warn('[Agent] Error reading console logs:', error.message);
+      log.warn('agent', 'Error reading console logs', { error: error.message })
     }
     
     return errors;
@@ -1055,7 +1057,7 @@ Summary:`;
       if (brokenItem.diagnosis) {
         existing.diagnosis = brokenItem.diagnosis;
       }
-      console.log(`[Agent] Updated broken item: ${existing.normalizedMessage} (${existing.occurrences} occurrences)`);
+      log.info('agent', 'Updated broken item: ... (... occurrences)', { normalizedMessage: existing.normalizedMessage, occurrences: existing.occurrences })
     } else {
       // Add new entry
       this.brokenItemsRegistry.unshift(brokenItem);
@@ -1065,7 +1067,7 @@ Summary:`;
         this.brokenItemsRegistry = this.brokenItemsRegistry.slice(0, this.maxBrokenItems);
       }
       
-      console.log(`[Agent] Registered broken item: ${brokenItem.normalizedMessage}`);
+      log.info('agent', 'Registered broken item: ...', { normalizedMessage: brokenItem.normalizedMessage })
     }
     
     this._saveState();
@@ -1136,7 +1138,7 @@ Summary:`;
     this.brokenItemsRegistry = [];
     this._saveState();
     
-    console.log(`[Agent] Manually cleared ${count} broken items from registry`);
+    log.info('agent', 'Manually cleared ... broken items from registry', { count })
     return { cleared: count };
   }
 
@@ -1162,14 +1164,14 @@ Summary:`;
             items: data.items || []
           });
         } catch (err) {
-          console.warn(`[Agent] Error reading archive ${file}:`, err.message);
+          log.warn('agent', 'Error reading archive ...', { file })
         }
       }
       
       // Sort by archive date (newest first)
       archives.sort((a, b) => new Date(b.archivedAt) - new Date(a.archivedAt));
     } catch (error) {
-      console.error('[Agent] Error reading archived broken items:', error);
+      log.error('agent', 'Error reading archived broken items', { error: error.message || error })
     }
     
     return archives;
@@ -1200,7 +1202,7 @@ Summary:`;
       );
       
       if (existingItem && existingItem.diagnosis) {
-        console.log(`[Agent] Using cached diagnosis for: ${normalizedMsg.substring(0, 50)}...`);
+        log.info('agent', 'Using cached diagnosis for: ......', { detail: normalizedMsg.substring(0, 50) })
         return {
           ...diagnosis,
           strategy: existingItem.diagnosis.strategy,
@@ -1226,7 +1228,7 @@ Summary:`;
       }
 
     } catch (error) {
-      console.error('[Agent] Diagnosis error:', error);
+      log.error('agent', 'Diagnosis error', { error: error.message || error })
       diagnosis.details = { error: error.message };
     }
 
@@ -1239,6 +1241,35 @@ Summary:`;
   _checkQuickFix(errorGroup) {
     const message = (errorGroup.message || '').toLowerCase();
     const source = (errorGroup.source || '').toLowerCase();
+    
+    // CRITICAL: Skip configuration/authentication errors entirely
+    // These are NOT item problems and should NEVER trigger item cleanup/deletion
+    const configurationErrors = [
+      'invalid x-api-key',
+      'invalid api key',
+      'api key',
+      'unauthorized',
+      '401',
+      '403',
+      'authentication failed',
+      'auth failed',
+      'not authenticated',
+      'invalid credentials',
+      'expired token',
+      'invalid token'
+    ];
+    
+    if (configurationErrors.some(pattern => message.includes(pattern))) {
+      log.info('agent', 'Skipping configuration error (not an item problem): ...', { detail: message.substring(0, 80) })
+      return {
+        strategy: FIX_STRATEGIES.SKIP,
+        confidence: 100,
+        details: { 
+          reason: 'Configuration/authentication error - not an item problem',
+          action: 'User needs to check API key settings'
+        }
+      };
+    }
     
     // Thumbnail errors
     if (message.includes('thumbnail') || source.includes('thumbnail')) {
@@ -1334,30 +1365,27 @@ Summary:`;
     try {
       const { getSettingsManager } = require('./settings-manager');
       const settingsManager = getSettingsManager();
-      const apiKey = settingsManager.get('llmApiKey') || settingsManager.get('anthropicApiKey');
+      // Prefer anthropicApiKey for Claude API calls
+      const apiKey = settingsManager.get('anthropicApiKey') || settingsManager.get('llmApiKey');
       
       if (!apiKey) {
-        console.log('[Agent] No API key for LLM diagnosis');
+        log.info('agent', 'No API key for LLM diagnosis')
         return null;
       }
 
-      const ClaudeAPI = require('./claude-api');
-      const claude = new ClaudeAPI();
-      
-      // Override model to use the most powerful one
-      claude.defaultModel = CONFIG.llmModel;
-      claude.maxTokens = CONFIG.llmMaxTokens;
-      
       // Build prompt with context
       const prompt = this._buildDiagnosisPromptWithContext(errorGroup);
       
-      console.log(`[Agent] Sending diagnosis to ${CONFIG.llmModel} with ${prompt.length} chars context`);
+      log.info('agent', 'Sending diagnosis to ... with ... chars context', { llmModel: CONFIG.llmModel, promptCount: prompt.length })
       
-      const response = await claude.chat([
-        { role: 'user', content: prompt }
-      ], apiKey, {
+      const response = await ai.chat({
+        profile: 'powerful', // Claude Opus equivalent
+        messages: [
+          { role: 'user', content: prompt }
+        ],
         maxTokens: CONFIG.llmMaxTokens,
-        temperature: 0.2 // Lower for more consistent diagnosis
+        temperature: 0.2, // Lower for more consistent diagnosis
+        feature: 'app-manager-agent'
       });
 
       if (response && response.content) {
@@ -1370,7 +1398,7 @@ Summary:`;
       }
 
     } catch (error) {
-      console.error('[Agent] LLM diagnosis error:', error);
+      log.error('agent', 'LLM diagnosis error', { error: error.message || error })
     }
 
     return null;
@@ -1547,7 +1575,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
         };
       }
     } catch (error) {
-      console.error('[Agent] Error parsing LLM response:', error);
+      log.error('agent', 'Error parsing LLM response', { error: error.message || error })
     }
     
     return null;
@@ -1557,7 +1585,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
    * Apply a fix based on diagnosis
    */
   async _applyFix(diagnosis) {
-    console.log(`[Agent] Applying fix: ${diagnosis.strategy}`);
+    log.info('agent', 'Applying fix: ...', { strategy: diagnosis.strategy })
     
     const result = {
       success: false,
@@ -1598,7 +1626,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
       }
       
     } catch (error) {
-      console.error('[Agent] Fix application error:', error);
+      log.error('agent', 'Fix application error', { error: error.message || error })
       result.details = { error: error.message };
     }
 
@@ -1618,7 +1646,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
       e.normalizedMessage === normalizedMsg && e.status === 'pending_user'
     );
     if (existingEscalation) {
-      console.log(`[Agent] Error already escalated, waiting for user: ${normalizedMsg.substring(0, 50)}`);
+      log.info('agent', 'Error already escalated, waiting for user: ...', { detail: normalizedMsg.substring(0, 50) })
       return { success: false, escalated: true, waitingForUser: true };
     }
     
@@ -1629,26 +1657,26 @@ Respond with ONLY a JSON object (no markdown, no explanation):
     const attemptCount = brokenItem?.fixAttempts || 0;
     
     // Step 1: Try primary strategy
-    console.log(`[Agent] Escalation Step 1: Trying primary strategy ${diagnosis.strategy}`);
+    log.info('agent', 'Escalation Step 1: Trying primary strategy ...', { strategy: diagnosis.strategy })
     let result = await this._applyFix(diagnosis);
     attempts.push({ strategy: diagnosis.strategy, success: result.success, step: 'primary' });
     
     if (result.success) {
-      console.log(`[Agent] Primary fix succeeded`);
+      log.info('agent', `[Agent] Primary fix succeeded`)
       return { ...result, attempts };
     }
     
     // Step 2: Try alternative strategies
     const alternatives = FALLBACK_STRATEGIES[diagnosis.strategy] || [];
     if (alternatives.length > 0) {
-      console.log(`[Agent] Escalation Step 2: Trying ${alternatives.length} alternative strategies`);
+      log.info('agent', 'Escalation Step 2: Trying ... alternative strategies', { alternativesCount: alternatives.length })
       for (const altStrategy of alternatives) {
         const altDiagnosis = { ...diagnosis, strategy: altStrategy };
         result = await this._applyFix(altDiagnosis);
         attempts.push({ strategy: altStrategy, success: result.success, step: 'alternative' });
         
         if (result.success) {
-          console.log(`[Agent] Alternative fix ${altStrategy} succeeded`);
+          log.info('agent', 'Alternative fix ... succeeded', { altStrategy })
           return { ...result, attempts };
         }
       }
@@ -1656,7 +1684,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
     
     // Step 3: Ask AI for creative workaround (only after multiple failures)
     if (attemptCount >= 2) {
-      console.log(`[Agent] Escalation Step 3: Requesting AI workaround`);
+      log.info('agent', `[Agent] Escalation Step 3: Requesting AI workaround`)
       try {
         const workaround = await this._requestAIWorkaround(diagnosis, attempts.map(a => a.strategy));
         if (workaround?.action && workaround.action !== 'none') {
@@ -1664,25 +1692,25 @@ Respond with ONLY a JSON object (no markdown, no explanation):
           attempts.push({ strategy: 'ai_workaround', success: result.success, step: 'ai', workaround });
           
           if (result.success) {
-            console.log(`[Agent] AI workaround succeeded: ${workaround.description}`);
+            log.info('agent', 'AI workaround succeeded: ...', { description: workaround.description })
             return { ...result, attempts };
           }
         }
       } catch (error) {
-        console.warn(`[Agent] AI workaround request failed:`, error.message);
+        log.warn('agent', `[Agent] AI workaround request failed:`)
         attempts.push({ strategy: 'ai_workaround', success: false, step: 'ai', error: error.message });
       }
     }
     
     // Step 4: Escalate to user after MAX_FIX_ATTEMPTS_BEFORE_ESCALATION failures
     if (attemptCount >= MAX_FIX_ATTEMPTS_BEFORE_ESCALATION) {
-      console.log(`[Agent] Escalation Step 4: Escalating to user after ${attemptCount} failed attempts`);
+      log.info('agent', 'Escalation Step 4: Escalating to user after ... failed attempts', { attemptCount })
       const escalation = await this._escalateToUser(diagnosis, attempts, normalizedMsg);
       return { success: false, escalated: true, escalation, attempts };
     }
     
     // Not yet ready for user escalation, will retry next scan
-    console.log(`[Agent] Fix failed (attempt ${attemptCount + 1}/${MAX_FIX_ATTEMPTS_BEFORE_ESCALATION}), will retry`);
+    log.info('agent', 'Fix failed (attempt .../...), will retry', { detail: attemptCount + 1, MAX_FIX_ATTEMPTS_BEFORE_ESCALATION })
     return { success: false, escalated: false, attempts };
   }
 
@@ -1708,36 +1736,33 @@ Respond with ONLY valid JSON (no markdown):
     try {
       const { getSettingsManager } = require('./settings-manager');
       const settingsManager = getSettingsManager();
-      const apiKey = settingsManager.get('llmApiKey') || settingsManager.get('anthropicApiKey');
+      // Prefer anthropicApiKey for Claude API calls
+      const apiKey = settingsManager.get('anthropicApiKey') || settingsManager.get('llmApiKey');
       
       if (!apiKey) {
-        console.log('[Agent] No API key for AI workaround request');
+        log.info('agent', 'No API key for AI workaround request')
         return { action: 'none', description: 'No API key configured' };
       }
       
-      const ClaudeAPI = require('./claude-api');
-      const claude = new ClaudeAPI();
-      claude.defaultModel = CONFIG.llmModel;
-      claude.maxTokens = 500;
-      
-      const response = await claude.complete(prompt, { systemPrompt: 'You are a helpful system repair assistant. Respond only with valid JSON.' });
+      const response = await ai.json(prompt, {
+        profile: 'powerful', // Claude Opus equivalent
+        maxTokens: 500,
+        system: 'You are a helpful system repair assistant. Respond only with valid JSON.',
+        feature: 'app-manager-agent'
+      });
       
       if (!response) {
         return { action: 'none', description: 'No AI response' };
       }
       
-      // Parse JSON from response
-      const jsonMatch = response.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        return {
-          action: parsed.action || 'none',
-          description: parsed.description || 'AI-suggested workaround',
-          itemId: parsed.itemId || diagnosis.details?.itemId
-        };
-      }
+      // Response is already parsed JSON from ai.json()
+      return {
+        action: response.action || 'none',
+        description: response.description || 'AI-suggested workaround',
+        itemId: response.itemId || diagnosis.details?.itemId
+      };
     } catch (error) {
-      console.error('[Agent] AI workaround request failed:', error.message);
+      log.error('agent', 'AI workaround request failed', { error: error.message })
     }
     
     return { action: 'none', description: 'Failed to get AI workaround' };
@@ -1747,19 +1772,24 @@ Respond with ONLY valid JSON (no markdown):
    * Execute an AI-suggested workaround
    */
   async _executeWorkaround(workaround, diagnosis) {
-    console.log(`[Agent] Executing AI workaround: ${workaround.action} - ${workaround.description}`);
+    log.info('agent', 'Executing AI workaround: ... - ...', { action: workaround.action, description: workaround.description })
     
     const itemId = workaround.itemId || diagnosis.details?.itemId;
     
     try {
       switch (workaround.action) {
         case 'cleanup':
-          // Remove the broken item entirely
+          // SAFETY: Never delete user items based on unrelated errors like API key failures
+          // The removeOrphanedItem method now has built-in protection, but log a warning
+          log.warn('agent', 'AI suggested cleanup for item ... - proceeding with safety checks', { itemId })
           if (itemId && this.clipboardManager?.storage) {
             const removed = this.clipboardManager.storage.removeOrphanedItem?.(itemId);
             if (removed) {
-              console.log(`[Agent] Cleaned up broken item: ${itemId}`);
+              log.info('agent', 'Cleaned up truly orphaned item: ...', { itemId })
               return { success: true, action: 'cleanup' };
+            } else {
+              log.info('agent', 'Item ... was NOT removed - it has valid content', { itemId })
+              return { success: false, action: 'cleanup', reason: 'Item has valid content on disk' };
             }
           }
           // Try general orphan cleanup
@@ -1777,7 +1807,7 @@ Respond with ONLY valid JSON (no markdown):
             if (item) {
               item.hidden = true;
               // Would need a save method
-              console.log(`[Agent] Marked item as hidden: ${itemId}`);
+              log.info('agent', 'Marked item as hidden: ...', { itemId })
               return { success: true, action: 'hide' };
             }
           }
@@ -1796,7 +1826,7 @@ Respond with ONLY valid JSON (no markdown):
           return { success: false, action: 'none', reason: 'No automated fix available' };
       }
     } catch (error) {
-      console.error(`[Agent] Workaround execution failed:`, error);
+      log.error('agent', `[Agent] Workaround execution failed:`)
     }
     
     return { success: false, action: workaround.action, error: 'Execution failed' };
@@ -1838,10 +1868,10 @@ Respond with ONLY valid JSON (no markdown):
         ...escalation,
         updateCount: (this.escalatedIssues[existingIndex].updateCount || 0) + 1
       };
-      console.log(`[Agent] Updated existing escalation for: ${normalizedMessage.substring(0, 50)}`);
+      log.info('agent', 'Updated existing escalation for: ...', { detail: normalizedMessage.substring(0, 50) })
     } else {
       this.escalatedIssues.push(escalation);
-      console.log(`[Agent] New escalation created: ${escalation.id}`);
+      log.info('agent', 'New escalation created: ...', { escalationId: escalation.id })
     }
     
     // Save state
@@ -1858,10 +1888,10 @@ Respond with ONLY valid JSON (no markdown):
       const mainWindow = BrowserWindow.getAllWindows().find(w => !w.isDestroyed());
       if (mainWindow) {
         mainWindow.webContents.send('agent:user-intervention-needed', escalation);
-        console.log(`[Agent] Sent intervention notification to renderer`);
+        log.info('agent', `[Agent] Sent intervention notification to renderer`)
       }
     } catch (error) {
-      console.warn('[Agent] Could not send IPC notification:', error.message);
+      log.warn('agent', 'Could not send IPC notification', { error: error.message })
     }
     
     this.stats.escalated++;
@@ -1878,7 +1908,7 @@ Respond with ONLY valid JSON (no markdown):
       return { success: false, error: 'Escalation not found' };
     }
     
-    console.log(`[Agent] User responded to escalation ${escalationId}: ${action}`);
+    log.info('agent', 'User responded to escalation ...: ...', { escalationId, action })
     
     switch (action) {
       case 'ignore':
@@ -1958,11 +1988,11 @@ Respond with ONLY valid JSON (no markdown):
         // Update item with new thumbnail
         item.thumbnail = thumbnail;
         // Would need to save back to storage
-        console.log(`[Agent] Regenerated thumbnail for ${itemId}`);
+        log.info('agent', 'Regenerated thumbnail for ...', { itemId })
         return true;
       }
     } catch (error) {
-      console.error('[Agent] Thumbnail regeneration failed:', error);
+      log.error('agent', 'Thumbnail regeneration failed', { error: error.message || error })
     }
 
     return false;
@@ -1980,14 +2010,15 @@ Respond with ONLY valid JSON (no markdown):
     try {
       const { getSettingsManager } = require('./settings-manager');
       const settingsManager = getSettingsManager();
-      const apiKey = settingsManager.get('llmApiKey');
+      // Prefer anthropicApiKey for metadata generation (uses Claude API)
+      const apiKey = settingsManager.get('anthropicApiKey') || settingsManager.get('llmApiKey');
       
       if (!apiKey) return false;
 
       const result = await this.metadataGenerator.generateMetadataForItem(itemId, apiKey);
       return result.success;
     } catch (error) {
-      console.error('[Agent] Metadata regeneration failed:', error);
+      log.error('agent', 'Metadata regeneration failed', { error: error.message || error })
     }
 
     return false;
@@ -2006,7 +2037,7 @@ Respond with ONLY valid JSON (no markdown):
       const result = await this.pipelineVerifier.repairItem(itemId);
       return result.success;
     } catch (error) {
-      console.error('[Agent] Metadata repair failed:', error);
+      log.error('agent', 'Metadata repair failed', { error: error.message || error })
     }
 
     return false;
@@ -2017,7 +2048,7 @@ Respond with ONLY valid JSON (no markdown):
    */
   async _fixRebuildIndex(diagnosis) {
     if (!this.clipboardManager?.storage) {
-      console.log('[Agent] No clipboard storage available for index rebuild');
+      log.info('agent', 'No clipboard storage available for index rebuild')
       return false;
     }
 
@@ -2030,7 +2061,7 @@ Respond with ONLY valid JSON (no markdown):
         if (typeof storage.removeOrphanedItem === 'function') {
           const removed = storage.removeOrphanedItem(itemId);
           if (removed) {
-            console.log(`[Agent] Removed orphaned index entry: ${itemId}`);
+            log.info('agent', 'Removed orphaned index entry: ...', { itemId })
             return true;
           }
         }
@@ -2039,16 +2070,16 @@ Respond with ONLY valid JSON (no markdown):
       // Full index cleanup - remove all entries pointing to missing files
       if (typeof storage.cleanupOrphanedIndexEntries === 'function') {
         const cleaned = storage.cleanupOrphanedIndexEntries();
-        console.log(`[Agent] Cleaned ${cleaned} orphaned index entries`);
+        log.info('agent', 'Cleaned ... orphaned index entries', { cleaned })
         return cleaned > 0;
       }
       
       // Fallback: manual cleanup if methods don't exist
-      console.log('[Agent] Storage cleanup methods not available, attempting manual cleanup');
+      log.info('agent', 'Storage cleanup methods not available, attempting manual cleanup')
       return await this._manualIndexCleanup(storage);
       
     } catch (error) {
-      console.error('[Agent] Index rebuild failed:', error);
+      log.error('agent', 'Index rebuild failed', { error: error.message || error })
       return false;
     }
   }
@@ -2073,7 +2104,7 @@ Respond with ONLY valid JSON (no markdown):
           const itemDir = path.join(storage.itemsDir, item.id);
           const exists = fs.existsSync(itemDir);
           if (!exists) {
-            console.log(`[Agent] Removing orphaned item from index: ${item.id}`);
+            log.info('agent', 'Removing orphaned item from index: ...', { itemId: item.id })
           }
           return exists;
         }
@@ -2089,13 +2120,13 @@ Respond with ONLY valid JSON (no markdown):
         } else if (typeof storage.saveIndexSync === 'function') {
           storage.saveIndexSync(storage.index);
         }
-        console.log(`[Agent] Manual cleanup removed ${removed} orphaned entries`);
+        log.info('agent', 'Manual cleanup removed ... orphaned entries', { removed })
         return true;
       }
       
       return false;
     } catch (error) {
-      console.error('[Agent] Manual index cleanup failed:', error);
+      log.error('agent', 'Manual index cleanup failed', { error: error.message || error })
       return false;
     }
   }
@@ -2112,7 +2143,7 @@ Respond with ONLY valid JSON (no markdown):
       const result = await this.pipelineVerifier.cleanupOrphanedFiles(false);
       return result.deleted.length > 0;
     } catch (error) {
-      console.error('[Agent] Orphan cleanup failed:', error);
+      log.error('agent', 'Orphan cleanup failed', { error: error.message || error })
     }
 
     return false;
@@ -2159,11 +2190,11 @@ Respond with ONLY valid JSON (no markdown):
     if (!existing) {
       this.escalatedIssues.push(issue);
       this.stats.escalated++;
-      console.log(`[Agent] Issue escalated: ${issue.message}`);
+      log.info('agent', 'Issue escalated: ...', { error: issue.message })
       
       // Report to external API
       this.reportIssue(issue, 'escalated').catch(err =>
-        console.warn('[Agent] Failed to report escalated issue:', err.message)
+        log.warn('agent', 'Failed to report escalated issue', { error: err.message })
       );
     }
     
@@ -2288,12 +2319,11 @@ Respond with ONLY valid JSON (no markdown):
       ...config
     };
     
-    console.log('[Agent] External API configured:', {
-      enabled: this.externalAPIConfig.enabled,
+    log.info('agent', 'External API configured', { detail: { enabled: this.externalAPIConfig.enabled,
       statusEndpoint: this.externalAPIConfig.statusEndpoint ? '***configured***' : null,
       issueEndpoint: this.externalAPIConfig.issueEndpoint ? '***configured***' : null,
       hasApiKey: !!this.externalAPIConfig.apiKey
-    });
+    } })
     
     // Restart status reporting interval if enabled
     if (this.externalAPIConfig.enabled && this.active) {
@@ -2323,7 +2353,7 @@ Respond with ONLY valid JSON (no markdown):
       this.reportStatus();
     }, this.externalAPIConfig.reportIntervalMs);
     
-    console.log(`[Agent] Status reporting started (every ${this.externalAPIConfig.reportIntervalMs / 1000}s)`);
+    log.info('agent', 'Status reporting started (every ...s)', { detail: this.externalAPIConfig.reportIntervalMs / 1000 })
   }
 
   /**
@@ -2489,12 +2519,12 @@ Respond with ONLY valid JSON (no markdown):
         });
 
         this.lastStatusReport = Date.now();
-        console.log(`[Agent] External API report sent to ${endpoint}`);
+        log.info('agent', 'External API report sent to ...', { endpoint })
         return result;
 
       } catch (error) {
         lastError = error;
-        console.warn(`[Agent] External API attempt ${attempt + 1} failed:`, error.message);
+        log.warn('agent', 'External API attempt ... failed', { detail: attempt + 1 })
         
         if (attempt < maxRetries) {
           // Wait before retry (exponential backoff)
@@ -2503,7 +2533,7 @@ Respond with ONLY valid JSON (no markdown):
       }
     }
 
-    console.error('[Agent] External API reporting failed after retries:', lastError?.message);
+    log.error('agent', 'External API reporting failed after retries', { error: lastError?.message })
     return {
       success: false,
       error: lastError?.message || 'Unknown error',

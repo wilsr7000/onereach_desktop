@@ -2,6 +2,8 @@
  * WaveformTypes - Different waveform visualization modes
  * Provides drawing functions for bars, line, mirror, and spectrogram
  */
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 export class WaveformTypes {
   constructor(appContext) {
     this.app = appContext;
@@ -214,7 +216,7 @@ export class WaveformTypes {
    * Draw spectrogram - amplitude-based heat map
    */
   async drawSpectrogram(ctx, width, height, duration, audioBuffer, alignInfo = {}) {
-    console.log('[Spectrogram] Starting draw:', { width, height, duration, hasAudioBuffer: !!audioBuffer });
+    log.info('video', '[Spectrogram] Starting draw', { arg0: { width, arg1: height, arg2: duration, arg3: hasAudioBuffer: !!audioBuffer } });
 
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -236,7 +238,7 @@ export class WaveformTypes {
       return;
     }
 
-    console.log('[Spectrogram] Drawing at', actualWidth, 'x', actualHeight);
+    log.info('video', '[Spectrogram] Drawing at', { arg0: actualWidth, arg1: 'x', arg2: actualHeight });
 
     const channelData = audioBuffer.getChannelData(0);
     const totalSamples = channelData.length;
@@ -303,7 +305,7 @@ export class WaveformTypes {
     ctx.putImageData(imageData, 0, 0);
     ctx.restore();
     
-    console.log('[Spectrogram] Done');
+    log.info('video', '[Spectrogram] Done');
   }
 
   /**

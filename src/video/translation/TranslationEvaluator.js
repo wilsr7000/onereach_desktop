@@ -4,6 +4,11 @@
  */
 
 import https from 'https';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const ai = require('../../../lib/ai-service');
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 /**
  * Service for evaluating translation quality
@@ -83,60 +88,29 @@ Evaluate and return JSON:`;
    * @private
    */
   async evaluateWithAnthropic(systemPrompt, userPrompt, apiKey) {
-    return new Promise((resolve, reject) => {
-      const postData = JSON.stringify({
-        model: 'claude-3-5-sonnet-20241022',
-        max_tokens: 1500,
-        messages: [
-          { role: 'user', content: `${systemPrompt}\n\n${userPrompt}` }
-        ]
-      });
-
-      const req = https.request({
-        hostname: 'api.anthropic.com',
-        path: '/v1/messages',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01'
+    try {
+      const result = await ai.json(
+        `${systemPrompt}\n\n${userPrompt}`,
+        {
+          profile: 'standard',
+          maxTokens: 1500,
+          feature: 'translation-evaluator'
         }
-      }, (res) => {
-        let data = '';
-        res.on('data', chunk => data += chunk);
-        res.on('end', () => {
-          if (res.statusCode !== 200) {
-            console.error('[TranslationEvaluator] Anthropic API error:', data);
-            resolve(this.getDefaultEvaluation());
-            return;
-          }
-          
-          try {
-            const response = JSON.parse(data);
-            const content = response.content[0].text;
-            const evaluation = JSON.parse(content);
-            
-            // Calculate composite if not provided
-            if (!evaluation.composite) {
-              evaluation.composite = this.calculateComposite(evaluation.scores);
-            }
-            
-            evaluation.pass = evaluation.composite >= 9.0;
-            resolve(evaluation);
-          } catch (e) {
-            console.error('[TranslationEvaluator] Failed to parse evaluation:', e);
-            resolve(this.getDefaultEvaluation());
-          }
-        });
-      });
-
-      req.on('error', (e) => {
-        console.error('[TranslationEvaluator] Evaluation request error:', e);
-        resolve(this.getDefaultEvaluation());
-      });
-      req.write(postData);
-      req.end();
-    });
+      );
+      
+      const evaluation = result || {};
+      
+      // Calculate composite if not provided
+      if (!evaluation.composite) {
+        evaluation.composite = this.calculateComposite(evaluation.scores);
+      }
+      
+      evaluation.pass = evaluation.composite >= 9.0;
+      return evaluation;
+    } catch (e) {
+      log.error('video', '[TranslationEvaluator] Evaluation request error', { error: e });
+      return this.getDefaultEvaluation();
+    }
   }
 
   /**
@@ -144,61 +118,30 @@ Evaluate and return JSON:`;
    * @private
    */
   async evaluateWithOpenAI(systemPrompt, userPrompt, apiKey) {
-    return new Promise((resolve, reject) => {
-      const postData = JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-        temperature: 0.3,
-        response_format: { type: 'json_object' }
-      });
-
-      const req = https.request({
-        hostname: 'api.openai.com',
-        path: '/v1/chat/completions',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
+    try {
+      const result = await ai.json(
+        userPrompt,
+        {
+          profile: 'fast',
+          system: systemPrompt,
+          temperature: 0.3,
+          feature: 'translation-evaluator'
         }
-      }, (res) => {
-        let data = '';
-        res.on('data', chunk => data += chunk);
-        res.on('end', () => {
-          if (res.statusCode !== 200) {
-            console.error('[TranslationEvaluator] OpenAI evaluation error:', data);
-            resolve(this.getDefaultEvaluation());
-            return;
-          }
-          
-          try {
-            const response = JSON.parse(data);
-            const content = response.choices[0].message.content;
-            const evaluation = JSON.parse(content);
-            
-            // Calculate composite if not provided
-            if (!evaluation.composite) {
-              evaluation.composite = this.calculateComposite(evaluation.scores);
-            }
-            
-            evaluation.pass = evaluation.composite >= 9.0;
-            resolve(evaluation);
-          } catch (e) {
-            console.error('[TranslationEvaluator] Failed to parse evaluation:', e);
-            resolve(this.getDefaultEvaluation());
-          }
-        });
-      });
-
-      req.on('error', (e) => {
-        console.error('[TranslationEvaluator] Evaluation request error:', e);
-        resolve(this.getDefaultEvaluation());
-      });
-      req.write(postData);
-      req.end();
-    });
+      );
+      
+      const evaluation = result || {};
+      
+      // Calculate composite if not provided
+      if (!evaluation.composite) {
+        evaluation.composite = this.calculateComposite(evaluation.scores);
+      }
+      
+      evaluation.pass = evaluation.composite >= 9.0;
+      return evaluation;
+    } catch (e) {
+      log.error('video', '[TranslationEvaluator] Evaluation request error', { error: e });
+      return this.getDefaultEvaluation();
+    }
   }
 
   /**

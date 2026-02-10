@@ -10,6 +10,8 @@ import https from 'https';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { app, shell } = require('electron');
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 /**
  * Vimeo privacy settings
@@ -47,7 +49,7 @@ export class VimeoUploader {
       try {
         return JSON.parse(fs.readFileSync(this.settingsPath, 'utf8'));
       } catch (e) {
-        console.warn('[VimeoUploader] Failed to load credentials:', e);
+        log.warn('video', '[VimeoUploader] Failed to load credentials', { data: e });
       }
     }
     return {};
@@ -173,7 +175,7 @@ export class VimeoUploader {
       });
 
       server.listen(8090, () => {
-        console.log('[VimeoUploader] OAuth callback server listening on port 8090');
+        log.info('video', '[VimeoUploader] OAuth callback server listening on port 8090');
         shell.openExternal(authUrl.toString());
       });
 
@@ -220,7 +222,7 @@ export class VimeoUploader {
     this.credentials.scope = tokens.scope;
     this.saveCredentials();
 
-    console.log('[VimeoUploader] Access token saved');
+    log.info('video', '[VimeoUploader] Access token saved');
   }
 
   /**
@@ -277,7 +279,7 @@ export class VimeoUploader {
 
     const fileSize = fs.statSync(videoPath).size;
     
-    console.log(`[VimeoUploader] Starting upload: ${title} (${(fileSize / 1024 / 1024).toFixed(2)} MB)`);
+    log.info('video', '[VimeoUploader] Starting upload: ( MB)', { v0: title, v1: (fileSize / 1024 / 1024).toFixed(2) });
 
     // Create video with tus upload
     const uploadData = await this._createVideo({
@@ -301,7 +303,7 @@ export class VimeoUploader {
     // Upload using tus protocol
     await this._tusUpload(uploadLink, videoPath, fileSize, progressCallback);
 
-    console.log('[VimeoUploader] Upload complete');
+    log.info('video', '[VimeoUploader] Upload complete');
     
     // Get video info
     const videoUri = uploadData.uri;
@@ -460,7 +462,7 @@ export class VimeoUploader {
     delete this.credentials.tokenType;
     delete this.credentials.scope;
     this.saveCredentials();
-    console.log('[VimeoUploader] Disconnected');
+    log.info('video', '[VimeoUploader] Disconnected');
   }
 
   /**
@@ -476,7 +478,7 @@ export class VimeoUploader {
       try {
         userInfo = await this.getUserInfo();
       } catch (e) {
-        console.warn('[VimeoUploader] Failed to get user info:', e);
+        log.warn('video', '[VimeoUploader] Failed to get user info', { data: e });
       }
     }
 

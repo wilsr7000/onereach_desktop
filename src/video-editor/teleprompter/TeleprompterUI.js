@@ -89,8 +89,8 @@ export class TeleprompterUI {
     if (this.words.length > 0) {
       const first = this.words[0];
       const last = this.words[this.words.length - 1];
-      console.log('[Teleprompter] Loaded', this.words.length, 'words (source:', this.app.transcriptSource + ')');
-      console.log('[Teleprompter] Time range:', first.start?.toFixed(1) + 's -', last.end?.toFixed(1) + 's');
+      window.logging.info('video', 'Teleprompter Loaded', { data: this.words.length, 'words (source:', this.app.transcriptSource + ' })');
+      window.logging.info('video', 'Teleprompter Time range', { data: first.start?.toFixed(1 }) + 's -', last.end?.toFixed(1) + 's');
     }
     
     // Render words
@@ -103,7 +103,7 @@ export class TeleprompterUI {
     const video = document.getElementById('videoPlayer');
     if (video) {
       const currentTime = video.currentTime;
-      console.log('[Teleprompter] Scrolling to current time:', currentTime.toFixed(1) + 's');
+      window.logging.info('video', 'Teleprompter Scrolling to current time', { data: currentTime.toFixed(1 }) + 's');
       
       requestAnimationFrame(() => {
         this.updateHighlight(currentTime);
@@ -185,7 +185,7 @@ export class TeleprompterUI {
     
     // Log speaker info
     if (uniqueSpeakers.length > 0) {
-      console.log('[Teleprompter] Speakers detected:', uniqueSpeakers.join(', '));
+      window.logging.info('video', 'Teleprompter Speakers detected', { data: uniqueSpeakers.join(', ' }));
     }
 
     wordsContainer.innerHTML = this.words.map((word, index) => {
@@ -370,7 +370,7 @@ export class TeleprompterUI {
     const wordEl = document.querySelector(`.teleprompter-word[data-index="${closestIndex}"]`);
     if (wordEl) {
       this.scrollToWord(wordEl);
-      console.log('[Teleprompter] Scrolled to word', closestIndex, ':', this.words[closestIndex].text);
+      window.logging.info('video', 'Teleprompter Scrolled to word', { data: closestIndex, ':', this.words[closestIndex].text });
     }
   }
 

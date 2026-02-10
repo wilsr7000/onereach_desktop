@@ -10,6 +10,10 @@
 import { createAgent, createKeywordMatcher } from '../task-agent/src/index.js';
 import type { Task, TaskResult, ExecutionContext } from '../task-exchange/src/types/index.js';
 
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
+
 // Common misspellings and corrections
 const COMMON_MISSPELLINGS: Record<string, string> = {
   'recieve': 'receive',
@@ -122,30 +126,8 @@ export function createSpellingAgent(exchangeUrl: string) {
       reconnectIntervalMs: 3000,
     },
     
-    // Fast keyword matching
-    quickMatch: (task: Task): number => {
-      const content = task.content.toLowerCase();
-      
-      // High confidence for direct spelling requests
-      if (content.includes('spell ') || content.includes('spelling')) {
-        return 0.95;
-      }
-      
-      // Medium confidence for related queries
-      if (content.includes('how do you write') || 
-          content.includes('letters in') ||
-          content.includes('spelled correctly')) {
-        return 0.8;
-      }
-      
-      // Check for any spelling keywords
-      const hasKeyword = SPELLING_KEYWORDS.some(kw => content.includes(kw));
-      if (hasKeyword) {
-        return 0.7;
-      }
-      
-      return 0; // Can't handle this
-    },
+    // Bidding is handled entirely by the unified LLM bidder (unified-bidder.js).
+    // No quickMatch -- per project policy, no keyword/regex classification.
     
     // Execute spelling tasks
     execute: async (task: Task, context: ExecutionContext): Promise<TaskResult> => {
@@ -230,58 +212,58 @@ export function createSpellingAgent(exchangeUrl: string) {
 async function main() {
   const exchangeUrl = process.argv[2] || 'ws://localhost:3000';
   
-  console.log(`[SpellingAgent] Starting...`);
-  console.log(`[SpellingAgent] Connecting to: ${exchangeUrl}`);
+  log.info('agent', 'Starting', { exchangeUrl });
+  log.info('agent', 'Connecting to exchange', { exchangeUrl });
   
   const agent = createSpellingAgent(exchangeUrl);
   
   // Event handlers
   agent.on('connected', ({ exchangeUrl }) => {
-    console.log(`[SpellingAgent] Connected to ${exchangeUrl}`);
+    log.info('agent', 'Connected to exchange', { exchangeUrl });
   });
   
   agent.on('disconnected', ({ reason }) => {
-    console.log(`[SpellingAgent] Disconnected: ${reason}`);
+    log.warn('agent', 'Disconnected from exchange', { reason });
   });
   
   agent.on('reconnecting', ({ attempt }) => {
-    console.log(`[SpellingAgent] Reconnecting (attempt ${attempt})...`);
+    log.info('agent', 'Reconnecting to exchange', { attempt });
   });
   
   agent.on('bid:requested', ({ task }) => {
-    console.log(`[SpellingAgent] Bid requested for: "${task.content}"`);
+    log.debug('agent', 'Bid requested', { content: task.content });
   });
   
   agent.on('bid:submitted', ({ confidence }) => {
-    console.log(`[SpellingAgent] Bid submitted: ${confidence}`);
+    log.debug('agent', 'Bid submitted', { confidence });
   });
   
   agent.on('bid:skipped', ({ reason }) => {
-    console.log(`[SpellingAgent] Skipped bidding: ${reason}`);
+    log.debug('agent', 'Skipped bidding', { reason });
   });
   
   agent.on('task:assigned', ({ task, isBackup }) => {
-    console.log(`[SpellingAgent] Task assigned: "${task.content}" (backup: ${isBackup})`);
+    log.info('agent', 'Task assigned', { content: task.content, isBackup });
   });
   
   agent.on('task:completed', ({ taskId, success }) => {
-    console.log(`[SpellingAgent] Task ${taskId} completed: ${success ? 'SUCCESS' : 'FAILED'}`);
+    log.info('agent', 'Task completed', { taskId, success });
   });
   
   // Start the agent
   try {
     await agent.start();
-    console.log(`[SpellingAgent] Running. Press Ctrl+C to stop.`);
+    log.info('agent', 'Running - press Ctrl+C to stop');
     
     // Handle graceful shutdown
     process.on('SIGINT', async () => {
-      console.log(`\n[SpellingAgent] Shutting down...`);
+      log.info('agent', 'Shutting down');
       await agent.stop();
       process.exit(0);
     });
     
-  } catch (error) {
-    console.error(`[SpellingAgent] Failed to start:`, error);
+  } catch (error: any) {
+    log.error('agent', 'Failed to start', { error: error?.message || error });
     process.exit(1);
   }
 }

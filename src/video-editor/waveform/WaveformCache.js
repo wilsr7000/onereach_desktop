@@ -2,6 +2,8 @@
  * WaveformCache - Memory and disk caching for waveform data
  * Handles tiered caching, peak storage, and rendered images
  */
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 export class WaveformCache {
   constructor(appContext) {
     this.app = appContext;
@@ -36,7 +38,7 @@ export class WaveformCache {
   setImage(imageKey, dataUrl) {
     if (!this.images) this.images = {};
     this.images[imageKey] = dataUrl;
-    console.log('[WaveformCache] Cached image in memory:', imageKey);
+    log.info('video', '[WaveformCache] Cached image in memory', { data: imageKey });
   }
 
   /**
@@ -56,7 +58,7 @@ export class WaveformCache {
     const tierKey = `tier_${samplesPerSec}`;
     if (!this.tiers) this.tiers = {};
     this.tiers[tierKey] = peaks;
-    console.log('[WaveformCache] Stored tier:', tierKey, 'with', peaks.length, 'samples');
+    log.info('video', '[WaveformCache] Stored tier', { arg0: tierKey, arg1: 'with', arg2: peaks.length, arg3: 'samples' });
   }
 
   /**
@@ -68,7 +70,7 @@ export class WaveformCache {
     this.masterPeaks = null;
     this.cachePath = null;
     this.duration = 0;
-    console.log('[WaveformCache] Cleared all caches');
+    log.info('video', '[WaveformCache] Cleared all caches');
   }
 
   /**
@@ -85,7 +87,7 @@ export class WaveformCache {
    */
   setMasterPeaks(peaks) {
     this.masterPeaks = peaks;
-    console.log('[WaveformCache] Stored master peaks:', peaks.length);
+    log.info('video', '[WaveformCache] Stored master peaks', { data: peaks.length });
   }
 
   /**
@@ -102,11 +104,11 @@ export class WaveformCache {
       if (result.exists && result.dataUrl) {
         // Also store in memory
         this.setImage(imageKey, result.dataUrl);
-        console.log('[WaveformCache] Loaded from disk:', imageKey);
+        log.info('video', '[WaveformCache] Loaded from disk', { data: imageKey });
       }
       return result;
     } catch (e) {
-      console.log('[WaveformCache] Disk load failed:', e.message);
+      log.info('video', '[WaveformCache] Disk load failed', { data: e.message });
       return { exists: false };
     }
   }
@@ -122,11 +124,11 @@ export class WaveformCache {
     try {
       const result = await window.videoEditor.saveWaveformImage(videoPath, imageKey, dataUrl);
       if (result.success) {
-        console.log('[WaveformCache] Saved to disk:', imageKey);
+        log.info('video', '[WaveformCache] Saved to disk', { data: imageKey });
       }
       return result;
     } catch (e) {
-      console.warn('[WaveformCache] Disk save failed:', e.message);
+      log.warn('video', '[WaveformCache] Disk save failed', { data: e.message });
       return { success: false };
     }
   }
@@ -143,12 +145,12 @@ export class WaveformCache {
       const result = await window.videoEditor.loadWaveformCache(videoPath);
       if (result.exists && result.masterPeaks) {
         this.masterPeaks = new Float32Array(result.masterPeaks);
-        console.log('[WaveformCache] Loaded master peaks from disk:', this.masterPeaks.length);
+        log.info('video', '[WaveformCache] Loaded master peaks from disk', { data: this.masterPeaks.length });
         return { exists: true, peaks: this.masterPeaks };
       }
       return { exists: false };
     } catch (e) {
-      console.log('[WaveformCache] No disk cache available');
+      log.info('video', '[WaveformCache] No disk cache available');
       return { exists: false };
     }
   }
@@ -168,11 +170,11 @@ export class WaveformCache {
         timestamp: Date.now()
       });
       if (result.success) {
-        console.log('[WaveformCache] Master peaks saved to disk');
+        log.info('video', '[WaveformCache] Master peaks saved to disk');
       }
       return result;
     } catch (e) {
-      console.warn('[WaveformCache] Could not save peaks to disk:', e.message);
+      log.warn('video', '[WaveformCache] Could not save peaks to disk', { data: e.message });
       return { success: false };
     }
   }
@@ -187,10 +189,10 @@ export class WaveformCache {
     
     try {
       const result = await window.videoEditor.deleteWaveformCache(videoPath);
-      console.log('[WaveformCache] Disk cache deleted:', result);
+      log.info('video', '[WaveformCache] Disk cache deleted', { data: result });
       return result;
     } catch (e) {
-      console.warn('[WaveformCache] Could not delete disk cache:', e.message);
+      log.warn('video', '[WaveformCache] Could not delete disk cache', { data: e.message });
       return { success: false };
     }
   }

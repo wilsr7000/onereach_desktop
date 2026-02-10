@@ -10,6 +10,8 @@ import path from 'path';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { app } = require('electron');
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 /**
  * Service for managing scene/edit workflows
@@ -51,7 +53,7 @@ export class SceneManager {
     const output = outputPath || path.join(this.outputDir, `${baseName}_edited_${Date.now()}.${format}`);
     const jobId = `edit_${Date.now()}`;
 
-    console.log(`[SceneManager] Processing edit list with ${editList.length} segments`);
+    log.info('video', '[SceneManager] Processing edit list with segments', { v0: editList.length });
 
     // Create temp directory for segment files
     const tempDir = path.join(this.outputDir, `temp_edit_${jobId}`);
@@ -78,7 +80,7 @@ export class SceneManager {
       // Get output file info
       const outputInfo = await this.videoProcessor.getVideoInfo(output);
 
-      console.log(`[SceneManager] Edit complete: ${output}`);
+      log.info('video', '[SceneManager] Edit complete:', { v0: output });
 
       return {
         success: true,
@@ -146,7 +148,7 @@ export class SceneManager {
 
         cmd.output(segmentPath)
           .on('end', () => {
-            console.log(`[SceneManager] Segment ${i + 1}/${totalSegments} extracted`);
+            log.info('video', '[SceneManager] Segment / extracted', { v0: i + 1, v1: totalSegments });
             resolve();
           })
           .on('error', reject)
@@ -238,7 +240,7 @@ export class SceneManager {
       throw new Error('Edited video file not found');
     }
 
-    console.log(`[SceneManager] Finalizing workflow for item: ${spaceItemId}`);
+    log.info('video', '[SceneManager] Finalizing workflow for item:', { v0: spaceItemId });
 
     // Get the original item
     const item = clipboardManager.storage.loadItem(spaceItemId);
@@ -254,12 +256,12 @@ export class SceneManager {
     const backupPath = originalPath + '.backup';
     if (fs.existsSync(originalPath)) {
       fs.copyFileSync(originalPath, backupPath);
-      console.log(`[SceneManager] Backed up original to: ${backupPath}`);
+      log.info('video', '[SceneManager] Backed up original to:', { v0: backupPath });
     }
 
     // Copy edited video to replace original
     fs.copyFileSync(editedVideoPath, originalPath);
-    console.log(`[SceneManager] Replaced video with edited version`);
+    log.info('video', '[SceneManager] Replaced video with edited version');
 
     // Update metadata with scenes
     await this.updateSceneMetadata(item, scenes, clipboardManager);
@@ -309,7 +311,7 @@ export class SceneManager {
     metadata.editedFrom = 'video-editor-workflow';
 
     fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
-    console.log(`[SceneManager] Saved ${validatedScenes.length} scenes to metadata`);
+    log.info('video', '[SceneManager] Saved scenes to metadata', { v0: validatedScenes.length });
   }
 
   /**
@@ -366,7 +368,7 @@ export class SceneManager {
       
       if (fs.existsSync(tempDir)) fs.rmdirSync(tempDir);
     } catch (e) {
-      console.warn('[SceneManager] Cleanup error:', e);
+      log.warn('video', '[SceneManager] Cleanup error', { data: e });
     }
   }
 }

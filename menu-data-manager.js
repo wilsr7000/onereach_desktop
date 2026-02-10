@@ -15,6 +15,8 @@ const { app, ipcMain } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const EventEmitter = require('events');
+const { getLogQueue } = require('./lib/log-event-queue');
+const log = getLogQueue();
 
 // Debounce helper
 function debounce(fn, delay) {
@@ -81,13 +83,13 @@ class MenuDataManager extends EventEmitter {
    */
   initialize() {
     if (this._initialized) {
-      console.log('[MenuDataManager] Already initialized');
+      log.info('menu', 'Already initialized')
       return;
     }
 
     try {
-      this._userDataPath = app.getPath('userData');
-      console.log('[MenuDataManager] Initializing with userData:', this._userDataPath);
+    this._userDataPath = app.getPath('userData');
+      log.info('menu', 'Initializing with userData', { _userDataPath: this._userDataPath })
       
       // Load all data from files
       this._loadAllData();
@@ -96,13 +98,13 @@ class MenuDataManager extends EventEmitter {
       this._registerIPCHandlers();
       
       this._initialized = true;
-      console.log('[MenuDataManager] ✅ Initialized successfully');
+      log.info('menu', '✅ Initialized successfully')
       
       // Emit ready event
       this.emit('ready', this.getAllData());
       
     } catch (error) {
-      console.error('[MenuDataManager] ❌ Initialization failed:', error);
+      log.error('menu', 'Initialization failed', { error: error.message || error })
       // Continue with empty data - graceful degradation
       this._initialized = true;
       this.emit('ready', this.getAllData());
@@ -140,13 +142,13 @@ class MenuDataManager extends EventEmitter {
   async setIDWEnvironments(environments, options = {}) {
     const { skipRefresh = false, source = 'unknown' } = options;
     
-    console.log(`[MenuDataManager] setIDWEnvironments called from ${source} with ${environments?.length || 0} items`);
+    log.info('menu', 'setIDWEnvironments called from ... with ... items', { source, detail: environments?.length || 0 })
     
     // Validate input
     const validated = this._validateIDWEnvironments(environments);
     
     if (!validated.valid) {
-      console.error('[MenuDataManager] Validation failed:', validated.errors);
+      log.error('menu', 'Validation failed', { errors: validated.errors })
       return { success: false, errors: validated.errors };
     }
     
@@ -157,7 +159,7 @@ class MenuDataManager extends EventEmitter {
     const saveResult = await this._atomicSave('idwEnvironments', validated.data);
     
     if (!saveResult.success) {
-      console.error('[MenuDataManager] Save failed:', saveResult.error);
+      log.error('menu', 'Save failed', { error: saveResult.error })
       return { success: false, error: saveResult.error };
     }
     
@@ -187,6 +189,7 @@ class MenuDataManager extends EventEmitter {
    */
   async setExternalBots(bots, options = {}) {
     const { skipRefresh = false } = options;
+    log.info('menu', 'setExternalBots: ... bots, skipRefresh=...', { detail: (bots || []).length, skipRefresh })
     
     const validated = this._validateArray(bots, 'externalBots');
     this._cache.externalBots = validated;
@@ -198,6 +201,7 @@ class MenuDataManager extends EventEmitter {
     }
     
     this.emit('externalBots:changed', validated);
+    log.info('menu', 'setExternalBots complete: ... saved', { validatedCount: validated.length })
     return { success: true, data: validated };
   }
 
@@ -213,6 +217,7 @@ class MenuDataManager extends EventEmitter {
    */
   async setImageCreators(creators, options = {}) {
     const { skipRefresh = false } = options;
+    log.info('menu', 'setImageCreators: ... creators, skipRefresh=...', { detail: (creators || []).length, skipRefresh })
     
     const validated = this._validateArray(creators, 'imageCreators');
     this._cache.imageCreators = validated;
@@ -224,6 +229,7 @@ class MenuDataManager extends EventEmitter {
     }
     
     this.emit('imageCreators:changed', validated);
+    log.info('menu', 'setImageCreators complete: ... saved', { validatedCount: validated.length })
     return { success: true, data: validated };
   }
 
@@ -239,6 +245,7 @@ class MenuDataManager extends EventEmitter {
    */
   async setVideoCreators(creators, options = {}) {
     const { skipRefresh = false } = options;
+    log.info('menu', 'setVideoCreators: ... creators, skipRefresh=...', { detail: (creators || []).length, skipRefresh })
     
     const validated = this._validateArray(creators, 'videoCreators');
     this._cache.videoCreators = validated;
@@ -250,6 +257,7 @@ class MenuDataManager extends EventEmitter {
     }
     
     this.emit('videoCreators:changed', validated);
+    log.info('menu', 'setVideoCreators complete: ... saved', { validatedCount: validated.length })
     return { success: true, data: validated };
   }
 
@@ -265,6 +273,7 @@ class MenuDataManager extends EventEmitter {
    */
   async setAudioGenerators(generators, options = {}) {
     const { skipRefresh = false } = options;
+    log.info('menu', 'setAudioGenerators: ... generators, skipRefresh=...', { detail: (generators || []).length, skipRefresh })
     
     const validated = this._validateArray(generators, 'audioGenerators');
     this._cache.audioGenerators = validated;
@@ -276,6 +285,7 @@ class MenuDataManager extends EventEmitter {
     }
     
     this.emit('audioGenerators:changed', validated);
+    log.info('menu', 'setAudioGenerators complete: ... saved', { validatedCount: validated.length })
     return { success: true, data: validated };
   }
 
@@ -291,6 +301,7 @@ class MenuDataManager extends EventEmitter {
    */
   async setUIDesignTools(tools, options = {}) {
     const { skipRefresh = false } = options;
+    log.info('menu', 'setUIDesignTools: ... tools, skipRefresh=...', { detail: (tools || []).length, skipRefresh })
     
     const validated = this._validateArray(tools, 'uiDesignTools');
     this._cache.uiDesignTools = validated;
@@ -302,6 +313,7 @@ class MenuDataManager extends EventEmitter {
     }
     
     this.emit('uiDesignTools:changed', validated);
+    log.info('menu', 'setUIDesignTools complete: ... saved', { validatedCount: validated.length })
     return { success: true, data: validated };
   }
 
@@ -317,6 +329,7 @@ class MenuDataManager extends EventEmitter {
    */
   async setGSXLinks(links, options = {}) {
     const { skipRefresh = false } = options;
+    log.info('menu', 'setGSXLinks: ... links, skipRefresh=...', { detail: (links || []).length, skipRefresh })
     
     const validated = this._validateArray(links, 'gsxLinks');
     this._cache.gsxLinks = validated;
@@ -328,6 +341,7 @@ class MenuDataManager extends EventEmitter {
     }
     
     this.emit('gsxLinks:changed', validated);
+    log.info('menu', 'setGSXLinks complete: ... saved', { validatedCount: validated.length })
     return { success: true, data: validated };
   }
 
@@ -339,12 +353,13 @@ class MenuDataManager extends EventEmitter {
    * Add an IDW environment
    */
   async addIDWEnvironment(env) {
+    log.info('menu', 'addIDWEnvironment: "..." (id=...)', { detail: env && env.label, detail: env && env.id })
     const environments = this.getIDWEnvironments();
     
     // Check for duplicate
     const existing = environments.find(e => e.id === env.id);
     if (existing) {
-      console.log(`[MenuDataManager] IDW ${env.id} already exists, updating instead`);
+      log.info('menu', 'IDW ... already exists, updating instead', { envId: env.id })
       return this.updateIDWEnvironment(env.id, env);
     }
     
@@ -353,6 +368,7 @@ class MenuDataManager extends EventEmitter {
     env.updatedAt = new Date().toISOString();
     
     environments.push(env);
+    log.info('menu', 'addIDWEnvironment: total now ...', { environmentsCount: environments.length })
     return this.setIDWEnvironments(environments, { source: 'addIDWEnvironment' });
   }
 
@@ -360,10 +376,12 @@ class MenuDataManager extends EventEmitter {
    * Update an IDW environment
    */
   async updateIDWEnvironment(id, updates) {
+    log.info('menu', 'updateIDWEnvironment', { id, fields: Object.keys(updates || {}) })
     const environments = this.getIDWEnvironments();
     const index = environments.findIndex(e => e.id === id);
     
     if (index === -1) {
+      log.warn('menu', 'updateIDWEnvironment: IDW ... not found', { id })
       return { success: false, error: `IDW ${id} not found` };
     }
     
@@ -374,6 +392,7 @@ class MenuDataManager extends EventEmitter {
       updatedAt: new Date().toISOString()
     };
     
+    log.info('menu', 'updateIDWEnvironment: updated "..."', { detail: environments[index].label })
     return this.setIDWEnvironments(environments, { source: 'updateIDWEnvironment' });
   }
 
@@ -381,13 +400,16 @@ class MenuDataManager extends EventEmitter {
    * Remove an IDW environment
    */
   async removeIDWEnvironment(id) {
+    log.info('menu', 'removeIDWEnvironment: id=...', { id })
     const environments = this.getIDWEnvironments();
     const filtered = environments.filter(e => e.id !== id);
     
     if (filtered.length === environments.length) {
+      log.warn('menu', 'removeIDWEnvironment: IDW ... not found', { id })
       return { success: false, error: `IDW ${id} not found` };
     }
     
+    log.info('menu', 'removeIDWEnvironment: ... -> ...', { environmentsCount: environments.length, filteredCount: filtered.length })
     return this.setIDWEnvironments(filtered, { source: 'removeIDWEnvironment' });
   }
 
@@ -399,7 +421,7 @@ class MenuDataManager extends EventEmitter {
    * Load all data from files
    */
   _loadAllData() {
-    console.log('[MenuDataManager] Loading all data from files...');
+    log.info('menu', 'Loading all data from files...')
     
     const dataTypes = [
       'idwEnvironments',
@@ -415,15 +437,14 @@ class MenuDataManager extends EventEmitter {
       this._cache[dataType] = this._loadFromFile(dataType);
     }
     
-    console.log('[MenuDataManager] Data loaded:', {
-      idwEnvironments: this._cache.idwEnvironments.length,
+    log.info('menu', 'Data loaded', { detail: { idwEnvironments: this._cache.idwEnvironments.length,
       externalBots: this._cache.externalBots.length,
       imageCreators: this._cache.imageCreators.length,
       videoCreators: this._cache.videoCreators.length,
       audioGenerators: this._cache.audioGenerators.length,
       uiDesignTools: this._cache.uiDesignTools.length,
       gsxLinks: this._cache.gsxLinks.length
-    });
+    } })
   }
 
   /**
@@ -439,19 +460,19 @@ class MenuDataManager extends EventEmitter {
         const parsed = JSON.parse(data);
         
         if (!Array.isArray(parsed)) {
-          console.warn(`[MenuDataManager] ${dataType} is not an array, using empty`);
+          log.warn('menu', '... is not an array, using empty', { dataType })
           return [];
         }
         
         return parsed;
       }
     } catch (error) {
-      console.error(`[MenuDataManager] Error loading ${dataType}:`, error.message);
+      log.error('menu', 'Error loading ...', { dataType })
       
       // Try to recover from backup
       const recovered = this._tryRecoverFromBackup(filePath);
       if (recovered) {
-        console.log(`[MenuDataManager] Recovered ${dataType} from backup`);
+        log.info('menu', 'Recovered ... from backup', { dataType })
         return recovered;
       }
     }
@@ -473,12 +494,12 @@ class MenuDataManager extends EventEmitter {
         if (Array.isArray(parsed)) {
           // Restore the backup to main file
           fs.writeFileSync(filePath, data, 'utf8');
-          console.log(`[MenuDataManager] Restored ${filePath} from backup`);
+          log.info('menu', 'Restored ... from backup', { filePath })
           return parsed;
         }
       }
     } catch (error) {
-      console.error(`[MenuDataManager] Backup recovery failed:`, error.message);
+      log.error('menu', `[MenuDataManager] Backup recovery failed:`)
     }
     
     return null;
@@ -516,11 +537,11 @@ class MenuDataManager extends EventEmitter {
       // 4. Rename temp to target (atomic on most filesystems)
       fs.renameSync(tempPath, filePath);
       
-      console.log(`[MenuDataManager] ✅ Saved ${dataType}: ${data.length} items`);
+      log.info('menu', '✅ Saved ...: ... items', { dataType, dataCount: data.length })
       return { success: true };
       
     } catch (error) {
-      console.error(`[MenuDataManager] ❌ Save failed for ${dataType}:`, error.message);
+      log.error('menu', '❌ Save failed for ...', { dataType })
       
       // Clean up temp file
       try {
@@ -586,7 +607,7 @@ class MenuDataManager extends EventEmitter {
    */
   _validateArray(data, dataType) {
     if (!Array.isArray(data)) {
-      console.warn(`[MenuDataManager] ${dataType} is not an array, using empty`);
+      log.warn('menu', '... is not an array, using empty', { dataType })
       return [];
     }
     return data.filter(item => item && typeof item === 'object');
@@ -630,10 +651,10 @@ class MenuDataManager extends EventEmitter {
     try {
       if (global.settingsManager && typeof global.settingsManager.set === 'function') {
         global.settingsManager.set(dataType, data);
-        console.log(`[MenuDataManager] Synced ${dataType} to settingsManager`);
+        log.info('menu', 'Synced ... to settingsManager', { dataType })
       }
     } catch (error) {
-      console.error(`[MenuDataManager] Settings sync failed:`, error.message);
+      log.error('menu', `[MenuDataManager] Settings sync failed:`)
       // Non-fatal - continue anyway
     }
   }
@@ -642,7 +663,17 @@ class MenuDataManager extends EventEmitter {
    * Trigger menu refresh
    */
   _triggerMenuRefresh() {
-    console.log('[MenuDataManager] Triggering menu refresh...');
+    const startTime = Date.now();
+    const cacheState = {
+      idw: this._cache.idwEnvironments.length,
+      bots: this._cache.externalBots.length,
+      images: this._cache.imageCreators.length,
+      video: this._cache.videoCreators.length,
+      audio: this._cache.audioGenerators.length,
+      ui: this._cache.uiDesignTools.length,
+      gsx: this._cache.gsxLinks.length
+    };
+    log.info('menu', 'Triggering menu refresh...', { detail: JSON.stringify(cacheState) })
     
     try {
       const { setApplicationMenu, invalidateMenuCache } = require('./menu');
@@ -650,16 +681,18 @@ class MenuDataManager extends EventEmitter {
       // Invalidate menu cache
       if (typeof invalidateMenuCache === 'function') {
         invalidateMenuCache();
+        log.info('menu', 'Menu cache invalidated')
       }
       
       // Rebuild menu with current data
       setApplicationMenu(this._cache.idwEnvironments);
       
       this.emit('menu:refreshed');
-      console.log('[MenuDataManager] ✅ Menu refreshed');
+      log.info('menu', 'Menu refreshed in ...ms', { detail: Date.now() - startTime })
       
     } catch (error) {
-      console.error('[MenuDataManager] ❌ Menu refresh failed:', error.message);
+      log.error('menu', 'Menu refresh failed after ...ms', { detail: Date.now() - startTime })
+      log.error('menu', 'Stack', { stack: error.stack })
       this.emit('menu:refreshError', error);
     }
   }
@@ -668,54 +701,182 @@ class MenuDataManager extends EventEmitter {
    * Force immediate menu refresh (bypasses debounce)
    */
   forceRefresh() {
+    log.info('menu', 'forceRefresh() called')
     this._triggerMenuRefresh();
+  }
+
+  /**
+   * Convenience: Full menu refresh using current cached data.
+   * Replaces direct calls to refreshApplicationMenu() from menu.js.
+   */
+  refresh() {
+    log.info('menu', 'refresh() called')
+    this._triggerMenuRefresh();
+  }
+
+  /**
+   * Convenience: Refresh only GSX links from disk, then rebuild menu.
+   * Replaces direct calls to refreshGSXLinks() from menu.js.
+   */
+  refreshGSXLinks() {
+    const startTime = Date.now();
+    log.info('menu', 'refreshGSXLinks() called')
+    try {
+      const { refreshGSXLinks: menuRefreshGSXLinks } = require('./menu');
+      menuRefreshGSXLinks();
+      this.emit('menu:refreshed');
+      log.info('menu', 'GSX links refreshed in ...ms', { detail: Date.now() - startTime })
+    } catch (error) {
+      log.error('menu', 'GSX links refresh failed after ...ms', { detail: Date.now() - startTime })
+      log.error('menu', 'Stack', { stack: error.stack })
+      this.emit('menu:refreshError', error);
+    }
+  }
+
+  /**
+   * Convenience: Rebuild the application menu with specific IDW environments.
+   * Replaces direct calls to setApplicationMenu(envs) from menu.js.
+   * @param {Array} idwEnvironments - IDW environment configurations
+   */
+  rebuild(idwEnvironments) {
+    const startTime = Date.now();
+    const envCount = (idwEnvironments || []).length;
+    const source = idwEnvironments ? 'caller-provided' : 'cached';
+    log.info('menu', 'rebuild() called - ... environments (...)', { envCount, source })
+    try {
+      const { setApplicationMenu, invalidateMenuCache } = require('./menu');
+      if (typeof invalidateMenuCache === 'function') {
+        invalidateMenuCache();
+        log.info('menu', 'Menu cache invalidated for rebuild')
+      }
+      setApplicationMenu(idwEnvironments || this._cache.idwEnvironments);
+      
+      // Update cache if environments were provided
+      if (idwEnvironments) {
+        const prevCount = this._cache.idwEnvironments.length;
+        this._cache.idwEnvironments = idwEnvironments;
+        if (prevCount !== envCount) {
+          log.info('menu', 'Cache updated: IDW environments ... -> ...', { prevCount, envCount })
+        }
+      }
+      
+      this.emit('menu:refreshed');
+      log.info('menu', 'Menu rebuilt in ...ms with ... environments', { detail: Date.now() - startTime, envCount })
+    } catch (error) {
+      log.error('menu', 'Menu rebuild failed after ...ms', { detail: Date.now() - startTime })
+      log.error('menu', 'Stack', { stack: error.stack })
+      this.emit('menu:refreshError', error);
+    }
+  }
+
+  /**
+   * Get all openable menu items for voice/agent access.
+   * Proxies to menu.js's getOpenableItems().
+   * @returns {Array} Flat list of openable items
+   */
+  getOpenableItems() {
+    const startTime = Date.now();
+    log.info('menu', 'getOpenableItems() called')
+    try {
+      const { getOpenableItems } = require('./menu');
+      const items = getOpenableItems();
+      log.info('menu', 'getOpenableItems returned ... items in ...ms', { itemsCount: items.length, detail: Date.now() - startTime })
+      return items;
+    } catch (error) {
+      log.error('menu', 'getOpenableItems failed after ...ms', { detail: Date.now() - startTime })
+      log.error('menu', 'Stack', { stack: error.stack })
+      return [];
+    }
+  }
+
+  /**
+   * Find a menu item by user query using LLM + phonetic matching.
+   * Proxies to menu.js's findMenuItem().
+   * @param {string} query - User's voice/text request
+   * @returns {Promise<Object|null>} Matching menu item or null
+   */
+  async findMenuItem(query) {
+    const startTime = Date.now();
+    log.info('menu', 'findMenuItem() called with query: "..."', { query })
+    try {
+      const { findMenuItem } = require('./menu');
+      const result = await findMenuItem(query);
+      if (result) {
+        log.info('menu', 'findMenuItem matched "..." in ...ms', { detail: result.name || result.label, detail: Date.now() - startTime })
+      } else {
+        log.info('menu', 'findMenuItem found no match for "..." in ...ms', { query, detail: Date.now() - startTime })
+      }
+      return result;
+    } catch (error) {
+      log.error('menu', 'findMenuItem failed for "..." after ...ms', { query, detail: Date.now() - startTime })
+      log.error('menu', 'Stack', { stack: error.stack })
+      return null;
+    }
   }
 
   /**
    * Register IPC handlers
    */
   _registerIPCHandlers() {
-    console.log('[MenuDataManager] Registering IPC handlers...');
+    log.info('menu', 'Registering IPC handlers...')
     
     // Get IDW environments
-    ipcMain.handle('menu-data:get-idw-environments', () => {
-      return this.getIDWEnvironments();
+    ipcMain.handle('menu-data:get-idw-environments', () => { logCount: log.info('menu', 'get-idw-environments')
+      const envs = this.getIDWEnvironments();
+      log.info('menu', 'Returning ... IDW environments', { envsCount: envs.length })
+      return envs;
     });
     
     // Set IDW environments
     ipcMain.handle('menu-data:set-idw-environments', async (event, environments) => {
-      return this.setIDWEnvironments(environments, { source: 'ipc' });
+      log.info('menu', 'set-idw-environments (... envs)', { detail: (environments || []).length })
+      const result = await this.setIDWEnvironments(environments, { source: 'ipc' });
+      log.info('menu', 'set-idw-environments result', { result })
+      return result;
     });
     
     // Add IDW environment
     ipcMain.handle('menu-data:add-idw-environment', async (event, env) => {
-      return this.addIDWEnvironment(env);
+      log.info('menu', 'add-idw-environment: "..."', { detail: env && env.label })
+      const result = await this.addIDWEnvironment(env);
+      log.info('menu', 'add-idw-environment result', { result })
+      return result;
     });
     
     // Update IDW environment
     ipcMain.handle('menu-data:update-idw-environment', async (event, id, updates) => {
-      return this.updateIDWEnvironment(id, updates);
+      
+      const result = await this.updateIDWEnvironment(id, updates);
+      log.info('menu', 'update-idw-environment result', { result })
+      return result;
     });
     
     // Remove IDW environment
     ipcMain.handle('menu-data:remove-idw-environment', async (event, id) => {
-      return this.removeIDWEnvironment(id);
+      log.info('menu', 'remove-idw-environment: id=...', { id })
+      const result = await this.removeIDWEnvironment(id);
+      log.info('menu', 'remove-idw-environment result', { result })
+      return result;
     });
     
     // Get all data
     ipcMain.handle('menu-data:get-all', () => {
-      return this.getAllData();
+      log.info('menu', 'get-all')
+      const data = this.getAllData();
+      log.info('menu', 'get-all returned ... data keys', { detail: Object.keys(data).length })
+      return data;
     });
     
     // Force refresh
     ipcMain.on('menu-data:force-refresh', () => {
+      log.info('menu', 'force-refresh triggered')
       this.forceRefresh();
     });
     
     // Legacy support: redirect old IPC channels
     this._registerLegacyHandlers();
     
-    console.log('[MenuDataManager] ✅ IPC handlers registered');
+    log.info('menu', '✅ IPC handlers registered')
   }
 
   /**
@@ -724,45 +885,57 @@ class MenuDataManager extends EventEmitter {
   _registerLegacyHandlers() {
     // Legacy get-idw-environments
     ipcMain.on('get-idw-environments', (event) => {
-      console.log('[MenuDataManager] Legacy get-idw-environments called');
-      event.reply('get-idw-environments', this.getIDWEnvironments());
+      log.info('menu', 'get-idw-environments')
+      const envs = this.getIDWEnvironments();
+      log.info('menu', 'Replying with ... IDW environments', { envsCount: envs.length })
+      event.reply('get-idw-environments', envs);
     });
     
     // Legacy get-external-bots
     ipcMain.on('get-external-bots', (event) => {
-      event.reply('get-external-bots', this.getExternalBots());
+      const bots = this.getExternalBots();
+      log.info('menu', 'get-external-bots -> ... bots', { botsCount: bots.length })
+      event.reply('get-external-bots', bots);
     });
     
     // Legacy get-image-creators
     ipcMain.on('get-image-creators', (event) => {
-      event.reply('get-image-creators', this.getImageCreators());
+      const creators = this.getImageCreators();
+      log.info('menu', 'get-image-creators -> ... creators', { creatorsCount: creators.length })
+      event.reply('get-image-creators', creators);
     });
     
     // Legacy get-video-creators
     ipcMain.on('get-video-creators', (event) => {
-      event.reply('get-video-creators', this.getVideoCreators());
+      const creators = this.getVideoCreators();
+      log.info('menu', 'get-video-creators -> ... creators', { creatorsCount: creators.length })
+      event.reply('get-video-creators', creators);
     });
     
     // Legacy get-audio-generators
     ipcMain.on('get-audio-generators', (event) => {
-      event.reply('get-audio-generators', this.getAudioGenerators());
+      const generators = this.getAudioGenerators();
+      log.info('menu', 'get-audio-generators -> ... generators', { generatorsCount: generators.length })
+      event.reply('get-audio-generators', generators);
     });
     
     // Legacy get-ui-design-tools
     ipcMain.on('get-ui-design-tools', (event) => {
-      event.reply('get-ui-design-tools', this.getUIDesignTools());
+      const tools = this.getUIDesignTools();
+      log.info('menu', 'get-ui-design-tools -> ... tools', { toolsCount: tools.length })
+      event.reply('get-ui-design-tools', tools);
     });
     
     // Legacy refresh-menu - SINGLE handler to replace duplicates
     ipcMain.on('refresh-menu', () => {
-      console.log('[MenuDataManager] Legacy refresh-menu called');
+      log.info('menu', 'refresh-menu triggered')
       this.forceRefresh();
     });
     
     // Legacy save handlers
-    ipcMain.on('save-idw-environments', async (event, environments) => {
-      console.log('[MenuDataManager] Legacy save-idw-environments called');
+    ipcMain.on('save-idw-environments', async (event, environments) => { logCount: log.info('menu', 'save-idw-environments (... envs)', { detail: (environments || []).length })
       const result = await this.setIDWEnvironments(environments, { source: 'legacy-save' });
+      log.info('menu', 'save-idw-environments result', { result })
       event.reply('idw-environments-saved', result);
     });
   }

@@ -10,6 +10,8 @@ import path from 'path';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { app } = require('electron');
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 /**
  * Service for generating video screengrabs
@@ -64,7 +66,7 @@ export class ScreengrabService {
       fs.mkdirSync(grabsDir, { recursive: true });
     }
 
-    console.log(`[ScreengrabService] Generating ${count} screengrabs`);
+    log.info('video', '[ScreengrabService] Generating screengrabs', { v0: count });
 
     const results = [];
     
@@ -96,9 +98,9 @@ export class ScreengrabService {
           filename: path.basename(outputPath)
         });
 
-        console.log(`[ScreengrabService] Generated frame ${i + 1}/${count} at ${formatTime(time)}`);
+        log.info('video', '[ScreengrabService] Generated frame / at', { v0: i + 1, v1: count, v2: formatTime(time) });
       } catch (error) {
-        console.error(`[ScreengrabService] Error generating frame at ${time}:`, error);
+        log.error('video', '[ScreengrabService] Error generating frame at :', { v0: time, arg0: error });
       }
     }
 
@@ -162,7 +164,7 @@ export class ScreengrabService {
           filename: path.basename(outputPath)
         });
       } catch (error) {
-        console.error(`[ScreengrabService] Error at timestamp ${time}:`, error);
+        log.error('video', '[ScreengrabService] Error at timestamp :', { v0: time, arg0: error });
       }
     }
 

@@ -12,11 +12,13 @@
 
 const { BrowserWindow } = require('electron');
 const { getSpeechQueue, PRIORITY } = require('./src/voice-task-sdk/audio/speechQueue');
-const { getBudgetManager } = require('./budget-manager');
+const { getAIService } = require('./lib/ai-service');
+const hudApi = require('./lib/hud-api');
+const { getLogQueue } = require('./lib/log-event-queue');
+const log = getLogQueue();
 
 class VoiceSpeaker {
   constructor() {
-    this.apiKey = null;
     this.isSpeaking = false;
     this.subscribers = new Map();  // webContents ID -> callback
     
@@ -25,48 +27,9 @@ class VoiceSpeaker {
     this.speechQueue.setSpeakFunction((text, metadata) => this._doSpeak(text, metadata));
     this.speechQueue.setCancelFunction(() => this._doCancel());
     
-    console.log('[VoiceSpeaker] Initialized');
+    log.info('voice', 'Initialized')
   }
 
-  /**
-   * Get OpenAI API key from settings
-   */
-  getApiKey() {
-    if (this.apiKey) return this.apiKey;
-    
-    if (global.settingsManager) {
-      // First try the dedicated OpenAI key
-      const openaiKey = global.settingsManager.get('openaiApiKey');
-      if (openaiKey) {
-        this.apiKey = openaiKey;
-        return this.apiKey;
-      }
-      
-      // Fall back to LLM API key if provider is OpenAI
-      const provider = global.settingsManager.get('llmProvider');
-      const llmKey = global.settingsManager.get('llmApiKey');
-      
-      if (llmKey && (!provider || provider === 'openai')) {
-        this.apiKey = llmKey;
-        return this.apiKey;
-      }
-      
-      // If llmApiKey starts with sk-, assume it's OpenAI
-      if (llmKey && llmKey.startsWith('sk-')) {
-        this.apiKey = llmKey;
-        return this.apiKey;
-      }
-    }
-    
-    return null;
-  }
-
-  /**
-   * Clear cached API key (call when settings change)
-   */
-  clearApiKey() {
-    this.apiKey = null;
-  }
 
   /**
    * Speak text using OpenAI TTS API
@@ -121,12 +84,6 @@ class VoiceSpeaker {
   async _doSpeak(text, metadata = {}) {
     this._ensureOrbSubscribed();
     
-    const apiKey = this.getApiKey();
-    if (!apiKey) {
-      console.error('[VoiceSpeaker] No API key available');
-      return false;
-    }
-    
     // Clear any currently playing audio
     if (this.isSpeaking) {
       this.broadcast({ type: 'clear_audio_buffer' });
@@ -134,55 +91,28 @@ class VoiceSpeaker {
     }
     
     const voice = metadata?.voice || 'alloy';
-    console.log('[VoiceSpeaker] Speaking:', text.slice(0, 80), '| Voice:', voice);
+    log.info('voice', 'Speaking', { arg1: text.slice(0, 80), arg2: '| Voice:', voice })
     
     try {
       this.isSpeaking = true;
       
-      // Call OpenAI TTS API
-      const response = await fetch('https://api.openai.com/v1/audio/speech', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'tts-1',
-          input: text,
-          voice: voice,
-          response_format: 'wav',
-        }),
+      // Signal HUD API so voice listener can mute during playback
+      hudApi.speechStarted();
+      
+      // Call TTS via centralized AI service
+      const ai = getAIService();
+      const result = await ai.tts(text, {
+        voice: voice,
+        responseFormat: 'wav',
+        feature: 'voice-speaker',
       });
       
-      if (!response.ok) {
-        const error = await response.text();
-        console.error('[VoiceSpeaker] TTS API error:', response.status, error);
-        this.isSpeaking = false;
-        return false;
-      }
-      
-      // Track usage for cost monitoring
-      try {
-        const budgetManager = getBudgetManager();
-        const estimatedTokens = Math.ceil(text.length / 4);
-        budgetManager.trackUsage({
-          provider: 'openai',
-          model: 'tts-1',
-          inputTokens: estimatedTokens,
-          outputTokens: 0,
-          feature: 'tts-voice',
-          operation: 'text-to-speech',
-        });
-      } catch (trackError) {
-        console.warn('[VoiceSpeaker] Failed to track usage:', trackError.message);
-      }
-      
-      // Get audio data
+      // Get audio data (result.audioBuffer is a Buffer)
       const ttsResponseId = `tts-${Date.now()}`;
-      const audioBuffer = await response.arrayBuffer();
-      const base64Audio = Buffer.from(audioBuffer).toString('base64');
+      const audioBuffer = result.audioBuffer;
+      const base64Audio = audioBuffer.toString('base64');
       
-      console.log(`[VoiceSpeaker] WAV received: ${audioBuffer.byteLength} bytes`);
+      log.info('voice', 'WAV received: ... bytes', { byteLength: audioBuffer.byteLength })
       
       // Estimate duration (48000 bytes/sec for 24kHz 16-bit mono + 44 byte header)
       const estimatedDurationMs = Math.max(500, ((audioBuffer.byteLength - 44) / 48000) * 1000);
@@ -203,6 +133,7 @@ class VoiceSpeaker {
         this.broadcast({ type: 'audio_done', responseId: ttsResponseId });
         this.speechQueue.markComplete();
         this.isSpeaking = false;
+        hudApi.speechEnded();
       }, estimatedDurationMs + 100);
       
       // Also broadcast full text
@@ -211,8 +142,9 @@ class VoiceSpeaker {
       return true;
       
     } catch (err) {
-      console.error('[VoiceSpeaker] TTS error:', err);
+      log.error('voice', 'TTS error', { error: err.message || err, responseBody: err.responseBody?.slice?.(0, 200) || undefined })
       this.isSpeaking = false;
+      hudApi.speechEnded();
       return false;
     }
   }
@@ -224,6 +156,7 @@ class VoiceSpeaker {
   async _doCancel() {
     this.isSpeaking = false;
     this.broadcast({ type: 'clear_audio_buffer' });
+    hudApi.speechEnded();
   }
 
   /**
@@ -267,7 +200,7 @@ class VoiceSpeaker {
    */
   subscribe(webContentsId, callback) {
     this.subscribers.set(webContentsId, callback);
-    console.log(`[VoiceSpeaker] Subscriber added: ${webContentsId}`);
+    log.info('voice', 'Subscriber added: ...', { webContentsId })
   }
 
   /**
@@ -275,7 +208,7 @@ class VoiceSpeaker {
    */
   unsubscribe(webContentsId) {
     this.subscribers.delete(webContentsId);
-    console.log(`[VoiceSpeaker] Subscriber removed: ${webContentsId}`);
+    log.info('voice', 'Subscriber removed: ...', { webContentsId })
   }
 
   /**
@@ -297,7 +230,7 @@ class VoiceSpeaker {
         const orbId = orbWindow.webContents.id;
         
         if (!this.subscribers.has(orbId)) {
-          console.log(`[VoiceSpeaker] Auto-subscribing orb window (id: ${orbId})`);
+          log.info('voice', 'Auto-subscribing orb window (id: ...)', { orbId })
           
           this.subscribe(orbId, (event) => {
             if (!orbWindow.isDestroyed()) {
@@ -307,7 +240,7 @@ class VoiceSpeaker {
         }
       }
     } catch (err) {
-      console.warn('[VoiceSpeaker] Error ensuring orb subscribed:', err.message);
+      log.warn('voice', 'Error ensuring orb subscribed', { error: err.message })
     }
   }
 
@@ -320,7 +253,7 @@ class VoiceSpeaker {
       try {
         callback(event);
       } catch (err) {
-        console.error(`[VoiceSpeaker] Error broadcasting to ${id}:`, err);
+        log.error('voice', 'Error broadcasting to ...', { id })
       }
     });
     
@@ -340,7 +273,7 @@ class VoiceSpeaker {
           }
         }
       } catch (err) {
-        console.error('[VoiceSpeaker] Error sending to windows:', err.message);
+        log.error('voice', 'Error sending to windows', { error: err.message })
       }
     }
   }

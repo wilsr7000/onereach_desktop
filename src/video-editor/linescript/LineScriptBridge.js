@@ -28,7 +28,7 @@ import { ProductionScriptUI } from './ProductionScriptUI.js';
  * @param {Object} app - The main video editor app object
  */
 export function initLineScriptBridge(app) {
-  console.log('[LineScriptBridge] Initializing Line Script modules...');
+  window.logging.info('video', 'LineScriptBridge initializing Line Script modules');
   
   
   // Create app context for modules
@@ -133,7 +133,7 @@ export function initLineScriptBridge(app) {
   // Hook into layout switching
   hookLayoutSwitching(app, lineScriptPanel, adaptiveModeManager, spottingController);
   
-  console.log('[LineScriptBridge] Line Script modules initialized');
+  window.logging.info('video', 'LineScriptBridge Line Script modules initialized');
   
   return {
     lineScriptPanel,
@@ -175,7 +175,7 @@ function setupProductionScriptSync(app, productionScriptManager) {
     }
   });
   
-  console.log('[LineScriptBridge] Production script sync initialized');
+  window.logging.info('video', 'LineScriptBridge production script sync initialized');
 }
 
 /**
@@ -184,7 +184,7 @@ function setupProductionScriptSync(app, productionScriptManager) {
 function setupAIGenerationHandler(app, lineScriptPanel, lineScriptAI) {
   // Listen for generateAIMetadata event from the panel
   lineScriptPanel.on('generateAIMetadata', async () => {
-    console.log('[LineScriptBridge] Generate AI Metadata requested');
+    window.logging.info('video', 'LineScriptBridge generate AI metadata requested');
     
     // Get transcript data
     const words = lineScriptPanel.words || [];
@@ -215,13 +215,13 @@ function setupAIGenerationHandler(app, lineScriptPanel, lineScriptAI) {
       // Set up progress handler
       lineScriptAI.on('progress', (data) => {
         lineScriptPanel.aiProgress = { current: data.current, total: data.total };
-        console.log(`[LineScriptBridge] AI Progress: ${data.current}/${data.total}`);
+        window.logging.info('video', 'LineScriptBridge AI progress', { current: data.current, total: data.total });
       });
       
       // Set up approval handler - auto-approve for now
       lineScriptAI.on('awaitingApproval', (data) => {
         // Auto-approve each chunk (user can review markers later)
-        console.log('[LineScriptBridge] Auto-approving chunk:', data.result.chunkId);
+        window.logging.info('video', 'LineScriptBridge auto-approving chunk', { chunkId: data.result.chunkId });
         lineScriptAI.approveChunk();
       });
       
@@ -241,14 +241,14 @@ function setupAIGenerationHandler(app, lineScriptPanel, lineScriptAI) {
       lineScriptPanel.render();
       
     } catch (error) {
-      console.error('[LineScriptBridge] AI generation error:', error);
+      window.logging.error('video', 'LineScriptBridge AI generation error', { error: error.message || error });
       app.showToast?.('AI generation failed: ' + error.message, 'error');
       lineScriptPanel.aiGenerating = false;
       lineScriptPanel.render();
     }
   });
   
-  console.log('[LineScriptBridge] AI generation handler initialized');
+  window.logging.info('video', 'LineScriptBridge AI generation handler initialized');
 }
 
 /**
@@ -256,13 +256,13 @@ function setupAIGenerationHandler(app, lineScriptPanel, lineScriptAI) {
  */
 function setupMarkerSync(app) {
   if (!app.markerManager) {
-    console.warn('[LineScriptBridge] MarkerManager not available for sync');
+    window.logging.warn('video', 'LineScriptBridge MarkerManager not available for sync');
     return;
   }
   
   // Listen to marker changes from MarkerManager
   app.markerManager.on('markerAdded', (data) => {
-    console.log('[LineScriptBridge] Marker added:', data.marker.id);
+    window.logging.info('video', 'LineScriptBridge marker added', { markerId: data.marker.id });
     
     // Update Line Script panel
     if (app.lineScriptPanel) {
@@ -277,7 +277,7 @@ function setupMarkerSync(app) {
   });
   
   app.markerManager.on('markerUpdated', (data) => {
-    console.log('[LineScriptBridge] Marker updated:', data.marker.id);
+    window.logging.info('video', 'LineScriptBridge marker updated', { markerId: data.marker.id });
     
     if (app.lineScriptPanel) {
       app.lineScriptPanel.onMarkerUpdated(data.marker);
@@ -288,7 +288,7 @@ function setupMarkerSync(app) {
   });
   
   app.markerManager.on('markerDeleted', (data) => {
-    console.log('[LineScriptBridge] Marker deleted:', data.markerId);
+    window.logging.info('video', 'LineScriptBridge marker deleted', { markerId: data.markerId });
     
     if (app.lineScriptPanel) {
       app.lineScriptPanel.onMarkerDeleted(data.markerId);
@@ -470,7 +470,7 @@ function setupTranscriptSync(app) {
   // Add a method to manually refresh transcript in Line Script
   app.refreshLineScriptTranscript = function() {
     if (app.lineScriptPanel) {
-      console.log('[LineScriptBridge] Manually refreshing transcript');
+      window.logging.info('video', 'LineScriptBridge manually refreshing transcript');
       app.lineScriptPanel.loadTranscriptData();
       if (app.lineScriptPanel.visible) {
         app.lineScriptPanel.render();
@@ -504,7 +504,7 @@ function setupTemplateHandlers(app, lineScriptPanel, lineScriptAI) {
         app.spottingController.loadShortcuts(templateId);
       }
       
-      console.log('[LineScriptBridge] Switched to template:', templateId);
+      window.logging.info('video', 'LineScriptBridge switched to template', { templateId });
     });
   });
 }
@@ -533,7 +533,7 @@ function setupAnalysisHandlers(app) {
       
       return results;
     } catch (error) {
-      console.error('[LineScriptBridge] Hook detection error:', error);
+      window.logging.error('video', 'LineScriptBridge Hook detection error', { error: error.message || error });
       app.showToast?.('Hook detection failed: ' + error.message, 'error');
       return null;
     }
@@ -561,7 +561,7 @@ function setupAnalysisHandlers(app) {
       
       return results;
     } catch (error) {
-      console.error('[LineScriptBridge] ZZZ detection error:', error);
+      window.logging.error('video', 'LineScriptBridge ZZZ detection error', { error: error.message || error });
       app.showToast?.('ZZZ detection failed: ' + error.message, 'error');
       return null;
     }
@@ -585,7 +585,7 @@ function setupAnalysisHandlers(app) {
       
       return results;
     } catch (error) {
-      console.error('[LineScriptBridge] Energy analysis error:', error);
+      window.logging.error('video', 'LineScriptBridge Energy analysis error', { error: error.message || error });
       app.showToast?.('Energy analysis failed: ' + error.message, 'error');
       return null;
     }
@@ -609,7 +609,7 @@ function setupAnalysisHandlers(app) {
       
       return quotes;
     } catch (error) {
-      console.error('[LineScriptBridge] Quote finding error:', error);
+      window.logging.error('video', 'LineScriptBridge Quote finding error', { error: error.message || error });
       app.showToast?.('Quote finding failed: ' + error.message, 'error');
       return null;
     }
@@ -632,7 +632,7 @@ function setupAnalysisHandlers(app) {
       
       return topics;
     } catch (error) {
-      console.error('[LineScriptBridge] Topic detection error:', error);
+      window.logging.error('video', 'LineScriptBridge Topic detection error', { error: error.message || error });
       app.showToast?.('Topic detection failed: ' + error.message, 'error');
       return null;
     }
@@ -656,7 +656,7 @@ function setupAnalysisHandlers(app) {
       
       return beats;
     } catch (error) {
-      console.error('[LineScriptBridge] Beat detection error:', error);
+      window.logging.error('video', 'LineScriptBridge Beat detection error', { error: error.message || error });
       app.showToast?.('Beat detection failed: ' + error.message, 'error');
       return null;
     }
@@ -702,7 +702,7 @@ function setupAnalysisHandlers(app) {
       
       return rating;
     } catch (error) {
-      console.error('[LineScriptBridge] Project rating error:', error);
+      window.logging.error('video', 'LineScriptBridge Project rating error', { error: error.message || error });
       app.showToast?.('Project rating failed: ' + error.message, 'error');
       return null;
     }
@@ -742,7 +742,7 @@ function setupExportHandlers(app, exportPresets) {
       
       return content;
     } catch (error) {
-      console.error('[LineScriptBridge] Export preview error:', error);
+      window.logging.error('video', 'LineScriptBridge Export preview error', { error: error.message || error });
       app.showToast?.('Export preview failed: ' + error.message, 'error');
       return null;
     }
@@ -782,7 +782,7 @@ function setupExportHandlers(app, exportPresets) {
       
       return { content, filename };
     } catch (error) {
-      console.error('[LineScriptBridge] Export error:', error);
+      window.logging.error('video', 'LineScriptBridge Export error', { error: error.message || error });
       app.showToast?.('Export failed: ' + error.message, 'error');
       return null;
     }
@@ -820,7 +820,7 @@ function setupExportHandlers(app, exportPresets) {
       
       return success;
     } catch (error) {
-      console.error('[LineScriptBridge] Copy error:', error);
+      window.logging.error('video', 'LineScriptBridge Copy error', { error: error.message || error });
       app.showToast?.('Copy failed: ' + error.message, 'error');
       return false;
     }
@@ -987,7 +987,7 @@ function setupExportHandlers(app, exportPresets) {
     });
   };
   
-  console.log('[LineScriptBridge] Export handlers initialized');
+  window.logging.info('video', 'LineScriptBridge Export handlers initialized');
 }
 
 /**
@@ -1030,9 +1030,9 @@ function hookLayoutSwitching(app, lineScriptPanel, adaptiveModeManager, spotting
         
         // Load current transcript if available - always reload from main app
         lineScriptPanel.loadTranscriptData();
-        console.log('[LineScriptBridge] Transcript data reloaded for linescript layout');
+        window.logging.info('video', 'LineScriptBridge Transcript data reloaded for linescript layout');
         
-        console.log('[LineScriptBridge] Line Script layout activated');
+        window.logging.info('video', 'LineScriptBridge Line Script layout activated');
       } else {
         // Hide Line Script panel
         lineScriptPanel.hide();
@@ -1047,7 +1047,7 @@ function hookLayoutSwitching(app, lineScriptPanel, adaptiveModeManager, spotting
       }
     };
     
-    console.log('[LineScriptBridge] Hooked switchLayout for Line Script');
+    window.logging.info('video', 'LineScriptBridge Hooked switchLayout for Line Script');
   }
 }
 

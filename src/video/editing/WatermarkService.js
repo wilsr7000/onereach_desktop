@@ -8,6 +8,8 @@ import path from 'path';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { app } = require('electron');
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 /**
  * Service for adding watermarks to videos
@@ -60,7 +62,7 @@ export class WatermarkService {
         .outputOptions(['-preset medium', '-crf 23'])
         .output(output)
         .on('start', (cmd) => {
-          console.log('[WatermarkService] Watermark started:', cmd);
+          log.info('video', '[WatermarkService] Watermark started', { data: cmd });
           this.activeJobs.set(jobId, {});
         })
         .on('progress', (progress) => {
@@ -122,7 +124,7 @@ export class WatermarkService {
         .outputOptions(['-preset medium', '-crf 23'])
         .output(output)
         .on('start', (cmd) => {
-          console.log('[WatermarkService] Text overlay started:', cmd);
+          log.info('video', '[WatermarkService] Text overlay started', { data: cmd });
           this.activeJobs.set(jobId, {});
         })
         .on('progress', (progress) => {

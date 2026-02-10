@@ -6,6 +6,8 @@
 const ProjectStorage = require('./ProjectStorage');
 const path = require('path');
 const fs = require('fs');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 
 class ProjectManager {
   constructor() {
@@ -44,7 +46,7 @@ class ProjectManager {
       primaryVideoAssetId: primaryAssetId
     });
 
-    console.log('[ProjectManager] Created project:', project.id, 'with version:', version.id);
+    log.info('app', '[ProjectManager] Created project', { arg0: project.id, arg1: 'with version:', arg2: version.id });
     
     return {
       project: this.storage.getProject(project.id),
@@ -115,7 +117,7 @@ class ProjectManager {
       const stats = fs.statSync(filePath);
       size = stats.size;
     } catch (error) {
-      console.warn('[ProjectManager] Could not get file stats:', error.message);
+      log.warn('app', '[ProjectManager] Could not get file stats', { data: error.message });
     }
 
     const asset = this.storage.addAsset(projectId, {
@@ -326,7 +328,7 @@ class ProjectManager {
     this.currentProject = project;
     this.currentVersion = version;
 
-    console.log('[ProjectManager] Loaded session:', project.id, '/', version.id);
+    log.info('app', '[ProjectManager] Loaded session', { arg0: project.id, arg1: '/', arg2: version.id });
 
     return {
       project,
@@ -376,7 +378,7 @@ class ProjectManager {
 
     this.currentVersion = version;
 
-    console.log('[ProjectManager] Switched to version:', version.id);
+    log.info('app', '[ProjectManager] Switched to version', { data: version.id });
 
     return {
       version,
@@ -412,7 +414,7 @@ class ProjectManager {
     this.currentProject = null;
     this.currentVersion = null;
 
-    console.log('[ProjectManager] Session closed');
+    log.info('app', '[ProjectManager] Session closed');
   }
 
   // ==================== EXPORT/IMPORT ====================

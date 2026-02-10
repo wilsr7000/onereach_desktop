@@ -7,6 +7,8 @@
  * - Customizable colors and styles
  */
 
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 export class WaveformRenderer {
   constructor(options = {}) {
     this.cache = new Map();
@@ -20,7 +22,7 @@ export class WaveformRenderer {
       centerLine: options.centerLineColor || 'rgba(255,255,255,0.1)'
     };
     
-    console.log('[WaveformRenderer] Initialized');
+    log.info('video', '[WaveformRenderer] Initialized');
   }
   
   /**
@@ -132,7 +134,7 @@ export class WaveformRenderer {
    */
   clearCache() {
     this.cache.clear();
-    console.log('[WaveformRenderer] Cache cleared');
+    log.info('video', '[WaveformRenderer] Cache cleared');
   }
   
   /**
@@ -175,7 +177,7 @@ export class WaveformRenderer {
    */
   dispose() {
     this.cache.clear();
-    console.log('[WaveformRenderer] Disposed');
+    log.info('video', '[WaveformRenderer] Disposed');
   }
 }
 

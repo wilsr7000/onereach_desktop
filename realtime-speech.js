@@ -12,6 +12,7 @@
 const { ipcMain } = require('electron');
 const { getVoiceListener } = require('./voice-listener');
 const { getVoiceSpeaker, PRIORITY } = require('./voice-speaker');
+const { getAIService } = require('./lib/ai-service');
 
 class RealtimeSpeech {
   constructor() {
@@ -38,15 +39,6 @@ class RealtimeSpeech {
   
   get hasActiveResponse() {
     return this.listener.hasActiveResponse;
-  }
-
-  getApiKey() {
-    return this.listener.getApiKey();
-  }
-
-  clearApiKey() {
-    this.listener.clearApiKey();
-    this.speaker.clearApiKey();
   }
 
   async connect() {
@@ -165,10 +157,20 @@ class RealtimeSpeech {
     });
 
     ipcMain.handle('realtime-speech:is-connected', async () => {
+      // Check if API key is available via ai-service
+      let hasApiKey = false;
+      try {
+        const ai = getAIService();
+        ai._getApiKey('openai'); // This will throw if no key
+        hasApiKey = true;
+      } catch {
+        hasApiKey = false;
+      }
+      
       return {
         connected: this.isConnected,
         sessionId: this.sessionId,
-        hasApiKey: !!this.getApiKey()
+        hasApiKey
       };
     });
 

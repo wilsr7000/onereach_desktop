@@ -11,6 +11,7 @@
 
 const { getAgentMemory } = require('../../lib/agent-memory-store');
 const { learnFromInteraction } = require('../../lib/thinking-agent');
+const ai = require('../../lib/ai-service');
 
 const helpAgent = {
   id: 'help-agent',
@@ -19,6 +20,29 @@ const helpAgent = {
   voice: 'alloy',  // Neutral, helpful - see VOICE-GUIDE.md
   categories: ['system', 'help'],
   keywords: ['help', 'what can you do', 'capabilities', 'commands', 'how do i', 'what do you'],
+  executionType: 'informational',  // Describes features, no side effects -- can fast-path in bid
+  
+  prompt: `Help Agent lists the app's capabilities and explains how to use features.
+
+HIGH CONFIDENCE (0.85+) for:
+- "What can you do?" / "What are your capabilities?"
+- "Help" / "Help me" / "I need help"
+- "What features does this app have?"
+- "Show me what agents are available"
+- "How do I use the time agent?" / "How do I check weather?"
+
+LOW CONFIDENCE (0.00) -- do NOT bid on:
+- Actual task requests: "What time is it?" (time agent handles that)
+- Weather/music/spelling requests (those agents handle them directly)
+- Greetings: "Hello" / "Good morning" (smalltalk agent)
+- Any request that asks for an ACTION rather than information about capabilities
+
+HALLUCINATION GUARD:
+NEVER state facts that are not in your context window.
+You do NOT know the current time, date, day of week, weather, calendar events, or any real-world data.
+If someone asks a factual question (time, date, weather, schedule, news), do NOT guess.
+Instead bid 0.00 so the correct agent handles it.
+The ONLY facts you may state are those present in the conversation history or user profile provided in your context. Everything else is a guess and will damage user trust.`,
   
   // Memory instance
   memory: null,
@@ -56,13 +80,8 @@ const helpAgent = {
     }
   },
   
-  /**
-   * Bid on a task - uses LLM-based unified bidder
-   */
-  bid(task) {
-    // No fast bidding - let the unified bidder handle all evaluation via LLM
-    return null;
-  },
+  // No bid() method. Routing is 100% LLM-based via unified-bidder.js.
+  // NEVER add keyword/regex bidding here. See .cursorrules.
   
   /**
    * Execute the task

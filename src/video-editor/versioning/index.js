@@ -29,7 +29,7 @@ export function initVersioning(appContext) {
   
   versionHistoryPanel.init();
   
-  console.log('[Versioning] Module initialized');
+  window.logging.info('video', 'Versioning Module initialized');
   
   return { branchSwitcher, versionHistoryPanel };
 }

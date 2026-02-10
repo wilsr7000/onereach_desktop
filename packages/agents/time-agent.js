@@ -17,6 +17,9 @@ const {
   learnFromInteraction,
   getTimeContext 
 } = require('../../lib/thinking-agent');
+const ai = require('../../lib/ai-service');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 
 // Agent configuration for thinking behavior
 const THINKING_CONFIG = {
@@ -44,26 +47,46 @@ const timeAgent = {
   acks: ["Let me check.", "One moment."],
   categories: ['system', 'time'],
   keywords: ['time', 'clock', 'hour', 'minute', 'date', 'day', 'month', 'year', 'today', 'what day'],
+  executionType: 'action',  // Needs system clock -- LLM bidder doesn't have real-time data
+  estimatedExecutionMs: 100,  // Instant -- just reads system clock
+  dataSources: ['system-clock'],
+  
+  /**
+   * Briefing contribution: current time and date.
+   * Priority 1 = appears first in the daily brief.
+   */
+  async getBriefing() {
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+    const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+    const h = now.getHours();
+    const greeting = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+    return {
+      section: 'Time & Date',
+      priority: 1,
+      content: `${greeting}. It's ${timeStr} on ${dateStr}.`,
+    };
+  },
   
   // Prompt for LLM evaluation - be specific about what this agent handles
-  prompt: `Time Agent answers questions about the CURRENT time and date from the system clock.
+  prompt: `Time Agent answers questions about the CURRENT time, date, day of week, month, or year from the system clock.
 
-HIGH CONFIDENCE (0.85+) for:
-- "What time is it?" - asking current time
-- "What's the date?" - asking current date  
-- "What day is it?" - asking current day of the week
-- "What month is it?" - asking current month
-- "What year is it?" - asking current year
+HIGH CONFIDENCE (0.85+) -- these are ALL time-agent queries:
+- "What time is it?" / "What's the time?" / "Time please" → current time
+- "What's today's date?" / "What's the date?" / "What's the date today?" → current date
+- "What day is it?" / "What day is it today?" / "What day of the week is it?" → current day name
+- "What month is it?" / "What year is it?" → current month/year
+- Any variation asking for the ACTUAL current time, date, or day of week
 
-LOW CONFIDENCE (0.00-0.20) - DO NOT BID on these:
-- Schedule/calendar queries: "What do I have on Tuesday?" (calendar agent territory)
-- Meeting questions: "When is my next meeting?" (calendar agent territory)
-- Weather questions: "What's it like outside?" (weather agent territory)
-- Any question asking about events, appointments, or schedules
+This agent reads the SYSTEM CLOCK. It answers "what is the date/time RIGHT NOW".
 
-CRITICAL: If the user mentions a day name (Monday, Tuesday, etc.) and asks "what's happening" or "what do I have", this is a CALENDAR query about their schedule, NOT a time query. Return confidence 0.00.
+LOW CONFIDENCE (0.00) -- do NOT bid on these:
+- Schedule/calendar queries: "What do I have today?" / "What's happening Tuesday?" (calendar agent)
+- Meeting questions: "When is my next meeting?" (calendar agent)
+- Weather questions: "What's it like outside?" (weather agent)
+- Any question about events, appointments, or schedules on a date
 
-This agent ONLY knows the current time/date from the system clock. It has NO access to calendars, schedules, or events.`,
+The difference: "What's today's date?" = TIME (asking the actual date). "What do I have today?" = CALENDAR (asking about events).`,
   
   // Memory instance
   memory: null,
@@ -102,13 +125,8 @@ This agent ONLY knows the current time/date from the system clock. It has NO acc
     }
   },
   
-  /**
-   * Bid on a task - uses LLM-based unified bidder
-   */
-  bid(task) {
-    // No fast bidding - let the unified bidder handle all evaluation via LLM
-    return null;
-  },
+  // No bid() method. Routing is 100% LLM-based via unified-bidder.js.
+  // NEVER add keyword/regex bidding here. See .cursorrules.
   
   /**
    * Execute the task with thinking pattern
@@ -163,7 +181,7 @@ This agent ONLY knows the current time/date from the system clock. It has NO acc
       return result;
       
     } catch (error) {
-      console.error('[TimeAgent] Error:', error);
+      log.error('agent', 'Error', { error });
       return { 
         success: false, 
         message: THINKING_CONFIG.errorMessage 

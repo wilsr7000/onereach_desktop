@@ -7,6 +7,11 @@ const AppContextCapture = require('./app-context-capture');
 const getLogger = require('./event-logger');
 const { getContentIngestionService, ValidationError, retryOperation } = require('./content-ingestion');
 const { getSpacesAPI } = require('./spaces-api');
+const ai = require('./lib/ai-service');
+
+// Structured logging
+const { getLogQueue } = require('./lib/log-event-queue');
+const log = getLogQueue();
 
 // Handle Electron imports gracefully
 let BrowserWindow, ipcMain, globalShortcut, screen, app, clipboard, nativeImage;
@@ -21,7 +26,7 @@ try {
   nativeImage = electron.nativeImage;
 } catch (e) {
   // Not in Electron environment - for testing
-  console.log('Running in non-Electron environment');
+  log.info('clipboard', 'Running in non-Electron environment')
 }
 
 /**
@@ -30,24 +35,33 @@ try {
  */
 class ClipboardManagerV2 {
   constructor() {
+    log.info('clipboard', 'ClipboardManagerV2 constructor started');
+    
     // Check if migration is needed
-    this.checkAndMigrate();
+    try {
+      this.checkAndMigrate();
+    } catch (migrationErr) {
+      log.error('clipboard', 'v2 migration check failed', { error: migrationErr.message });
+    }
     
     // Use shared storage singleton to ensure consistency with SpacesAPI
-    // This fixes issues where items added via ClipboardManager weren't
-    // visible to SpacesAPI (and vice versa) due to separate in-memory indexes
     this.storage = getSharedStorage();
+    log.info('clipboard', 'Shared storage loaded', { hasStorage: !!this.storage });
     
     // Initialize app context capture
-    this.contextCapture = new AppContextCapture();
+    try {
+      this.contextCapture = new AppContextCapture();
+    } catch (ctxErr) {
+      log.warn('clipboard', 'AppContextCapture init failed', { error: ctxErr.message });
+      this.contextCapture = null;
+    }
     
     // Track active YouTube downloads for cancellation
-    this.activeDownloads = new Map(); // Map<placeholderId, { controller: AbortController, progress: number }>
+    this.activeDownloads = new Map();
     
     // PERFORMANCE: Defer loading history until first access
-    // This speeds up initial startup significantly
-    this.history = null; // Will be loaded lazily
-    this.spaces = null;  // Will be loaded lazily
+    this.history = null;
+    this.spaces = null;
     this._historyLoaded = false;
     
     // Compatibility properties
@@ -62,15 +76,35 @@ class ClipboardManagerV2 {
     this.processedScreenshots = new Set();
     
     // Load preferences (lightweight, do immediately)
-    this.loadPreferences();
+    try {
+      this.loadPreferences();
+      log.info('clipboard', 'Preferences loaded', { spacesEnabled: this.spacesEnabled, screenshotCapture: this.screenshotCaptureEnabled });
+    } catch (prefErr) {
+      log.error('clipboard', 'loadPreferences failed', { error: prefErr.message });
+    }
     
     // Migrate existing web monitor items BEFORE IPC handlers (so clients get correct data)
-    this.migrateWebMonitorItems();
+    try {
+      this.migrateWebMonitorItems();
+    } catch (migrateErr) {
+      log.error('clipboard', 'migrateWebMonitorItems failed', { error: migrateErr.message });
+    }
     
-    // Set up IPC handlers (needed immediately for IPC)
-    this.setupIPC();
+    // Set up IPC handlers (needed immediately for IPC) - MUST succeed for viewer to work
+    try {
+      this.setupIPC();
+      log.info('clipboard', 'IPC handlers registered successfully');
+    } catch (ipcErr) {
+      log.error('clipboard', 'setupIPC FAILED - viewer will not work', { error: ipcErr.message, stack: ipcErr.stack?.substring(0, 300) });
+    }
     
     // Log feature initialization
+    log.info('clipboard', 'ClipboardManagerV2 constructor completed', {
+      storageReady: !!this.storage,
+      ipcRegistered: !!ClipboardManagerV2._ipcRegistered,
+      spacesEnabled: this.spacesEnabled,
+      screenshotCapture: this.screenshotCaptureEnabled
+    });
     const logger = getLogger();
     logger.logFeatureUsed('clipboard-manager', { 
       status: 'initialized',
@@ -107,7 +141,7 @@ class ClipboardManagerV2 {
       
       // When an item is deleted via API, remove from our in-memory history
       spacesAPI.on('item:deleted', ({ spaceId, itemId }) => {
-        console.log('[Clipboard] SpacesAPI item:deleted event received:', itemId);
+        log.info('clipboard', 'SpacesAPI item:deleted event received', { itemId })
         const beforeCount = this.history?.length || 0;
         if (this.history) {
           this.history = this.history.filter(h => h.id !== itemId);
@@ -116,7 +150,7 @@ class ClipboardManagerV2 {
         const afterCount = this.history?.length || 0;
         
         if (beforeCount !== afterCount) {
-          console.log('[Clipboard] Removed item from history, notifying UI');
+          log.info('clipboard', 'Removed item from history, notifying UI')
           this.updateSpaceCounts();
           this.notifyHistoryUpdate();
         }
@@ -124,7 +158,7 @@ class ClipboardManagerV2 {
       
       // When an item is added via API, add to our in-memory history
       spacesAPI.on('item:added', ({ spaceId, item }) => {
-        console.log('[Clipboard] SpacesAPI item:added event received:', item?.id);
+        log.info('clipboard', 'SpacesAPI item:added event received', { detail: item?.id })
         this.ensureHistoryLoaded();
         
         // Only add if not already in history (avoid duplicates)
@@ -150,7 +184,7 @@ class ClipboardManagerV2 {
             this.pinnedItems.add(item.id);
           }
           
-          console.log('[Clipboard] Added item to history, notifying UI');
+          log.info('clipboard', 'Added item to history, notifying UI')
           this.updateSpaceCounts();
           this.notifyHistoryUpdate();
         }
@@ -158,7 +192,7 @@ class ClipboardManagerV2 {
       
       // When an item is updated via API, update our in-memory history
       spacesAPI.on('item:updated', ({ spaceId, itemId, data }) => {
-        console.log('[Clipboard] SpacesAPI item:updated event received:', itemId, Object.keys(data || {}));
+        log.info('clipboard', 'SpacesAPI item:updated event received', { arg1: itemId, arg2: Object.keys(data || {}) })
         this.ensureHistoryLoaded();
         
         const item = this.history.find(h => h.id === itemId);
@@ -174,28 +208,28 @@ class ClipboardManagerV2 {
             }
           }
           
-          console.log('[Clipboard] Updated item in history, notifying UI');
+          log.info('clipboard', 'Updated item in history, notifying UI')
           this.notifyHistoryUpdate();
         }
       });
       
       // When an item is moved between spaces via API
       spacesAPI.on('item:moved', ({ itemId, fromSpaceId, toSpaceId }) => {
-        console.log('[Clipboard] SpacesAPI item:moved event received:', itemId, fromSpaceId, '->', toSpaceId);
+        log.info('clipboard', 'SpacesAPI item:moved event received', { itemId, fromSpaceId, arg3: '->', toSpaceId })
         this.ensureHistoryLoaded();
         
         const item = this.history.find(h => h.id === itemId);
         if (item) {
           item.spaceId = toSpaceId;
-          console.log('[Clipboard] Updated item space, notifying UI');
+          log.info('clipboard', 'Updated item space, notifying UI')
           this.updateSpaceCounts();
           this.notifyHistoryUpdate();
         }
       });
       
-      console.log('[Clipboard] Subscribed to SpacesAPI events for sync');
+      log.info('clipboard', 'Subscribed to SpacesAPI events for sync')
     } catch (error) {
-      console.error('[Clipboard] Failed to subscribe to SpacesAPI events:', error.message);
+      log.error('clipboard', 'Failed to subscribe to SpacesAPI events', { error: error.message })
       // Non-fatal - app will still work, just without real-time sync
     }
   }
@@ -203,10 +237,10 @@ class ClipboardManagerV2 {
   // PERFORMANCE: Lazy load history on first access
   ensureHistoryLoaded() {
     if (!this._historyLoaded) {
-      console.log('[Clipboard] Lazy loading history...');
+      log.info('clipboard', 'Lazy loading history...')
       this.loadFromStorage();
       this._historyLoaded = true;
-      console.log('[Clipboard] History loaded:', this.history.length, 'items');
+      log.info('clipboard', 'History loaded', { arg1: this.history.length, arg2: 'items' })
     }
   }
   
@@ -223,16 +257,16 @@ class ClipboardManagerV2 {
       // Journey Map detection (check first - more specific structure)
       // Matches exported journey maps from Journey Editor
       if (data.journeyData && data.metadata?.exportVersion) {
-        console.log('[JsonSubtype] Detected journey-map (export format)');
+        log.info('clipboard', 'Detected journey-map (export format)')
         return 'journey-map';
       }
       if (data.journeyData?.persona?.journeys?.[0]?.stages) {
-        console.log('[JsonSubtype] Detected journey-map (stages format)');
+        log.info('clipboard', 'Detected journey-map (stages format)')
         return 'journey-map';
       }
       // Journey map template format (from templates/export/)
       if (data.prompt && data.systemPrompt && data.htmlTemplate && data.styling) {
-        console.log('[JsonSubtype] Detected journey-map (template format)');
+        log.info('clipboard', 'Detected journey-map (template format)')
         return 'journey-map';
       }
       
@@ -249,7 +283,7 @@ class ClipboardManagerV2 {
                                 data.borders || data.animations;
         
         if (hasColorTokens && hasTypographyTokens) {
-          console.log('[JsonSubtype] Detected style-guide');
+          log.info('clipboard', 'Detected style-guide')
           return 'style-guide';
         }
       }
@@ -263,7 +297,7 @@ class ClipboardManagerV2 {
         );
         
         if (hasAIMetadata && hasMessageStructure) {
-          console.log('[JsonSubtype] Detected chatbot-conversation');
+          log.info('clipboard', 'Detected chatbot-conversation')
           return 'chatbot-conversation';
         }
       }
@@ -271,7 +305,7 @@ class ClipboardManagerV2 {
       // No specific subtype detected
       return null;
     } catch (e) {
-      console.warn('[JsonSubtype] Error parsing JSON for subtype detection:', e.message);
+      log.warn('clipboard', 'Error parsing JSON for subtype detection', { error: e.message })
       return null;
     }
   }
@@ -289,7 +323,7 @@ class ClipboardManagerV2 {
       const content = fs.readFileSync(filePath, 'utf8');
       return this.detectJsonSubtype(content);
     } catch (e) {
-      console.warn('[JsonSubtype] Error reading file for subtype detection:', e.message);
+      log.warn('clipboard', 'Error reading file for subtype detection', { error: e.message })
       return null;
     }
   }
@@ -424,8 +458,12 @@ class ClipboardManagerV2 {
     if (requestedSpaceId && requestedSpaceId !== 'unclassified') {
       const spaceExists = this.storage.index?.spaces?.some(s => s.id === requestedSpaceId);
       if (!spaceExists) {
+        log.error('clipboard', 'CRITICAL: Space "..." does not exist! Item will be saved to "unclassified" instead.', { requestedSpaceId })
+        log.error('clipboard', `[addToHistory] Available spaces:`)
         logger.warn('Space not found, defaulting to unclassified', { spaceId: requestedSpaceId });
         item.spaceId = 'unclassified';
+      } else {
+        log.info('clipboard', 'Space "..." exists, proceeding with save', { requestedSpaceId })
       }
     }
     
@@ -443,28 +481,28 @@ class ClipboardManagerV2 {
       // Skip SVG-only content (likely UI elements, not user content)
       const trimmedContent = content.trim();
       if (trimmedContent.startsWith('<svg') && trimmedContent.endsWith('</svg>')) {
-        console.log('[WebMonitors] Skipping SVG-only content (likely UI element)');
+        log.info('clipboard', 'Skipping SVG-only content (likely UI element)')
         return null;
       }
       
       // Check if content contains a URL
       const url = this.extractURL(content);
-      console.log('[WebMonitors] Content received:', content.substring(0, 100));
-      console.log('[WebMonitors] Extracted URL:', url);
+      log.info('clipboard', 'Content received', { detail: content.substring(0, 100) })
+      log.info('clipboard', 'Extracted URL', { url })
       
       if (url) {
-        console.log('[WebMonitors] URL detected, creating website monitor...');
+        log.info('clipboard', 'URL detected, creating website monitor...')
         
         try {
           // Try to create a full website monitor with scanning
           const result = await this.createWebsiteMonitorFromURL(url);
           if (result) {
-            console.log('[WebMonitors] Monitor created successfully:', result.id);
+            log.info('clipboard', 'Monitor created successfully', { resultId: result.id })
             return result;
           }
         } catch (error) {
-          console.error('[WebMonitors] Failed to create monitor:', error.message);
-          console.log('[WebMonitors] Falling back to simple URL item');
+          log.error('clipboard', 'Failed to create monitor', { error: error.message })
+          log.info('clipboard', 'Falling back to simple URL item')
           
           // Notify user of the failure
           const { BrowserWindow } = require('electron');
@@ -488,7 +526,7 @@ class ClipboardManagerV2 {
           }
         }
       } else {
-        console.log('[WebMonitors] No URL found in content, adding as regular item');
+        log.info('clipboard', 'No URL found in content, adding as regular item')
       }
     }
     // ========================================
@@ -505,7 +543,7 @@ class ClipboardManagerV2 {
     if (!context && !item.source) {
       try {
         context = await this.contextCapture.getFullContext();
-        console.log('[V2] Captured context:', context);
+        log.info('clipboard', 'Captured context', { context })
       } catch (error) {
         const logger = getLogger();
         logger.warn('Clipboard context capture failed', {
@@ -547,13 +585,13 @@ class ClipboardManagerV2 {
           // For larger images (>100KB), generate a smaller thumbnail
           if (imageData.length > 100000) {
             item.thumbnail = this.generateImageThumbnail(imageData);
-            console.log('[addToHistory] Generated thumbnail for large image');
+            log.info('clipboard', 'Generated thumbnail for large image')
           } else {
             item.thumbnail = imageData;
-            console.log('[addToHistory] Using full image as thumbnail (small image)');
+            log.info('clipboard', 'Using full image as thumbnail (small image)')
           }
         } catch (thumbError) {
-          console.error('[addToHistory] Error generating image thumbnail:', thumbError);
+      log.error('clipboard', 'Error generating image thumbnail', { thumbError })
           // Fallback: use the content as thumbnail
           item.thumbnail = imageData;
         }
@@ -615,7 +653,7 @@ class ClipboardManagerV2 {
             updatedAt: new Date().toISOString()
           };
           this.storage.updateSpaceMetadata(itemSpaceId, { files: spaceMeta.files });
-          console.log('[Clipboard] Synced new item to space-metadata.json:', fileKey);
+          log.info('clipboard', 'Synced new item to space-metadata.json', { fileKey })
         }
       } catch (syncError) {
         const logger = getLogger();
@@ -660,7 +698,9 @@ class ClipboardManagerV2 {
       // Check if auto AI metadata is enabled
       const autoAIMetadata = settingsManager.get('autoAIMetadata');
       const autoAIMetadataTypes = settingsManager.get('autoAIMetadataTypes') || ['all'];
-      const apiKey = settingsManager.get('llmApiKey');
+      // Always use anthropicApiKey for metadata generation since it uses Claude API
+      // The llmApiKey depends on llmProvider which may be set to 'openai'
+      const apiKey = settingsManager.get('anthropicApiKey') || settingsManager.get('llmApiKey');
       
       // Also check legacy screenshot setting for backward compatibility
       const autoGenerateScreenshotMetadata = settingsManager.get('autoGenerateScreenshotMetadata');
@@ -669,19 +709,10 @@ class ClipboardManagerV2 {
       const isImageFile = itemType === 'file' && fileType === 'image-file';
       
       
-      console.log(`[Auto AI] Settings check for item ${itemId}:`, {
-        itemType,
-        fileType,
-        isScreenshot,
-        isImageFile,
-        autoAIMetadata,
-        autoAIMetadataTypes,
-        hasApiKey: !!apiKey,
-        autoGenerateScreenshotMetadata
-      });
+      log.info('clipboard', 'Settings check for item ...', { itemId })
       
       if (!apiKey) {
-        console.log('[Auto AI] No API key configured, skipping metadata generation');
+        log.info('clipboard', 'No API key configured, skipping metadata generation')
         return; // No API key configured
       }
       
@@ -715,11 +746,11 @@ class ClipboardManagerV2 {
       }
       
       if (!shouldGenerate) {
-        console.log(`[Auto AI] Skipping metadata generation for ${itemType} (not in enabled types: ${autoAIMetadataTypes.join(', ')})`);
+        log.info('clipboard', 'Skipping metadata generation for ... (not in enabled types: ...)', { itemType, detail: autoAIMetadataTypes.join(', ') })
         return;
       }
       
-      console.log(`[Auto AI] Generating metadata for ${itemType} item: ${itemId}`);
+      log.info('clipboard', 'Generating metadata for ... item: ...', { itemType, itemId })
       
       // Generate metadata using NEW specialized system
       const MetadataGenerator = require('./metadata-generator');
@@ -730,7 +761,7 @@ class ClipboardManagerV2 {
       
       
       if (result.success) {
-        console.log(`[Auto AI] Successfully generated specialized metadata for ${itemType}: ${itemId}`);
+        log.info('clipboard', 'Successfully generated specialized metadata for ...: ...', { itemType, itemId })
         
         // Notify UI to refresh this item
         this.notifyHistoryUpdate();
@@ -745,13 +776,12 @@ class ClipboardManagerV2 {
           });
         }
       } else {
-        console.error(`[Auto AI] Failed to generate metadata for item ${itemId}:`, result.error);
+        log.warn('clipboard', 'Auto-metadata generation failed (non-critical)', { itemId })
       }
     } catch (error) {
       const logger = getLogger();
-      logger.error('Clipboard auto AI metadata generation failed', {
+      logger.warn('Clipboard auto AI metadata generation failed (non-critical)', {
         error: error.message,
-        stack: error.stack,
         operation: 'autoGenerateMetadata'
       });
     }
@@ -841,7 +871,7 @@ class ClipboardManagerV2 {
             if (indexEntry && !indexEntry.jsonSubtype) {
               indexEntry.jsonSubtype = detectedSubtype;
               this.storage.saveIndex();
-              console.log(`[ClipboardManager] Detected and saved jsonSubtype: ${detectedSubtype} for item ${item.id}`);
+              log.info('clipboard', 'Detected and saved jsonSubtype: ... for item ...', { detectedSubtype, itemId: item.id })
             }
           }
         } catch (e) {
@@ -854,7 +884,7 @@ class ClipboardManagerV2 {
   }
   
   async deleteItem(id) {
-    console.log('[Clipboard] deleteItem called for:', id);
+    log.info('clipboard', 'deleteItem called for', { id })
     
     // Ensure history is loaded
     this.ensureHistoryLoaded();
@@ -863,14 +893,14 @@ class ClipboardManagerV2 {
     if (this.manager && this.manager.pendingOperations) {
       const pendingOps = this.manager.pendingOperations.get(id);
       if (pendingOps && pendingOps.size > 0) {
-        console.log(`[Clipboard] Waiting for ${pendingOps.size} pending operations to complete before deleting item ${id}`);
+        log.info('clipboard', 'Waiting for ... pending operations to complete before deleting item ...', { size: pendingOps.size, id })
         try {
           await Promise.race([
             Promise.all(Array.from(pendingOps)),
             new Promise((resolve) => setTimeout(resolve, 5000)) // 5 second timeout
           ]);
         } catch (e) {
-          console.error('[Clipboard] Error waiting for pending operations:', e);
+          log.error('clipboard', 'Error waiting for pending operations', { error: e.message || e })
         }
       }
     }
@@ -880,15 +910,15 @@ class ClipboardManagerV2 {
     const spaceId = item ? item.spaceId : null;
     const fileName = item ? item.fileName : null;
     
-    console.log('[Clipboard] Attempting storage delete for:', id, 'spaceId:', spaceId);
+    log.info('clipboard', 'Attempting storage delete for', { id, arg2: 'spaceId:', spaceId })
     const success = this.storage.deleteItem(id);
-    console.log('[Clipboard] Storage delete result:', success);
+    log.info('clipboard', 'Storage delete result', { success })
     
     if (!success) {
       // Item might still be in history but not in storage index - clean up history anyway
       const historyIndex = this.history.findIndex(h => h.id === id);
       if (historyIndex !== -1) {
-        console.log('[Clipboard] Item not in storage index but found in history, removing from history');
+        log.info('clipboard', 'Item not in storage index but found in history, removing from history')
         this.history.splice(historyIndex, 1);
         this.pinnedItems.delete(id);
         this.updateSpaceCounts();
@@ -907,7 +937,7 @@ class ClipboardManagerV2 {
           if (spaceMeta.files && spaceMeta.files[fileKey]) {
             delete spaceMeta.files[fileKey];
             this.storage.updateSpaceMetadata(spaceId, { files: spaceMeta.files });
-            console.log('[Clipboard] Removed from space-metadata.json:', fileKey);
+            log.info('clipboard', 'Removed from space-metadata.json', { fileKey })
           }
         }
       } catch (syncError) {
@@ -928,7 +958,7 @@ class ClipboardManagerV2 {
     }
     this.updateSpaceCounts();
     this.notifyHistoryUpdate();
-    console.log('[Clipboard] Delete completed successfully for:', id);
+    log.info('clipboard', 'Delete completed successfully for', { id })
   }
   
   async clearHistory() {
@@ -949,7 +979,7 @@ class ClipboardManagerV2 {
                 new Promise((resolve) => setTimeout(resolve, 5000))
               ]);
             } catch (e) {
-              console.error('Error waiting for pending operations:', e);
+              log.error('clipboard', 'Error waiting for pending operations', { error: e.message || e })
             }
           }
         }
@@ -1036,7 +1066,7 @@ class ClipboardManagerV2 {
               updatedAt: new Date().toISOString()
             };
             this.storage.updateSpaceMetadata(spaceId, { files: newMeta.files });
-            console.log('[Clipboard] Synced move to space-metadata.json:', fileKey, '->', spaceId);
+            log.info('clipboard', 'Synced move to space-metadata.json', { fileKey, arg2: '->', spaceId })
           }
         }
       } catch (syncError) {
@@ -1146,18 +1176,18 @@ class ClipboardManagerV2 {
     // Query directly from storage index (source of truth) instead of potentially stale history
     const indexItems = this.storage.index.items || [];
     
-    console.log(`[getSpaceItems] Querying spaceId: "${spaceId}", index items: ${indexItems.length}`);
+    log.info('clipboard', 'Querying spaceId: "...", index items: ...', { spaceId, indexItemsCount: indexItems.length })
     
     // Debug: show all unique spaceIds in index
     const uniqueSpaceIds = [...new Set(indexItems.map(item => item.spaceId))];
-    console.log(`[getSpaceItems] Unique spaceIds in index:`, uniqueSpaceIds);
+    log.info('clipboard', `[getSpaceItems] Unique spaceIds in index:`)
     
     // Filter items by space from the storage index
     const filteredItems = indexItems.filter(item => 
       spaceId === null ? true : item.spaceId === spaceId
     );
     
-    console.log(`[getSpaceItems] Found ${filteredItems.length} items for spaceId "${spaceId}"`);
+    log.info('clipboard', 'Found ... items for spaceId "..."', { filteredItemsCount: filteredItems.length, spaceId })
     
     // Load content and thumbnails on demand
     return filteredItems.map(item => {
@@ -1215,7 +1245,7 @@ class ClipboardManagerV2 {
           }
         }
       } catch (error) {
-        console.warn('[getSpaceItems] Failed to load content for item:', item.id, error.message);
+        log.warn('clipboard', 'Failed to load content for item', { itemId: item.id, error: error.message })
       }
       
       return historyItem;
@@ -1380,8 +1410,12 @@ class ClipboardManagerV2 {
     }
     
     try {
-      const { refreshApplicationMenu } = require('./menu');
-      refreshApplicationMenu();
+      if (global.menuDataManager) {
+        global.menuDataManager.refresh();
+      } else {
+        const { refreshApplicationMenu } = require('./menu');
+        refreshApplicationMenu();
+      }
     } catch (e) {
       // Menu module not available in non-Electron environment
     }
@@ -1389,14 +1423,14 @@ class ClipboardManagerV2 {
   
   // Generate AI metadata for video content
   async generateVideoMetadata({ transcript, originalTitle, uploader, description, duration }) {
-    console.log('[AI-Metadata] Generating video metadata...');
+    log.info('clipboard', 'Generating video metadata...')
     
     const { getSettingsManager } = require('./settings-manager');
     const settingsManager = getSettingsManager();
     const apiKey = settingsManager.get('llmApiKey');
     
     if (!apiKey) {
-      console.log('[AI-Metadata] No API key configured');
+      log.info('clipboard', 'No API key configured')
       return null;
     }
     
@@ -1446,86 +1480,19 @@ Respond ONLY with valid JSON, no other text.`;
     try {
       const isClaudeKey = apiKey.startsWith('sk-ant-');
       
-      if (isClaudeKey) {
-        // Use Claude API
-        const https = require('https');
-        
-        const response = await new Promise((resolve, reject) => {
-          const postData = JSON.stringify({
-            model: 'claude-sonnet-4-5-20250929',
-            max_tokens: 1500,
-            messages: [{ role: 'user', content: prompt }]
-          });
-          
-          const options = {
-            hostname: 'api.anthropic.com',
-            port: 443,
-            path: '/v1/messages',
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-api-key': apiKey,
-              'anthropic-version': '2023-06-01',
-              'Content-Length': Buffer.byteLength(postData)
-            },
-            timeout: 60000
-          };
-          
-          const req = https.request(options, (res) => {
-            let data = '';
-            res.on('data', chunk => data += chunk);
-            res.on('end', () => {
-              try {
-                const parsed = JSON.parse(data);
-                if (parsed.content && parsed.content[0] && parsed.content[0].text) {
-                  resolve(parsed.content[0].text);
-                } else if (parsed.error) {
-                  reject(new Error(parsed.error.message));
-                } else {
-                  reject(new Error('Unexpected response format'));
-                }
-              } catch (e) {
-                reject(e);
-              }
-            });
-          });
-          
-          req.on('error', reject);
-          req.on('timeout', () => reject(new Error('Request timeout')));
-          req.write(postData);
-          req.end();
-        });
-        
-        // Parse JSON from response
-        const jsonMatch = response.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          return JSON.parse(jsonMatch[0]);
-        }
-        
-      } else {
-        // Use OpenAI API
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`
-          },
-          body: JSON.stringify({
-            model: 'gpt-4o-mini',
-            messages: [{ role: 'user', content: prompt }],
-            max_tokens: 1500,
-            temperature: 0.3
-          })
-        });
-        
-        const data = await response.json();
-        if (data.choices && data.choices[0] && data.choices[0].message) {
-          const content = data.choices[0].message.content;
-          const jsonMatch = content.match(/\{[\s\S]*\}/);
-          if (jsonMatch) {
-            return JSON.parse(jsonMatch[0]);
-          }
-        }
+      // Use centralized AI service
+      const result = await ai.chat({
+        profile: isClaudeKey ? 'standard' : 'fast',
+        messages: [{ role: 'user', content: prompt }],
+        maxTokens: 1500,
+        temperature: isClaudeKey ? undefined : 0.3,
+        feature: 'clipboard-manager',
+      });
+      
+      // Parse JSON from response
+      const jsonMatch = result.content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0]);
       }
     } catch (err) {
       const logger = getLogger();
@@ -1544,7 +1511,7 @@ Respond ONLY with valid JSON, no other text.`;
    */
   cleanupOrphanedDownloads() {
     try {
-      console.log('[Cleanup] Checking for orphaned downloads...');
+      log.info('clipboard', 'Checking for orphaned downloads...')
       
       const allItems = this.storage.getAllItems();
       let cleaned = 0;
@@ -1559,7 +1526,7 @@ Respond ONLY with valid JSON, no other text.`;
           
           // Check if stuck in downloading state
           if (metadata.downloadStatus === 'downloading') {
-            console.log('[Cleanup] Found orphaned download:', item.id, metadata.title || 'Unknown');
+            log.info('clipboard', 'Found orphaned download', { arg1: item.id, arg2: metadata.title || 'Unknown' })
             
             // Check if video file actually exists (download completed but state not updated)
             const itemDir = path.join(this.storage.itemsDir, item.id);
@@ -1568,7 +1535,7 @@ Respond ONLY with valid JSON, no other text.`;
             
             if (videoFile) {
               // Download completed but state wasn't updated - fix it
-              console.log('[Cleanup] Found completed video file, updating state...');
+              log.info('clipboard', 'Found completed video file, updating state...')
               const stats = fs.statSync(path.join(itemDir, videoFile));
               const title = videoFile.replace(/-[a-zA-Z0-9_-]{11}\.mp4$/, '');
               
@@ -1590,11 +1557,11 @@ Respond ONLY with valid JSON, no other text.`;
                 }
               });
               
-              console.log('[Cleanup] ✅ Fixed completed download:', title);
+              log.info('clipboard', '✅ Fixed completed download', { title })
               cleaned++;
             } else {
               // Download never completed - mark as failed
-              console.log('[Cleanup] No video file found, marking as failed...');
+              log.info('clipboard', 'No video file found, marking as failed...')
               
               metadata.downloadStatus = 'error';
               metadata.downloadError = 'Download interrupted (app crash or restart)';
@@ -1608,27 +1575,27 @@ Respond ONLY with valid JSON, no other text.`;
                 }
               });
               
-              console.log('[Cleanup] ❌ Marked as failed:', metadata.title || item.id);
+              log.info('clipboard', '❌ Marked as failed', { detail: metadata.title || item.id })
               cleaned++;
             }
           }
         } catch (err) {
-          console.error('[Cleanup] Error processing item:', item.id, err.message);
+          log.error('clipboard', 'Error processing item', { itemId: item.id, error: err.message })
         }
       }
       
       if (cleaned > 0) {
-        console.log(`[Cleanup] Cleaned up ${cleaned} orphaned downloads`);
+        log.info('clipboard', 'Cleaned up ... orphaned downloads', { cleaned })
         // Reload history to reflect changes
         if (this._historyLoaded) {
           this._ensureHistoryLoaded();
           this.notifyHistoryUpdate();
         }
       } else {
-        console.log('[Cleanup] No orphaned downloads found');
+        log.info('clipboard', 'No orphaned downloads found')
       }
     } catch (error) {
-      console.error('[Cleanup] Error cleaning orphaned downloads:', error);
+      log.error('clipboard', 'Error cleaning orphaned downloads', { error: error.message || error })
     }
   }
   
@@ -1641,7 +1608,7 @@ Respond ONLY with valid JSON, no other text.`;
     const download = this.activeDownloads.get(placeholderId);
     
     if (!download) {
-      console.log('[Cancel] No active download found for:', placeholderId);
+      log.info('clipboard', 'No active download found for', { placeholderId })
       return false;
     }
     
@@ -1674,7 +1641,7 @@ Respond ONLY with valid JSON, no other text.`;
           fs.writeFileSync(metaPath, JSON.stringify(metadata, null, 2));
         }
       } catch (err) {
-        console.error('[Cancel] Error updating metadata:', err);
+        log.error('clipboard', 'Error updating metadata', { error: err.message || err })
       }
       
       // Update index
@@ -1687,11 +1654,11 @@ Respond ONLY with valid JSON, no other text.`;
       
       this.notifyHistoryUpdate();
       
-      console.log('[Cancel] ✅ Download cancelled:', placeholderId);
+      log.info('clipboard', '✅ Download cancelled', { placeholderId })
       return true;
       
     } catch (error) {
-      console.error('[Cancel] Error cancelling download:', error);
+      log.error('clipboard', 'Error cancelling download', { error: error.message || error })
       return false;
     }
   }
@@ -1700,7 +1667,7 @@ Respond ONLY with valid JSON, no other text.`;
   async downloadYouTubeInBackground(url, spaceId, placeholderId, sender) {
     const { Notification } = require('electron');
     
-    console.log('[YouTube-BG] Starting background download for:', url, 'placeholder:', placeholderId);
+    log.info('clipboard', 'Starting background download for', { url, arg2: 'placeholder:', placeholderId })
     
     // Create abort controller for cancellation
     const abortController = new AbortController();
@@ -1727,7 +1694,7 @@ Respond ONLY with valid JSON, no other text.`;
           throw new Error('Download cancelled by user');
         }
         
-        console.log('[YouTube-BG] Progress:', percent, '%', status);
+        log.info('clipboard', 'Progress', { percent, arg2: '%', status })
         
         // Update progress tracking
         const download = this.activeDownloads.get(placeholderId);
@@ -1781,13 +1748,13 @@ Respond ONLY with valid JSON, no other text.`;
         throw new Error('Download cancelled by user');
       }
       
-      console.log('[YouTube-BG] Download completed:', JSON.stringify(result));
+      log.info('clipboard', 'Download completed', { detail: JSON.stringify(result) })
       
       // Try to fetch transcript
       let transcript = null;
       if (result.success) {
         try {
-          console.log('[YouTube-BG] Fetching transcript...');
+          log.info('clipboard', 'Fetching transcript...')
           const transcriptResult = await dl.getTranscript(url, 'en');
           if (transcriptResult.success) {
             transcript = {
@@ -1796,10 +1763,10 @@ Respond ONLY with valid JSON, no other text.`;
               language: transcriptResult.language,
               isAutoGenerated: transcriptResult.isAutoGenerated,
             };
-            console.log('[YouTube-BG] Transcript fetched:', transcript.language);
+            log.info('clipboard', 'Transcript fetched', { language: transcript.language })
           }
         } catch (e) {
-          console.log('[YouTube-BG] Could not fetch transcript:', e.message);
+          log.info('clipboard', 'Could not fetch transcript', { error: e.message })
         }
       }
       
@@ -1820,13 +1787,13 @@ Respond ONLY with valid JSON, no other text.`;
           
           // Copy file
           fs.copyFileSync(result.filePath, destFilePath);
-          console.log('[YouTube-BG] Copied video to:', destFilePath);
+          log.info('clipboard', 'Copied video to', { destFilePath })
           
           // Clean up temp file
           try { fs.unlinkSync(result.filePath); } catch (e) {}
           
         } catch (copyErr) {
-          console.error('[YouTube-BG] Error copying file:', copyErr);
+          log.error('clipboard', 'Error copying file', { copyErr })
         }
         
         // Update the placeholder with actual data
@@ -1861,7 +1828,7 @@ Respond ONLY with valid JSON, no other text.`;
         // Extract thumbnail from video
         let thumbnailPath = null;
         try {
-          console.log('[YouTube-BG] Extracting thumbnail...');
+          log.info('clipboard', 'Extracting thumbnail...')
           const ffmpeg = require('fluent-ffmpeg');
           const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
           ffmpeg.setFfmpegPath(ffmpegPath);
@@ -1877,23 +1844,23 @@ Respond ONLY with valid JSON, no other text.`;
                 size: '480x270' // 16:9 aspect ratio thumbnail
               })
               .on('end', () => {
-                console.log('[YouTube-BG] Thumbnail extracted to:', thumbnailPath);
+                log.info('clipboard', 'Thumbnail extracted to', { thumbnailPath })
                 resolve();
               })
               .on('error', (err) => {
-                console.error('[YouTube-BG] Thumbnail extraction error:', err);
+                log.error('clipboard', 'Thumbnail extraction error', { error: err.message || err })
                 reject(err);
               });
           });
         } catch (thumbErr) {
-          console.error('[YouTube-BG] Thumbnail extraction failed:', thumbErr.message);
+          log.error('clipboard', 'Thumbnail extraction failed', { error: thumbErr.message })
           thumbnailPath = null;
         }
         
         // Extract audio file
         let audioPath = null;
         try {
-          console.log('[YouTube-BG] Extracting audio...');
+          log.info('clipboard', 'Extracting audio...')
           const ffmpeg = require('fluent-ffmpeg');
           const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
           ffmpeg.setFfmpegPath(ffmpegPath);
@@ -1901,25 +1868,24 @@ Respond ONLY with valid JSON, no other text.`;
           const audioFileName = path.parse(result.fileName).name + '.mp3';
           audioPath = path.join(itemDir, audioFileName);
           
-          await new Promise((resolve, reject) => {
-            ffmpeg(destFilePath)
+          await new Promise((resolve, reject) => { detail: ffmpeg(destFilePath)
               .noVideo()
               .audioCodec('libmp3lame')
               .audioBitrate('128k')
               .format('mp3')
               .output(audioPath)
               .on('end', () => {
-                console.log('[YouTube-BG] Audio extracted to:', audioPath);
+                log.info('clipboard', 'Audio extracted to', { audioPath })
                 resolve();
               })
               .on('error', (err) => {
-                console.error('[YouTube-BG] Audio extraction error:', err);
+                log.error('clipboard', 'Audio extraction error', { error: err.message || err })
                 reject(err);
               })
               .run();
           });
         } catch (audioErr) {
-          console.error('[YouTube-BG] Audio extraction failed:', audioErr.message);
+          log.error('clipboard', 'Audio extraction failed', { error: audioErr.message })
           audioPath = null;
         }
         
@@ -1927,7 +1893,7 @@ Respond ONLY with valid JSON, no other text.`;
         let aiMetadata = null;
         if (transcript && transcript.text && transcript.text.length > 100) {
           try {
-            console.log('[YouTube-BG] Generating AI metadata...');
+            log.info('clipboard', 'Generating AI metadata...')
             aiMetadata = await this.generateVideoMetadata({
               transcript: transcript.text,
               originalTitle: title,
@@ -1935,9 +1901,9 @@ Respond ONLY with valid JSON, no other text.`;
               description: videoInfo.description,
               duration: videoInfo.duration
             });
-            console.log('[YouTube-BG] AI metadata generated:', aiMetadata ? 'success' : 'failed');
+            log.info('clipboard', 'AI metadata generated', { detail: aiMetadata ? 'success' : 'failed' })
           } catch (aiErr) {
-            console.error('[YouTube-BG] AI metadata generation failed:', aiErr.message);
+            log.error('clipboard', 'AI metadata generation failed', { error: aiErr.message })
           }
         }
         
@@ -1994,7 +1960,7 @@ Respond ONLY with valid JSON, no other text.`;
           if (transcript && transcript.text) {
             const transcriptPath = path.join(itemDir, 'transcript.txt');
             fs.writeFileSync(transcriptPath, transcript.text);
-            console.log('[YouTube-BG] Transcript saved to:', transcriptPath);
+            log.info('clipboard', 'Transcript saved to', { transcriptPath })
           }
           
           // Update in-memory history with new metadata
@@ -2025,7 +1991,7 @@ Respond ONLY with valid JSON, no other text.`;
           });
           
         } catch (err) {
-          console.error('[YouTube-BG] Error updating metadata:', err);
+          log.error('clipboard', 'Error updating metadata', { error: err.message || err })
         }
         
         // Remove from active downloads
@@ -2033,7 +1999,7 @@ Respond ONLY with valid JSON, no other text.`;
         
         // Save the updated index to persist changes
         this.storage.saveIndexSync();  // Use sync save to ensure persistence
-        console.log('[YouTube-BG] Index saved with updated metadata');
+        log.info('clipboard', 'Index saved with updated metadata')
         
         // Notify UI
         this.notifyHistoryUpdate();
@@ -2147,6 +2113,7 @@ Respond ONLY with valid JSON, no other text.`;
   
   // CRITICAL: For clipboard viewer window (NOT black hole widget)
   createClipboardWindow() {
+    log.info('clipboard', 'createClipboardWindow called', { hasExistingWindow: !!(this.clipboardWindow && !this.clipboardWindow.isDestroyed()) });
     if (this.clipboardWindow && !this.clipboardWindow.isDestroyed()) {
       this.clipboardWindow.focus();
       this.clipboardWindow.show();
@@ -2155,13 +2122,13 @@ Respond ONLY with valid JSON, no other text.`;
     
     // Use app.getAppPath() instead of __dirname for packaged apps
     const preloadPath = path.join(app.getAppPath(), 'preload.js');
-    console.log('[ClipboardManager] Creating clipboard window with preload:', preloadPath);
-    console.log('[ClipboardManager] App path:', app.getAppPath());
-    console.log('[ClipboardManager] Preload exists?', require('fs').existsSync(preloadPath));
+    log.info('clipboard', 'Creating clipboard window with preload', { preloadPath })
+    log.info('clipboard', 'App path', { detail: app.getAppPath() })
+    log.info('clipboard', 'Preload exists?', { detail: require('fs').existsSync(preloadPath) })
     
     // Check if preload script exists
     if (!require('fs').existsSync(preloadPath)) {
-      console.error('[ClipboardManager] Preload script not found at:', preloadPath);
+      log.error('clipboard', 'Preload script not found at', { preloadPath })
       const { dialog } = require('electron');
       dialog.showErrorBox('Error', 'Failed to load clipboard manager: Preload script not found.');
       return;
@@ -2171,7 +2138,8 @@ Respond ONLY with valid JSON, no other text.`;
       width: 1400,
       height: 900,
       frame: false,
-      transparent: true,
+      transparent: false,
+      backgroundColor: '#1a1a1a',
       alwaysOnTop: false,
       resizable: true,
       minWidth: 1200,
@@ -2188,14 +2156,14 @@ Respond ONLY with valid JSON, no other text.`;
     
     // Handle load errors - only close for critical main frame failures
     this.clipboardWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
-      console.warn('[ClipboardManager] Load failed:', { errorCode, errorDescription, validatedURL, isMainFrame });
+      log.warn('clipboard', 'Load failed', { detail: { errorCode, errorDescription, validatedURL, isMainFrame } })
       
       // Only show error and close for main frame failures with real errors
       // Error codes: -3 = ABORTED (user action), -6 = CONNECTION_FAILED, etc.
       // See: https://source.chromium.org/chromium/chromium/src/+/main:net/base/net_error_list.h
       if (isMainFrame && errorCode !== -3) {
         // Main frame failed to load (not just aborted)
-        console.error('[ClipboardManager] Critical load failure - main frame failed');
+        log.error('clipboard', 'Critical load failure - main frame failed')
         const { dialog } = require('electron');
         dialog.showErrorBox('Error', `Failed to load clipboard manager: ${errorDescription || 'Unknown error'}`);
         if (this.clipboardWindow && !this.clipboardWindow.isDestroyed()) {
@@ -2207,11 +2175,12 @@ Respond ONLY with valid JSON, no other text.`;
     
     // Show window when ready
     this.clipboardWindow.once('ready-to-show', () => {
-      console.log('[ClipboardManager] Clipboard window ready to show');
+      log.info('clipboard', 'Clipboard window ready-to-show');
       this.clipboardWindow.show();
     });
     
     // Add cache-busting query string to force fresh load
+    log.info('clipboard', 'Loading clipboard-viewer.html');
     this.clipboardWindow.loadFile('clipboard-viewer.html', {
       query: { t: Date.now() }
     });
@@ -2219,18 +2188,23 @@ Respond ONLY with valid JSON, no other text.`;
     // Clear cache to ensure fresh HTML loads
     this.clipboardWindow.webContents.session.clearCache();
     
-    // Add debug logging
+    // Attach structured log forwarding (console-message, render-process-gone, preload-error, did-fail-load)
+    try {
+      const { attachLogForwarder } = require('./browserWindow');
+      attachLogForwarder(this.clipboardWindow, 'clipboard');
+    } catch (e) {
+      log.warn('clipboard', 'Could not attach log forwarder', { error: e.message });
+    }
+    
+    // Additional lifecycle logging specific to clipboard viewer
     this.clipboardWindow.webContents.on('did-finish-load', () => {
-      console.log('[ClipboardManager] Clipboard viewer finished loading');
+      log.info('clipboard', 'Clipboard viewer HTML loaded');
     });
-    
-    this.clipboardWindow.webContents.on('preload-error', (event, preloadPath, error) => {
-      console.error('[ClipboardManager] Preload error:', preloadPath, error);
-    });
-    
+
     this.clipboardWindow.on('closed', () => {
       this.clipboardWindow = null;
     });
+
   }
   
   // CRITICAL: Black hole widget window - DO NOT DUPLICATE THIS METHOD!
@@ -2250,11 +2224,11 @@ Respond ONLY with valid JSON, no other text.`;
     const width = (startExpanded || clipboardData) ? 600 : 150;
     const height = (startExpanded || clipboardData) ? 800 : 150;
     
-    console.log('[BlackHole] Creating window:', { position, width, height, startExpanded });
+    log.info('clipboard', 'Creating window', { detail: { position, width, height, startExpanded } })
     
     // Use app.getAppPath() for preload path in packaged apps
     const preloadPath = path.join(app.getAppPath(), 'preload.js');
-    console.log('[BlackHole] Preload path:', preloadPath);
+    log.info('clipboard', 'Preload path', { preloadPath })
     
     const windowConfig = {
       width: width,
@@ -2281,7 +2255,7 @@ Respond ONLY with valid JSON, no other text.`;
     if (position && position.x !== undefined && position.y !== undefined) {
       windowConfig.x = Math.round(position.x);
       windowConfig.y = Math.round(position.y);
-      console.log('[BlackHole] Setting initial position:', windowConfig.x, windowConfig.y);
+      log.info('clipboard', 'Setting initial position', { x: windowConfig.x, y: windowConfig.y })
     }
     
     this.blackHoleWindow = new BrowserWindow(windowConfig);
@@ -2293,19 +2267,19 @@ Respond ONLY with valid JSON, no other text.`;
     
     // Check for preload errors
     this.blackHoleWindow.webContents.on('preload-error', (event, preloadPath, error) => {
-      console.error('[BlackHole] Preload error:', preloadPath, error);
+      log.error('clipboard', 'Preload error', { preloadPath, error })
     });
     
     this.blackHoleWindow.once('ready-to-show', () => {
       // Position is already set in the config, just show the window
       this.blackHoleWindow.show();
-      console.log('[BlackHole] Window shown at position:', this.blackHoleWindow.getBounds());
+      log.info('clipboard', 'Window shown at position', { detail: this.blackHoleWindow.getBounds() })
     });
     
     // Send startExpanded flag and clipboard data to the window after it loads
     this.blackHoleWindow.webContents.on('did-finish-load', () => {
       const hasClipboardData = !!clipboardData;
-      console.log('[BlackHole] Window loaded, startExpanded:', startExpanded, 'hasClipboardData:', hasClipboardData);
+      log.info('clipboard', 'Window loaded, startExpanded', { startExpanded, arg2: 'hasClipboardData:', hasClipboardData })
       
       // Send init with clipboard data if available
       this.blackHoleWindow.webContents.send('black-hole:init', { 
@@ -2316,7 +2290,7 @@ Respond ONLY with valid JSON, no other text.`;
     
     this.blackHoleWindow.on('closed', () => {
       this.blackHoleWindow = null;
-      console.log('[BlackHole] Window closed');
+      log.info('clipboard', 'Window closed')
     });
   }
   
@@ -2324,14 +2298,13 @@ Respond ONLY with valid JSON, no other text.`;
   
   setupScreenshotWatcher() {
     if (!app || !app.getPath) {
-      console.log('Screenshot watcher not available in non-Electron environment');
+      log.info('clipboard', 'Screenshot watcher not available in non-Electron environment')
       return;
     }
     
     const desktopPath = app.getPath('desktop');
     
-    if (fs.existsSync(desktopPath)) {
-      console.log('Setting up screenshot watcher for:', desktopPath);
+    if (fs.existsSync(desktopPath)) { info: log.info('clipboard', 'Setting up screenshot watcher for', { desktopPath })
       
       // Track files being processed to prevent duplicates
       const processingFiles = new Set();
@@ -2354,10 +2327,10 @@ Respond ONLY with valid JSON, no other text.`;
             
             try {
               if (fs.existsSync(fullPath)) {
-                console.log('Screenshot file ready:', fullPath);
+                log.info('clipboard', 'Screenshot file ready', { fullPath })
                 await this.handleScreenshot(fullPath);
               } else {
-                console.log('Screenshot file disappeared:', fullPath);
+                log.info('clipboard', 'Screenshot file disappeared', { fullPath })
               }
             } finally {
               // Remove from processing set
@@ -2402,7 +2375,7 @@ Respond ONLY with valid JSON, no other text.`;
           
           if (now - stats.mtimeMs < 5 * 60 * 1000) {
             if (!this.processedScreenshots.has(fullPath)) {
-              console.log('Found recent screenshot:', filename);
+              log.info('clipboard', 'Found recent screenshot', { filename })
               this.handleScreenshot(fullPath);
             }
           }
@@ -2418,7 +2391,7 @@ Respond ONLY with valid JSON, no other text.`;
   }
   
   async handleScreenshot(screenshotPath) {
-    console.log('Processing screenshot:', screenshotPath);
+    log.info('clipboard', 'Processing screenshot', { screenshotPath })
     
     try {
       this.processedScreenshots.add(screenshotPath);
@@ -2431,7 +2404,7 @@ Respond ONLY with valid JSON, no other text.`;
       }
       
       if (!fs.existsSync(screenshotPath)) {
-        console.log('Screenshot file not found:', screenshotPath);
+        log.info('clipboard', 'Screenshot file not found', { screenshotPath })
         return;
       }
       
@@ -2447,17 +2420,16 @@ Respond ONLY with valid JSON, no other text.`;
       );
       
       if (existingScreenshot) {
-        console.log('Screenshot already in history:', fileName);
+        log.info('clipboard', 'Screenshot already in history', { fileName })
         return;
       }
       
       if (!this.screenshotCaptureEnabled) {
-        console.log('Screenshot capture is disabled');
+        log.info('clipboard', 'Screenshot capture is disabled')
         return;
       }
       
-      if (!this.currentSpace || this.currentSpace === null) {
-        console.log('No active space, prompting user to select space for screenshot');
+      if (!this.currentSpace || this.currentSpace === null) { send: log.info('clipboard', 'No active space, prompting user to select space for screenshot')
         
         // Send event to renderer to show space selector modal
         if (this.clipboardWindow && !this.clipboardWindow.isDestroyed()) {
@@ -2465,8 +2437,7 @@ Respond ONLY with valid JSON, no other text.`;
             screenshotPath: screenshotPath,
             fileName: fileName,
             stats: stats,
-            ext: ext
-          });
+            ext: ext });
           return; // The renderer will call back with the selected space
         } else {
           // If no clipboard window, put in unclassified
@@ -2491,9 +2462,9 @@ Respond ONLY with valid JSON, no other text.`;
           } else {
             thumbnail = fullImageData; // Keep full quality for smaller screenshots
           }
-          console.log(`Screenshot thumbnail size: ${thumbnail.length} bytes (original: ${stats.size} bytes)`);
+          log.info('clipboard', 'Screenshot thumbnail size: ... bytes (original: ... bytes)', { thumbnailCount: thumbnail.length, statsSize: stats.size })
         } catch (e) {
-          console.error('Error creating screenshot thumbnail:', e);
+          log.error('clipboard', 'Error creating screenshot thumbnail', { error: e.message || e })
         }
       }
       
@@ -2517,7 +2488,7 @@ Respond ONLY with valid JSON, no other text.`;
       
       // Ensure the screenshot file exists before adding to history
       if (!fs.existsSync(screenshotPath)) {
-        console.error('Screenshot file disappeared before storage:', screenshotPath);
+        log.error('clipboard', 'Screenshot file disappeared before storage', { screenshotPath })
         return;
       }
       
@@ -2536,17 +2507,19 @@ Respond ONLY with valid JSON, no other text.`;
       // Check if auto AI metadata generation is enabled for screenshots
       const settings = this.settingsManager?.getSettings();
       if (settings?.autoGenerateScreenshotMetadata && settings?.llmApiKey) {
-        console.log('Auto-generating AI metadata for screenshot...');
+        log.info('clipboard', 'Auto-generating AI metadata for screenshot...')
         
         // Trigger AI metadata generation using specialized system
         setTimeout(async () => {
           try {
             const MetadataGenerator = require('./metadata-generator');
             const metadataGen = new MetadataGenerator(this);
-            const result = await metadataGen.generateMetadataForItem(item.id, settings.llmApiKey);
+            // Use anthropicApiKey for metadata generation (Claude API)
+            const apiKey = settings.anthropicApiKey || settings.llmApiKey;
+            const result = await metadataGen.generateMetadataForItem(item.id, apiKey);
             
             if (result.success) {
-              console.log('AI metadata generated successfully for screenshot using specialized prompts');
+              log.info('clipboard', 'AI metadata generated successfully for screenshot using specialized prompts')
               
               // Send notification about AI analysis completion
               if (BrowserWindow) {
@@ -2559,7 +2532,7 @@ Respond ONLY with valid JSON, no other text.`;
               }
             }
           } catch (error) {
-            console.error('Error auto-generating AI metadata for screenshot:', error);
+            log.error('clipboard', 'Error auto-generating AI metadata for screenshot', { error: error.message || error })
           }
         }, 1000); // Small delay to ensure item is fully saved
       }
@@ -2577,12 +2550,12 @@ Respond ONLY with valid JSON, no other text.`;
     try {
       const image = nativeImage.createFromDataURL(base64Data);
       if (image.isEmpty()) {
-        console.log('Failed to create image from base64 data');
+        log.info('clipboard', 'Failed to create image from base64 data')
         return base64Data;
       }
       
       const size = image.getSize();
-      console.log(`Original image size: ${size.width}x${size.height}`);
+      log.info('clipboard', 'Original image size: ...x...', { width: size.width, height: size.height })
       
       if (size.width <= maxWidth && size.height <= maxHeight) {
         return base64Data;
@@ -2605,11 +2578,11 @@ Respond ONLY with valid JSON, no other text.`;
       });
       
       const thumbnail = resized.toDataURL();
-      console.log(`Generated thumbnail: ${newWidth}x${newHeight}`);
+      log.info('clipboard', 'Generated thumbnail: ...x...', { newWidth, newHeight })
       
       return thumbnail;
     } catch (error) {
-      console.error('Error generating thumbnail:', error);
+      log.error('clipboard', 'Error generating thumbnail', { error: error.message || error })
       return base64Data;
     }
   }
@@ -2617,28 +2590,37 @@ Respond ONLY with valid JSON, no other text.`;
   // IPC Setup - Complete set of handlers for compatibility
   setupIPC() {
     if (!ipcMain) {
-      console.log('IPC not available in non-Electron environment');
+      log.info('clipboard', 'IPC not available in non-Electron environment')
       return;
     }
     
     // Prevent duplicate IPC registration (memory leak prevention)
     if (ClipboardManagerV2._ipcRegistered) {
-      console.warn('[ClipboardManager] IPC handlers already registered - skipping to prevent memory leak');
+      log.warn('clipboard', 'IPC handlers already registered - skipping to prevent memory leak')
       return;
     }
     ClipboardManagerV2._ipcRegistered = true;
     
-    // Helper to safely register IPC handlers - skips if handler already exists
-    // This prevents "Attempted to register a second handler" errors when handlers
-    // are registered elsewhere (e.g., main.js fallback handlers)
+    // Helper to safely register IPC handlers with structured logging.
+    // Wraps every handler so that failures are logged to the log queue.
     const safeHandle = (channel, handler) => {
+      const wrappedHandler = async (...args) => {
+        try {
+          const result = await handler(...args);
+          return result;
+        } catch (err) {
+          log.error('ipc', `IPC handler threw: ${channel}`, { error: err.message, stack: err.stack?.substring(0, 300) });
+          throw err; // Re-throw so the renderer sees the rejection
+        }
+      };
       try {
-        ipcMain.handle(channel, handler);
+        ipcMain.handle(channel, wrappedHandler);
       } catch (err) {
         if (err.message && err.message.includes('second handler')) {
-          console.log(`[ClipboardManager] Handler for '${channel}' already exists, skipping`);
+          log.info('clipboard', `IPC handler already registered, skipping: ${channel}`)
         } else {
-          throw err; // Re-throw unexpected errors
+          log.error('ipc', `Failed to register IPC handler: ${channel}`, { error: err.message });
+          throw err;
         }
       }
     };
@@ -2649,9 +2631,9 @@ Respond ONLY with valid JSON, no other text.`;
     // Black hole window handlers
     ipcMain.on('black-hole:resize-window', (event, { width, height }) => {
       if (this.blackHoleWindow && !this.blackHoleWindow.isDestroyed()) {
-        console.log('[BlackHole] Resizing window to:', width, 'x', height);
+        log.info('clipboard', 'Resizing window to', { width, arg2: 'x', height })
         const currentBounds = this.blackHoleWindow.getBounds();
-        console.log('[BlackHole] Current bounds:', currentBounds);
+        log.info('clipboard', 'Current bounds', { currentBounds })
         
         // Keep the window position relative to the button when expanding
         if (width > 150) {
@@ -2666,11 +2648,11 @@ Respond ONLY with valid JSON, no other text.`;
             width: width,
             height: height
           }, true);
-          console.log('[BlackHole] Expanded to modal size at:', newX, newY);
+          log.info('clipboard', 'Expanded to modal size at', { newX, newY })
         } else {
           // Just resize without moving
           this.blackHoleWindow.setSize(width, height, true);
-          console.log('[BlackHole] Restored to normal size');
+          log.info('clipboard', 'Restored to normal size')
         }
       }
     });
@@ -2703,13 +2685,11 @@ Respond ONLY with valid JSON, no other text.`;
     
     ipcMain.on('black-hole:active', () => {
       // Black hole is active (modal open)
-      console.log('Black hole active');
+      log.info('clipboard', 'Black hole active')
     });
     
-    ipcMain.on('black-hole:inactive', () => {
-      // Black hole is inactive (modal closed)
-      console.log('Black hole inactive');
-    });
+    ipcMain.on('black-hole:inactive', () => { detail: // Black hole is inactive (modal closed)
+      log.info('clipboard', 'Black hole inactive') });
     
     // History management
     safeHandle('clipboard:get-history', () => {
@@ -2724,10 +2704,10 @@ Respond ONLY with valid JSON, no other text.`;
     safeHandle('clipboard:delete-item', async (event, id) => {
       try {
         await this.deleteItem(id);
-        console.log('[Clipboard] Deleted item:', id);
+        log.info('clipboard', 'Deleted item', { id })
         return { success: true };
       } catch (error) {
-        console.error('[Clipboard] Failed to delete item:', id, error);
+        log.error('clipboard', 'Failed to delete item', { id, error })
         return { success: false, error: error.message };
       }
     });
@@ -2749,20 +2729,20 @@ Respond ONLY with valid JSON, no other text.`;
           try {
             await this.deleteItem(id);
             results.deleted++;
-            console.log('[Clipboard] Deleted item:', id);
+            log.info('clipboard', 'Deleted item', { id })
           } catch (error) {
             results.failed++;
             results.errors.push(`Failed to delete ${id}: ${error.message}`);
-            console.error('[Clipboard] Failed to delete item:', id, error);
+            log.error('clipboard', 'Failed to delete item', { id, error })
           }
         }
         
         results.success = results.deleted > 0;
-        console.log('[Clipboard] Bulk delete completed:', results);
+        log.info('clipboard', 'Bulk delete completed', { results })
         
         return results;
       } catch (error) {
-        console.error('[Clipboard] Failed to delete items:', error);
+        log.error('clipboard', 'Failed to delete items', { error: error.message || error })
         return { success: false, error: error.message, deleted: 0, failed: itemIds.length };
       }
     });
@@ -2789,7 +2769,7 @@ Respond ONLY with valid JSON, no other text.`;
             const success = this.storage.moveItem(id, toSpaceId);
             if (success) {
               results.moved++;
-              console.log('[Clipboard] Moved item:', id, 'to space:', toSpaceId);
+              log.info('clipboard', 'Moved item', { id, arg2: 'to space:', toSpaceId })
             } else {
               results.failed++;
               results.errors.push(`Failed to move ${id}`);
@@ -2797,16 +2777,16 @@ Respond ONLY with valid JSON, no other text.`;
           } catch (error) {
             results.failed++;
             results.errors.push(`Failed to move ${id}: ${error.message}`);
-            console.error('[Clipboard] Failed to move item:', id, error);
+            log.error('clipboard', 'Failed to move item', { id, error })
           }
         }
         
         results.success = results.moved > 0;
-        console.log('[Clipboard] Bulk move completed:', results);
+        log.info('clipboard', 'Bulk move completed', { results })
         
         return results;
       } catch (error) {
-        console.error('[Clipboard] Failed to move items:', error);
+        log.error('clipboard', 'Failed to move items', { error: error.message || error })
         return { success: false, error: error.message, moved: 0, failed: itemIds.length };
       }
     });
@@ -2828,7 +2808,7 @@ Respond ONLY with valid JSON, no other text.`;
       }
       
       // DEBUG: Log item details
-      console.log('📋 Pasting item:', {
+      log.info('clipboard', '📋 Pasting item', { detail: {
         id: item.id,
         type: item.type,
         fileName: item.fileName,
@@ -2836,7 +2816,7 @@ Respond ONLY with valid JSON, no other text.`;
         contentLength: item.content ? item.content.length : 0,
         contentPreview: item.content ? item.content.substring(0, 100) : 'none',
         filePath: item.filePath
-      });
+      } })
       
       // Paste logic based on type
       if (item.type === 'text') {
@@ -2982,15 +2962,15 @@ Respond ONLY with valid JSON, no other text.`;
       try {
         const item = this.storage.loadItem(itemId);
         if (!item || !item.contentPath) {
-          console.error('[NativeDrag] Item not found or no content path:', itemId);
+          log.error('clipboard', 'Item not found or no content path', { itemId })
           return { success: false, error: 'Item not found' };
         }
         
         const filePath = path.join(this.storage.storageRoot, item.contentPath);
-        console.log('[NativeDrag] Starting drag for:', filePath);
+        log.info('clipboard', 'Starting drag for', { filePath })
         
         if (!fs.existsSync(filePath)) {
-          console.error('[NativeDrag] File not found:', filePath);
+          log.error('clipboard', 'File not found', { filePath })
           return { success: false, error: 'File not found' };
         }
         
@@ -3011,7 +2991,7 @@ Respond ONLY with valid JSON, no other text.`;
         
         return { success: true, filePath };
       } catch (error) {
-        console.error('[NativeDrag] Error:', error);
+        log.error('clipboard', 'Error', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -3021,11 +3001,11 @@ Respond ONLY with valid JSON, no other text.`;
       try {
         const item = this.storage.loadItem(itemId);
         if (!item) {
-          console.error('[FloatCard] Item not found:', itemId);
+          log.error('clipboard', 'Item not found', { itemId })
           return { success: false, error: 'Item not found' };
         }
         
-        console.log('[FloatCard] Creating float card for:', itemId);
+        log.info('clipboard', 'Creating float card for', { itemId })
         
         // Close existing float card if any
         if (this.floatCardWindow && !this.floatCardWindow.isDestroyed()) {
@@ -3077,17 +3057,15 @@ Respond ONLY with valid JSON, no other text.`;
         if (!this._floatCardCloseHandler) {
           this._floatCardCloseHandler = true;
           ipcMain.on('float-card:close', () => {
-            console.log('[FloatCard] Close requested');
+            log.info('clipboard', 'Close requested')
             if (self.floatCardWindow && !self.floatCardWindow.isDestroyed()) {
               self.floatCardWindow.close();
               self.floatCardWindow = null;
-              console.log('[FloatCard] Window closed');
+              log.info('clipboard', 'Window closed')
             }
           });
           
-          ipcMain.on('float-card:ready', () => {
-            console.log('[FloatCard] Window ready');
-          });
+          ipcMain.on('float-card:ready', () => { info: log.info('clipboard', 'Window ready') });
           
           ipcMain.on('float-card:start-drag', (event, itemId) => {
             // Forward native drag request
@@ -3113,7 +3091,7 @@ Respond ONLY with valid JSON, no other text.`;
         
         return { success: true };
       } catch (error) {
-        console.error('[FloatCard] Error:', error);
+        log.error('clipboard', 'Error', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -3165,10 +3143,10 @@ Respond ONLY with valid JSON, no other text.`;
                 updatedAt: new Date().toISOString()
               };
               this.storage.updateSpaceMetadata(item.spaceId, { files: spaceMetadata.files });
-              console.log('[Clipboard] Synced metadata to space-metadata.json for:', fileKey);
+              log.info('clipboard', 'Synced metadata to space-metadata.json for', { fileKey })
             }
           } catch (syncError) {
-            console.error('[Clipboard] Error syncing to space metadata:', syncError);
+            log.error('clipboard', 'Error syncing to space metadata', { syncError })
             // Don't fail the operation if sync fails
           }
         }
@@ -3309,14 +3287,14 @@ Respond ONLY with valid JSON, no other text.`;
                 scenesUpdatedAt: metadata.scenesUpdatedAt
               };
               this.storage.updateSpaceMetadata(item.spaceId, { files: spaceMetadata.files });
-              console.log('[Clipboard] Synced video scenes to space-metadata.json:', fileKey);
+              log.info('clipboard', 'Synced video scenes to space-metadata.json', { fileKey })
             }
           } catch (syncError) {
-            console.error('[Clipboard] Error syncing scenes to space metadata:', syncError);
+            log.error('clipboard', 'Error syncing scenes to space metadata', { syncError })
           }
         }
         
-        console.log(`[Clipboard] Updated ${scenes.length} scenes for video:`, item.fileName);
+        log.info('clipboard', 'Updated ... scenes for video', { scenesCount: scenes.length })
         return { success: true, scenesCount: scenes.length };
       } catch (error) {
         const logger = getLogger();
@@ -3357,7 +3335,7 @@ Respond ONLY with valid JSON, no other text.`;
         
         fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
         
-        console.log(`[Clipboard] Added scene "${scene.name}" to video:`, item.fileName);
+        log.info('clipboard', 'Added scene "..." to video', { sceneName: scene.name })
         return { success: true, scene, totalScenes: metadata.scenes.length };
       } catch (error) {
         const logger = getLogger();
@@ -3393,7 +3371,7 @@ Respond ONLY with valid JSON, no other text.`;
         metadata.scenesUpdatedAt = new Date().toISOString();
         fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
         
-        console.log(`[Clipboard] Deleted scene ${sceneId} from video:`, item.fileName);
+        log.info('clipboard', 'Deleted scene ... from video', { sceneId })
         return { success: true, remainingScenes: metadata.scenes.length };
       } catch (error) {
         const logger = getLogger();
@@ -3428,7 +3406,7 @@ Respond ONLY with valid JSON, no other text.`;
               scenes = metadata.scenes || [];
             }
           } catch (e) {
-            console.error('Error loading scenes for video:', item.fileName, e);
+            log.error('clipboard', 'Error loading scenes for video', { fileName: item.fileName, e })
           }
           
           return {
@@ -3449,7 +3427,7 @@ Respond ONLY with valid JSON, no other text.`;
           videosWithScenes: videosWithScenes.filter(v => v.sceneCount > 0).length
         };
       } catch (error) {
-        console.error('Error getting videos with scenes:', error);
+        log.error('clipboard', 'Error getting videos with scenes', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -3485,7 +3463,7 @@ Respond ONLY with valid JSON, no other text.`;
                 content = fs.readFileSync(item.content, 'utf8');
               }
             } catch (readError) {
-              console.error('Error reading file content:', readError);
+              log.error('clipboard', 'Error reading file content', { readError })
               content = item.preview || '';
             }
           } else if (item.fileType === 'image-file' || (item.fileExt && imageExtensions.includes(item.fileExt.toLowerCase()))) {
@@ -3497,10 +3475,10 @@ Respond ONLY with valid JSON, no other text.`;
                 // Detect actual MIME type from magic bytes
                 const mimeType = this.detectImageMimeType(buffer);
                 content = `data:${mimeType};base64,${buffer.toString('base64')}`;
-                console.log('[getItemContent] Loaded full-resolution image:', item.fileName, 'size:', buffer.length);
+                log.info('clipboard', 'Loaded full-resolution image', { fileName: item.fileName, arg2: 'size:', bufferCount: buffer.length })
               }
             } catch (readError) {
-              console.error('Error reading image file:', readError);
+              log.error('clipboard', 'Error reading image file', { readError })
               content = item.thumbnail || '';
             }
           }
@@ -3514,7 +3492,52 @@ Respond ONLY with valid JSON, no other text.`;
           fileExt: item.fileExt
         };
       } catch (error) {
-        console.error('Error getting item content:', error);
+        log.error('clipboard', 'Error getting item content', { error: error.message || error })
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // Get PDF data for PDF.js viewer
+    safeHandle('clipboard:get-pdf-data', (event, itemId) => {
+      try {
+        const item = this.storage.loadItem(itemId);
+        if (!item) return { success: false, error: 'Item not found' };
+        
+        if (item.fileType !== 'pdf' && item.fileExt !== '.pdf') {
+          return { success: false, error: 'Item is not a PDF' };
+        }
+        
+        // Get the PDF file path
+        let pdfPath = item.content;
+        if (!pdfPath || !fs.existsSync(pdfPath)) {
+          // Try items directory
+          const itemDir = path.join(this.storage.storageRoot, 'items', itemId);
+          if (fs.existsSync(itemDir)) {
+            const files = fs.readdirSync(itemDir).filter(f => f.toLowerCase().endsWith('.pdf'));
+            if (files.length > 0) {
+              pdfPath = path.join(itemDir, files[0]);
+            }
+          }
+        }
+        
+        if (!pdfPath || !fs.existsSync(pdfPath)) {
+          return { success: false, error: 'PDF file not found' };
+        }
+        
+        // Read and return as base64
+        const pdfBuffer = fs.readFileSync(pdfPath);
+        const base64Data = pdfBuffer.toString('base64');
+        
+        log.info('clipboard', 'Loaded PDF', { fileName: item.fileName, arg2: 'size:', pdfBufferCount: pdfBuffer.length })
+        
+        return {
+          success: true,
+          data: base64Data,
+          fileName: item.fileName,
+          fileSize: pdfBuffer.length
+        };
+      } catch (error) {
+        log.error('clipboard', 'Error getting PDF data', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -3584,7 +3607,7 @@ Respond ONLY with valid JSON, no other text.`;
         
         // Write the content
         fs.writeFileSync(contentPath, newContent, 'utf8');
-        console.log(`[Clipboard] Saved content to: ${contentPath}`);
+        log.info('clipboard', 'Saved content to: ...', { contentPath })
         
         // Update preview in index (strip HTML tags if present)
         const preview = newContent.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').substring(0, 200).trim();
@@ -3603,10 +3626,10 @@ Respond ONLY with valid JSON, no other text.`;
         // Notify UI of update
         this.notifyHistoryUpdate();
         
-        console.log(`[Clipboard] Updated content for item: ${itemId}`);
+        log.info('clipboard', 'Updated content for item: ...', { itemId })
         return { success: true };
       } catch (error) {
-        console.error('Error updating item content:', error);
+        log.error('clipboard', 'Error updating item content', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -3633,9 +3656,9 @@ Respond ONLY with valid JSON, no other text.`;
         const mammoth = require('mammoth');
         const result = await mammoth.convertToHtml({ path: filePath });
         
-        console.log(`[Clipboard] Converted DOCX to HTML: ${filePath}`);
+        log.info('clipboard', 'Converted DOCX to HTML: ...', { filePath })
         if (result.messages && result.messages.length > 0) {
-          console.log('[Clipboard] Mammoth messages:', result.messages);
+          log.info('clipboard', 'Mammoth messages', { messages: result.messages })
         }
         
         return { 
@@ -3644,7 +3667,7 @@ Respond ONLY with valid JSON, no other text.`;
           messages: result.messages || []
         };
       } catch (error) {
-        console.error('Error converting DOCX to HTML:', error);
+        log.error('clipboard', 'Error converting DOCX to HTML', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -3667,14 +3690,14 @@ Respond ONLY with valid JSON, no other text.`;
         
         // shell.openPath returns empty string on success, error message on failure
         if (result === '') {
-          console.log(`[Clipboard] Opened file: ${filePath}`);
+          log.info('clipboard', 'Opened file: ...', { filePath })
           return { success: true };
         } else {
-          console.error(`[Clipboard] Failed to open file: ${result}`);
+          log.error('clipboard', 'Failed to open file: ...', { result })
           return { success: false, error: result };
         }
       } catch (error) {
-        console.error('Error opening file in system:', error);
+        log.error('clipboard', 'Error opening file in system', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -3684,17 +3707,18 @@ Respond ONLY with valid JSON, no other text.`;
       try {
         const { itemId, imageData, prompt } = options;
         
-        // Get settings to check for OpenAI API key
+        // Get settings to check for API keys
         const { getSettingsManager } = require('./settings-manager');
         const settingsManager = getSettingsManager();
         const openaiKey = settingsManager.get('openaiApiKey');
-        const anthropicKey = settingsManager.get('llmApiKey');
+        // Always use anthropicApiKey for Claude API calls (not llmApiKey which depends on provider)
+        const anthropicKey = settingsManager.get('anthropicApiKey');
         
         if (!imageData) {
           return { success: false, error: 'No image data provided' };
         }
         
-        console.log('[AI Image Edit] Processing edit request:', prompt);
+        log.info('clipboard', 'Processing edit request', { prompt })
         
         // Extract base64 data
         let base64Data = imageData;
@@ -3708,105 +3732,42 @@ Respond ONLY with valid JSON, no other text.`;
           }
         }
         
-        // Use OpenAI gpt-image-1 for true image editing
+        // Use centralized ai-service for true image editing (gpt-image-1)
         if (openaiKey) {
-          console.log('[AI Image Edit] Using OpenAI gpt-image-1 for image editing');
-          const https = require('https');
+          log.info('clipboard', 'Using ai-service gpt-image-1 for image editing')
           
           try {
-            // Convert base64 to buffer for OpenAI
+            const ai = require('./lib/ai-service');
             const imageBuffer = Buffer.from(base64Data, 'base64');
             
-            // Create multipart form data
-            const boundary = '----FormBoundary' + Math.random().toString(36).substr(2);
+            log.info('clipboard', 'Sending image to gpt-image-1 edits endpoint...')
             
-            // Build multipart body parts
-            const parts = [];
-            
-            // Add image file
-            parts.push(Buffer.from(
-              `--${boundary}\r\n` +
-              `Content-Disposition: form-data; name="image"; filename="image.png"\r\n` +
-              `Content-Type: image/png\r\n\r\n`, 'utf-8'
-            ));
-            parts.push(imageBuffer);
-            parts.push(Buffer.from('\r\n', 'utf-8'));
-            
-            // Add prompt
-            parts.push(Buffer.from(
-              `--${boundary}\r\n` +
-              `Content-Disposition: form-data; name="prompt"\r\n\r\n` +
-              `${prompt}\r\n`, 'utf-8'
-            ));
-            
-            // Add model - gpt-image-1
-            parts.push(Buffer.from(
-              `--${boundary}\r\n` +
-              `Content-Disposition: form-data; name="model"\r\n\r\n` +
-              `gpt-image-1\r\n`, 'utf-8'
-            ));
-            
-            // Add closing boundary
-            parts.push(Buffer.from(`--${boundary}--\r\n`, 'utf-8'));
-            
-            const fullBody = Buffer.concat(parts);
-            
-            console.log('[AI Image Edit] Sending image to gpt-image-1 edits endpoint...');
-            
-            const response = await new Promise((resolve, reject) => {
-              const req = https.request({
-                hostname: 'api.openai.com',
-                path: '/v1/images/edits',
-                method: 'POST',
-                headers: {
-                  'Content-Type': `multipart/form-data; boundary=${boundary}`,
-                  'Content-Length': fullBody.length,
-                  'Authorization': `Bearer ${openaiKey}`
-                }
-              }, (res) => {
-                let data = '';
-                res.on('data', chunk => data += chunk);
-                res.on('end', () => {
-                  try {
-                    resolve(JSON.parse(data));
-                  } catch (e) {
-                    reject(new Error('Failed to parse response: ' + data));
-                  }
-                });
-              });
-              
-              req.on('error', reject);
-              req.write(fullBody);
-              req.end();
+            const response = await ai.imageEdit(imageBuffer, prompt, {
+              model: 'gpt-image-1',
+              feature: 'clipboard-image-edit',
             });
             
-            if (response.error) {
-              console.error('[AI Image Edit] gpt-image-1 API error:', response.error);
-              throw new Error(response.error.message);
-            }
-            
-            if (response.data && response.data[0]) {
+            if (response.images && response.images[0]) {
               let editedImageData;
               
-              if (response.data[0].b64_json) {
-                editedImageData = `data:image/png;base64,${response.data[0].b64_json}`;
-              } else if (response.data[0].url) {
+              if (response.images[0].b64_json) {
+                editedImageData = `data:image/png;base64,${response.images[0].b64_json}`;
+              } else if (response.images[0].url) {
                 // Download the image from URL
-                console.log('[AI Image Edit] Downloading edited image from URL...');
-                const imageUrl = response.data[0].url;
-                const imageResponse = await new Promise((resolve, reject) => {
-                  https.get(imageUrl, (res) => {
+                log.info('clipboard', 'Downloading edited image from URL...')
+                const https = require('https');
+                const imageUrl = response.images[0].url;
+                const imageResponse = await new Promise((resolve, reject) => { on: https.get(imageUrl, (res) => {
                     const chunks = [];
                     res.on('data', chunk => chunks.push(chunk));
                     res.on('end', () => resolve(Buffer.concat(chunks)));
-                    res.on('error', reject);
-                  }).on('error', reject);
+                    res.on('error', reject); }).on('error', reject);
                 });
                 editedImageData = `data:image/png;base64,${imageResponse.toString('base64')}`;
               }
               
               if (editedImageData) {
-                console.log('[AI Image Edit] Successfully edited image with gpt-image-1');
+                log.info('clipboard', 'Successfully edited image with gpt-image-1')
                 return { 
                   success: true, 
                   editedImage: editedImageData
@@ -3817,57 +3778,34 @@ Respond ONLY with valid JSON, no other text.`;
             throw new Error('No image data in response');
             
           } catch (editError) {
-            console.error('[AI Image Edit] gpt-image-1 error:', editError.message);
+            log.error('clipboard', 'gpt-image-1 error', { error: editError.message })
             // Fall through to Claude analysis
           }
         }
         
         // Fallback: Use Claude to analyze and describe the edits
         if (anthropicKey) {
-          console.log('[AI Image Edit] Using Claude for image analysis (no OpenAI key or DALL-E failed)');
+          log.info('clipboard', 'Using Claude for image analysis (no OpenAI key or DALL-E failed)')
           
-          const ClaudeAPI = require('./claude-api');
-          const claudeAPI = new ClaudeAPI();
-          
-          const requestData = JSON.stringify({
-            model: 'claude-sonnet-4-5-20250929',
-            max_tokens: 1000,
-            messages: [{
-              role: 'user',
-              content: [
-                {
-                  type: 'text',
-                  text: `I want to edit this image with the following changes: "${prompt}"
+          const visionPrompt = `I want to edit this image with the following changes: "${prompt}"
 
 Please analyze the image and describe:
 1. What you see in the current image
 2. What specific changes would be made based on my request
 3. How the final result would look
 
-Respond in a helpful, conversational way.`
-                },
-                {
-                  type: 'image',
-                  source: {
-                    type: 'base64',
-                    media_type: mediaType,
-                    data: base64Data
-                  }
-                }
-              ]
-            }]
+Respond in a helpful, conversational way.`;
+          
+          // Convert base64 data to data URI format for ai.vision()
+          const imageDataUri = `data:${mediaType};base64,${base64Data}`;
+          
+          const result = await ai.vision(imageDataUri, visionPrompt, {
+            profile: 'standard',
+            maxTokens: 1000,
+            feature: 'clipboard-manager',
           });
           
-          const response = await claudeAPI.makeRequest('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-API-Key': anthropicKey,
-              'anthropic-version': '2023-06-01'
-            }
-          }, requestData);
-          
-          const description = response.content[0].text;
+          const description = result.content;
           
           return { 
             success: false, 
@@ -3883,7 +3821,7 @@ Respond in a helpful, conversational way.`
         };
         
       } catch (error) {
-        console.error('[AI Image Edit] Error:', error);
+        log.error('clipboard', 'Error', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -3933,10 +3871,10 @@ Respond in a helpful, conversational way.`
         // Notify UI
         this.notifyHistoryUpdate();
         
-        console.log(`[Clipboard] Updated image for item: ${itemId}`);
+        log.info('clipboard', 'Updated image for item: ...', { itemId })
         return { success: true };
       } catch (error) {
-        console.error('Error updating item image:', error);
+        log.error('clipboard', 'Error updating item image', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -3959,14 +3897,28 @@ Respond in a helpful, conversational way.`
         // Create image buffer
         const imageBuffer = Buffer.from(base64Data, 'base64');
         
+        // Determine target space: use provided spaceId, or get from source item, or use current space
+        let targetSpaceId = options.spaceId;
+        if (!targetSpaceId && options.sourceItemId) {
+          // Try to get space from source item
+          const sourceItem = this.history.find(h => h.id === options.sourceItemId);
+          if (sourceItem && sourceItem.spaceId) {
+            targetSpaceId = sourceItem.spaceId;
+          }
+        }
+        if (!targetSpaceId) {
+          targetSpaceId = this.currentSpace || 'unclassified';
+        }
+        
         // Create a new clipboard item
         const newItem = {
           type: 'image',
           timestamp: Date.now(),
           image: imageBuffer,
           preview: options.description || 'AI-edited image',
+          spaceId: targetSpaceId,  // Use target space (from source item or current)
           metadata: {
-            source: 'ai-edit',
+            source: options.sourceItemId ? 'pdf-extraction' : 'ai-edit',
             sourceItemId: options.sourceItemId,
             description: options.description || 'AI-edited image'
           }
@@ -3984,10 +3936,10 @@ Respond in a helpful, conversational way.`
         // Notify UI
         this.notifyHistoryUpdate();
         
-        console.log(`[Clipboard] Saved new image item: ${savedItem.id}`);
+        log.info('clipboard', 'Saved new image item: ...', { savedItemId: savedItem.id })
         return { success: true, itemId: savedItem.id };
       } catch (error) {
-        console.error('Error saving image as new:', error);
+        log.error('clipboard', 'Error saving image as new', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -4013,8 +3965,8 @@ Respond in a helpful, conversational way.`
         const textLength = text.length;
         const estimatedChunks = Math.ceil(textLength / 4000);
         const estimatedMinutes = Math.round(textLength / 150 / 60);
-        console.log(`[TTS] Generating speech with voice: ${voice}`);
-        console.log(`[TTS] Text length: ${textLength} chars, estimated ${estimatedChunks} chunks, ~${estimatedMinutes} min audio`);
+        log.info('clipboard', 'Generating speech with voice: ...', { voice })
+        log.info('clipboard', 'Text length: ... chars, estimated ... chunks, ~... min audio', { textLength, estimatedChunks, estimatedMinutes })
         
         const https = require('https');
         
@@ -4047,7 +3999,7 @@ Respond in a helpful, conversational way.`
             textChunks.push(remaining.substring(0, breakPoint).trim());
             remaining = remaining.substring(breakPoint).trim();
           }
-          console.log(`[TTS] Split text into ${textChunks.length} chunks`);
+          log.info('clipboard', 'Split text into ... chunks', { textChunksCount: textChunks.length })
         }
         
         // Generate audio for each chunk
@@ -4065,64 +4017,22 @@ Respond in a helpful, conversational way.`
         
         for (let i = 0; i < textChunks.length; i++) {
           const chunk = textChunks[i];
-          console.log(`[TTS] Generating chunk ${i + 1}/${totalChunks}, length: ${chunk.length}`);
+          log.info('clipboard', 'Generating chunk .../..., length: ...', { detail: i + 1, totalChunks, chunkCount: chunk.length })
           sendProgress(i + 1, totalChunks, `Generating audio chunk ${i + 1} of ${totalChunks}...`);
           
-          const requestBody = JSON.stringify({
-            model: 'tts-1-hd',
-            input: chunk,
+          const result = await ai.tts(chunk, {
             voice: voice,
-            response_format: 'mp3'
+            model: 'tts-1-hd',
+            responseFormat: 'mp3',
+            feature: 'clipboard-manager',
+            timeout: 120000
           });
           
-          const chunkAudio = await new Promise((resolve, reject) => {
-            const req = https.request({
-              hostname: 'api.openai.com',
-              path: '/v1/audio/speech',
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${openaiKey}`
-              },
-              timeout: 120000 // 2 minute timeout per chunk
-            }, (res) => {
-              const chunks = [];
-              
-              res.on('data', chunk => chunks.push(chunk));
-              res.on('end', () => {
-                if (res.statusCode !== 200) {
-                  const errorText = Buffer.concat(chunks).toString();
-                  try {
-                    const errorJson = JSON.parse(errorText);
-                    reject(new Error(errorJson.error?.message || `HTTP ${res.statusCode}`));
-                  } catch {
-                    reject(new Error(`HTTP ${res.statusCode}: ${errorText}`));
-                  }
-                  return;
-                }
-                
-                resolve(Buffer.concat(chunks));
-              });
-            });
-            
-            req.on('error', (e) => {
-              console.error(`[TTS] Request error on chunk ${i + 1}:`, e.message);
-              reject(e);
-            });
-            
-            req.on('timeout', () => {
-              console.error(`[TTS] Timeout on chunk ${i + 1}`);
-              req.destroy();
-              reject(new Error(`Timeout generating chunk ${i + 1}`));
-            });
-            
-            req.write(requestBody);
-            req.end();
-          });
+          const chunkAudio = result.audioBuffer;
           
           audioBuffers.push(chunkAudio);
           const chunkSizeKB = Math.round(chunkAudio.length / 1024);
-          console.log(`[TTS] Chunk ${i + 1}/${totalChunks} complete (${chunkSizeKB} KB)`);
+          log.info('clipboard', 'Chunk .../... complete (... KB)', { detail: i + 1, totalChunks, chunkSizeKB })
         }
         
         // Combine all audio buffers
@@ -4132,14 +4042,14 @@ Respond in a helpful, conversational way.`
         
         const totalSizeKB = Math.round(combinedBuffer.length / 1024);
         const totalSizeMB = (combinedBuffer.length / (1024 * 1024)).toFixed(2);
-        console.log(`[TTS] Successfully generated audio: ${totalChunks} chunks, ${totalSizeKB} KB (${totalSizeMB} MB)`);
-        console.log(`[TTS] Base64 encoded size: ${Math.round(audioData.length / 1024)} KB`);
+        log.info('clipboard', 'Successfully generated audio: ... chunks, ... KB (... MB)', { totalChunks, totalSizeKB, totalSizeMB })
+        log.info('clipboard', 'Base64 encoded size: ... KB', { detail: Math.round(audioData.length / 1024) })
         sendProgress(totalChunks, totalChunks, 'Complete!');
         
         return { success: true, audioData, totalChunks, totalSizeBytes: combinedBuffer.length };
         
       } catch (error) {
-        console.error('[TTS] Error generating speech:', error);
+        log.error('clipboard', 'Error generating speech', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -4162,12 +4072,11 @@ Respond in a helpful, conversational way.`
           return { success: false, error: 'OpenAI API key not configured. Please add it in Settings.' };
         }
         
-        console.log(`[AudioScript] Creating audio script for: ${title}, content length: ${content.length}`);
+        log.info('clipboard', 'Creating audio script for: ..., content length: ...', { title, contentCount: content.length })
         
-        const https = require('https');
-        
-        // Call OpenAI Chat Completions API with GPT-4o (gpt-5.1 doesn't exist yet, using gpt-4o)
-        const requestBody = JSON.stringify({
+        // Use centralized AI service with gpt-4o override
+        const result = await ai.chat({
+          provider: 'openai',
           model: 'gpt-4o',
           messages: [
             {
@@ -4200,60 +4109,18 @@ ${content}`
             }
           ],
           temperature: 0.7,
-          max_tokens: 8000
+          maxTokens: 8000,
+          feature: 'clipboard-manager',
         });
         
-        const scriptText = await new Promise((resolve, reject) => {
-          const req = https.request({
-            hostname: 'api.openai.com',
-            path: '/v1/chat/completions',
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${openaiKey}`
-            }
-          }, (res) => {
-            const chunks = [];
-            
-            res.on('data', chunk => chunks.push(chunk));
-            res.on('end', () => {
-              const responseText = Buffer.concat(chunks).toString();
-              
-              if (res.statusCode !== 200) {
-                try {
-                  const errorJson = JSON.parse(responseText);
-                  reject(new Error(errorJson.error?.message || `HTTP ${res.statusCode}`));
-                } catch {
-                  reject(new Error(`HTTP ${res.statusCode}: ${responseText}`));
-                }
-                return;
-              }
-              
-              try {
-                const response = JSON.parse(responseText);
-                const script = response.choices?.[0]?.message?.content;
-                if (script) {
-                  resolve(script);
-                } else {
-                  reject(new Error('No script generated'));
-                }
-              } catch (e) {
-                reject(new Error('Failed to parse response'));
-              }
-            });
-          });
-          
-          req.on('error', reject);
-          req.write(requestBody);
-          req.end();
-        });
+        const scriptText = result.content;
         
-        console.log(`[AudioScript] Successfully created script, length: ${scriptText.length}`);
+        log.info('clipboard', 'Successfully created script, length: ...', { scriptTextCount: scriptText.length })
         
         return { success: true, script: scriptText };
         
       } catch (error) {
-        console.error('[AudioScript] Error creating audio script:', error);
+        log.error('clipboard', 'Error creating audio script', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -4274,31 +4141,31 @@ ${content}`
         
         // If attaching to source item
         if (attachToSource && sourceItemId) {
-          console.log(`[TTS] Attaching audio to source item: ${sourceItemId}`);
+          log.info('clipboard', 'Attaching audio to source item: ...', { sourceItemId })
           
           // Find the source item
           const sourceItem = this.history.find(h => h.id === sourceItemId);
           if (sourceItem) {
             // Get the item directory
             const itemDir = path.join(this.storage.itemsDir, sourceItemId);
-            console.log(`[TTS] Item directory: ${itemDir}`);
+            log.info('clipboard', 'Item directory: ...', { itemDir })
             
             if (!fs.existsSync(itemDir)) {
-              console.log(`[TTS] Creating directory: ${itemDir}`);
+              log.info('clipboard', 'Creating directory: ...', { itemDir })
               fs.mkdirSync(itemDir, { recursive: true });
             }
             
             // Save audio in the item's directory
             const audioPath = path.join(itemDir, 'tts-audio.mp3');
-            console.log(`[TTS] Writing ${audioBuffer.length} bytes to: ${audioPath}`);
+            log.info('clipboard', 'Writing ... bytes to: ...', { audioBufferCount: audioBuffer.length, audioPath })
             fs.writeFileSync(audioPath, audioBuffer);
             
             // Verify file was written
             if (fs.existsSync(audioPath)) {
               const stats = fs.statSync(audioPath);
-              console.log(`[TTS] File verified, size: ${stats.size} bytes`);
+              log.info('clipboard', 'File verified, size: ... bytes', { size: stats.size })
             } else {
-              console.error(`[TTS] ERROR: File was not written!`);
+              log.error('clipboard', `[TTS] ERROR: File was not written!`)
             }
             
             // Update item metadata to include TTS audio reference
@@ -4316,7 +4183,7 @@ ${content}`
             };
             
             fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
-            console.log(`[TTS] Metadata updated with ttsAudio reference`);
+            log.info('clipboard', `[TTS] Metadata updated with ttsAudio reference`)
             
             // Update the index entry
             this.storage.updateItemIndex(sourceItemId, {
@@ -4324,10 +4191,10 @@ ${content}`
               ttsVoice: voice
             });
             
-            console.log(`[TTS] Successfully attached audio to item ${sourceItemId}`);
+            log.info('clipboard', 'Successfully attached audio to item ...', { sourceItemId })
             return { success: true, itemId: sourceItemId, attached: true };
           } else {
-            console.error(`[TTS] Source item not found in history: ${sourceItemId}`);
+            log.error('clipboard', 'Source item not found in history: ...', { sourceItemId })
           }
         }
         
@@ -4380,11 +4247,11 @@ ${content}`
         this.updateSpaceCounts();
         this.notifyHistoryUpdate();
         
-        console.log(`[TTS] Saved audio as new item: ${audioPath}`);
+        log.info('clipboard', 'Saved audio as new item: ...', { audioPath })
         return { success: true, itemId: indexEntry.id, attached: false };
         
       } catch (error) {
-        console.error('[TTS] Error saving audio:', error);
+        log.error('clipboard', 'Error saving audio', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -4392,20 +4259,20 @@ ${content}`
     // Get TTS audio for an item (if attached)
     safeHandle('clipboard:get-tts-audio', async (event, itemId) => {
       try {
-        console.log(`[TTS] Getting audio for item: ${itemId}`);
+        log.info('clipboard', 'Getting audio for item: ...', { itemId })
         const itemDir = path.join(this.storage.itemsDir, itemId);
         const audioPath = path.join(itemDir, 'tts-audio.mp3');
         
-        console.log(`[TTS] Checking path: ${audioPath}`);
-        console.log(`[TTS] File exists: ${fs.existsSync(audioPath)}`);
+        log.info('clipboard', 'Checking path: ...', { audioPath })
+        log.info('clipboard', 'File exists: ...', { detail: fs.existsSync(audioPath) })
         
         if (fs.existsSync(audioPath)) {
           const stats = fs.statSync(audioPath);
-          console.log(`[TTS] File size: ${stats.size} bytes`);
+          log.info('clipboard', 'File size: ... bytes', { size: stats.size })
           
           const audioData = fs.readFileSync(audioPath);
           const base64 = audioData.toString('base64');
-          console.log(`[TTS] Base64 length: ${base64.length}`);
+          log.info('clipboard', 'Base64 length: ...', { base64Count: base64.length })
           
           // Get voice from metadata
           const metadataPath = path.join(itemDir, 'metadata.json');
@@ -4423,10 +4290,10 @@ ${content}`
           };
         }
         
-        console.log(`[TTS] No audio file found for item: ${itemId}`);
+        log.info('clipboard', 'No audio file found for item: ...', { itemId })
         return { success: true, hasAudio: false };
       } catch (error) {
-        console.error('[TTS] Error getting audio:', error);
+        log.error('clipboard', 'Error getting audio', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -4434,7 +4301,7 @@ ${content}`
     // Extract audio from video file
     safeHandle('clipboard:extract-audio', async (event, itemId) => {
       try {
-        console.log('[AudioExtract] Extracting audio for item:', itemId);
+        log.info('clipboard', 'Extracting audio for item', { itemId })
         
         // Get item from storage
         const item = this.history.find(h => h.id === itemId);
@@ -4466,8 +4333,8 @@ ${content}`
         const audioFileName = path.basename(videoPath, path.extname(videoPath)) + '.mp3';
         const audioPath = path.join(itemDir, audioFileName);
         
-        console.log('[AudioExtract] Starting ffmpeg extraction from:', videoPath);
-        console.log('[AudioExtract] Output path:', audioPath);
+        log.info('clipboard', 'Starting ffmpeg extraction from', { videoPath })
+        log.info('clipboard', 'Output path', { audioPath })
         
         await new Promise((resolve, reject) => {
           ffmpeg(videoPath)
@@ -4477,7 +4344,7 @@ ${content}`
             .format('mp3')
             .output(audioPath)
             .on('start', (cmd) => {
-              console.log('[AudioExtract] FFmpeg command:', cmd);
+              log.info('clipboard', 'FFmpeg command', { cmd })
               // Send initial progress
               if (event.sender && !event.sender.isDestroyed()) {
                 event.sender.send('audio-extract-progress', { itemId, percent: 0, status: 'Starting...' });
@@ -4485,21 +4352,20 @@ ${content}`
             })
             .on('progress', (progress) => {
               const percent = progress.percent ? Math.round(progress.percent) : 0;
-              console.log('[AudioExtract] Progress:', percent + '%');
+              log.info('clipboard', 'Progress', { detail: percent + '%' })
               // Send progress to renderer
               if (event.sender && !event.sender.isDestroyed()) {
                 event.sender.send('audio-extract-progress', { itemId, percent, status: `Extracting: ${percent}%` });
               }
             })
             .on('end', () => {
-              console.log('[AudioExtract] FFmpeg completed successfully');
-              if (event.sender && !event.sender.isDestroyed()) {
-                event.sender.send('audio-extract-progress', { itemId, percent: 100, status: 'Complete!' });
+              log.info('clipboard', 'FFmpeg completed successfully')
+              if (event.sender && !event.sender.isDestroyed()) { send: event.sender.send('audio-extract-progress', { itemId, percent: 100, status: 'Complete!' });
               }
               resolve();
             })
             .on('error', (err) => {
-              console.error('[AudioExtract] FFmpeg error:', err.message);
+              log.error('clipboard', 'FFmpeg error', { error: err.message })
               if (event.sender && !event.sender.isDestroyed()) {
                 event.sender.send('audio-extract-progress', { itemId, percent: 0, status: 'Error: ' + err.message });
               }
@@ -4508,7 +4374,7 @@ ${content}`
             .run();
         });
         
-        console.log('[AudioExtract] Audio extracted to:', audioPath);
+        log.info('clipboard', 'Audio extracted to', { audioPath })
         
         // Update metadata
         const metadataPath = path.join(itemDir, 'metadata.json');
@@ -4526,7 +4392,7 @@ ${content}`
           audioSize: fs.statSync(audioPath).size
         };
       } catch (error) {
-        console.error('[AudioExtract] Error:', error);
+        log.error('clipboard', 'Error', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -4556,7 +4422,7 @@ ${content}`
           return { success: false, error: 'Audio file not found' };
         }
         
-        console.log(`[Transcription] Transcribing file: ${audioPath}`);
+        log.info('clipboard', 'Transcribing file: ...', { audioPath })
         
         // Check if it's a video file - need to extract audio first
         const fileExt = path.extname(audioPath).toLowerCase().replace('.', '') || 'mp3';
@@ -4569,7 +4435,7 @@ ${content}`
         let tempAudioPath = null;
         
         if (isVideo) {
-          console.log(`[Transcription] Video file detected, extracting audio...`);
+          log.info('clipboard', `[Transcription] Video file detected, extracting audio...`)
           
           // Extract audio from video using ffmpeg
           try {
@@ -4593,10 +4459,10 @@ ${content}`
                 .run();
             });
             
-            console.log(`[Transcription] Audio extracted to: ${tempAudioPath}`);
+            log.info('clipboard', 'Audio extracted to: ...', { tempAudioPath })
             transcribePath = tempAudioPath;
           } catch (ffmpegError) {
-            console.error('[Transcription] FFmpeg error:', ffmpegError);
+            log.error('clipboard', 'FFmpeg error', { ffmpegError })
             return { success: false, error: 'Failed to extract audio from video. Make sure ffmpeg is installed.' };
           }
         }
@@ -4619,7 +4485,7 @@ ${content}`
           diarize  // Enable speaker identification
         });
         
-        console.log(`[Transcription] Successfully transcribed: ${result.wordCount} words, ${result.speakerCount} speakers`);
+        log.info('clipboard', 'Successfully transcribed: ... words, ... speakers', { wordCount: result.wordCount, speakerCount: result.speakerCount })
         
         // Cleanup temp file if exists
         if (tempAudioPath && fs.existsSync(tempAudioPath)) {
@@ -4640,7 +4506,7 @@ ${content}`
         };
         
       } catch (error) {
-        console.error('[Transcription] Error:', error);
+        log.error('clipboard', 'Error', { error: error.message || error })
         // Cleanup temp file on error too
         if (typeof tempAudioPath !== 'undefined' && tempAudioPath && fs.existsSync(tempAudioPath)) {
           try { fs.unlinkSync(tempAudioPath); } catch (e) {}
@@ -4652,13 +4518,26 @@ ${content}`
     // Save transcription - attach to source item or create new
     safeHandle('clipboard:save-transcription', async (event, options) => {
       try {
-        const { transcription, sourceItemId, sourceFileName, attachToSource } = options;
+        const { transcription, sourceItemId, sourceFileName, attachToSource, spaceId } = options;
         
         if (!transcription) {
           return { success: false, error: 'No transcription provided' };
         }
         
         const timestamp = Date.now();
+        
+        // Determine target space: use provided spaceId, or get from source item, or use current space
+        let targetSpaceId = spaceId;
+        if (!targetSpaceId && sourceItemId) {
+          // Try to get space from source item
+          const sourceItem = this.history.find(h => h.id === sourceItemId);
+          if (sourceItem && sourceItem.spaceId) {
+            targetSpaceId = sourceItem.spaceId;
+          }
+        }
+        if (!targetSpaceId) {
+          targetSpaceId = this.currentSpace || 'unclassified';
+        }
         
         // If attaching to source item
         if (attachToSource && sourceItemId) {
@@ -4692,7 +4571,7 @@ ${content}`
             hasTranscription: true
           });
           
-          console.log(`[Transcription] Attached to item ${sourceItemId}`);
+          log.info('clipboard', 'Attached to item ...', { sourceItemId })
           return { success: true, itemId: sourceItemId, attached: true };
         }
         
@@ -4704,7 +4583,7 @@ ${content}`
           content: transcription,
           preview: preview,
           timestamp: timestamp,
-          spaceId: this.currentSpace || 'unclassified',
+          spaceId: targetSpaceId,  // Use target space (from source item or current)
           metadata: {
             source: 'transcription',
             sourceItemId: sourceItemId,
@@ -4723,11 +4602,11 @@ ${content}`
         this.updateSpaceCounts();
         this.notifyHistoryUpdate();
         
-        console.log(`[Transcription] Saved as new item: ${indexEntry.id}`);
+        log.info('clipboard', 'Saved as new item: ...', { indexEntryId: indexEntry.id })
         return { success: true, itemId: indexEntry.id, attached: false };
         
       } catch (error) {
-        console.error('[Transcription] Error saving:', error);
+        log.error('clipboard', 'Error saving', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -4785,7 +4664,7 @@ ${content}`
               ? metadata.transcript 
               : metadata.transcriptSegments.map(s => s.text).join(' ');
             
-            console.log('[Transcription] Using Whisper transcription from metadata:', metadata.transcriptSegments.length, 'segments');
+            log.info('clipboard', 'Using Whisper transcription from metadata', { arg1: metadata.transcriptSegments.length, arg2: 'segments' })
             return {
               success: true,
               transcription: transcriptText,
@@ -4806,9 +4685,9 @@ ${content}`
             const speakersContent = fs.readFileSync(speakersPath, 'utf8');
             // Parse speaker transcription format: "Speaker A [00:00:00 - 00:00:05]: text"
             segments = parseSpeakerTranscription(speakersContent);
-            console.log('[Transcription] Parsed', segments?.length || 0, 'segments from speakers file');
+            log.info('clipboard', 'Parsed', { arg1: segments?.length || 0, arg2: 'segments from speakers file' })
           } catch (e) {
-            console.warn('[Transcription] Could not parse speakers file:', e.message);
+            log.warn('clipboard', 'Could not parse speakers file', { error: e.message })
           }
         }
 
@@ -4842,7 +4721,7 @@ ${content}`
               : metadata.transcriptSegments.map(s => s.text).join(' ');
             
             const source = metadata.transcriptionSource || 'youtube';
-            console.log('[Transcription] Found', metadata.transcriptSegments.length, 'segments in metadata (source:', source + ')');
+            log.info('clipboard', 'Found', { metadataCount: metadata.transcriptSegments.length, arg2: 'segments in metadata (source:', arg3: source + ')' })
             return {
               success: true,
               transcription: transcriptText,
@@ -4880,18 +4759,18 @@ ${content}`
 
         return { success: true, hasTranscription: false };
       } catch (error) {
-        console.error('[Transcription] Error getting:', error);
+        log.error('clipboard', 'Error getting', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
     
     // AI Summary Generation - create a summary from transcript
     safeHandle('clipboard:generate-summary', async (event, options) => {
-      console.log('[AISummary] ====== Handler called ======');
+      log.info('clipboard', '====== Handler called ======')
       try {
         const { itemId, transcript, title } = options;
-        console.log('[AISummary] Starting summary generation for item:', itemId);
-        console.log('[AISummary] Transcript length:', transcript?.length || 0);
+        log.info('clipboard', 'Starting summary generation for item', { itemId })
+        log.info('clipboard', 'Transcript length', { detail: transcript?.length || 0 })
         
         if (!transcript || transcript.length < 100) {
           return { success: false, error: 'Transcript is too short to summarize' };
@@ -4914,20 +4793,12 @@ ${content}`
         // Detect API type
         const isAnthropicKey = apiKey.startsWith('sk-ant-');
         
-        console.log('[AISummary] Using API:', isAnthropicKey ? 'Claude' : 'OpenAI');
+        log.info('clipboard', 'Using API', { detail: isAnthropicKey ? 'Claude' : 'OpenAI' })
         
         let summary = '';
         
-        if (isAnthropicKey) {
-          // Use Claude API
-          const https = require('https');
-          
-          const requestBody = JSON.stringify({
-            model: 'claude-sonnet-4-5-20250929',
-            max_tokens: 2000,
-            messages: [{
-              role: 'user',
-              content: `You are a skilled content summarizer. Given the following transcript${title ? ` from "${title}"` : ''}, write a comprehensive but concise summary.
+        // Use centralized AI service
+        const summaryPrompt = `You are a skilled content summarizer. Given the following transcript${title ? ` from "${title}"` : ''}, write a comprehensive but concise summary.
 
 Create a structured summary with this format:
 
@@ -4952,99 +4823,22 @@ IMPORTANT RULES:
 TRANSCRIPT:
 ${truncatedTranscript}
 
-Write the structured summary now:`
-            }]
-          });
-          
-          const response = await new Promise((resolve, reject) => {
-            const req = https.request({
-              hostname: 'api.anthropic.com',
-              path: '/v1/messages',
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': apiKey,
-                'anthropic-version': '2023-06-01'
-              }
-            }, (res) => {
-              let data = '';
-              res.on('data', chunk => data += chunk);
-              res.on('end', () => {
-                try {
-                  resolve({ statusCode: res.statusCode, body: JSON.parse(data) });
-                } catch (e) {
-                  reject(new Error('Invalid JSON response'));
-                }
-              });
-            });
-            req.on('error', reject);
-            req.write(requestBody);
-            req.end();
-          });
-          
-          if (response.statusCode !== 200) {
-            throw new Error(`Claude API error: ${response.statusCode} - ${JSON.stringify(response.body)}`);
-          }
-          
-          summary = response.body.content?.[0]?.text || '';
-          
-        } else {
-          // Use OpenAI API
-          const response = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${apiKey}`
-            },
-            body: JSON.stringify({
-              model: 'gpt-4o-mini',
-              messages: [{
-                role: 'user',
-                content: `You are a skilled content summarizer. Given the following transcript${title ? ` from "${title}"` : ''}, write a comprehensive but concise summary.
+Write the structured summary now:`;
 
-Create a structured summary with this format:
-
-OVERVIEW: One paragraph explaining what this content is about and why it matters.
-
-KEY POINTS:
-• Point 1 - explanation
-• Point 2 - explanation
-• Point 3 - explanation
-• Point 4 - explanation
-• Point 5 - explanation
-(Include 5-8 substantive key points)
-
-MAIN TAKEAWAYS: One paragraph summarizing the most important insights or conclusions.
-
-IMPORTANT RULES:
-1. Focus ONLY on actual content - ignore sponsor messages, ads, and promotional content
-2. Extract substantive arguments and insights, not surface-level observations
-3. Be specific and concrete - someone reading should understand the key ideas
-4. Use bullet points (•) for KEY POINTS only, no other formatting
-
-TRANSCRIPT:
-${truncatedTranscript}
-
-Write the structured summary now:`
-              }],
-              max_tokens: 2000
-            })
-          });
-          
-          if (!response.ok) {
-            const errorBody = await response.text();
-            throw new Error(`OpenAI API error: ${response.status} - ${errorBody}`);
-          }
-          
-          const result = await response.json();
-          summary = result.choices?.[0]?.message?.content || '';
-        }
+        const result = await ai.chat({
+          profile: isAnthropicKey ? 'standard' : 'fast',
+          messages: [{ role: 'user', content: summaryPrompt }],
+          maxTokens: 2000,
+          feature: 'clipboard-manager',
+        });
+        
+        summary = result.content;
         
         if (!summary) {
           return { success: false, error: 'Failed to generate summary' };
         }
         
-        console.log('[AISummary] Generated summary length:', summary.length);
+        log.info('clipboard', 'Generated summary length', { summaryCount: summary.length })
         
         // Save to metadata
         const itemDir = path.join(this.storage.itemsDir, itemId);
@@ -5066,53 +4860,35 @@ Write the structured summary now:`
         return { success: true, summary };
         
       } catch (error) {
-        console.error('[AISummary] Error:', error);
+        log.error('clipboard', 'Error', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
     
     // AI Speaker Identification - analyze transcript and assign speakers
     safeHandle('clipboard:identify-speakers', async (event, options) => {
-      console.log('[SpeakerID] ====== Handler called ======');
+      log.info('clipboard', '====== Handler called ======')
       try {
         const { itemId, transcript, contextHint } = options;
-        console.log('[SpeakerID] Starting speaker identification for item:', itemId);
-        console.log('[SpeakerID] Transcript length:', transcript?.length || 0);
+        log.info('clipboard', 'Starting speaker identification for item', { itemId })
+        log.info('clipboard', 'Transcript length', { detail: transcript?.length || 0 })
         
         // Get API key from settings
         const { getSettingsManager } = require('./settings-manager');
         const settingsManager = getSettingsManager();
         
-        // Get API keys - try multiple field names
-        const llmApiKey = settingsManager.get('llmApiKey') || '';
-        const claudeApiKey = settingsManager.get('claudeApiKey') || '';
+        // Get API keys - use dedicated key fields (anthropicApiKey, openaiApiKey)
+        const anthropicApiKey = settingsManager.get('anthropicApiKey') || '';
         const openaiApiKey = settingsManager.get('openaiApiKey') || '';
         
-        console.log('[SpeakerID] Raw keys - llmApiKey:', !!llmApiKey, 'claudeApiKey:', !!claudeApiKey, 'openaiApiKey:', !!openaiApiKey);
+        log.info('clipboard', 'Raw keys - anthropicApiKey', { arg1: !!anthropicApiKey, arg2: 'openaiApiKey:', arg3: !!openaiApiKey })
         
-        // Auto-detect key type by prefix (more reliable than provider setting)
-        let claudeKey = null;
-        let openaiKey = null;
+        // Use dedicated API key fields (no longer rely on llmApiKey which depends on provider)
+        let claudeKey = anthropicApiKey && anthropicApiKey.startsWith('sk-ant-') ? anthropicApiKey : null;
+        let openaiKey = openaiApiKey && openaiApiKey.startsWith('sk-') ? openaiApiKey : null;
         
-        // Check llmApiKey first
-        if (llmApiKey.startsWith('sk-ant-')) {
-          claudeKey = llmApiKey;
-        } else if (llmApiKey.startsWith('sk-')) {
-          openaiKey = llmApiKey;
-        }
-        
-        // Check dedicated claudeApiKey field
-        if (!claudeKey && claudeApiKey && claudeApiKey.startsWith('sk-ant-')) {
-          claudeKey = claudeApiKey;
-        }
-        
-        // Also check dedicated openaiApiKey field
-        if (!openaiKey && openaiApiKey && openaiApiKey.startsWith('sk-')) {
-          openaiKey = openaiApiKey;
-        }
-        
-        console.log('[SpeakerID] Key detection - Claude:', !!claudeKey, 'OpenAI:', !!openaiKey);
-        if (claudeKey) console.log('[SpeakerID] Claude key prefix:', claudeKey.substring(0, 15) + '...');
+        log.info('clipboard', 'Key detection - Claude', { arg1: !!claudeKey, arg2: 'OpenAI:', arg3: !!openaiKey })
+        if (claudeKey) log.info('clipboard', 'Claude key prefix', { detail: claudeKey.substring(0, 15) + '...' })
         
         if (!claudeKey && !openaiKey) {
           return { success: false, error: 'No AI API key configured. Please add a Claude or OpenAI API key in Settings.' };
@@ -5120,7 +4896,7 @@ Write the structured summary now:`
         
         // Get model from settings (defaults to Claude Sonnet 4.5 or GPT-4o)
         const llmModel = settingsManager.get('llmModel') || (claudeKey ? 'claude-sonnet-4-5-20250929' : 'gpt-4o');
-        console.log('[SpeakerID] Using model:', llmModel);
+        log.info('clipboard', 'Using model', { llmModel })
         
         // Try to get timecoded segments from metadata for better analysis
         let formattedTranscript = transcript;
@@ -5135,11 +4911,11 @@ Write the structured summary now:`
                 formattedTranscript = metadata.transcript.segments.map(seg => 
                   `[${seg.startFormatted || formatTime(seg.start)}] ${seg.text}`
                 ).join('\n');
-                console.log('[SpeakerID] Using timecoded segments:', metadata.transcript.segments.length, 'segments');
+                log.info('clipboard', 'Using timecoded segments', { arg1: metadata.transcript.segments.length, arg2: 'segments' })
               }
             }
           } catch (e) {
-            console.log('[SpeakerID] Could not load segments, using plain transcript');
+            log.info('clipboard', 'Could not load segments, using plain transcript')
           }
         }
         
@@ -5209,171 +4985,45 @@ ${truncatedTranscript}`;
         const chunkSize = 10000;
         const needsChunking = truncatedTranscript.length > chunkSize;
         
-        console.log('[SpeakerID] Transcript length:', truncatedTranscript.length, 'needsChunking:', needsChunking);
+        log.info('clipboard', 'Transcript length', { truncatedTranscriptCount: truncatedTranscript.length, arg2: 'needsChunking:', needsChunking })
         
         async function callClaude(prompt, systemMsg) {
-          console.log('[SpeakerID] Calling Claude API, prompt length:', prompt.length);
-          console.log('[SpeakerID] Using model:', llmModel);
-          console.log('[SpeakerID] Using key:', claudeKey ? claudeKey.substring(0, 15) + '...' : 'NONE');
+          log.info('clipboard', 'Calling Claude API, prompt length', { promptCount: prompt.length })
+          log.info('clipboard', 'Using model', { llmModel })
+          log.info('clipboard', 'Using key', { detail: claudeKey ? claudeKey.substring(0, 15) + '...' : 'NONE' })
           
-          // Use Node's https module for more reliable requests in Electron
-          const https = require('https');
-          
-          return new Promise((resolve, reject) => {
-            const requestBody = JSON.stringify({
-              model: llmModel,
-              max_tokens: 8000,
-              system: systemMsg,
-              messages: [{ role: 'user', content: prompt }]
-            });
-            
-            const options = {
-              hostname: 'api.anthropic.com',
-              port: 443,
-              path: '/v1/messages',
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Content-Length': Buffer.byteLength(requestBody),
-                'x-api-key': claudeKey,
-                'anthropic-version': '2023-06-01'
-              },
-              timeout: 120000
-            };
-            
-            console.log('[SpeakerID] Sending https request...');
-            
-            const req = https.request(options, (res) => {
-              console.log('[SpeakerID] ✅ Response received! Status:', res.statusCode);
-              let data = '';
-              let totalReceived = 0;
-              
-              res.on('data', (chunk) => {
-                totalReceived += chunk.length;
-                console.log('[SpeakerID] 📦 Received chunk, size:', chunk.length, 'Total so far:', totalReceived);
-                data += chunk;
-              });
-              
-              res.on('end', () => {
-                console.log('[SpeakerID] Response complete, data length:', data.length);
-                
-                if (res.statusCode !== 200) {
-                  console.error('[SpeakerID] ====== API ERROR ======');
-                  console.error('[SpeakerID] Status:', res.statusCode);
-                  console.error('[SpeakerID] Response:', data);
-                  
-                  // Try to parse error from response
-                  let errorMsg = `Claude API returned status ${res.statusCode}`;
-                  try {
-                    const errorData = JSON.parse(data);
-                    if (errorData.error?.message) {
-                      errorMsg = errorData.error.message;
-                    }
-                  } catch (e) {
-                    // Couldn't parse error, use raw data
-                    errorMsg += `: ${data.substring(0, 200)}`;
-                  }
-                  
-                  reject(new Error(errorMsg));
-                  return;
-                }
-                
-                try {
-                  const parsed = JSON.parse(data);
-                  const text = parsed.content?.[0]?.text || '';
-                  console.log('[SpeakerID] ✅ Successfully parsed response, text length:', text.length);
-                  resolve(text);
-                } catch (e) {
-                  console.error('[SpeakerID] Failed to parse response:', e.message);
-                  reject(new Error('Failed to parse Claude response: ' + e.message));
-                }
-              });
-            });
-            
-            req.on('error', (e) => {
-              console.error('[SpeakerID] ====== REQUEST ERROR ======');
-              console.error('[SpeakerID] Error:', e.message);
-              console.error('[SpeakerID] Error code:', e.code);
-              console.error('[SpeakerID] Stack:', e.stack);
-              reject(new Error(`Network error: ${e.message} (${e.code || 'Unknown'})`));
-            });
-            
-            req.on('timeout', () => {
-              console.error('[SpeakerID] ====== REQUEST TIMEOUT ======');
-              console.error('[SpeakerID] Request timed out after 2 minutes!');
-              req.destroy();
-              reject(new Error('Request timed out after 2 minutes. The transcript may be too long or Claude API is slow.'));
-            });
-            
-            console.log('[SpeakerID] Writing request body, size:', Buffer.byteLength(requestBody));
-            req.write(requestBody);
-            console.log('[SpeakerID] Ending request...');
-            req.end();
-            console.log('[SpeakerID] Request sent, waiting for response...');
+          const result = await ai.chat({
+            profile: 'standard',
+            messages: [
+              { role: 'system', content: systemMsg },
+              { role: 'user', content: prompt }
+            ],
+            maxTokens: 8000,
+            feature: 'clipboard-manager',
+            timeout: 120000,
           });
+          
+          log.info('clipboard', '✅ Successfully received response, text length', { contentCount: result.content.length })
+          return result.content;
         }
         
         async function callOpenAI(prompt, systemMsg) {
-          console.log('[SpeakerID] Calling OpenAI API, prompt length:', prompt.length);
-          console.log('[SpeakerID] Using model:', llmModel);
+          log.info('clipboard', 'Calling OpenAI API, prompt length', { promptCount: prompt.length })
+          log.info('clipboard', 'Using model', { llmModel })
           
-          const https = require('https');
-          
-          return new Promise((resolve, reject) => {
-            const requestBody = JSON.stringify({
-              model: llmModel,
-              messages: [
-                { role: 'system', content: systemMsg },
-                { role: 'user', content: prompt }
-              ],
-              max_tokens: 8000
-            });
-            
-            const options = {
-              hostname: 'api.openai.com',
-              port: 443,
-              path: '/v1/chat/completions',
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Content-Length': Buffer.byteLength(requestBody),
-                'Authorization': `Bearer ${openaiKey}`
-              },
-              timeout: 120000
-            };
-            
-            const req = https.request(options, (res) => {
-              console.log('[SpeakerID] OpenAI response status:', res.statusCode);
-              let data = '';
-              
-              res.on('data', (chunk) => {
-                data += chunk;
-              });
-              
-              res.on('end', () => {
-                if (res.statusCode !== 200) {
-                  reject(new Error(`OpenAI API error: ${res.statusCode} - ${data.substring(0, 500)}`));
-                  return;
-                }
-                
-                try {
-                  const parsed = JSON.parse(data);
-                  resolve(parsed.choices[0].message.content);
-                } catch (e) {
-                  reject(new Error('Failed to parse OpenAI response: ' + e.message));
-                }
-              });
-            });
-            
-            req.on('error', (e) => reject(e));
-            req.on('timeout', () => {
-              req.destroy();
-              reject(new Error('Request timed out after 2 minutes'));
-            });
-            
-            req.write(requestBody);
-            req.end();
+          const result = await ai.chat({
+            provider: 'openai',
+            model: llmModel,
+            messages: [
+              { role: 'system', content: systemMsg },
+              { role: 'user', content: prompt }
+            ],
+            maxTokens: 8000,
+            feature: 'clipboard-manager',
+            timeout: 120000,
           });
+          
+          return result.content;
         }
         
         const callAI = claudeKey ? callClaude : callOpenAI;
@@ -5392,7 +5042,7 @@ ${truncatedTranscript}`;
             chunks.push(truncatedTranscript.substring(i, i + chunkSize));
           }
           
-          console.log('[SpeakerID] Processing', chunks.length, 'chunks');
+          log.info('clipboard', 'Processing', { arg1: chunks.length, arg2: 'chunks' })
           sendProgress(`Starting analysis: ${chunks.length} chunks to process...`, 0, chunks.length);
           
           // Process each chunk
@@ -5400,7 +5050,7 @@ ${truncatedTranscript}`;
           let speakerContext = '';
           
           for (let i = 0; i < chunks.length; i++) {
-            console.log('[SpeakerID] Processing chunk', i + 1, 'of', chunks.length);
+            log.info('clipboard', 'Processing chunk', { arg1: i + 1, arg2: 'of', chunksCount: chunks.length })
             sendProgress(`Processing chunk ${i + 1} of ${chunks.length}...`, i + 1, chunks.length);
             
             // Include context in first chunk, speaker names in subsequent chunks
@@ -5442,18 +5092,18 @@ ${chunks[i]}`;
           sendProgress('Analysis complete!', chunks.length, chunks.length);
         } else {
           // Process in one go
-          console.log('[SpeakerID] Processing in single request');
+          log.info('clipboard', 'Processing in single request')
           result = await callAI(userPrompt, systemPrompt);
         }
         
-        console.log('[SpeakerID] Successfully identified speakers, result length:', result.length);
+        log.info('clipboard', 'Successfully identified speakers, result length', { resultCount: result.length })
         
         // Save the speaker-identified transcript
         if (itemId) {
           const itemDir = path.join(this.storage.itemsDir, itemId);
           const speakerTranscriptPath = path.join(itemDir, 'transcription-speakers.txt');
           fs.writeFileSync(speakerTranscriptPath, result, 'utf8');
-          console.log('[SpeakerID] Saved speaker transcript to:', speakerTranscriptPath);
+          log.info('clipboard', 'Saved speaker transcript to', { speakerTranscriptPath })
           
           // Update metadata - replace transcript with speaker-identified version
           const metadataPath = path.join(itemDir, 'metadata.json');
@@ -5472,7 +5122,7 @@ ${chunks[i]}`;
             metadata.speakersIdentifiedModel = llmModel;
             
             fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
-            console.log('[SpeakerID] Updated metadata.transcript with speaker-identified version');
+            log.info('clipboard', 'Updated metadata.transcript with speaker-identified version')
             
             // Also update in-memory history item
             const historyItem = this.history.find(h => h.id === itemId);
@@ -5494,9 +5144,9 @@ ${chunks[i]}`;
           model: llmModel
         };
       } catch (error) {
-        console.error('[SpeakerID] ====== ERROR ======');
-        console.error('[SpeakerID] Error message:', error.message);
-        console.error('[SpeakerID] Error stack:', error.stack);
+        log.error('clipboard', '====== ERROR ======')
+        log.error('clipboard', 'Error message', { error: error.message })
+        log.error('clipboard', 'Error stack', { stack: error.stack })
         return { 
           success: false, 
           error: error.message || 'Unknown error occurred during speaker identification'
@@ -5564,7 +5214,7 @@ ${chunks[i]}`;
     // ========================================
     
     safeHandle('clipboard:check-monitor-now', async (event, itemId) => {
-      console.log('[WebMonitor] Check now requested for:', itemId);
+      log.info('clipboard', 'Check now requested for', { itemId })
       try {
         // Find the monitor item - check both history and storage
         let item = this.history.find(h => h.id === itemId);
@@ -5575,7 +5225,7 @@ ${chunks[i]}`;
             try {
               item = this.storage.loadItem(itemId);
             } catch (e) {
-              console.error('[WebMonitor] Failed to load item from storage:', e);
+              log.error('clipboard', 'Failed to load item from storage', { error: e.message || e })
             }
           }
         }
@@ -5596,12 +5246,12 @@ ${chunks[i]}`;
         if (!monitorId && item.id.startsWith('monitor-')) {
           monitorId = item.id.replace('monitor-', '');
         }
-        console.log('[WebMonitor] Using monitorId:', monitorId);
+        log.info('clipboard', 'Using monitorId', { monitorId })
         
         // Ensure the monitor is registered in WebsiteMonitor
         // (monitors are lost when app restarts since they're in-memory)
         if (!this.websiteMonitor.monitors.has(monitorId)) {
-          console.log('[WebMonitor] Re-registering monitor from item data...');
+          log.info('clipboard', 'Re-registering monitor from item data...')
           // Re-add the monitor to WebsiteMonitor's in-memory list
           this.websiteMonitor.monitors.set(monitorId, {
             id: monitorId,
@@ -5624,7 +5274,7 @@ ${chunks[i]}`;
         
         // If timeline is empty, create a baseline entry
         if (currentTimeline.length === 0 && result && result.snapshot) {
-          console.log('[WebMonitor] Creating baseline entry for existing monitor...');
+          log.info('clipboard', 'Creating baseline entry for existing monitor...')
           
           const baselineEntry = {
             id: `baseline-${Date.now()}`,
@@ -5680,13 +5330,13 @@ ${chunks[i]}`;
         
         return { success: true, changed: result?.changed || false };
       } catch (error) {
-        console.error('[WebMonitor] Check now failed:', error);
+        log.error('clipboard', 'Check now failed', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
     
     safeHandle('clipboard:set-monitor-status', async (event, itemId, status) => {
-      console.log('[WebMonitor] Set status:', itemId, status);
+      log.info('clipboard', 'Set status', { itemId, status })
       try {
         const item = this.history.find(h => h.id === itemId);
         if (!item || item.type !== 'web-monitor') {
@@ -5710,13 +5360,13 @@ ${chunks[i]}`;
         
         return { success: true };
       } catch (error) {
-        console.error('[WebMonitor] Set status failed:', error);
+        log.error('clipboard', 'Set status failed', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
     
     safeHandle('clipboard:set-monitor-ai-enabled', async (event, itemId, enabled) => {
-      console.log('[WebMonitor] Set AI enabled:', itemId, enabled);
+      log.info('clipboard', 'Set AI enabled', { itemId, enabled })
       try {
         const item = this.history.find(h => h.id === itemId);
         if (!item || item.type !== 'web-monitor') {
@@ -5730,13 +5380,13 @@ ${chunks[i]}`;
         
         return { success: true };
       } catch (error) {
-        console.error('[WebMonitor] Set AI enabled failed:', error);
+        log.error('clipboard', 'Set AI enabled failed', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
     
     safeHandle('clipboard:set-monitor-check-interval', async (event, itemId, minutes) => {
-      console.log('[WebMonitor] Set check interval:', itemId, minutes, 'minutes');
+      log.info('clipboard', 'Set check interval', { itemId, minutes, arg3: 'minutes' })
       try {
         const item = this.history.find(h => h.id === itemId);
         if (!item || item.type !== 'web-monitor') {
@@ -5758,7 +5408,7 @@ ${chunks[i]}`;
         
         return { success: true };
       } catch (error) {
-        console.error('[WebMonitor] Set check interval failed:', error);
+        log.error('clipboard', 'Set check interval failed', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -5767,14 +5417,161 @@ ${chunks[i]}`;
     // END WEB MONITOR IPC HANDLERS
     // ========================================
     
+    // ========================================
+    // DATA SOURCE IPC HANDLERS
+    // ========================================
+    
+    safeHandle('clipboard:add-data-source', async (event, data) => {
+      log.info('clipboard', 'Adding data source', { name: data.name, sourceType: data.dataSource?.sourceType });
+      try {
+        const ds = data.dataSource || {};
+        const itemId = `ds-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+        
+        const item = {
+          id: itemId,
+          type: 'data-source',
+          content: JSON.stringify(ds, null, 2),
+          spaceId: data.spaceId || 'unclassified',
+          name: data.name || '',
+          dataSource: ds,
+          sourceType: ds.sourceType || 'api',
+          timestamp: Date.now()
+        };
+        
+        const result = await this.storage.addItem(item);
+        this.notifyHistoryUpdate();
+        
+        return { success: true, itemId: result?.id || itemId };
+      } catch (error) {
+        log.error('clipboard', 'Add data source failed', { error: error.message });
+        return { success: false, error: error.message };
+      }
+    });
+    
+    safeHandle('clipboard:test-data-source', async (event, itemId, credential) => {
+      log.info('clipboard', 'Testing data source connection', { itemId });
+      try {
+        // Load item
+        const item = this.history.find(h => h.id === itemId) || this.storage.index.items.find(i => i.id === itemId);
+        if (!item || item.type !== 'data-source') {
+          return { success: false, error: 'Item not found or not a data source' };
+        }
+        
+        const ds = item.dataSource || {};
+        const conn = ds.connection || {};
+        const url = conn.url;
+        
+        if (!url) {
+          return { success: false, error: 'No URL configured' };
+        }
+        
+        // Test connectivity with a simple fetch
+        const startTime = Date.now();
+        const headers = { ...(conn.headers || {}) };
+        
+        // Apply credential if provided
+        if (credential && ds.auth) {
+          if (ds.auth.type === 'bearer') {
+            headers['Authorization'] = `Bearer ${credential}`;
+          } else if (ds.auth.type === 'api-key' && ds.auth.headerName) {
+            headers[ds.auth.headerName] = credential;
+          } else if (ds.auth.type === 'basic') {
+            headers['Authorization'] = `Basic ${Buffer.from(credential).toString('base64')}`;
+          }
+        }
+        
+        const https = require('https');
+        const http = require('http');
+        const urlObj = new URL(url);
+        const transport = urlObj.protocol === 'https:' ? https : http;
+        
+        const testResult = await new Promise((resolve) => {
+          const req = transport.request(url, {
+            method: conn.method || 'GET',
+            headers,
+            timeout: Math.min(conn.timeout || 10000, 15000)
+          }, (res) => {
+            const elapsed = Date.now() - startTime;
+            resolve({ success: res.statusCode < 400, statusCode: res.statusCode, responseTime: elapsed });
+            res.destroy();
+          });
+          req.on('error', (err) => {
+            resolve({ success: false, error: err.message, responseTime: Date.now() - startTime });
+          });
+          req.on('timeout', () => {
+            req.destroy();
+            resolve({ success: false, error: 'Connection timed out', responseTime: Date.now() - startTime });
+          });
+          req.end();
+        });
+        
+        // Update status
+        const newStatus = testResult.success ? 'active' : 'error';
+        const updates = {
+          dataSource: {
+            ...ds,
+            status: newStatus,
+            lastTestedAt: new Date().toISOString(),
+            lastError: testResult.success ? null : (testResult.error || `HTTP ${testResult.statusCode}`)
+          }
+        };
+        
+        // Update in-memory and storage
+        if (item.dataSource) {
+          item.dataSource.status = newStatus;
+          item.dataSource.lastTestedAt = updates.dataSource.lastTestedAt;
+          item.dataSource.lastError = updates.dataSource.lastError;
+        }
+        item.dataSourceStatus = newStatus;
+        item.lastTestedAt = updates.dataSource.lastTestedAt;
+        
+        await this.updateItemMetadata(itemId, updates);
+        this.notifyHistoryUpdate();
+        
+        return testResult;
+      } catch (error) {
+        log.error('clipboard', 'Test data source failed', { error: error.message });
+        return { success: false, error: error.message };
+      }
+    });
+    
+    safeHandle('clipboard:update-data-source-document', async (event, itemId, content, visibility) => {
+      log.info('clipboard', 'Updating data source document', { itemId, visibility });
+      try {
+        const item = this.history.find(h => h.id === itemId) || this.storage.index.items.find(i => i.id === itemId);
+        if (!item || item.type !== 'data-source') {
+          return { success: false, error: 'Item not found or not a data source' };
+        }
+        
+        const ds = item.dataSource || {};
+        ds.document = {
+          content: content || '',
+          visibility: visibility || 'private',
+          lastUpdated: new Date().toISOString()
+        };
+        
+        await this.updateItemMetadata(itemId, { dataSource: ds });
+        this.notifyHistoryUpdate();
+        
+        return { success: true };
+      } catch (error) {
+        log.error('clipboard', 'Update data source document failed', { error: error.message });
+        return { success: false, error: error.message };
+      }
+    });
+    
+    // ========================================
+    // END DATA SOURCE IPC HANDLERS
+    // ========================================
+    
     // Get video file path from item ID (with optional scenes from metadata)
     safeHandle('clipboard:get-video-path', async (event, itemId) => {
       try {
-        console.log('[ClipboardManager] Getting video path for item:', itemId);
+        log.info('clipboard', 'Getting video path for item', { itemId })
         
         // First check the index entry's contentPath (most reliable)
         const indexEntry = this.storage.index.items.find(i => i.id === itemId);
-        console.log('[ClipboardManager] Index entry:', indexEntry ? { contentPath: indexEntry.contentPath, fileName: indexEntry.fileName } : 'null');
+        log.info('clipboard', 'Index entry', { detail: indexEntry ? { contentPath: indexEntry.contentPath, fileName: indexEntry.fileName } : 'null' })
         
         // Helper to load scenes from metadata
         const loadScenes = (itemId) => {
@@ -5785,16 +5582,16 @@ ${chunks[i]}`;
               return metadata.scenes || [];
             }
           } catch (e) {
-            console.error('[ClipboardManager] Error loading scenes:', e);
+            log.error('clipboard', 'Error loading scenes', { error: e.message || e })
           }
           return [];
         };
         
         if (indexEntry?.contentPath) {
           const contentPath = path.join(this.storage.storageRoot, indexEntry.contentPath);
-          console.log('[ClipboardManager] Checking contentPath:', contentPath);
+          log.info('clipboard', 'Checking contentPath', { contentPath })
           if (fs.existsSync(contentPath)) {
-            console.log('[ClipboardManager] Found video at contentPath:', contentPath);
+            log.info('clipboard', 'Found video at contentPath', { contentPath })
             const scenes = loadScenes(itemId);
             return { 
               success: true, 
@@ -5803,14 +5600,13 @@ ${chunks[i]}`;
               scenes: scenes
             };
           } else {
-            console.log('[ClipboardManager] contentPath file does not exist');
+            log.info('clipboard', 'contentPath file does not exist')
           }
         }
         
         // Try to get from item directly
         const item = this.history.find(h => h.id === itemId);
-        if (item?.filePath && fs.existsSync(item.filePath)) {
-          console.log('[ClipboardManager] Found filePath on item:', item.filePath);
+        if (item?.filePath && fs.existsSync(item.filePath)) { filePath: log.info('clipboard', 'Found filePath on item', { filePath: item.filePath })
           const scenes = loadScenes(itemId);
           return { 
             success: true, 
@@ -5823,7 +5619,7 @@ ${chunks[i]}`;
         // Try loading full item from storage
         const fullItem = this.storage.loadItem(itemId);
         if (fullItem?.filePath && fs.existsSync(fullItem.filePath)) {
-          console.log('[ClipboardManager] Found filePath in full item:', fullItem.filePath);
+          log.info('clipboard', 'Found filePath in full item', { filePath: fullItem.filePath })
           const scenes = loadScenes(itemId);
           return { 
             success: true, 
@@ -5835,15 +5631,15 @@ ${chunks[i]}`;
         
         // Check the item directory for media files
         const itemDir = path.join(this.storage.itemsDir, itemId);
-        console.log('[ClipboardManager] Checking item dir:', itemDir);
+        log.info('clipboard', 'Checking item dir', { itemDir })
         if (fs.existsSync(itemDir)) {
           const files = fs.readdirSync(itemDir);
-          console.log('[ClipboardManager] Files in item dir:', files);
+          log.info('clipboard', 'Files in item dir', { files })
           const videoExtensions = ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm', '.m4v', '.mpg', '.mpeg'];
           const videoFile = files.find(f => videoExtensions.some(ext => f.toLowerCase().endsWith(ext)));
           if (videoFile) {
             const videoPath = path.join(itemDir, videoFile);
-            console.log('[ClipboardManager] Found video file in item dir:', videoPath);
+            log.info('clipboard', 'Found video file in item dir', { videoPath })
             const scenes = loadScenes(itemId);
             return { 
               success: true, 
@@ -5858,13 +5654,13 @@ ${chunks[i]}`;
         const expectedPath = indexEntry?.contentPath 
           ? path.join(this.storage.storageRoot, indexEntry.contentPath)
           : 'unknown';
-        console.error('[ClipboardManager] Video file not found. Expected at:', expectedPath);
+        log.error('clipboard', 'Video file not found. Expected at', { expectedPath })
         return { 
           success: false, 
           error: `Video file is missing from storage. The file may have been deleted or moved. Expected: ${indexEntry?.fileName || 'unknown'}`
         };
       } catch (error) {
-        console.error('[ClipboardManager] Error getting video path:', error);
+        log.error('clipboard', 'Error getting video path', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -5875,10 +5671,10 @@ ${chunks[i]}`;
         const { BrowserWindow } = require('electron');
         const path = require('path');
         
-        console.log('[ClipboardManager] Opening Video Editor with file:', filePath);
+        log.info('clipboard', 'Opening Video Editor with file', { filePath })
         
         if (!filePath || !fs.existsSync(filePath)) {
-          console.error('[ClipboardManager] Video file not found:', filePath);
+          log.error('clipboard', 'Video file not found', { filePath })
           return { success: false, error: 'Video file not found: ' + filePath };
         }
         
@@ -5907,7 +5703,7 @@ ${chunks[i]}`;
         
         // Once loaded, send the file path to open
         videoEditorWindow.webContents.on('did-finish-load', () => {
-          console.log('[ClipboardManager] Video Editor loaded, sending file path:', filePath);
+          log.info('clipboard', 'Video Editor loaded, sending file path', { filePath })
           videoEditorWindow.webContents.send('video-editor:load-file', filePath);
         });
         
@@ -5918,50 +5714,76 @@ ${chunks[i]}`;
         
         return { success: true };
       } catch (error) {
-        console.error('[ClipboardManager] Error opening Video Editor:', error);
+        log.error('clipboard', 'Error opening Video Editor', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
     
     safeHandle('clipboard:get-current-user', () => {
+      // Try to get user email from multi-tenant store (from 'or' cookie user data)
+      try {
+        const multiTenantStore = require('./multi-tenant-store');
+        
+        // Check edison first (most common), then other environments
+        const environments = ['edison', 'staging', 'production'];
+        for (const env of environments) {
+          const userData = multiTenantStore.getOrTokenUserData(env);
+          if (userData && userData.username) {
+            // Username from 'or' cookie is typically an email
+            return userData.username;
+          }
+        }
+      } catch (e) {
+        // Multi-tenant store not available, fall back to system username
+      }
+      
+      // Fall back to system username (won't create Person node without @)
       return os.userInfo().username || 'Unknown';
     });
     
     // AI metadata generation
     safeHandle('clipboard:generate-metadata-ai', async (event, { itemId, apiKey, customPrompt }) => {
-      console.log('[MetadataGen IPC] Generate metadata request received:', { itemId, hasApiKey: !!apiKey, hasCustomPrompt: !!customPrompt });
+      log.info('clipboard', 'Generate metadata request received', { detail: { itemId, hasApiKey: !!apiKey, hasCustomPrompt: !!customPrompt } })
       
       try {
         // Use the NEW specialized metadata generator
         const MetadataGenerator = require('./metadata-generator');
         const metadataGen = new MetadataGenerator(this);
         
-        console.log('[MetadataGen IPC] Calling generateMetadataForItem...');
-        const result = await metadataGen.generateMetadataForItem(itemId, apiKey, customPrompt);
-        console.log('[MetadataGen IPC] Result:', { success: result.success, error: result.error });
+        // Fallback to anthropicApiKey if no key provided (for Claude API)
+        let effectiveApiKey = apiKey;
+        if (!effectiveApiKey) {
+          const { getSettingsManager } = require('./settings-manager');
+          const settingsManager = getSettingsManager();
+          effectiveApiKey = settingsManager.get('anthropicApiKey') || settingsManager.get('llmApiKey');
+        }
+        
+        log.info('clipboard', 'Calling generateMetadataForItem...')
+        const result = await metadataGen.generateMetadataForItem(itemId, effectiveApiKey, customPrompt);
+        log.info('clipboard', 'Result', { detail: { success: result.success, error: result.error } })
 
         if (result.success) {
           // Get the updated item to return full metadata
           const item = this.storage.loadItem(itemId);
-          console.log('[MetadataGen IPC] Returning success with metadata');
+          log.info('clipboard', 'Returning success with metadata')
           return {
             success: true,
             metadata: item.metadata,
             message: 'Metadata generated successfully'
           };
         } else {
-          console.log('[MetadataGen IPC] Returning failure:', result.error);
+          log.info('clipboard', 'Returning failure', { error: result.error })
           return result;
         }
       } catch (err) {
-        console.error('[MetadataGen IPC] Exception:', err.message);
+        log.error('clipboard', 'Exception', { error: err.message })
         return { success: false, error: err.message };
       }
     });
     
     // Handle capture methods for external AI windows
     safeHandle('clipboard:capture-text', async (event, text) => {
-      console.log('[V2] Capturing text from external window:', text.substring(0, 100) + '...');
+      log.info('clipboard', 'Capturing text from external window', { detail: text.substring(0, 100) + '...' })
       
       const item = {
         type: 'text',
@@ -5978,7 +5800,7 @@ ${chunks[i]}`;
     });
     
     safeHandle('clipboard:capture-html', async (event, html) => {
-      console.log('[V2] Capturing HTML from external window');
+      log.info('clipboard', 'Capturing HTML from external window')
       
       const plainText = this.stripHtml(html);
       
@@ -5999,23 +5821,22 @@ ${chunks[i]}`;
     
     // Get audio/video file - returns file path for videos, base64 for audio
     safeHandle('clipboard:get-audio-data', (event, itemId) => {
-      console.log('[Media] get-audio-data called for:', itemId);
+      log.info('clipboard', 'get-audio-data called for', { itemId })
       
       const item = this.history.find(h => h.id === itemId);
-      console.log('[Media] Found item:', item ? {
-        type: item.type,
+      log.info('clipboard', 'Found item', { detail: item ? { type: item.type,
         fileType: item.fileType,
         fileCategory: item.fileCategory,
         filePath: item.filePath,
         _needsContent: item._needsContent
-      } : 'null');
+      } : 'null' })
       
       const isAudioOrVideo = item && item.type === 'file' && 
         (item.fileType === 'audio' || item.fileType === 'video' || 
          item.fileCategory === 'audio' || item.fileCategory === 'video');
       
       if (!item || !isAudioOrVideo) {
-        console.error('[Media] Not an audio/video file or not found');
+        log.error('clipboard', 'Not an audio/video file or not found')
         return { success: false, error: 'Audio/video file not found' };
       }
       
@@ -6024,9 +5845,9 @@ ${chunks[i]}`;
         
         // Load full item if needed
         if (item._needsContent || !filePath) {
-          console.log('[Media] Loading full item from storage...');
+          log.info('clipboard', 'Loading full item from storage...')
           const fullItem = this.storage.loadItem(itemId);
-          console.log('[Media] Full item loaded:', fullItem ? { filePath: fullItem.filePath } : 'null');
+          log.info('clipboard', 'Full item loaded', { detail: fullItem ? { filePath: fullItem.filePath } : 'null' })
           filePath = fullItem?.filePath;
         }
         
@@ -6036,7 +5857,7 @@ ${chunks[i]}`;
           
           // For videos, return file path directly (don't load into memory)
           if (isVideo) {
-            console.log('[Media] Video file - returning path:', filePath);
+            log.info('clipboard', 'Video file - returning path', { filePath })
             const mimeType = this.getMediaMimeType(item.fileExt, item.fileType);
             return { 
               success: true, 
@@ -6047,19 +5868,19 @@ ${chunks[i]}`;
           }
           
           // For audio files, load as base64 (they're typically small enough)
-          console.log('[Media] Audio file - reading into memory:', filePath);
+          log.info('clipboard', 'Audio file - reading into memory', { filePath })
           const mediaData = fs.readFileSync(filePath);
           const base64 = mediaData.toString('base64');
           const mimeType = this.getMediaMimeType(item.fileExt, item.fileType);
           const dataUrl = `data:${mimeType};base64,${base64}`;
-          console.log('[Media] Success - data length:', base64.length);
+          log.info('clipboard', 'Success - data length', { base64Count: base64.length })
           return { success: true, dataUrl };
         }
         
-        console.error('[Media] File not found at:', filePath);
+        log.error('clipboard', 'File not found at', { filePath })
         return { success: false, error: 'Media file no longer exists at: ' + filePath };
       } catch (error) {
-        console.error('[Media] Error reading media file:', error);
+        log.error('clipboard', 'Error reading media file', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -6099,7 +5920,7 @@ ${chunks[i]}`;
         
         return { success: true, filePath, jsonSubtype: indexEntry.jsonSubtype };
       } catch (error) {
-        console.error('[ClipboardManager] Error getting JSON asset path:', error);
+        log.error('clipboard', 'Error getting JSON asset path', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -6123,7 +5944,7 @@ ${chunks[i]}`;
           return { success: false, error: 'Style guide file not found' };
         }
         
-        console.log('[ClipboardManager] Opening Style Guide Editor with file:', filePath);
+        log.info('clipboard', 'Opening Style Guide Editor with file', { filePath })
         
         // Open the style guide preview with the file data
         const styleGuideWindow = new BrowserWindow({
@@ -6147,7 +5968,7 @@ ${chunks[i]}`;
         
         return { success: true };
       } catch (error) {
-        console.error('[ClipboardManager] Error opening Style Guide Editor:', error);
+        log.error('clipboard', 'Error opening Style Guide Editor', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -6169,7 +5990,7 @@ ${chunks[i]}`;
           return { success: false, error: 'Journey map file not found' };
         }
         
-        console.log('[ClipboardManager] Opening Journey Map Editor with file:', filePath);
+        log.info('clipboard', 'Opening Journey Map Editor with file', { filePath })
         
         // For now, show the file in Finder as there may not be a dedicated journey editor
         // In the future, this could open a dedicated journey map editor window
@@ -6196,7 +6017,7 @@ ${chunks[i]}`;
         
         return { success: true };
       } catch (error) {
-        console.error('[ClipboardManager] Error opening Journey Map Editor:', error);
+        log.error('clipboard', 'Error opening Journey Map Editor', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -6211,10 +6032,10 @@ ${chunks[i]}`;
       this.savePreferences();
       
       if (enabled && !this.screenshotWatcher) {
-        console.log('Re-enabling screenshot watcher...');
+        log.info('clipboard', 'Re-enabling screenshot watcher...')
         this.setupScreenshotWatcher();
       } else if (!enabled && this.screenshotWatcher) {
-        console.log('Disabling screenshot watcher...');
+        log.info('clipboard', 'Disabling screenshot watcher...')
         this.screenshotWatcher.close();
         this.screenshotWatcher = null;
       }
@@ -6230,7 +6051,7 @@ ${chunks[i]}`;
     
     // PDF page thumbnails
     safeHandle('clipboard:get-pdf-page-thumbnail', async (event, itemId, pageNumber) => {
-      console.log('[V2-PDF] Requested thumbnail for item:', itemId, 'page:', pageNumber);
+      log.info('clipboard', 'Requested thumbnail for item', { itemId, arg2: 'page:', pageNumber })
       
       const item = this.history.find(h => h.id === itemId);
       if (!item || item.type !== 'file' || item.fileType !== 'pdf') {
@@ -6253,7 +6074,7 @@ ${chunks[i]}`;
         const thumbnail = await this.generatePDFPageThumbnail(pdfPath, pageNumber);
         return { success: true, thumbnail };
       } catch (error) {
-        console.error('[V2-PDF] Error generating page thumbnail:', error);
+        log.error('clipboard', 'Error generating page thumbnail', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -6261,9 +6082,9 @@ ${chunks[i]}`;
     // Black hole handlers - using ContentIngestionService for validation
     ipcMain.handle('black-hole:add-text', async (event, data) => {
       const opId = `add-text-${Date.now()}`;
-      console.log(`[ContentIngestion:${opId}] ═══════════════════════════════════════`);
-      console.log(`[ContentIngestion:${opId}] ADD-TEXT HANDLER - Time: ${new Date().toISOString()}`);
-      console.log(`[ContentIngestion:${opId}] Data:`, data ? { spaceId: data.spaceId, contentLength: data.content?.length || 0 } : 'NO DATA');
+      log.info('clipboard', '═══════════════════════════════════════', { opId })
+      log.info('clipboard', 'ADD-TEXT HANDLER - Time: ...', { opId, detail: new Date().toISOString() })
+      log.info('clipboard', 'Data', { opId })
       
       // Get ingestion service for validation
       const ingestionService = getContentIngestionService(this);
@@ -6272,7 +6093,7 @@ ${chunks[i]}`;
         // Quick validation using ingestion service
         const validation = ingestionService.validateContent('text', data);
         if (!validation.valid) {
-          console.error(`[ContentIngestion:${opId}] Validation failed:`, validation.errors);
+          log.error('clipboard', 'Validation failed', { opId })
           return { success: false, error: validation.errors.join('; '), code: 'VALIDATION_ERROR' };
         }
         
@@ -6282,7 +6103,7 @@ ${chunks[i]}`;
           const ytModule = require('./youtube-downloader');
           isYouTubeUrl = ytModule.isYouTubeUrl;
         } catch (e) {
-          console.warn(`[ContentIngestion:${opId}] YouTube module not available`);
+          log.warn('clipboard', 'YouTube module not available', { opId })
           isYouTubeUrl = () => false;
         }
         
@@ -6290,7 +6111,7 @@ ${chunks[i]}`;
         const isYT = isYouTubeUrl(content);
         
         if (isYT) {
-          console.log(`[ContentIngestion:${opId}] YouTube URL detected - returning for download handling`);
+          log.info('clipboard', 'YouTube URL detected - returning for download handling', { opId })
           return { 
             success: true, 
             isYouTube: true, 
@@ -6305,7 +6126,7 @@ ${chunks[i]}`;
         try {
           context = await this.contextCapture.getFullContext();
         } catch (error) {
-          console.warn(`[ContentIngestion:${opId}] Context capture failed:`, error.message);
+          log.warn('clipboard', 'Context capture failed', { opId })
         }
         
         // Enhance source detection
@@ -6336,25 +6157,25 @@ ${chunks[i]}`;
         }
         
         // Save item
-        console.log(`[ContentIngestion:${opId}] Saving text item to space: ${item.spaceId}`);
+        log.info('clipboard', 'Saving text item to space: ...', { opId, spaceId: item.spaceId })
         await this.addToHistory(item);
         
         // Get the saved item ID
         const savedItem = this.history?.[0];
-        console.log(`[ContentIngestion:${opId}] ✓ Text saved successfully, itemId: ${savedItem?.id}`);
+        log.info('clipboard', '✓ Text saved successfully, itemId: ...', { opId, detail: savedItem?.id })
         
         return { success: true, itemId: savedItem?.id };
         
       } catch (error) {
-        console.error(`[ContentIngestion:${opId}] ERROR:`, error.message);
-        console.error(`[ContentIngestion:${opId}] Stack:`, error.stack);
+        log.error('clipboard', 'ERROR', { opId })
+        log.error('clipboard', 'Stack', { opId })
         return ingestionService.handleError(error, { opId, type: 'text', spaceId: data?.spaceId });
       }
     });
     
     ipcMain.handle('black-hole:add-html', async (event, data) => {
       const opId = `add-html-${Date.now()}`;
-      console.log(`[ContentIngestion:${opId}] ADD-HTML HANDLER - spaceId: ${data?.spaceId}`);
+      log.info('clipboard', 'ADD-HTML HANDLER - spaceId: ...', { opId, detail: data?.spaceId })
       
       const ingestionService = getContentIngestionService(this);
       
@@ -6362,7 +6183,7 @@ ${chunks[i]}`;
         // Validate
         const validation = ingestionService.validateContent('html', data);
         if (!validation.valid) {
-          console.error(`[ContentIngestion:${opId}] Validation failed:`, validation.errors);
+          log.error('clipboard', 'Validation failed', { opId })
           return { success: false, error: validation.errors.join('; '), code: 'VALIDATION_ERROR' };
         }
         
@@ -6371,7 +6192,7 @@ ${chunks[i]}`;
         try {
           context = await this.contextCapture.getFullContext();
         } catch (error) {
-          console.warn(`[ContentIngestion:${opId}] Context capture failed:`, error.message);
+          log.warn('clipboard', 'Context capture failed', { opId })
         }
         
         // Enhance source detection
@@ -6404,23 +6225,23 @@ ${chunks[i]}`;
         }
         
         // Save item
-        console.log(`[ContentIngestion:${opId}] Saving HTML item to space: ${item.spaceId}`);
+        log.info('clipboard', 'Saving HTML item to space: ...', { opId, spaceId: item.spaceId })
         await this.addToHistory(item);
         
         const savedItem = this.history?.[0];
-        console.log(`[ContentIngestion:${opId}] ✓ HTML saved successfully, itemId: ${savedItem?.id}`);
+        log.info('clipboard', '✓ HTML saved successfully, itemId: ...', { opId, detail: savedItem?.id })
         
         return { success: true, itemId: savedItem?.id };
         
       } catch (error) {
-        console.error(`[ContentIngestion:${opId}] ERROR:`, error.message);
+        log.error('clipboard', 'ERROR', { opId })
         return ingestionService.handleError(error, { opId, type: 'html', spaceId: data?.spaceId });
       }
     });
     
     ipcMain.handle('black-hole:add-image', async (event, data) => {
       const opId = `add-image-${Date.now()}`;
-      console.log(`[ContentIngestion:${opId}] ADD-IMAGE HANDLER - spaceId: ${data?.spaceId}`);
+      log.info('clipboard', 'ADD-IMAGE HANDLER - spaceId: ...', { opId, detail: data?.spaceId })
       
       const ingestionService = getContentIngestionService(this);
       
@@ -6428,7 +6249,7 @@ ${chunks[i]}`;
         // Validate
         const validation = ingestionService.validateContent('image', data);
         if (!validation.valid) {
-          console.error(`[ContentIngestion:${opId}] Validation failed:`, validation.errors);
+          log.error('clipboard', 'Validation failed', { opId })
           return { success: false, error: validation.errors.join('; '), code: 'VALIDATION_ERROR' };
         }
         
@@ -6437,7 +6258,7 @@ ${chunks[i]}`;
         try {
           context = await this.contextCapture.getFullContext();
         } catch (error) {
-          console.warn(`[ContentIngestion:${opId}] Context capture failed:`, error.message);
+          log.warn('clipboard', 'Context capture failed', { opId })
         }
         
         // Generate thumbnail if needed
@@ -6475,26 +6296,26 @@ ${chunks[i]}`;
         }
         
         // Save item with retry for transient disk errors
-        console.log(`[ContentIngestion:${opId}] Saving image to space: ${item.spaceId}`);
+        log.info('clipboard', 'Saving image to space: ...', { opId, spaceId: item.spaceId })
         await retryOperation(
           () => this.addToHistory(item),
           { maxRetries: 3, baseDelay: 200 }
         );
         
         const savedItem = this.history?.[0];
-        console.log(`[ContentIngestion:${opId}] ✓ Image saved successfully, itemId: ${savedItem?.id}`);
+        log.info('clipboard', '✓ Image saved successfully, itemId: ...', { opId, detail: savedItem?.id })
         
         return { success: true, itemId: savedItem?.id };
         
       } catch (error) {
-        console.error(`[ContentIngestion:${opId}] ERROR:`, error.message);
+        log.error('clipboard', 'ERROR', { opId })
         return ingestionService.handleError(error, { opId, type: 'image', spaceId: data?.spaceId });
       }
     });
     
     ipcMain.handle('black-hole:add-file', async (event, data) => {
       const opId = `add-file-${Date.now()}`;
-      console.log(`[ContentIngestion:${opId}] ADD-FILE HANDLER - spaceId: ${data?.spaceId}, fileName: ${data?.fileName}`);
+      log.info('clipboard', 'ADD-FILE HANDLER - spaceId: ..., fileName: ...', { opId, detail: data?.spaceId, detail: data?.fileName })
       
       const ingestionService = getContentIngestionService(this);
       
@@ -6503,13 +6324,13 @@ ${chunks[i]}`;
         if (data.filePath && !data.fileName) {
           try {
             if (!fs.existsSync(data.filePath)) {
-              console.error(`[ContentIngestion:${opId}] File does not exist:`, data.filePath);
+              log.error('clipboard', 'File does not exist', { opId })
               return { success: false, error: 'File does not exist: ' + data.filePath, code: 'FILE_NOT_FOUND' };
             }
             
             const stats = fs.statSync(data.filePath);
             if (!stats.isFile()) {
-              console.error(`[ContentIngestion:${opId}] Path is not a file:`, data.filePath);
+              log.error('clipboard', 'Path is not a file', { opId })
               return { success: false, error: 'Path is not a file: ' + data.filePath, code: 'NOT_A_FILE' };
             }
             
@@ -6521,13 +6342,9 @@ ${chunks[i]}`;
             const fileBuffer = fs.readFileSync(data.filePath);
             data.fileData = fileBuffer.toString('base64');
             
-            console.log(`[ContentIngestion:${opId}] File read from path:`, {
-              fileName: data.fileName,
-              fileSize: data.fileSize,
-              dataLength: data.fileData.length
-            });
+            log.info('clipboard', 'File read from path', { opId })
           } catch (readError) {
-            console.error(`[ContentIngestion:${opId}] Error reading file:`, readError);
+            log.error('clipboard', 'Error reading file', { opId })
             return ingestionService.handleError(readError, { opId, type: 'file', spaceId: data?.spaceId });
           }
         }
@@ -6535,7 +6352,7 @@ ${chunks[i]}`;
         // Validate using ingestion service
         const validation = ingestionService.validateContent('file', data);
         if (!validation.valid) {
-          console.error(`[ContentIngestion:${opId}] Validation failed:`, validation.errors);
+          log.error('clipboard', 'Validation failed', { opId })
           return { success: false, error: validation.errors.join('; '), code: 'VALIDATION_ERROR' };
         }
         
@@ -6544,7 +6361,7 @@ ${chunks[i]}`;
         try {
           context = await this.contextCapture.getFullContext();
         } catch (error) {
-          console.warn(`[ContentIngestion:${opId}] Context capture failed:`, error.message);
+          log.warn('clipboard', 'Context capture failed', { opId })
         }
       
       // Extract file extension and determine category
@@ -6596,7 +6413,7 @@ ${chunks[i]}`;
             const content = Buffer.from(data.fileData, 'base64').toString('utf8');
             jsonSubtype = this.detectJsonSubtype(content);
           } catch (e) {
-            console.warn('[V2] Error detecting JSON subtype from fileData:', e.message);
+            log.warn('clipboard', 'Error detecting JSON subtype from fileData', { error: e.message })
           }
         }
         // If not detected yet and we have a file path, try reading the file
@@ -6605,7 +6422,7 @@ ${chunks[i]}`;
         }
         
         if (jsonSubtype) {
-          console.log(`[V2] Detected JSON subtype: ${jsonSubtype} for file: ${data.fileName}`);
+          log.info('clipboard', 'Detected JSON subtype: ... for file: ...', { jsonSubtype, fileName: data.fileName })
         }
       }
       
@@ -6621,7 +6438,7 @@ ${chunks[i]}`;
         // For image files, create a data URL thumbnail from the base64 data
         const mimeType = data.mimeType || this.getMimeTypeFromExtension(ext);
         thumbnail = `data:${mimeType};base64,${data.fileData}`;
-        console.log('[V2] Generated image thumbnail, mimeType:', mimeType, 'dataLength:', data.fileData.length);
+        log.info('clipboard', 'Generated image thumbnail, mimeType', { mimeType, arg2: 'dataLength:', fileDataCount: data.fileData.length })
       }
       
       const itemId = this.generateId();
@@ -6658,7 +6475,7 @@ ${chunks[i]}`;
       
       // If we have file data, prepare it for the storage system
       if (data.fileData) {
-        console.log('[V2] Preparing file data for storage:', data.fileName);
+        log.info('clipboard', 'Preparing file data for storage', { fileName: data.fileName, arg2: 'size:', fileDataCount: data.fileData.length, arg4: 'chars' })
         
         // Create a temporary file that the storage system will copy
         const tempDir = path.join(app.getPath('temp'), 'clipboard-temp-files');
@@ -6666,18 +6483,26 @@ ${chunks[i]}`;
           fs.mkdirSync(tempDir, { recursive: true });
         }
         
-        const tempFilePath = path.join(tempDir, data.fileName);
+        // Use unique filename to avoid conflicts
+        const tempFilePath = path.join(tempDir, `${item.id}_${data.fileName}`);
         try {
           const buffer = Buffer.from(data.fileData, 'base64');
           fs.writeFileSync(tempFilePath, buffer);
           
+          // Verify the temp file was written correctly
+          if (!fs.existsSync(tempFilePath)) {
+            throw new Error('Temp file was not created');
+          }
+          const tempStats = fs.statSync(tempFilePath);
+          log.info('clipboard', 'Temp file created', { tempFilePath, arg2: 'size:', size: tempStats.size, arg4: 'bytes' })
+          
+          if (tempStats.size === 0) {
+            throw new Error('Temp file has 0 bytes - base64 decode may have failed');
+          }
+          
           // Set filePath so storage system can copy it
           item.filePath = tempFilePath;
           item.fileName = data.fileName;
-          console.log('[V2] Temp file created for storage system:', tempFilePath);
-          
-          // The actual file will be stored by storage.addItem in the correct location
-          // We'll generate thumbnails after the item is properly stored
           
           // Set flags for post-processing
           if (fileType === 'pdf') {
@@ -6693,69 +6518,76 @@ ${chunks[i]}`;
             item.needsTextPreview = true;
           }
         } catch (err) {
-          console.error('[V2] Error creating temp file:', err);
-        }
-      }
-      
-      // If we have file data, prepare it for the storage system
-      if (data.fileData) {
-        console.log('[V2] Preparing file data for storage system:', data.fileName);
-        // Create a temporary file that the storage system can copy from
-        const tempDir = path.join(app.getPath('temp'), 'clipboard-files');
-        if (!fs.existsSync(tempDir)) {
-          fs.mkdirSync(tempDir, { recursive: true });
-        }
-        
-        const tempFilePath = path.join(tempDir, `${item.id}_${data.fileName}`);
-        try {
-          const buffer = Buffer.from(data.fileData, 'base64');
-          fs.writeFileSync(tempFilePath, buffer);
-          item.fileDataPath = tempFilePath;
-          console.log('[V2] Temporary file saved to:', tempFilePath);
-        } catch (err) {
-          console.error('[V2] Error saving temporary file:', err);
+          log.error('clipboard', 'CRITICAL: Error creating temp file', { error: err.message })
+          log.error('clipboard', 'This will cause the file to not be saved properly!')
+          return { success: false, error: `Failed to create temp file: ${err.message}`, code: 'TEMP_FILE_ERROR' };
         }
       }
       
       // Add item to history with retry for transient disk errors
-      console.log(`[ContentIngestion:${opId}] Saving file item to space: ${item.spaceId}`);
-      await retryOperation(
-        () => this.addToHistory(item),
-        { maxRetries: 3, baseDelay: 200 }
-      );
+      log.info('clipboard', 'Saving file item to space: ...', { opId, spaceId: item.spaceId })
+      try {
+        await retryOperation(
+          () => this.addToHistory(item),
+          { maxRetries: 3, baseDelay: 200 }
+        );
+      } catch (addError) {
+        log.error('clipboard', 'CRITICAL: Failed to add item to history', { opId })
+        return { success: false, error: `Failed to save file: ${addError.message}`, code: 'SAVE_ERROR' };
+      }
       
-      // Now the file has been copied to items/[id]/fileName by the storage system
-      // We need to find the actual stored file path for post-processing
-      if (item.needsPDFThumbnail || item.needsTextPreview) {
-        const storedFilePath = path.join(this.storage.storageRoot, 'items', item.id, item.fileName);
+      // CRITICAL: Verify the file was actually saved to storage
+      const storedFilePath = path.join(this.storage.storageRoot, 'items', item.id, item.fileName);
+      if (!fs.existsSync(storedFilePath)) {
+        log.error('clipboard', 'CRITICAL: File was not saved to storage!', { opId })
+        log.error('clipboard', 'Expected location: ...', { opId, storedFilePath })
+        log.error('clipboard', 'Source was: ...', { opId, filePath: item.filePath })
         
+        // Check what files exist in the item directory
+        const itemDir = path.join(this.storage.storageRoot, 'items', item.id);
+        if (fs.existsSync(itemDir)) {
+          const files = fs.readdirSync(itemDir);
+          log.error('clipboard', 'Files in item directory', { opId })
+        } else {
+          log.error('clipboard', 'Item directory doesn\'t exist!', { opId })
+        }
+        
+        // Don't return error here - item is in index, just missing file content
+        // This helps diagnose the issue without breaking the flow
+      } else {
+        const savedStats = fs.statSync(storedFilePath);
+        log.info('clipboard', 'File verified at: ..., size: ... bytes', { opId, storedFilePath, size: savedStats.size })
+      }
+      
+      // Post-processing for PDFs and text files
+      if (item.needsPDFThumbnail || item.needsTextPreview) {
         if (fs.existsSync(storedFilePath)) {
           // Generate PDF thumbnail
           if (item.needsPDFThumbnail) {
-            console.log('[V2] Generating real PDF thumbnail for stored file:', storedFilePath);
+            log.info('clipboard', 'Generating real PDF thumbnail for stored file', { storedFilePath })
             await this.generateRealPDFThumbnail(storedFilePath, item);
           }
           
           // Generate text preview
           if (item.needsTextPreview) {
             try {
-              console.log('[V2] Generating text preview for stored file:', storedFilePath);
+              log.info('clipboard', 'Generating text preview for stored file', { storedFilePath })
               const preview = await this.generateTextPreview(storedFilePath, item);
               if (preview && !preview.includes('svg+xml')) {
                 // Update item with real preview
                 const historyItem = this.history.find(h => h.id === item.id);
                 if (historyItem) {
                   historyItem.thumbnail = preview;
-                  console.log('[V2-TEXT] Updated item with text preview');
+                  log.info('clipboard', 'Updated item with text preview')
                   this.notifyHistoryUpdate();
                 }
               }
             } catch (error) {
-              console.error('[V2-TEXT] Error generating text preview:', error);
+              log.error('clipboard', 'Error generating text preview', { error: error.message || error })
             }
           }
         } else {
-          console.error('[V2] Stored file not found at expected location:', storedFilePath);
+          log.error('clipboard', 'Stored file not found at expected location', { storedFilePath })
         }
       }
       
@@ -6763,17 +6595,17 @@ ${chunks[i]}`;
       if (item.filePath && item.filePath.includes('clipboard-temp-files')) {
         try {
           fs.unlinkSync(item.filePath);
-          console.log(`[ContentIngestion:${opId}] Cleaned up temp file:`, item.filePath);
+          log.info('clipboard', 'Cleaned up temp file', { opId })
         } catch (err) {
           // Ignore cleanup errors
         }
       }
       
-      console.log(`[ContentIngestion:${opId}] ✓ File saved successfully, itemId: ${item.id}`);
+      log.info('clipboard', '✓ File saved successfully, itemId: ...', { opId, itemId: item.id })
       return { success: true, itemId: item.id };
       
       } catch (error) {
-        console.error(`[ContentIngestion:${opId}] ERROR:`, error.message);
+        log.error('clipboard', 'ERROR', { opId })
         return ingestionService.handleError(error, { opId, type: 'file', spaceId: data?.spaceId });
       }
     });
@@ -6854,7 +6686,7 @@ ${chunks[i]}`;
         
         return result;
       } catch (error) {
-        console.error('Error generating PDF:', error);
+        log.error('clipboard', 'Error generating PDF', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -6926,14 +6758,14 @@ ${chunks[i]}`;
         
         return pdfResult;
       } catch (error) {
-        console.error('Error exporting PDF:', error);
+        log.error('clipboard', 'Error exporting PDF', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
     
     // Smart export handlers
     safeHandle('clipboard:smart-export-space', async (event, spaceId) => {
-      console.log('[Clipboard] Opening smart export for space:', spaceId);
+      log.info('clipboard', 'Opening smart export for space', { spaceId })
       
       try {
         const space = this.spaces.find(s => s.id === spaceId);
@@ -6984,14 +6816,14 @@ ${chunks[i]}`;
         
         return true;
       } catch (error) {
-        console.error('[Clipboard] Error opening smart export:', error);
+        log.error('clipboard', 'Error opening smart export', { error: error.message || error })
         throw error;
       }
     });
     
     // Unified export preview handler
     safeHandle('clipboard:open-export-preview', async (event, spaceId, options = {}) => {
-      console.log('[Clipboard] Opening export preview for space:', spaceId, 'Options:', options);
+      log.info('clipboard', 'Opening export preview for space', { spaceId, arg2: 'Options:', options })
       
       try {
         const space = this.spaces.find(s => s.id === spaceId);
@@ -7043,7 +6875,7 @@ ${chunks[i]}`;
         
         return true;
       } catch (error) {
-        console.error('[Clipboard] Error opening export preview:', error);
+        log.error('clipboard', 'Error opening export preview', { error: error.message || error })
         throw error;
       }
     });
@@ -7060,7 +6892,7 @@ ${chunks[i]}`;
         const monitor = await this.websiteMonitor.addMonitor(config);
         return { success: true, monitor };
       } catch (error) {
-        console.error('Error adding website monitor:', error);
+        log.error('clipboard', 'Error adding website monitor', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -7095,7 +6927,7 @@ ${chunks[i]}`;
         
         return result;
       } catch (error) {
-        console.error('Error checking website:', error);
+        log.error('clipboard', 'Error checking website', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -7110,7 +6942,7 @@ ${chunks[i]}`;
         
         return Array.from(this.websiteMonitor.monitors.values());
       } catch (error) {
-        console.error('Error getting monitors:', error);
+        log.error('clipboard', 'Error getting monitors', { error: error.message || error })
         return [];
       }
     });
@@ -7126,7 +6958,7 @@ ${chunks[i]}`;
         const history = await this.websiteMonitor.getMonitorHistory(monitorId);
         return { success: true, history };
       } catch (error) {
-        console.error('Error getting monitor history:', error);
+        log.error('clipboard', 'Error getting monitor history', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -7141,7 +6973,7 @@ ${chunks[i]}`;
         
         return await this.websiteMonitor.removeMonitor(monitorId);
       } catch (error) {
-        console.error('Error removing monitor:', error);
+        log.error('clipboard', 'Error removing monitor', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -7157,7 +6989,7 @@ ${chunks[i]}`;
         await this.websiteMonitor.pauseMonitor(monitorId);
         return { success: true };
       } catch (error) {
-        console.error('Error pausing monitor:', error);
+        log.error('clipboard', 'Error pausing monitor', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -7173,7 +7005,7 @@ ${chunks[i]}`;
         await this.websiteMonitor.resumeMonitor(monitorId);
         return { success: true };
       } catch (error) {
-        console.error('Error resuming monitor:', error);
+        log.error('clipboard', 'Error resuming monitor', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -7184,9 +7016,9 @@ ${chunks[i]}`;
   
   // Setup YouTube download IPC handlers
   setupYouTubeHandlers(safeHandle) {
-    console.log('[ClipboardManager] Setting up YouTube handlers...');
+    log.info('clipboard', 'Setting up YouTube handlers...')
     const { YouTubeDownloader, isYouTubeUrl, extractVideoId } = require('./youtube-downloader');
-    console.log('[ClipboardManager] YouTube module loaded, isYouTubeUrl:', typeof isYouTubeUrl);
+    log.info('clipboard', 'YouTube module loaded, isYouTubeUrl', { detail: typeof isYouTubeUrl })
     
     // Lazy-init downloader
     let downloader = null;
@@ -7220,7 +7052,7 @@ ${chunks[i]}`;
     // Verify an item exists with file and metadata, returns checksum
     safeHandle('clipboard:verify-item', async (event, itemId) => {
       try {
-        console.log('[Verify] Verifying item:', itemId);
+        log.info('clipboard', 'Verifying item', { itemId })
         const itemDir = path.join(this.storage.itemsDir, itemId);
         
         // Check directory exists
@@ -7270,7 +7102,7 @@ ${chunks[i]}`;
         hash.update(fileStats.size.toString());
         const checksum = hash.digest('hex').substring(0, 8); // Short checksum
         
-        console.log('[Verify] Item verified:', itemId, 'checksum:', checksum);
+        log.info('clipboard', 'Item verified', { itemId, arg2: 'checksum:', checksum })
         
         return {
           success: true,
@@ -7294,46 +7126,45 @@ ${chunks[i]}`;
           return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
         }
       } catch (error) {
-        console.error('[Verify] Error:', error);
+        log.error('clipboard', 'Error', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
     
     // Download video to Space
     ipcMain.handle('youtube:download-to-space', async (event, url, spaceId) => {
-      console.log('[YouTube] download-to-space called with URL:', url, 'spaceId:', spaceId);
+      log.info('clipboard', 'download-to-space called with URL', { url, arg2: 'spaceId:', spaceId })
       try {
         const dl = getDownloader();
-        console.log('[YouTube] Starting download...');
-        const result = await dl.downloadToSpace(url, this, spaceId || this.currentSpace, (percent, status) => {
-          console.log('[YouTube] Progress:', percent, status);
+        log.info('clipboard', 'Starting download...')
+        const result = await dl.downloadToSpace(url, this, spaceId || this.currentSpace, (percent, status) => { info: log.info('clipboard', 'Progress', { percent, status })
           // Send progress updates to renderer
           if (event.sender && !event.sender.isDestroyed()) {
             event.sender.send('youtube:download-progress', { percent, status, url });
           }
         });
-        console.log('[YouTube] Download result:', JSON.stringify(result));
+        log.info('clipboard', 'Download result', { detail: JSON.stringify(result) })
         return result;
       } catch (error) {
-        console.error('[YouTube] Download error:', error);
+        log.error('clipboard', 'Download error', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
     
     // Start YouTube download in background - returns immediately with placeholder item
     ipcMain.handle('youtube:start-background-download', async (event, url, spaceId) => {
-      console.log('[YouTube] *** start-background-download called ***');
-      console.log('[YouTube] URL:', url);
-      console.log('[YouTube] spaceId:', spaceId);
+      log.info('clipboard', '*** start-background-download called ***')
+      log.info('clipboard', 'URL', { url })
+      log.info('clipboard', 'spaceId', { spaceId })
       
       try {
         const targetSpaceId = spaceId || this.currentSpace || 'unclassified';
-        console.log('[YouTube] targetSpaceId:', targetSpaceId);
+        log.info('clipboard', 'targetSpaceId', { targetSpaceId })
         
         // Extract video ID from URL for immediate feedback
         const { extractVideoId } = require('./youtube-downloader');
         const videoId = extractVideoId(url);
-        console.log('[YouTube] Extracted videoId:', videoId);
+        log.info('clipboard', 'Extracted videoId', { videoId })
         
         // Create placeholder immediately WITHOUT waiting for video info
         // This makes the UI feel responsive
@@ -7358,7 +7189,7 @@ ${chunks[i]}`;
         // Add placeholder to storage
         const indexEntry = this.storage.addItem(placeholderItem);
         const placeholderId = indexEntry.id;
-        console.log('[YouTube] Created placeholder item:', placeholderId);
+        log.info('clipboard', 'Created placeholder item', { placeholderId })
         
         // Add to in-memory history
         this.history.unshift({
@@ -7381,7 +7212,7 @@ ${chunks[i]}`;
         };
         
       } catch (error) {
-        console.error('[YouTube] Error starting background download:', error);
+        log.error('clipboard', 'Error starting background download', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -7402,12 +7233,12 @@ ${chunks[i]}`;
     
     // Cancel YouTube download
     ipcMain.handle('youtube:cancel-download', async (event, placeholderId) => {
-      console.log('[YouTube] Cancel download requested for:', placeholderId);
+      log.info('clipboard', 'Cancel download requested for', { placeholderId })
       try {
         const success = this.cancelDownload(placeholderId);
         return { success };
       } catch (error) {
-        console.error('[YouTube] Cancel error:', error);
+        log.error('clipboard', 'Cancel error', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -7429,21 +7260,21 @@ ${chunks[i]}`;
     
     // Get transcript from YouTube video (using YouTube captions)
     ipcMain.handle('youtube:get-transcript', async (event, url, lang = 'en') => {
-      console.log('[YouTube] get-transcript called for:', url, 'lang:', lang);
+      log.info('clipboard', 'get-transcript called for', { url, arg2: 'lang:', lang })
       try {
         const dl = getDownloader();
         const result = await dl.getTranscript(url, lang);
-        console.log('[YouTube] Transcript result:', result.success ? 'success' : result.error);
+        log.info('clipboard', 'Transcript result', { detail: result.success ? 'success' : result.error })
         return result;
       } catch (error) {
-        console.error('[YouTube] Transcript error:', error);
+        log.error('clipboard', 'Transcript error', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
     
     // Fetch and save YouTube transcript for an existing item
     ipcMain.handle('youtube:fetch-transcript-for-item', async (event, itemId, lang = 'en') => {
-      console.log('[YouTube] fetch-transcript-for-item called for:', itemId, 'lang:', lang);
+      log.info('clipboard', 'fetch-transcript-for-item called for', { itemId, arg2: 'lang:', lang })
       try {
         // Load item metadata
         const itemDir = path.join(this.storage.itemsDir, itemId);
@@ -7460,7 +7291,7 @@ ${chunks[i]}`;
           return { success: false, error: 'Not a YouTube video' };
         }
         
-        console.log('[YouTube] Fetching transcript for:', youtubeUrl);
+        log.info('clipboard', 'Fetching transcript for', { youtubeUrl })
         
         const dl = getDownloader();
         const result = await dl.getTranscript(youtubeUrl, lang);
@@ -7482,7 +7313,7 @@ ${chunks[i]}`;
           const transcriptionPath = path.join(itemDir, 'transcription.txt');
           fs.writeFileSync(transcriptionPath, result.transcript, 'utf8');
           
-          console.log('[YouTube] Transcript saved for item:', itemId, 'length:', result.transcript.length);
+          log.info('clipboard', 'Transcript saved for item', { itemId, arg2: 'length:', transcriptCount: result.transcript.length })
           
           return {
             success: true,
@@ -7495,7 +7326,7 @@ ${chunks[i]}`;
           return { success: false, error: result.error || 'Failed to fetch transcript' };
         }
       } catch (error) {
-        console.error('[YouTube] fetch-transcript-for-item error:', error);
+        log.error('clipboard', 'fetch-transcript-for-item error', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -7503,7 +7334,7 @@ ${chunks[i]}`;
     // Transcribe YouTube video using unified TranscriptionService (ElevenLabs Scribe)
     // Replaces legacy Whisper endpoint - now uses ElevenLabs with speaker diarization
     ipcMain.handle('youtube:get-transcript-whisper', async (event, url, lang = 'en') => {
-      console.log('[YouTube] Transcription requested for:', url, 'lang:', lang);
+      log.info('clipboard', 'Transcription requested for', { url, arg2: 'lang:', lang })
       try {
         const dl = getDownloader();
         
@@ -7535,11 +7366,11 @@ ${chunks[i]}`;
           event.sender.send('youtube:transcribe-progress', { percent: 100, status: 'Complete', url });
         }
         
-        console.log('[YouTube] Transcription result:', result.success ? 
-          `${result.wordCount} words, ${result.speakerCount} speakers` : result.error);
+        log.info('clipboard', 'Transcription result', { detail: result.success ? 
+          `${result.wordCount} words, ${ result.speakerCount} speakers` : result.error })
         return result;
       } catch (error) {
-        console.error('[YouTube] Transcription error:', error);
+        log.error('clipboard', 'Transcription error', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
@@ -7547,7 +7378,7 @@ ${chunks[i]}`;
     // Process speaker recognition - now uses unified TranscriptionService
     // ElevenLabs Scribe includes speaker diarization by default
     ipcMain.handle('youtube:process-speaker-recognition', async (event, url) => {
-      console.log('[YouTube] Speaker recognition requested for:', url);
+      log.info('clipboard', 'Speaker recognition requested for', { url })
       try {
         const dl = getDownloader();
         
@@ -7578,16 +7409,16 @@ ${chunks[i]}`;
           event.sender.send('youtube:speaker-recognition-progress', { percent: 100, status: 'Complete', url });
         }
         
-        console.log('[YouTube] Speaker recognition result:', result.success ? 
-          `${result.speakerCount} speakers, ${result.wordCount} words` : result.error);
+        log.info('clipboard', 'Speaker recognition result', { detail: result.success ? 
+          `${result.speakerCount} speakers, ${ result.wordCount} words` : result.error })
         return result;
       } catch (error) {
-        console.error('[YouTube] Speaker recognition error:', error);
+        log.error('clipboard', 'Speaker recognition error', { error: error.message || error })
         return { success: false, error: error.message };
       }
     });
 
-    console.log('[ClipboardManager] YouTube download handlers registered');
+    log.info('clipboard', 'YouTube download handlers registered')
   }
   
   // Helper method for space names
@@ -7605,7 +7436,14 @@ ${chunks[i]}`;
   // Helper method to update item metadata
   async updateItemMetadata(itemId, metadata) {
     try {
-      const item = this.storage.loadItem(itemId);
+      let item;
+      try {
+        item = this.storage.loadItem(itemId);
+      } catch (loadErr) {
+        // Item may have been deleted between creation and metadata update
+        log.debug('clipboard', 'Metadata update skipped (item removed)', { itemId });
+        return { success: false, error: 'Item not found' };
+      }
       if (!item) return { success: false, error: 'Item not found' };
       
       // Save back to storage - merge with existing metadata to preserve app-specific fields
@@ -7617,7 +7455,7 @@ ${chunks[i]}`;
         try {
           existingMetadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
         } catch (parseErr) {
-          console.warn('[Clipboard] Could not parse existing metadata, starting fresh:', parseErr.message);
+          log.warn('clipboard', 'Could not parse existing metadata, starting fresh', { error: parseErr.message })
         }
       }
       
@@ -7662,7 +7500,7 @@ ${chunks[i]}`;
       
       return { success: true, metadata: mergedMetadata };
     } catch (error) {
-      console.error('Error updating metadata:', error);
+      log.error('clipboard', 'Error updating metadata', { error: error.message || error })
       return { success: false, error: error.message };
     }
   }
@@ -7718,7 +7556,7 @@ ${chunks[i]}`;
       
       return { success: true };
     } catch (error) {
-      console.error('Error showing item in Finder:', error);
+      log.error('clipboard', 'Error showing item in Finder', { error: error.message || error })
       return { success: false, error: error.message };
     }
   }
@@ -7758,14 +7596,12 @@ ${chunks[i]}`;
     // Reset IPC registration flag to allow re-registration if manager is recreated
     ClipboardManagerV2._ipcRegistered = false;
     
-    console.log('Clipboard manager cleaned up');
+    log.info('clipboard', 'Clipboard manager cleaned up')
   }
   
   // Helper method to generate AI metadata
   async generateAIMetadata(itemId, apiKey, customPrompt) {
     try {
-      const ClaudeAPI = require('./claude-api');
-      const claudeAPI = new ClaudeAPI();
       
       // Get the full item with content loaded
       let item = this.storage.loadItem(itemId);
@@ -7773,7 +7609,7 @@ ${chunks[i]}`;
         return { success: false, error: 'Item not found' };
       }
       
-      console.log('[AI Metadata] Processing item:', {
+      log.info('clipboard', 'Processing item', { detail: {
         id: item.id,
         type: item.type,
         fileType: item.fileType,
@@ -7785,7 +7621,7 @@ ${chunks[i]}`;
         thumbnailType: item.thumbnail ? item.thumbnail.substring(0, 50) : 'none',
         isGeneratedDocument: item.metadata?.type === 'generated-document',
         hasHtmlContent: !!item.html || !!item.content
-      });
+      } })
       
       // Prepare content for analysis
       let content = '';
@@ -7812,14 +7648,14 @@ ${chunks[i]}`;
           (item.type === 'image') ||
           (item.fileType === 'image-file')) {
         
-        console.log('[AI Metadata] Processing as image/visual content');
+        log.info('clipboard', 'Processing as image/visual content')
         
         // For images, we need the actual image data
         if (item.thumbnail && !item.thumbnail.includes('svg+xml')) {
           imageData = item.thumbnail;
           contentType = 'image';
           content = `Filename: ${item.fileName || 'Screenshot'}`;
-          console.log('[AI Metadata] Using thumbnail as image data');
+          log.info('clipboard', 'Using thumbnail as image data')
         } 
         else if (item.filePath || item.content) {
           const filePath = item.filePath || item.content;
@@ -7830,9 +7666,9 @@ ${chunks[i]}`;
               imageData = `data:image/${ext};base64,${imageBuffer.toString('base64')}`;
               contentType = 'image';
               content = `Filename: ${item.fileName || 'Image'}`;
-              console.log('[AI Metadata] Loaded image from file path');
+              log.info('clipboard', 'Loaded image from file path')
             } catch (e) {
-              console.error('[AI Metadata] Error loading image file:', e);
+      log.error('clipboard', 'Error loading image file', { error: e.message || e })
               // Fall back to text analysis of filename
               content = item.fileName || item.preview || 'Image file';
               contentType = 'file';
@@ -7842,7 +7678,7 @@ ${chunks[i]}`;
       }
       // Check if this is a PDF that needs special handling
       else if (documentExtensions.includes(fileExt)) {
-        console.log('[AI Metadata] Processing as document file');
+        log.info('clipboard', 'Processing as document file')
         
         // For PDFs and documents, we can't easily extract text, so analyze based on filename and context
         content = `Document file: ${item.fileName || 'Document'}\nType: ${fileExt}\nSize: ${item.fileSize ? this.formatFileSize(item.fileSize) : 'Unknown'}`;
@@ -7856,7 +7692,7 @@ ${chunks[i]}`;
       }
       // Check if this is HTML content or generated document
       else if (item.type === 'html' || item.metadata?.type === 'generated-document' || fileExt === '.html') {
-        console.log('[AI Metadata] Processing as HTML/generated document');
+        log.info('clipboard', 'Processing as HTML/generated document')
         
         // Use the actual HTML content if available
         content = item.html || item.content || item.preview || 'No content available';
@@ -7869,11 +7705,11 @@ ${chunks[i]}`;
           content = `Generated Document (${templateName}) created on ${generatedAt}:\n\n${content}`;
         }
         
-        console.log('[AI Metadata] Using HTML content, length:', content.length);
+        log.info('clipboard', 'Using HTML content, length', { contentCount: content.length })
       }
       // Check if this is code
       else if (codeExtensions.includes(fileExt)) {
-        console.log('[AI Metadata] Processing as code file');
+        log.info('clipboard', 'Processing as code file')
         
         // Load code content if available
         if (item.content || item.text) {
@@ -7894,7 +7730,7 @@ ${chunks[i]}`;
       }
       // Check if this is data file
       else if (dataExtensions.includes(fileExt)) {
-        console.log('[AI Metadata] Processing as data file');
+        log.info('clipboard', 'Processing as data file')
         
         // Load data content if available
         if (item.content || item.text) {
@@ -7915,7 +7751,7 @@ ${chunks[i]}`;
       }
       // Plain text files
       else if (textExtensions.includes(fileExt) || item.type === 'text') {
-        console.log('[AI Metadata] Processing as text content');
+        log.info('clipboard', 'Processing as text content')
         
         content = item.content || item.text || item.preview || '';
         contentType = 'text';
@@ -7931,7 +7767,7 @@ ${chunks[i]}`;
       }
       // Audio files
       else if (audioExtensions.includes(fileExt) || item.fileCategory === 'audio' || item.fileType === 'audio') {
-        console.log('[AI Metadata] Processing as audio file');
+        log.info('clipboard', 'Processing as audio file')
         
         content = [
           `Audio file: ${item.fileName || 'Unknown'}`,
@@ -7947,7 +7783,7 @@ ${chunks[i]}`;
       }
       // Video files
       else if (videoExtensions.includes(fileExt) || item.fileCategory === 'video' || item.fileType === 'video') {
-        console.log('[AI Metadata] Processing as video file');
+        log.info('clipboard', 'Processing as video file')
         
         content = [
           `Video file: ${item.fileName || 'Unknown'}`,
@@ -7967,7 +7803,7 @@ ${chunks[i]}`;
       }
       // Archive files
       else if (archiveExtensions.includes(fileExt) || item.fileCategory === 'archive') {
-        console.log('[AI Metadata] Processing as archive file');
+        log.info('clipboard', 'Processing as archive file')
         
         content = [
           `Archive file: ${item.fileName || 'Unknown'}`,
@@ -7980,7 +7816,7 @@ ${chunks[i]}`;
       }
       // Generic file handling
       else if (item.type === 'file') {
-        console.log('[AI Metadata] Processing as generic file');
+        log.info('clipboard', 'Processing as generic file')
         
         const fileInfo = [
           `Filename: ${item.fileName || 'Unknown'}`,
@@ -7994,27 +7830,85 @@ ${chunks[i]}`;
       }
       // Default fallback
       else {
-        console.log('[AI Metadata] Using default text analysis');
+        log.info('clipboard', 'Using default text analysis')
         content = item.content || item.text || item.preview || item.fileName || 'No content available';
         contentType = 'text';
       }
       
       // Ensure content is not empty
       if (!content && !imageData) {
-        console.log('[AI Metadata] No content available, using fallback');
+        log.info('clipboard', 'No content available, using fallback')
         content = item.preview || item.fileName || 'No content available';
       }
       
-      console.log('[AI Metadata] Final analysis type:', contentType, 'Has image data:', !!imageData);
+      log.info('clipboard', 'Final analysis type', { contentType, arg2: 'Has image data:', arg3: !!imageData })
       
-      // Generate metadata using Claude
-      const generatedMetadata = await claudeAPI.generateMetadata(
-        content,
-        contentType,
-        apiKey,
-        customPrompt,
-        imageData
-      );
+      // Generate metadata using centralized AI service
+      let generatedMetadata;
+      
+      if (imageData) {
+        // Use vision API for image analysis
+        const visionPrompt = customPrompt || `Analyze this ${contentType} and generate comprehensive metadata including:
+- title: A clear, descriptive title
+- description: A detailed description of the content
+- tags: Array of relevant tags
+- category: The primary category
+- keywords: Array of important keywords
+- summary: A brief summary
+
+Return the metadata as a JSON object.`;
+        
+        const result = await ai.vision(imageData, visionPrompt, {
+          profile: 'standard',
+          maxTokens: 2000,
+          feature: 'clipboard-manager',
+        });
+        
+        // Parse JSON from response
+        const jsonMatch = result.content.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          generatedMetadata = JSON.parse(jsonMatch[0]);
+        } else {
+          // Fallback: create basic metadata from response
+          generatedMetadata = {
+            description: result.content,
+            title: item.fileName || 'Untitled',
+          };
+        }
+      } else {
+        // Use chat API for text analysis
+        const chatPrompt = customPrompt || `Analyze this ${contentType} and generate comprehensive metadata including:
+- title: A clear, descriptive title
+- description: A detailed description of the content
+- tags: Array of relevant tags
+- category: The primary category
+- keywords: Array of important keywords
+- summary: A brief summary
+
+Content to analyze:
+${content}
+
+Return the metadata as a JSON object.`;
+        
+        const result = await ai.chat({
+          profile: 'standard',
+          messages: [{ role: 'user', content: chatPrompt }],
+          maxTokens: 2000,
+          feature: 'clipboard-manager',
+        });
+        
+        // Parse JSON from response
+        const jsonMatch = result.content.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          generatedMetadata = JSON.parse(jsonMatch[0]);
+        } else {
+          // Fallback: create basic metadata from response
+          generatedMetadata = {
+            description: result.content,
+            title: item.fileName || 'Untitled',
+          };
+        }
+      }
       
       // Merge with existing metadata and ensure all fields are populated
       const updatedMetadata = {
@@ -8034,14 +7928,14 @@ ${chunks[i]}`;
         ai_analyzed_content_type: contentType
       };
       
-      console.log('[AI Metadata] Generated metadata for', contentType, 'with vision:', !!imageData);
+      log.info('clipboard', 'Generated metadata for', { contentType, arg2: 'with vision:', arg3: !!imageData })
       
       // Update the item's metadata
       const updateResult = await this.updateItemMetadata(itemId, updatedMetadata);
       
       return updateResult;
     } catch (error) {
-      console.error('Error generating AI metadata:', error);
+      log.error('clipboard', 'Error generating AI metadata', { error: error.message || error })
       return { 
         success: false, 
         error: error.message || 'Failed to generate metadata' 
@@ -8058,10 +7952,19 @@ ${chunks[i]}`;
         const status = JSON.parse(fs.readFileSync(statusPath, 'utf8'));
         
         if (!status.migrated) {
-          console.log('[V2] Migration needed, running migration...');
+          log.info('clipboard', 'Migration needed, running migration...')
           
-          // Run migration
-          const StorageMigration = require('./migrate-to-v2-storage');
+          // Run migration (script may not exist if migration was already baked in)
+          let StorageMigration;
+          try {
+            StorageMigration = require('./migrate-to-v2-storage');
+          } catch (e) {
+            log.warn('clipboard', 'Migration script not found, marking as migrated', { error: e.message });
+            status.migrated = true;
+            status.migratedAt = new Date().toISOString();
+            fs.writeFileSync(statusPath, JSON.stringify(status, null, 2));
+            return;
+          }
           const migration = new StorageMigration();
           const result = migration.migrate();
           
@@ -8072,16 +7975,16 @@ ${chunks[i]}`;
             status.itemsMigrated = result.itemsMigrated;
             fs.writeFileSync(statusPath, JSON.stringify(status, null, 2));
             
-            console.log(`[V2] Migration complete! Migrated ${result.itemsMigrated} items`);
+            log.info('clipboard', 'Migration complete! Migrated ... items', { itemsMigrated: result.itemsMigrated })
           } else {
-            console.error('[V2] Migration failed:', result.error);
+            log.error('clipboard', 'Migration failed', { error: result.error })
           }
         } else {
-          console.log('[V2] Already migrated');
+          log.info('clipboard', 'Already migrated')
         }
       }
     } catch (error) {
-      console.error('[V2] Error checking migration status:', error);
+      log.error('clipboard', 'Error checking migration status', { error: error.message || error })
     }
   }
   
@@ -8091,7 +7994,7 @@ ${chunks[i]}`;
    */
   migrateWebMonitorItems() {
     try {
-      console.log('[WebMonitor Migration] Checking for items needing migration...');
+      log.info('clipboard', 'Checking for items needing migration...')
       
       const indexItems = this.storage.index.items || [];
       let migratedCount = 0;
@@ -8100,7 +8003,7 @@ ${chunks[i]}`;
       for (const item of indexItems) {
         // Check if it's in web-monitors space but missing type or web-monitor fields
         if (item.spaceId === 'web-monitors' && item.type !== 'web-monitor') {
-          console.log(`[WebMonitor Migration] Fixing item ${item.id} - setting type to web-monitor`);
+          log.info('clipboard', 'Fixing item ... - setting type to web-monitor', { itemId: item.id })
           
           // Try to load the full item to get monitor data
           try {
@@ -8141,19 +8044,15 @@ ${chunks[i]}`;
             item.settings = monitorData.settings || { aiDescriptions: false };
             
             migratedCount++;
-            console.log(`[WebMonitor Migration] Fixed item ${item.id}:`, {
-              type: item.type,
-              url: item.url,
-              name: item.name
-            });
+            log.info('clipboard', 'Fixed item ...', { itemId: item.id })
           } catch (loadError) {
-            console.error(`[WebMonitor Migration] Failed to load item ${item.id}:`, loadError.message);
+            log.error('clipboard', 'Failed to load item ...', { itemId: item.id })
           }
         }
         
         // Also check items that have type=web-monitor but missing fields
         if (item.type === 'web-monitor' && (!item.url || !item.monitorId)) {
-          console.log(`[WebMonitor Migration] Fixing incomplete web-monitor item ${item.id}`);
+          log.info('clipboard', 'Fixing incomplete web-monitor item ...', { itemId: item.id })
           
           try {
             const fullItem = this.storage.loadItem(item.id);
@@ -8180,7 +8079,7 @@ ${chunks[i]}`;
             
             migratedCount++;
           } catch (loadError) {
-            console.error(`[WebMonitor Migration] Failed to fix item ${item.id}:`, loadError.message);
+            log.error('clipboard', 'Failed to fix item ...', { itemId: item.id })
           }
         }
       }
@@ -8188,12 +8087,12 @@ ${chunks[i]}`;
       if (migratedCount > 0) {
         // Save the updated index
         this.storage.saveIndex();
-        console.log(`[WebMonitor Migration] Migrated ${migratedCount} items, index saved`);
+        log.info('clipboard', 'Migrated ... items, index saved', { migratedCount })
       } else {
-        console.log('[WebMonitor Migration] No items needed migration');
+        log.info('clipboard', 'No items needed migration')
       }
     } catch (error) {
-      console.error('[WebMonitor Migration] Error:', error);
+      log.error('clipboard', 'Error', { error: error.message || error })
     }
   }
   
@@ -8201,7 +8100,7 @@ ${chunks[i]}`;
   async generateRealPDFThumbnail(filePath, item) {
     // Windows compatibility: Return placeholder for now
     if (process.platform !== 'darwin') {
-      console.log('[V2-PDF] Non-macOS platform detected, using placeholder');
+      log.info('clipboard', 'Non-macOS platform detected, using placeholder')
       const fileName = path.basename(filePath);
       const fileSize = fs.existsSync(filePath) ? fs.statSync(filePath).size : 0;
       return this.generatePDFThumbnail(fileName, fileSize);
@@ -8211,7 +8110,7 @@ ${chunks[i]}`;
     const { promisify } = require('util');
     const execAsync = promisify(exec);
     
-    console.log('[V2-PDF] Starting real thumbnail generation for:', filePath);
+    log.info('clipboard', 'Starting real thumbnail generation for', { filePath })
     
     // Add a small delay to ensure file is fully written
     await new Promise(resolve => setTimeout(resolve, 500));
@@ -8219,19 +8118,19 @@ ${chunks[i]}`;
     try {
       // Verify file exists and has content
       const stats = fs.statSync(filePath);
-      console.log('[V2-PDF] PDF file size:', stats.size, 'bytes');
+      log.info('clipboard', 'PDF file size', { arg1: stats.size, arg2: 'bytes' })
       
       // Create temp directory
       let tempDir = path.join(app.getPath('temp'), 'pdf-thumbnails-v2', Date.now().toString());
       if (!fs.existsSync(tempDir)) {
         fs.mkdirSync(tempDir, { recursive: true });
       }
-      console.log('[V2-PDF] Temp directory:', tempDir);
+      log.info('clipboard', 'Temp directory', { tempDir })
       
       // Try qlmanage first
       try {
         const command = `/usr/bin/qlmanage -t -s 512 -o "${tempDir}" "${filePath}" 2>&1`;
-        console.log('[V2-PDF] Running command:', command);
+        log.info('clipboard', 'Running command', { command })
         
         const { stdout, stderr } = await execAsync(command, {
           timeout: 15000,
@@ -8239,15 +8138,15 @@ ${chunks[i]}`;
           env: { ...process.env, PATH: '/usr/bin:/bin:/usr/sbin:/sbin:' + process.env.PATH }
         });
         
-        if (stdout) console.log('[V2-PDF] qlmanage stdout:', stdout);
-        if (stderr) console.log('[V2-PDF] qlmanage stderr:', stderr);
+        if (stdout) log.info('clipboard', 'qlmanage stdout', { stdout })
+        if (stderr) log.info('clipboard', 'qlmanage stderr', { stderr })
         
         // Wait a bit for qlmanage to finish writing
         await new Promise(resolve => setTimeout(resolve, 1000));
         
         // List all files in temp directory to see what was generated
         const generatedFiles = fs.readdirSync(tempDir);
-        console.log('[V2-PDF] Generated files:', generatedFiles);
+        log.info('clipboard', 'Generated files', { generatedFiles })
         
         // Find the thumbnail - qlmanage adds a suffix
         let thumbnailPath = null;
@@ -8255,28 +8154,54 @@ ${chunks[i]}`;
           if (file.endsWith('.png')) {
             thumbnailPath = path.join(tempDir, file);
             const thumbStats = fs.statSync(thumbnailPath);
-            console.log('[V2-PDF] Found thumbnail:', file, 'size:', thumbStats.size, 'bytes');
+            log.info('clipboard', 'Found thumbnail', { file, arg2: 'size:', size: thumbStats.size, arg4: 'bytes' })
             
             // Check if thumbnail has reasonable size (not just placeholder)
             if (thumbStats.size > 5000) { // More than 5KB suggests real thumbnail
               break;
             } else {
-              console.log('[V2-PDF] Thumbnail too small, might be placeholder');
+              log.info('clipboard', 'Thumbnail too small, might be placeholder')
               thumbnailPath = null;
             }
           }
         }
         
-        if (thumbnailPath && fs.existsSync(thumbnailPath)) {
-          console.log('[V2-PDF] Reading thumbnail from:', thumbnailPath);
+        if (thumbnailPath && fs.existsSync(thumbnailPath)) { info: log.info('clipboard', 'Reading thumbnail from', { thumbnailPath })
           const thumbnailBuffer = fs.readFileSync(thumbnailPath);
           const base64 = thumbnailBuffer.toString('base64');
           const dataUrl = `data:image/png;base64,${base64}`;
           
-          console.log('[V2-PDF] Thumbnail data URL length:', dataUrl.length);
+          log.info('clipboard', 'Thumbnail data URL length', { dataUrlCount: dataUrl.length })
           
           // Update the item thumbnail immediately
           item.thumbnail = dataUrl;
+          
+          // CRITICAL: Save the real PNG thumbnail to storage (replacing placeholder SVG)
+          try {
+            const itemDir = path.join(this.storage.storageRoot, 'items', item.id);
+            const pngThumbnailPath = path.join(itemDir, 'thumbnail.png');
+            const svgThumbnailPath = path.join(itemDir, 'thumbnail.svg');
+            
+            // Save the PNG thumbnail
+            fs.writeFileSync(pngThumbnailPath, thumbnailBuffer);
+            log.info('clipboard', 'Saved real thumbnail to', { pngThumbnailPath })
+            
+            // Remove the placeholder SVG if it exists
+            if (fs.existsSync(svgThumbnailPath)) {
+              fs.unlinkSync(svgThumbnailPath);
+              log.info('clipboard', 'Removed placeholder SVG')
+            }
+            
+            // Update the storage index to point to the PNG
+            const storageItem = this.storage.index?.items?.find(i => i.id === item.id);
+            if (storageItem) {
+              storageItem.thumbnailPath = `items/${item.id}/thumbnail.png`;
+              this.storage.saveIndexSync();
+              log.info('clipboard', 'Updated index with PNG thumbnail path')
+            }
+          } catch (saveErr) {
+      log.error('clipboard', 'Error saving thumbnail to storage', { error: saveErr.message })
+          }
           
           // Find item in history and update thumbnail immediately
           const historyItem = this.history.find(h => h.id === item.id);
@@ -8285,12 +8210,11 @@ ${chunks[i]}`;
             // Set default page count first
             historyItem.pageCount = 1;
             this.notifyHistoryUpdate();
-            console.log('[V2-PDF] Updated item with real thumbnail immediately');
+            log.info('clipboard', 'Updated item with real thumbnail immediately')
           }
           
           // Get page count asynchronously (don't block thumbnail display)
-          this.getPDFPageCount(filePath).then(pageCount => {
-            console.log('[V2-PDF] Async page count result:', pageCount);
+          this.getPDFPageCount(filePath).then(pageCount => { info: log.info('clipboard', 'Async page count result', { pageCount })
             item.pageCount = pageCount;
             
             // Update history item with correct page count
@@ -8298,26 +8222,26 @@ ${chunks[i]}`;
             if (historyItem && historyItem.pageCount !== pageCount) {
               historyItem.pageCount = pageCount;
               this.notifyHistoryUpdate();
-              console.log('[V2-PDF] Updated page count to:', pageCount);
+              log.info('clipboard', 'Updated page count to', { pageCount })
             }
           }).catch(err => {
-            console.error('[V2-PDF] Error getting page count:', err);
+            log.error('clipboard', 'Error getting page count', { error: err.message || err })
           });
           
           // Clean up temp directory
           try {
             fs.rmSync(tempDir, { recursive: true, force: true });
           } catch (e) {
-            console.error('[V2-PDF] Error cleaning up temp dir:', e);
+            log.error('clipboard', 'Error cleaning up temp dir', { error: e.message || e })
           }
           
           return dataUrl;
         } else {
-          console.log('[V2-PDF] No valid thumbnail found');
+          log.info('clipboard', 'No valid thumbnail found')
         }
       } catch (qlError) {
-        console.error('[V2-PDF] qlmanage error:', qlError.message);
-        console.error('[V2-PDF] Full error:', qlError);
+      log.error('clipboard', 'qlmanage error', { error: qlError.message })
+        log.error('clipboard', 'Full error', { qlError })
       }
       
       // Clean up temp directory if still exists
@@ -8330,17 +8254,17 @@ ${chunks[i]}`;
       }
       
     } catch (error) {
-      console.error('[V2-PDF] Error generating real thumbnail:', error);
+      log.error('clipboard', 'Error generating real thumbnail', { error: error.message || error })
     }
     
-    console.log('[V2-PDF] Using placeholder thumbnail');
+    log.info('clipboard', 'Using placeholder thumbnail')
   }
   
   // Get PDF page count with multiple fallback methods
   async getPDFPageCount(filePath) {
     // Windows/Linux compatibility: Return default page count
     if (process.platform !== 'darwin') {
-      console.log('[V2-PDF] Non-macOS platform detected, returning default page count');
+      log.info('clipboard', 'Non-macOS platform detected, returning default page count')
       return 1;
     }
     
@@ -8352,19 +8276,19 @@ ${chunks[i]}`;
     try {
       const fileCommand = `/usr/bin/file -b "${filePath}"`;
       const { stdout } = await execAsync(fileCommand, { timeout: 2000 });
-      console.log('[V2-PDF] file command output:', stdout);
+      log.info('clipboard', 'file command output', { stdout })
       
       // Some PDFs might have page info in file output
       const pageMatch = stdout.match(/(\d+)\s*pages?/i);
       if (pageMatch) {
         const pageCount = parseInt(pageMatch[1]);
         if (!isNaN(pageCount) && pageCount > 0) {
-          console.log('[V2-PDF] Page count from file command:', pageCount);
+          log.info('clipboard', 'Page count from file command', { pageCount })
           return pageCount;
         }
       }
     } catch (error) {
-      console.error('[V2-PDF] Error getting page count with file command:', error.message);
+      log.error('clipboard', 'Error getting page count with file command', { error: error.message })
     }
     
     // Second attempt: Look for page count in PDF structure using strings
@@ -8378,13 +8302,13 @@ ${chunks[i]}`;
         if (match) {
           const pageCount = parseInt(match[1]);
           if (!isNaN(pageCount) && pageCount > 0) {
-            console.log('[V2-PDF] Page count from PDF structure:', pageCount);
+            log.info('clipboard', 'Page count from PDF structure', { pageCount })
             return pageCount;
           }
         }
       }
     } catch (error) {
-      console.error('[V2-PDF] Error parsing PDF structure:', error.message);
+      log.error('clipboard', 'Error parsing PDF structure', { error: error.message })
     }
     
     // Third attempt: Use mdls (only if file has been indexed)
@@ -8397,32 +8321,31 @@ ${chunks[i]}`;
       const pageCount = parseInt(cleanOutput);
       
       if (!isNaN(pageCount) && pageCount > 0) {
-        console.log('[V2-PDF] Page count from mdls:', pageCount);
+        log.info('clipboard', 'Page count from mdls', { pageCount })
         return pageCount;
       }
     } catch (error) {
-      console.error('[V2-PDF] Error getting page count with mdls:', error.message);
+      log.error('clipboard', 'Error getting page count with mdls', { error: error.message })
     }
     
-    console.log('[V2-PDF] Could not determine page count, defaulting to 1');
+    log.info('clipboard', 'Could not determine page count, defaulting to 1')
     return 1; // Default to 1 page if we can't determine
   }
   
   // Generate PDF thumbnail for specific page
-  async generatePDFPageThumbnail(filePath, pageNumber = 1) {
-    // This method handles page-specific thumbnail requests
-    console.log('[V2-PDF-PAGE] Generating thumbnail for page:', pageNumber);
+  async generatePDFPageThumbnail(filePath, pageNumber = 1) { detail: // This method handles page-specific thumbnail requests
+    log.info('clipboard', 'Generating thumbnail for page', { pageNumber })
     
     // Try to find the item by file path
     const item = this.history.find(h => h.filePath === filePath);
     if (item && item.thumbnail && !item.thumbnail.includes('svg+xml')) {
-      console.log('[V2-PDF-PAGE] Returning existing thumbnail from history');
+      log.info('clipboard', 'Returning existing thumbnail from history')
       return item.thumbnail;
     }
     
     // Windows/Linux compatibility: Return placeholder
     if (process.platform !== 'darwin') {
-      console.log('[V2-PDF-PAGE] Non-macOS platform detected, using placeholder');
+      log.info('clipboard', 'Non-macOS platform detected, using placeholder')
       return this.generatePDFThumbnail(path.basename(filePath), 0);
     }
     
@@ -8446,7 +8369,7 @@ ${chunks[i]}`;
       
       // Use qlmanage to extract page 1 thumbnail
       const command = `/usr/bin/qlmanage -t -s 512 -o "${tempDir}" "${filePath}" 2>&1`;
-      console.log('[V2-PDF-PAGE] Using qlmanage to extract thumbnail');
+      log.info('clipboard', 'Using qlmanage to extract thumbnail')
       
       try {
         const { stdout, stderr } = await execAsync(command, {
@@ -8454,8 +8377,8 @@ ${chunks[i]}`;
           maxBuffer: 1024 * 1024 * 10
         });
         
-        if (stdout) console.log('[V2-PDF-PAGE] qlmanage stdout:', stdout);
-        if (stderr) console.log('[V2-PDF-PAGE] qlmanage stderr:', stderr);
+        if (stdout) log.info('clipboard', 'qlmanage stdout', { stdout })
+        if (stderr) log.info('clipboard', 'qlmanage stderr', { stderr })
         
         // Find the generated thumbnail
         const generatedFiles = fs.readdirSync(tempDir);
@@ -8473,11 +8396,10 @@ ${chunks[i]}`;
           const base64 = thumbnailBuffer.toString('base64');
           let dataUrl = `data:image/png;base64,${base64}`;
           
-          console.log('[V2-PDF-PAGE] Generated thumbnail for page 1 (all pages show page 1 preview)');
+          log.info('clipboard', 'Generated thumbnail for page 1 (all pages show page 1 preview)')
           
           // Clean up
-          try {
-            fs.rmSync(tempDir, { recursive: true, force: true });
+          try { rmSync: fs.rmSync(tempDir, { recursive: true, force: true });
           } catch (e) {
             // Ignore
           }
@@ -8485,7 +8407,7 @@ ${chunks[i]}`;
           return dataUrl;
         }
       } catch (error) {
-        console.error('[V2-PDF-PAGE] qlmanage error:', error.message);
+        log.error('clipboard', 'qlmanage error', { error: error.message })
       }
       
       // Clean up temp directory if still exists
@@ -8498,7 +8420,7 @@ ${chunks[i]}`;
       }
       
     } catch (error) {
-      console.error('[V2-PDF-PAGE] Error generating page thumbnail:', error);
+      log.error('clipboard', 'Error generating page thumbnail', { error: error.message || error })
     }
     
     // Return placeholder if all else fails
@@ -8640,7 +8562,7 @@ ${chunks[i]}`;
       return `data:image/svg+xml;base64,${base64}`;
       
     } catch (error) {
-      console.error('Error generating PDF thumbnail:', error);
+      log.error('clipboard', 'Error generating PDF thumbnail', { error: error.message || error })
       
       // Simple fallback SVG
       const fallbackSvg = `<svg width="200" height="260" xmlns="http://www.w3.org/2000/svg">
@@ -8733,7 +8655,7 @@ ${chunks[i]}`;
       return `data:image/svg+xml;base64,${base64}`;
       
     } catch (error) {
-      console.error('Error generating HTML thumbnail:', error);
+      log.error('clipboard', 'Error generating HTML thumbnail', { error: error.message || error })
       
       // Simple fallback SVG
       const fallbackSvg = `<svg width="200" height="260" xmlns="http://www.w3.org/2000/svg">
@@ -8834,7 +8756,7 @@ ${chunks[i]}`;
       return `data:image/svg+xml;base64,${base64}`;
       
     } catch (error) {
-      console.error('Error generating notebook thumbnail:', error);
+      log.error('clipboard', 'Error generating notebook thumbnail', { error: error.message || error })
       
       // Simple fallback SVG
       const fallbackSvg = `<svg width="200" height="260" xmlns="http://www.w3.org/2000/svg">
@@ -8850,11 +8772,11 @@ ${chunks[i]}`;
   
   // Generate text file preview using Quick Look
   async generateTextPreview(filePath, item) {
-    console.log('[V2-TEXT] Starting text preview generation for:', filePath);
+    log.info('clipboard', 'Starting text preview generation for', { filePath })
     
     // Windows/Linux compatibility: Use custom preview directly
     if (process.platform !== 'darwin') {
-      console.log('[V2-TEXT] Non-macOS platform detected, using custom preview');
+      log.info('clipboard', 'Non-macOS platform detected, using custom preview')
       return this.createCustomTextPreview(filePath, item);
     }
     
@@ -8871,24 +8793,24 @@ ${chunks[i]}`;
       
       // Use qlmanage to generate preview
       const command = `/usr/bin/qlmanage -t -s 512 -o "${tempDir}" "${filePath}" 2>&1`;
-      console.log('[V2-TEXT] Running command:', command);
+      log.info('clipboard', 'Running command', { command })
       
       const { stdout, stderr } = await execAsync(command, { 
         timeout: 10000,
         env: { ...process.env, PATH: '/usr/bin:/bin:/usr/sbin:/sbin' }
       });
       
-      console.log('[V2-TEXT] qlmanage stdout:', stdout);
-      if (stderr) console.log('[V2-TEXT] qlmanage stderr:', stderr);
+      log.info('clipboard', 'qlmanage stdout', { stdout })
+      if (stderr) log.info('clipboard', 'qlmanage stderr', { stderr })
       
       // Check if thumbnail was generated
       const files = fs.readdirSync(tempDir);
-      console.log('[V2-TEXT] Generated files:', files);
+      log.info('clipboard', 'Generated files', { files })
       
       const thumbnailFile = files.find(f => f.endsWith('.png'));
       if (thumbnailFile) {
         const thumbnailPath = path.join(tempDir, thumbnailFile);
-        console.log('[V2-TEXT] Found thumbnail:', thumbnailFile, 'size:', fs.statSync(thumbnailPath).size, 'bytes');
+        log.info('clipboard', 'Found thumbnail', { thumbnailFile, arg2: 'size:', arg3: fs.statSync(thumbnailPath).size, arg4: 'bytes' })
         
         // Read the thumbnail
         const thumbnailBuffer = fs.readFileSync(thumbnailPath);
@@ -8900,17 +8822,17 @@ ${chunks[i]}`;
           fs.unlinkSync(thumbnailPath);
           fs.rmdirSync(tempDir, { recursive: true });
         } catch (e) {
-          console.error('[V2-TEXT] Error cleaning up temp files:', e.message);
+          log.error('clipboard', 'Error cleaning up temp files', { error: e.message })
         }
         
         return dataUrl;
       } else {
         // If qlmanage didn't generate a preview, create a custom preview
-        console.log('[V2-TEXT] No thumbnail generated by qlmanage, creating custom preview');
+        log.info('clipboard', 'No thumbnail generated by qlmanage, creating custom preview')
         return this.createCustomTextPreview(filePath, item);
       }
     } catch (error) {
-      console.error('[V2-TEXT] Error generating text preview:', error.message);
+      log.error('clipboard', 'Error generating text preview', { error: error.message })
       // Fallback to custom preview
       return this.createCustomTextPreview(filePath, item);
     }
@@ -8974,7 +8896,7 @@ ${chunks[i]}`;
       return `data:image/svg+xml;base64,${svgBase64}`;
       
     } catch (error) {
-      console.error('[V2-TEXT] Error creating custom text preview:', error);
+      log.error('clipboard', 'Error creating custom text preview', { error: error.message || error })
       // Return a generic text icon
       return this.createTextIcon(item);
     }
@@ -9061,19 +8983,17 @@ ${chunks[i]}`;
   // Add missing method from original
   registerShortcut() {
     if (!globalShortcut) {
-      console.log('Global shortcuts not available in non-Electron environment');
+      log.info('clipboard', 'Global shortcuts not available in non-Electron environment')
       return;
     }
     
     // Register global shortcut for clipboard viewer
     const shortcut = process.platform === 'darwin' ? 'Cmd+Shift+V' : 'Ctrl+Shift+V';
     
-    globalShortcut.register(shortcut, () => {
-      console.log('Clipboard viewer shortcut triggered');
-      this.createClipboardWindow();
-    });
+    globalShortcut.register(shortcut, () => { createClipboardWindow: log.info('clipboard', 'Clipboard viewer shortcut triggered')
+      this.createClipboardWindow(); });
     
-    console.log(`Registered global shortcut: ${shortcut}`);
+    log.info('clipboard', 'Registered global shortcut: ...', { shortcut })
   }
   
   // ========================================
@@ -9128,17 +9048,17 @@ ${chunks[i]}`;
     const WebsiteMonitor = require('./website-monitor');
     const { BrowserWindow } = require('electron');
     
-    console.log('[WebMonitors] createWebsiteMonitorFromURL called with:', url);
+    log.info('clipboard', 'createWebsiteMonitorFromURL called with', { url })
     
     // Initialize website monitor if needed
     if (!this.websiteMonitor) {
-      console.log('[WebMonitors] Initializing WebsiteMonitor...');
+      log.info('clipboard', 'Initializing WebsiteMonitor...')
       try {
         this.websiteMonitor = new WebsiteMonitor();
         await this.websiteMonitor.initialize();
-        console.log('[WebMonitors] WebsiteMonitor initialized successfully');
+        log.info('clipboard', 'WebsiteMonitor initialized successfully')
       } catch (initError) {
-        console.error('[WebMonitors] Failed to initialize WebsiteMonitor:', initError);
+      log.error('clipboard', 'Failed to initialize WebsiteMonitor', { initError })
         throw new Error(`Website Monitor initialization failed: ${initError.message}`);
       }
     }
@@ -9146,7 +9066,7 @@ ${chunks[i]}`;
     // Check for duplicate
     const existingMonitor = this.findMonitorByURL(url);
     if (existingMonitor) {
-      console.log('[WebMonitors] URL already being monitored:', url);
+      log.info('clipboard', 'URL already being monitored', { url })
       
       // Check if a clipboard item exists for this monitor
       // Check both history cache AND storage index (source of truth)
@@ -9170,11 +9090,10 @@ ${chunks[i]}`;
       }
       
       // Monitor exists in WebsiteMonitor but no clipboard item - create one
-      console.log('[WebMonitors] Monitor exists but no clipboard item, creating item...');
+      log.info('clipboard', 'Monitor exists but no clipboard item, creating item...')
       // Use the existing monitor data, don't call addMonitor again
       var monitor = existingMonitor;
-    } else {
-      console.log('[WebMonitors] Creating new monitor for:', url);
+    } else { info: log.info('clipboard', 'Creating new monitor for', { url })
       
       // Create the monitor
       var monitor = await this.websiteMonitor.addMonitor({
@@ -9274,11 +9193,11 @@ ${chunks[i]}`;
       });
     });
     
-    console.log('[WebMonitors] Monitor created successfully:', monitorItem.id);
+    log.info('clipboard', 'Monitor created successfully', { monitorItemId: monitorItem.id })
     
     // Perform initial check to capture baseline
     try {
-      console.log('[WebMonitors] Capturing initial baseline...');
+      log.info('clipboard', 'Capturing initial baseline...')
       const initialResult = await this.websiteMonitor.checkWebsite(monitor.id);
       
       if (initialResult && initialResult.snapshot) {
@@ -9307,13 +9226,13 @@ ${chunks[i]}`;
           });
         }
         
-        console.log('[WebMonitors] Initial baseline captured successfully');
+        log.info('clipboard', 'Initial baseline captured successfully')
         
         // Notify UI of update
         this.notifyHistoryUpdate();
       }
     } catch (baselineError) {
-      console.error('[WebMonitors] Failed to capture initial baseline:', baselineError.message);
+      log.error('clipboard', 'Failed to capture initial baseline', { error: baselineError.message })
       // Not critical - monitor will work, just no baseline in timeline
     }
     
@@ -9338,11 +9257,11 @@ ${chunks[i]}`;
         // Check if there are any active monitors
         const monitorCount = this.websiteMonitor.monitors?.size || 0;
         if (monitorCount === 0) {
-          console.log('[WebsiteMonitor] No monitors configured, skipping check');
+          log.info('clipboard', 'No monitors configured, skipping check')
           return;
         }
         
-        console.log(`[WebsiteMonitor] Running periodic check for ${monitorCount} monitors...`);
+        log.info('clipboard', 'Running periodic check for ... monitors...', { monitorCount })
         const results = await this.websiteMonitor.checkAllMonitors();
         
         // Process results and update monitor items
@@ -9353,9 +9272,9 @@ ${chunks[i]}`;
         }
         
         const changedCount = results.filter(r => r.changed).length;
-        console.log(`[WebsiteMonitor] Check complete. ${changedCount}/${monitorCount} sites changed.`);
+        log.info('clipboard', 'Check complete. .../... sites changed.', { changedCount, monitorCount })
       } catch (error) {
-        console.error('[WebsiteMonitor] Error in periodic check:', error);
+        log.error('clipboard', 'Error in periodic check', { error: error.message || error })
       }
     }, 30 * 60 * 1000); // 30 minutes
   }
@@ -9368,7 +9287,7 @@ ${chunks[i]}`;
     const { monitor, snapshot, previousSnapshot } = result;
     const { BrowserWindow, Notification } = require('electron');
     
-    console.log(`[WebsiteMonitor] Change detected for ${monitor.name}`);
+    log.info('clipboard', 'Change detected for ...', { monitorName: monitor.name })
     
     // Find the monitor item in history
     const monitorItem = this.history.find(h => 
@@ -9376,7 +9295,7 @@ ${chunks[i]}`;
     );
     
     if (!monitorItem) {
-      console.warn('[WebsiteMonitor] Monitor item not found in history:', monitor.id);
+      log.warn('clipboard', 'Monitor item not found in history', { monitorId: monitor.id })
       return;
     }
     
@@ -9390,7 +9309,7 @@ ${chunks[i]}`;
     
     if (recentChanges.length >= 5) {
       // Auto-pause this monitor - too dynamic
-      console.log(`[WebsiteMonitor] Auto-pausing ${monitor.name}: ${recentChanges.length} changes in 24h`);
+      log.info('clipboard', 'Auto-pausing ...: ... changes in 24h', { monitorName: monitor.name, recentChangesCount: recentChanges.length })
       
       monitorItem.status = 'paused';
       monitorItem.pauseReason = 'high_frequency';
@@ -9407,7 +9326,7 @@ ${chunks[i]}`;
           pauseReason: 'high_frequency'
         });
       } catch (e) {
-        console.error('[WebsiteMonitor] Failed to update pause status:', e);
+        log.error('clipboard', 'Failed to update pause status', { error: e.message || e })
       }
       
       // Send notification about auto-pause
@@ -9467,7 +9386,7 @@ ${chunks[i]}`;
         currentScreenshotPath: monitorItem.currentScreenshotPath
       });
     } catch (e) {
-      console.error('[WebsiteMonitor] Failed to update storage:', e);
+      log.error('clipboard', 'Failed to update storage', { error: e.message || e })
     }
     
     // Update space badge count

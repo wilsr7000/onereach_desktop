@@ -77,7 +77,7 @@ export class TrackContextMenu {
     const track = this.adrManager.findTrack(trackId);
     
     if (!track) {
-      console.error('[TrackContextMenu] Track not found:', trackId);
+      window.logging.error('video', 'TrackContextMenu Track not found', { error: trackId });
       return;
     }
 
@@ -194,12 +194,12 @@ export class TrackContextMenu {
     const trackId = this.currentTrackId;
     
     if (!trackId) {
-      console.error('[TrackContextMenu] No track selected');
+      window.logging.error('video', 'TrackContextMenu No track selected');
       this.hide();
       return;
     }
 
-    console.log('[TrackContextMenu] Action:', action, 'Track:', trackId);
+    window.logging.info('video', 'TrackContextMenu Action', { data: action, 'Track:', trackId });
     const track = this.adrManager.findTrack(trackId);
 
     switch (action) {
@@ -236,7 +236,7 @@ export class TrackContextMenu {
         break;
 
       default:
-        console.warn('[TrackContextMenu] Unknown action:', action);
+        window.logging.warn('video', 'TrackContextMenu Unknown action', { data: action });
     }
 
     this.hide();
@@ -269,7 +269,7 @@ export class TrackContextMenu {
         }
       });
     } else {
-      console.warn('[TrackContextMenu] Space Asset Picker not available');
+      window.logging.warn('video', 'TrackContextMenu Space Asset Picker not available');
       this.app.showToast?.('error', 'Space Asset Picker not available');
     }
   }
@@ -302,7 +302,7 @@ export class TrackContextMenu {
         this.app.showToast?.('success', 'File imported to track');
       }
     } catch (error) {
-      console.error('[TrackContextMenu] Import from file error:', error);
+      window.logging.error('video', 'TrackContextMenu Import from file error', { error: error.message || error });
       this.app.showToast?.('error', 'Failed to import file');
     }
   }

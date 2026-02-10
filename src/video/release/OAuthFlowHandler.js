@@ -8,6 +8,8 @@
  * - Refreshes expired tokens
  */
 
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 export class OAuthFlowHandler {
   constructor(options = {}) {
     this.options = options;
@@ -55,12 +57,11 @@ export class OAuthFlowHandler {
         this.tokens = await window.videoEditor.getOAuthTokens();
       }
       
-      console.log('[OAuth] Initialized', {
-        youtubeConnected: !!this.tokens.youtube,
-        vimeoConnected: !!this.tokens.vimeo
-      });
+      log.info('video', '[OAuth] Initialized', { arg0: {
+        youtubeConnected: !!this.tokens.youtube, arg1: vimeoConnected: !!this.tokens.vimeo
+      } });
     } catch (error) {
-      console.error('[OAuth] Init error:', error);
+      log.error('video', '[OAuth] Init error', { error: error });
     }
   }
 
@@ -121,7 +122,7 @@ export class OAuthFlowHandler {
 
     const authUrl = `${config.authUrl}?${params.toString()}`;
 
-    console.log('[OAuth] Starting auth flow for', service);
+    log.info('video', '[OAuth] Starting auth flow for', { arg0: service });
 
     // Open OAuth window
     return this._openAuthWindow(authUrl, service);
@@ -218,7 +219,7 @@ export class OAuthFlowHandler {
       await window.videoEditor.saveOAuthTokens(this.tokens);
     }
 
-    console.log('[OAuth] Successfully authenticated with', service);
+    log.info('video', '[OAuth] Successfully authenticated with', { arg0: service });
     
     return {
       success: true,
@@ -333,7 +334,7 @@ export class OAuthFlowHandler {
 
     // Check if token is expired or about to expire (5 min buffer)
     if (token.expires_at && Date.now() > token.expires_at - 300000) {
-      console.log('[OAuth] Token expired, refreshing...');
+      log.info('video', '[OAuth] Token expired, refreshing...');
       const refreshed = await this.refreshToken(service);
       return refreshed.access_token;
     }
@@ -356,7 +357,7 @@ export class OAuthFlowHandler {
         }
         // Vimeo doesn't have a revoke endpoint
       } catch (error) {
-        console.warn('[OAuth] Token revocation failed:', error);
+        log.warn('video', '[OAuth] Token revocation failed', { data: error });
       }
     }
 
@@ -367,7 +368,7 @@ export class OAuthFlowHandler {
       await window.videoEditor.saveOAuthTokens(this.tokens);
     }
 
-    console.log('[OAuth] Disconnected from', service);
+    log.info('video', '[OAuth] Disconnected from', { arg0: service });
   }
 
   /**
@@ -480,7 +481,7 @@ export class OAuthFlowHandler {
       });
     }
 
-    console.log('[OAuth] Configuration saved');
+    log.info('video', '[OAuth] Configuration saved');
   }
 
   /**

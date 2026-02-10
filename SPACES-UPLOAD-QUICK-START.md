@@ -35,13 +35,13 @@ Upload files from your Spaces directly into ChatGPT, Claude, and any file picker
 
 ## Settings
 
-**Location**: Settings → General Settings  
+**Location**: Settings → General  
 **Toggle**: "Spaces Upload Integration"  
 **Default**: Enabled
 
 To disable:
 1. Open Settings
-2. Scroll to "General Settings"
+2. Click the "General" tab
 3. Turn OFF "Spaces Upload Integration"
 4. Save
 
@@ -96,6 +96,6 @@ When disabled, you'll see normal file pickers without the Spaces option.
 
 ## Disable Instructions
 
-Don't want this feature? Turn it off in Settings → General Settings → Spaces Upload Integration
+Don't want this feature? Turn it off in Settings → General → Spaces Upload Integration
 
 The dialog also reminds you how to disable it each time it appears.

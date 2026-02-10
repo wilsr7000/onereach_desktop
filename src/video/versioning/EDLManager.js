@@ -7,6 +7,10 @@
 import fs from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 /**
  * EDL segment types
@@ -239,7 +243,7 @@ export class EDLManager {
       fs.mkdirSync(dir, { recursive: true });
     }
     fs.writeFileSync(filePath, JSON.stringify(edl, null, 2));
-    console.log(`[EDLManager] Saved EDL to: ${filePath}`);
+    log.info('video', `EDLManager Saved EDL to: ${filePath}`);
   }
 
   /**

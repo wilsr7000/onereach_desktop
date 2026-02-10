@@ -291,7 +291,7 @@ Built-in browser windows for accessing external AI services with session persist
 
 ### Technical Details
 - **File**: `src/ai-conversation-capture.js`, `preload-external-ai.js`
-- **API**: `claude-api.js`, `openai-api.js`
+- **API**: `lib/ai-service.js` (centralized AI service; legacy: `claude-api.js`, `openai-api.js` -- deprecated)
 
 ---
 
@@ -687,28 +687,22 @@ module-folder/
 ### Overview
 Centralized settings management for all application features.
 
-### Settings Categories
+### Settings Tabs
 
-| Category | Settings |
-|----------|----------|
-| **General** | Theme, startup behavior |
-| **AI/LLM** | API keys, default models, provider selection |
-| **Video Editor** | Default paths, export settings |
-| **Spaces** | Storage location, sync settings |
-| **Budget** | Limits, alerts, tracking preferences |
-| **Keyboard Shortcuts** | Global hotkeys |
+The settings panel uses a sidebar-tabbed layout with 6 sections:
 
-### API Key Management
-- OpenAI API key
-- Anthropic (Claude) API key
-- ElevenLabs API key
-- GSX Token
-- YouTube OAuth
-- Vimeo OAuth
+| Tab | Settings |
+|-----|----------|
+| **API Keys** | OpenAI, Anthropic, AssemblyAI, ElevenLabs keys; YouTube/Vimeo OAuth |
+| **AI Configuration** | Default provider/model, Claude thinking mode, AI metadata, conversation capture |
+| **OneReach Login** | Credentials, 2FA/TOTP, auto-login environments |
+| **GSX File Sync** | Environment, token, auto-sync, backup |
+| **Budget** | Enable tracking, cost estimates, confirmation threshold |
+| **General** | Auto-save, Spaces upload, Voice Orb, diagnostic logging, Learning API |
 
 ### Technical Details
 - **File**: `settings.html`, `settings-manager.js`
-- **Storage**: Electron userData directory
+- **Storage**: Electron userData directory (encrypted via system keychain)
 
 ---
 
@@ -752,8 +746,10 @@ Onereach_app/
 │
 ├── # APIs
 ├── spaces-api.js              # Unified Spaces API
-├── claude-api.js              # Claude API client
-├── openai-api.js              # OpenAI API client
+├── lib/ai-service.js          # Centralized AI service (all LLM calls)
+├── lib/ai-providers/          # Provider adapters (openai, anthropic)
+├── claude-api.js              # DEPRECATED - use lib/ai-service.js
+├── openai-api.js              # DEPRECATED - use lib/ai-service.js
 │
 ├── # Services
 ├── budget-manager.js          # Cost tracking

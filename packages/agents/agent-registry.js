@@ -11,24 +11,30 @@
  * REQUIRED AGENT PROPERTIES:
  * - id: string (e.g., 'calendar-agent')
  * - name: string (e.g., 'Calendar Agent')
- * - description: string
+ * - description: string (used by LLM bidder for semantic routing)
  * - categories: string[] (e.g., ['system', 'calendar'])
- * - keywords: string[] (for category routing and LLM context)
+ * - keywords: string[] (passed to LLM bidder as context, NOT for keyword matching)
  * - execute: async function(task) => { success, message, needsInput? }
  * 
  * OPTIONAL PROPERTIES:
  * - prompt: string (LLM prompt for intelligent bidding)
- * - capabilities: string[] (human-readable capability list)
- * - bid: function(task) => { confidence, reasoning } | null (fallback bidding)
+ * - capabilities: string[] (human-readable capability list, passed to LLM bidder)
  * - initialize: async function() (called once before first execute)
  * - cleanup: function() (called on shutdown)
  * 
+ * FORBIDDEN PROPERTIES:
+ * - bid: NEVER add a bid() method. All routing is LLM-based via unified-bidder.js.
+ *   Agents with bid() methods will be REJECTED at load time.
+ *   See .cursorrules "Classification Approach" -- no keyword/regex classification.
+ * 
  * CATEGORY AUTO-REGISTRATION:
  * Categories declared by agents are automatically registered with the exchange.
- * Agent keywords are used for category routing.
+ * Agent keywords are passed to the LLM bidder as semantic context.
  */
 
 const path = require('path');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 
 // ==================== AGENT IDS ====================
 // Add new agent IDs here - the registry handles the rest
@@ -42,8 +48,19 @@ const BUILT_IN_AGENT_IDS = [
   'help-agent',
   'search-agent',
   'smalltalk-agent',
+  'spelling-agent',
   'dj-agent',
   'email-agent',         // Email assistant - data-aware bidding for email communications
+  'recorder-agent',      // Video recorder - launches GSX Capture to record video to Spaces
+  'meeting-monitor-agent', // Meeting monitor - watches live transcript + health, alerts on issues (bidExcluded)
+  'error-agent',         // System agent - handles failed/timed-out tasks (bidExcluded)
+  // Meeting agents (default space: meeting-agents)
+  'action-item-agent',   // Captures action items with owner/deadline from meeting context
+  'decision-agent',      // Logs decisions with context/rationale
+  'meeting-notes-agent', // Captures notes, key points, bookmarks
+  // Documentation
+  'docs-agent',          // RAG-grounded documentation assistant -- answers from official app docs
+  'daily-brief-agent',   // Meta-agent - orchestrates morning briefing from time, weather, calendar, email, etc.
   // Add new agents here:
   // 'your-new-agent',
 ];
@@ -51,7 +68,17 @@ const BUILT_IN_AGENT_IDS = [
 // ==================== VALIDATION ====================
 
 const REQUIRED_PROPERTIES = ['id', 'name', 'description', 'categories', 'keywords', 'execute'];
-const OPTIONAL_PROPERTIES = ['prompt', 'capabilities', 'bid', 'initialize', 'cleanup', 'memory', 'version', 'voice', 'ack', 'acks'];
+const OPTIONAL_PROPERTIES = ['prompt', 'capabilities', 'initialize', 'cleanup', 'memory', 'version', 'voice', 'ack', 'acks', 'executionType', 'bidExcluded', 'defaultSpaces', 'getBriefing', 'estimatedExecutionMs', 'dataSources'];
+// NOTE: 'bid' is intentionally NOT in OPTIONAL_PROPERTIES. Agents must not have bid() methods.
+// All routing is LLM-based via unified-bidder.js. See .cursorrules "Classification Approach".
+// executionType: 'informational' | 'action' | 'system' -- tells bidder if agent can fast-path
+// bidExcluded: true -- system agents that should not participate in auctions (e.g., error-agent)
+// getBriefing: async function() -- optional. Returns { section, priority, content } for the daily brief.
+//   Agents with this method are auto-discovered during morning brief orchestration.
+// dataSources: string[] -- optional. Declares what data the agent uses (e.g., ['system-clock', 'weather-api', 'calendar-store']).
+//   Action agents without dataSources get a warning during registration -- they should declare what they access.
+//   priority: 1=time/date, 2=weather, 3=calendar, 4=email, 5=tasks, 6=other
+// estimatedExecutionMs: number -- agent's own estimate of typical execution time (for ack protocol)
 
 /**
  * Validate an agent has required properties
@@ -103,6 +130,23 @@ function validateAgent(agent, filename) {
     }
   }
   
+  // ENFORCE: No bid() methods allowed on agents.
+  // All routing is 100% LLM-based via unified-bidder.js.
+  // Keyword/regex-based classification is forbidden. See .cursorrules.
+  if (typeof agent.bid === 'function') {
+    errors.push(
+      `FORBIDDEN: Agent "${agent.name || filename}" has a bid() method. ` +
+      'All routing must be LLM-based via unified-bidder.js. ' +
+      'Remove the bid() method. See .cursorrules "Classification Approach".'
+    );
+  }
+  
+  // WARN: Action agents should declare their data sources for grounding enforcement.
+  // This is a soft warning, not a blocking error.
+  if (agent.executionType === 'action' && !agent.dataSources) {
+    console.warn(`[agent-registry] Warning: Action agent "${agent.name || filename}" has no dataSources declared. Consider adding dataSources: ['system-clock', 'weather-api', etc.] for grounding enforcement.`);
+  }
+  
   return {
     valid: errors.length === 0,
     errors
@@ -137,26 +181,26 @@ function loadBuiltInAgents() {
       // Validate
       const validation = validateAgent(agent, filename);
       if (!validation.valid) {
-        console.error(`[AgentRegistry] Invalid agent ${agentId}:`, validation.errors);
+        log.error('agent', `REJECTED agent ${agentId}`, { errors: validation.errors });
         continue;
       }
       
       // Verify ID matches filename
       if (agent.id !== agentId) {
-        console.warn(`[AgentRegistry] Agent ID mismatch: file=${agentId}, agent.id=${agent.id}`);
+        log.warn('agent', `Agent ID mismatch: file=${agentId}, agent.id=${agent.id}`);
       }
       
       loadedAgents.push(agent);
       agentMap[agent.id] = agent;
       
-      console.log(`[AgentRegistry] Loaded: ${agent.name} (${agent.id})`);
+      log.info('agent', `Loaded: ${agent.name} (${agent.id})`);
       
     } catch (error) {
-      console.error(`[AgentRegistry] Failed to load ${agentId}:`, error.message);
+      log.error('agent', `Failed to load ${agentId}`, { error: error.message });
     }
   }
   
-  console.log(`[AgentRegistry] Loaded ${loadedAgents.length}/${BUILT_IN_AGENT_IDS.length} built-in agents`);
+  log.info('agent', `Loaded ${loadedAgents.length}/${BUILT_IN_AGENT_IDS.length} built-in agents`);
   
   return loadedAgents;
 }
@@ -234,7 +278,7 @@ function buildCategoryConfig() {
     });
   }
   
-  console.log(`[AgentRegistry] Built ${categoryConfig.length} categories from agent declarations`);
+  log.info('agent', `Built ${categoryConfig.length} categories from agent declarations`);
   
   return categoryConfig;
 }
@@ -270,7 +314,28 @@ function clearCache() {
     delete require.cache[require.resolve(filepath)];
   }
   
-  console.log('[AgentRegistry] Cache cleared');
+  log.info('agent', 'Cache cleared');
+}
+
+/**
+ * Get agents that declare a specific default space
+ * @param {string} spaceId - e.g. 'meeting-agents'
+ * @returns {Object[]} Agents with that space in their defaultSpaces
+ */
+function getAgentsByDefaultSpace(spaceId) {
+  if (!loadedAgents) loadBuiltInAgents();
+  return loadedAgents.filter(agent =>
+    Array.isArray(agent.defaultSpaces) && agent.defaultSpaces.includes(spaceId)
+  );
+}
+
+/**
+ * Get all agents that implement getBriefing().
+ * Used by the morning brief orchestrator to discover contributors.
+ */
+function getBriefingAgents() {
+  if (!agentMap) loadBuiltInAgents();
+  return Object.values(agentMap).filter(a => typeof a.getBriefing === 'function');
 }
 
 module.exports = {
@@ -284,6 +349,12 @@ module.exports = {
   
   // Categories
   buildCategoryConfig,
+  
+  // Briefing
+  getBriefingAgents,
+  
+  // Spaces
+  getAgentsByDefaultSpace,
   
   // Utilities
   validateAgent,

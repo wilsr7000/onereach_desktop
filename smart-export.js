@@ -1,10 +1,13 @@
 const { getSettingsManager } = require('./settings-manager');
+const ai = require('./lib/ai-service');
 const fs = require('fs');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const { ipcMain } = require('electron');
 const WebStyleAnalyzer = require('./web-style-analyzer');
 const ContentStyleAnalyzer = require('./content-style-analyzer');
+const { getLogQueue } = require('./lib/log-event-queue');
+const log = getLogQueue();
 
 class SmartExport {
   constructor() {
@@ -24,7 +27,7 @@ class SmartExport {
       const cssPath = path.join(__dirname, 'smart-export-styles.css');
       return fs.readFileSync(cssPath, 'utf8');
     } catch (error) {
-      console.error('Error loading style guide CSS:', error);
+      log.error('app', 'Error loading style guide CSS', { error: error.message || error })
       // Return a minimal fallback CSS if file can't be loaded
       return `
         :root {
@@ -47,7 +50,7 @@ class SmartExport {
   setupIpcHandlers() {
     ipcMain.handle('smart-export:extract-styles', async (event, urls, options = {}) => {
       try {
-        console.log('[SmartExport] Extracting CSS styles from URLs:', urls);
+        log.info('app', 'Extracting CSS styles from URLs', { urls })
         
         // Enable LLM enhancement by default unless explicitly disabled
         const analyzerOptions = {
@@ -57,14 +60,14 @@ class SmartExport {
         
         return await this.styleAnalyzer.analyzeStyles(urls, analyzerOptions);
       } catch (error) {
-        console.error('[SmartExport] Style extraction error:', error);
+        log.error('app', 'Style extraction error', { error: error.message || error })
         throw error;
       }
     });
 
     ipcMain.handle('smart-export:extract-content-guidelines', async (event, url, options) => {
       try {
-        console.log('[SmartExport] Extracting content guidelines from URL:', url);
+        log.info('app', 'Extracting content guidelines from URL', { url })
         const result = await this.contentAnalyzer.analyzeContentStyle(url, options);
         
         if (result.success) {
@@ -81,7 +84,7 @@ class SmartExport {
           return result;
         }
       } catch (error) {
-        console.error('[SmartExport] Content guideline extraction error:', error);
+        log.error('app', 'Content guideline extraction error', { error: error.message || error })
         return {
           success: false,
           error: error.message
@@ -104,7 +107,7 @@ class SmartExport {
           appliedGuidelines: guidelines
         };
       } catch (error) {
-        console.error('[SmartExport] Generation with guidelines error:', error);
+        log.error('app', 'Generation with guidelines error', { error: error.message || error })
         return {
           success: false,
           error: error.message
@@ -262,13 +265,6 @@ class SmartExport {
    * @returns {Promise<Object>} Generated HTML and metadata
    */
   async generateSmartExport(space, items, options = {}) {
-    const apiKey = this.settingsManager.getLLMApiKey();
-    const model = this.settingsManager.getLLMModel();
-    
-    if (!apiKey) {
-      throw new Error('No API key configured. Please set up your LLM API key in Settings.');
-    }
-
     // Check content size and handle large spaces
     const processedItems = this.preprocessItems(items);
     
@@ -276,25 +272,23 @@ class SmartExport {
     const imageItems = processedItems.filter(item => 
       item.type === 'image' || (item.type === 'file' && item.fileType === 'image')
     );
-    console.log('Image items after processing:', imageItems.map(item => ({
-      id: item.id,
+    log.info('app', 'Image items after processing', { detail: imageItems.map(item => ({ id: item.id,
       type: item.type,
       content: item.content,
       imagePath: item.imagePath,
       imageDataUrl: item.imageDataUrl,
       hasOriginalDataUrl: !!item.originalDataUrl,
-      fileName: item.metadata?.filename || item.fileName
-    })));
+      fileName: item.metadata?.filename || item.fileName })) })
     
     // Prepare the content for Claude
     const prompt = this.buildPrompt(space, processedItems, options);
     
     // Estimate tokens
     const estimatedTokens = this.estimateTokens(prompt);
-    console.log(`Prompt size: ${prompt.length} characters, estimated ${estimatedTokens} tokens`);
+    log.info('app', 'Prompt size: ... characters, estimated ... tokens', { promptCount: prompt.length, estimatedTokens })
     
     if (estimatedTokens > this.MAX_TOKENS) {
-      console.warn(`Content too large (${estimatedTokens} tokens). Using summarized version.`);
+      log.warn('app', 'Content too large (... tokens). Using summarized version.', { estimatedTokens })
       // Further reduce content if still too large
       const summaryItems = this.createSummaryItems(processedItems);
       return this.generateSmartExport(space, summaryItems, { ...options, isSummary: true });
@@ -304,69 +298,27 @@ class SmartExport {
     const thinkingMode = this.settingsManager.getClaude4ThinkingMode();
     const thinkingLevel = this.settingsManager.getClaude4ThinkingLevel();
     
-    // Build the request
-    const headers = {
-      'Content-Type': 'application/json',
-      'X-API-Key': apiKey,
-      'anthropic-version': '2023-06-01'
-    };
-    
-    // Add thinking mode header if enabled
-    if (model === 'claude-opus-4-20250514' && thinkingMode === 'enabled') {
-      headers['interleaved-thinking-2025-05-14'] = 'true';
-    }
-    
     // Enhance prompt based on thinking level
     const enhancedPrompt = this.enhancePromptForThinkingLevel(prompt, thinkingLevel);
     
     try {
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          model,
-          max_tokens: 8000,
-          messages: [
-            {
-              role: 'user',
-              content: enhancedPrompt
-            }
-          ],
-          temperature: 0.3 // Lower temperature for more consistent formatting
-        })
+      const result = await ai.chat({
+        profile: 'powerful',  // smart export uses powerful models for document generation
+        messages: [{ role: 'user', content: enhancedPrompt }],
+        maxTokens: 8000,
+        temperature: 0.3,
+        feature: 'smart-export',
       });
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(`API Error: ${error.error?.message || 'Unknown error'}`);
-      }
-
-      const data = await response.json();
-      console.log('Claude API response structure:', {
-        id: data.id,
-        type: data.type,
-        role: data.role,
-        model: data.model,
-        contentLength: data.content?.[0]?.text?.length || 0,
-        hasThinkingSummary: !!data.thinking_summary
-      });
+      log.info('app', 'AI service response structure', { detail: { model: result.model,
+        provider: result.provider,
+        contentLength: result.content?.length || 0,
+        cost: result.cost || 0,
+        usedFallback: result.usedFallback || false
+      } })
       
-      // Handle different response formats
-      let htmlContent = '';
-      
-      if (data.content && Array.isArray(data.content) && data.content.length > 0) {
-        // Standard response format
-        htmlContent = data.content[0].text || '';
-      } else if (data.completion) {
-        // Alternative format
-        htmlContent = data.completion;
-      } else if (typeof data === 'string') {
-        // Direct string response
-        htmlContent = data;
-      } else {
-        console.error('Unexpected response format:', data);
-        throw new Error('Unexpected response format from Claude API');
-      }
+      // Response content is always in result.content
+      let htmlContent = result.content || '';
       
       if (!htmlContent) {
         throw new Error('No HTML content generated');
@@ -381,11 +333,11 @@ class SmartExport {
       const match = htmlContent.match(codeBlockRegex);
       
       if (match) {
-        console.log('Stripping markdown code block formatting from HTML');
+        log.info('app', 'Stripping markdown code block formatting from HTML')
         htmlContent = match[1].trim();
       } else if (htmlContent.startsWith('```') && htmlContent.includes('```')) {
         // Fallback for any other code block format
-        console.log('Stripping generic code block formatting from HTML');
+        log.info('app', 'Stripping generic code block formatting from HTML')
         const start = htmlContent.indexOf('\n') + 1;
         const end = htmlContent.lastIndexOf('```');
         if (start > 0 && end > start) {
@@ -393,31 +345,32 @@ class SmartExport {
         }
       }
       
-      // Extract thinking summary if available
+      // Extract thinking summary if available (ai-service doesn't expose this yet)
       let thinkingSummary = null;
-      if (data.thinking_summary) {
-        thinkingSummary = data.thinking_summary;
-      }
+      // Note: thinking_summary is not currently exposed by ai-service
+      // This would need to be added to the adapter if needed
 
       // Post-process HTML to inject data URLs back
-      console.log('HTML before post-processing length:', htmlContent.length);
+      log.info('app', 'HTML before post-processing length', { htmlContentCount: htmlContent.length })
       const finalHTML = this.postProcessHTML(htmlContent, processedItems);
-      console.log('HTML after post-processing length:', finalHTML.length);
+      log.info('app', 'HTML after post-processing length', { finalHTMLCount: finalHTML.length })
       
       return {
         html: finalHTML,
         thinkingSummary,
         metadata: {
-          model,
+          model: result.model,
           timestamp: new Date().toISOString(),
           itemCount: items.length,
           processedItemCount: processedItems.length,
           spaceName: space.name,
-          isSummary: options.isSummary || false
+          isSummary: options.isSummary || false,
+          cost: result.cost || 0,
+          usedFallback: result.usedFallback || false
         }
       };
     } catch (error) {
-      console.error('Error generating smart export:', error);
+      log.error('app', 'Error generating smart export', { error: error.message || error })
       throw error;
     }
   }
@@ -435,7 +388,7 @@ class SmartExport {
 
     // Take only the most recent items if there are too many
     if (sortedItems.length > this.MAX_ITEMS_PER_REQUEST) {
-      console.log(`Limiting to ${this.MAX_ITEMS_PER_REQUEST} most recent items out of ${sortedItems.length}`);
+      log.info('app', 'Limiting to ... most recent items out of ...', { MAX_ITEMS_PER_REQUEST: this.MAX_ITEMS_PER_REQUEST, sortedItemsCount: sortedItems.length })
       return sortedItems.slice(0, this.MAX_ITEMS_PER_REQUEST);
     }
 
@@ -869,16 +822,16 @@ OUTPUT FORMAT:
   postProcessHTML(html, items) {
     let processedHTML = html;
     
-    console.log('Post-processing HTML for', items.length, 'items');
+    log.info('app', 'Post-processing HTML for', { arg1: items.length, arg2: 'items' })
     
     // Count images that need data URL injection
     const imagesToInject = items.filter(item => item.originalDataUrl);
-    console.log('Images needing data URL injection:', imagesToInject.length);
+    log.info('app', 'Images needing data URL injection', { imagesToInjectCount: imagesToInject.length })
     
     // Inject data URLs back for images that had them
     items.forEach(item => {
       if (item.originalDataUrl) {
-        console.log('Processing image:', item.id, item.metadata?.filename || item.fileName);
+        log.info('app', 'Processing image', { arg1: item.id, arg2: item.metadata?.filename || item.fileName })
         // Create patterns to find image references
         const patterns = [];
         
@@ -913,16 +866,16 @@ OUTPUT FORMAT:
         patterns.forEach(pattern => {
           const matches = processedHTML.match(pattern);
           if (matches) {
-            console.log('Found matches for pattern:', pattern, 'Matches:', matches.length);
+            log.info('app', 'Found matches for pattern', { pattern, arg2: 'Matches:', matchesCount: matches.length })
           }
           
           processedHTML = processedHTML.replace(pattern, (match) => {
-            console.log('Replacing match:', match.substring(0, 100) + '...');
+            log.info('app', 'Replacing match', { detail: match.substring(0, 100) + '...' })
             
             // For img tags, always replace the src if we have a data URL
             if (match.includes('<img') && match.includes('src=')) {
               const replaced = match.replace(/src="[^"]*"/, `src="${item.originalDataUrl}"`);
-              console.log('Replaced with:', replaced.substring(0, 100) + '...');
+              log.info('app', 'Replaced with', { detail: replaced.substring(0, 100) + '...' })
               return replaced;
             } else if (match === '[DATA_URL_PLACEHOLDER]') {
               return item.originalDataUrl;

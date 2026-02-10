@@ -45,7 +45,7 @@ export class RecorderUI {
     
     if (element) {
       element.srcObject = stream;
-      element.play().catch(e => console.warn('Preview autoplay blocked'));
+      element.play().catch(e => window.logging.warn('recorder', 'Preview autoplay blocked'));
     }
   }
 

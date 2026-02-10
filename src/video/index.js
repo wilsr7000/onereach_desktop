@@ -8,6 +8,8 @@
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { getBudgetManager } = require('../../budget-manager');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 
 // Core services
 import { VideoProcessor, formatDuration, formatTime, parseTime } from './core/VideoProcessor.js';
@@ -99,7 +101,7 @@ export class VideoEditor {
     this.thumbnailDir = this.processor.thumbnailDir;
     this.activeJobs = this.processor.activeJobs;
 
-    console.log('[VideoEditor] Initialized with modular architecture');
+    log.info('video', '[VideoEditor] Initialized with modular architecture');
   }
 
   // ==================== CORE OPERATIONS ====================
@@ -229,7 +231,7 @@ export class VideoEditor {
     // Sort replacements by start time
     const sorted = [...replacements].sort((a, b) => a.startTime - b.startTime);
     
-    console.log('[VideoEditor] Exporting with', sorted.length, 'audio replacements');
+    log.info('video', '[VideoEditor] Exporting with', { arg0: sorted.length, arg1: 'audio replacements' });
 
     const baseName = path.basename(videoPath, path.extname(videoPath));
     const outputPath = path.join(this.outputDir, `${baseName}_edited_${Date.now()}.mp4`);
@@ -285,7 +287,7 @@ export class VideoEditor {
         });
       }
 
-      console.log('[VideoEditor] Audio segments:', audioSegments.length);
+      log.info('video', '[VideoEditor] Audio segments', { data: audioSegments.length });
 
       // Extract each segment
       const segmentFiles = [];
@@ -397,7 +399,7 @@ export class VideoEditor {
         progressCallback({ status: 'Complete!', percent: 100 });
       }
 
-      console.log('[VideoEditor] Export complete:', outputPath);
+      log.info('video', '[VideoEditor] Export complete', { data: outputPath });
 
       return {
         success: true,
@@ -551,13 +553,13 @@ export class VideoEditor {
       throw new Error('OpenAI API key not configured. Please set it in Settings → API Keys → OpenAI.');
     }
     
-    console.log('[VideoEditor] Using OpenAI key:', openaiKey ? `${openaiKey.substring(0, 10)}...` : 'none');
+    log.info('video', '[VideoEditor] Using OpenAI key', { hasKey: !!openaiKey });
 
     // Calculate chunk size: ~10 minutes per chunk (128kbps * 600s = ~9.6MB, safe under 25MB)
     const CHUNK_DURATION = 600; // 10 minutes in seconds
     const numChunks = Math.ceil(totalDuration / CHUNK_DURATION);
     
-    console.log(`[VideoEditor] Total duration: ${totalDuration.toFixed(0)}s, splitting into ${numChunks} chunk(s)`);
+    log.info('video', '[VideoEditor] Total duration: s, splitting into chunk(s)', { v0: totalDuration.toFixed(0), v1: numChunks });
 
     let allWords = [];
     let fullTranscription = '';
@@ -566,7 +568,7 @@ export class VideoEditor {
       const chunkStart = startTime + (i * CHUNK_DURATION);
       const chunkDuration = Math.min(CHUNK_DURATION, totalDuration - (i * CHUNK_DURATION));
       
-      console.log(`[VideoEditor] Processing chunk ${i + 1}/${numChunks}: ${chunkStart.toFixed(0)}s - ${(chunkStart + chunkDuration).toFixed(0)}s`);
+      log.info('video', '[VideoEditor] Processing chunk /: s - s', { v0: i + 1, v1: numChunks, v2: chunkStart.toFixed(0), v3: (chunkStart + chunkDuration).toFixed(0) });
 
       // Create temp audio file for this chunk
       const tempAudioPath = path.join(this.outputDir, `temp_transcribe_${Date.now()}_chunk${i}.mp3`);
@@ -589,7 +591,7 @@ export class VideoEditor {
 
         const audioBuffer = fs.readFileSync(tempAudioPath);
         const audioSize = audioBuffer.length;
-        console.log(`[VideoEditor] Chunk ${i + 1} audio: ${(audioSize / 1024 / 1024).toFixed(2)}MB`);
+        log.info('video', '[VideoEditor] Chunk audio: MB', { v0: i + 1, v1: (audioSize / 1024 / 1024).toFixed(2) });
 
         // Transcribe this chunk
         const chunkResult = await this._transcribeAudioBuffer(audioBuffer, openaiKey, language);
@@ -635,7 +637,7 @@ export class VideoEditor {
       }
     }
 
-    console.log(`[VideoEditor] Transcription complete: ${allWords.length} words`);
+    log.info('video', '[VideoEditor] Transcription complete: words', { v0: allWords.length });
 
     return {
       success: true,
@@ -649,110 +651,30 @@ export class VideoEditor {
   }
 
   /**
-   * Internal: Transcribe a single audio buffer using Whisper API
+   * Internal: Transcribe a single audio buffer using the centralized ai-service.
+   * Uses verbose_json with word-level timestamps for subtitle generation.
    */
   async _transcribeAudioBuffer(audioBuffer, openaiKey, language = 'en') {
-    const https = await import('https');
-    
-    const boundary = '----WebKitFormBoundary' + Math.random().toString(36).substring(2);
-    
-    const parts = [];
-    parts.push(Buffer.from(
-      `--${boundary}\r\n` +
-      `Content-Disposition: form-data; name="file"; filename="audio.mp3"\r\n` +
-      `Content-Type: audio/mpeg\r\n\r\n`
-    ));
-    parts.push(audioBuffer);
-    parts.push(Buffer.from('\r\n'));
-    
-    parts.push(Buffer.from(
-      `--${boundary}\r\n` +
-      `Content-Disposition: form-data; name="model"\r\n\r\n` +
-      `whisper-1\r\n`
-    ));
-    
-    parts.push(Buffer.from(
-      `--${boundary}\r\n` +
-      `Content-Disposition: form-data; name="language"\r\n\r\n` +
-      `${language}\r\n`
-    ));
-    
-    parts.push(Buffer.from(
-      `--${boundary}\r\n` +
-      `Content-Disposition: form-data; name="response_format"\r\n\r\n` +
-      `verbose_json\r\n`
-    ));
-    
-    parts.push(Buffer.from(
-      `--${boundary}\r\n` +
-      `Content-Disposition: form-data; name="timestamp_granularities[]"\r\n\r\n` +
-      `word\r\n`
-    ));
-    
-    parts.push(Buffer.from(`--${boundary}--\r\n`));
-    
-    const fullBody = Buffer.concat(parts);
+    // Use centralized ai-service for transcription (handles key retrieval,
+    // retry, circuit breaker, and cost tracking automatically)
+    const ai = require('../../lib/ai-service');
 
-    const response = await new Promise((resolve, reject) => {
-      const req = https.request({
-        hostname: 'api.openai.com',
-        path: '/v1/audio/transcriptions',
-        method: 'POST',
-        headers: {
-          'Content-Type': `multipart/form-data; boundary=${boundary}`,
-          'Content-Length': fullBody.length,
-          'Authorization': `Bearer ${openaiKey}`
-        }
-      }, (res) => {
-        let data = '';
-        res.on('data', chunk => data += chunk);
-        res.on('end', () => {
-          if (res.statusCode !== 200) {
-            try {
-              const errorJson = JSON.parse(data);
-              reject(new Error(errorJson.error?.message || `HTTP ${res.statusCode}`));
-            } catch {
-              reject(new Error(`HTTP ${res.statusCode}: ${data}`));
-            }
-            return;
-          }
-          resolve(data);
-        });
-      });
-      
-      req.on('error', reject);
-      req.write(fullBody);
-      req.end();
+    const result = await ai.transcribe(audioBuffer, {
+      language,
+      filename: 'audio.mp3',
+      responseFormat: 'verbose_json',
+      timestampGranularities: ['word'],
+      feature: 'video-transcription',
     });
 
-    const parsedResponse = JSON.parse(response);
-    
-    // Track Whisper API usage for cost monitoring
-    // Whisper pricing: $0.006 per minute of audio
-    try {
-      const budgetManager = getBudgetManager();
-      const audioDurationMinutes = (parsedResponse.duration || 0) / 60;
-      
-      budgetManager.trackUsage({
-        provider: 'openai',
-        model: 'whisper-1',
-        inputTokens: 0,
-        outputTokens: 0,
-        feature: 'video-transcription',
-        operation: 'transcribe-audio',
-        projectId: null,
-        metadata: {
-          audioDurationSeconds: parsedResponse.duration || 0,
-          audioDurationMinutes: audioDurationMinutes,
-          costPerMinute: 0.006,
-          language: language
-        }
-      });
-    } catch (trackError) {
-      console.warn('[VideoEditor] Failed to track Whisper usage:', trackError.message);
-    }
-    
-    return parsedResponse;
+    // Return in the same shape the caller expects (full verbose_json response)
+    return {
+      text: result.text || '',
+      duration: result.duration,
+      language: result.language,
+      words: result.words || [],
+      segments: result.segments || [],
+    };
   }
 
   // ==================== IPC SETUP ====================

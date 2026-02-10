@@ -8,6 +8,8 @@ import path from 'path';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { app } = require('electron');
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 /**
  * Service for video transcoding and compression
@@ -109,7 +111,7 @@ export class TranscodeService {
         .format(format)
         .output(output)
         .on('start', (cmd) => {
-          console.log('[TranscodeService] Transcode started:', cmd);
+          log.info('video', '[TranscodeService] Transcode started', { data: cmd });
           this.activeJobs.set(jobId, command);
         })
         .on('progress', (progress) => {
@@ -171,7 +173,7 @@ export class TranscodeService {
         ])
         .output(output)
         .on('start', (cmd) => {
-          console.log('[TranscodeService] Compression started:', cmd);
+          log.info('video', '[TranscodeService] Compression started', { data: cmd });
           this.activeJobs.set(jobId, 'compress');
         })
         .on('progress', (progress) => {

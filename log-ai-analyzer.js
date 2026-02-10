@@ -7,6 +7,7 @@
 
 const { ipcMain } = require('electron');
 const getLogger = require('./event-logger');
+const ai = require('./lib/ai-service');
 
 class LogAIAnalyzer {
     constructor() {
@@ -59,10 +60,12 @@ class LogAIAnalyzer {
         // Build the analysis prompt
         const prompt = this.buildAnalysisPrompt(preparedLogs, context, focusArea);
         
-        // Call Claude API
-        const ClaudeAPI = require('./claude-api');
-        const claudeApi = new ClaudeAPI();
-        const analysis = await claudeApi.analyze(prompt);
+        // Call AI service
+        const analysis = await ai.json(prompt, {
+            profile: 'standard',
+            maxTokens: 4000,
+            feature: 'log-analyzer'
+        });
         
         return {
             summary: analysis.summary,
@@ -260,9 +263,11 @@ Focus on:
 
 Provide actionable fixes that can be implemented immediately.`;
 
-        const ClaudeAPI = require('./claude-api');
-        const claudeApi = new ClaudeAPI();
-        return await claudeApi.analyze(prompt);
+        return await ai.json(prompt, {
+            profile: 'standard',
+            maxTokens: 4000,
+            feature: 'log-analyzer'
+        });
     }
 
     /**
@@ -289,9 +294,11 @@ Identify:
 
 Provide specific code optimizations and performance improvements.`;
 
-        const ClaudeAPI = require('./claude-api');
-        const claudeApi = new ClaudeAPI();
-        return await claudeApi.analyze(prompt);
+        return await ai.json(prompt, {
+            profile: 'standard',
+            maxTokens: 4000,
+            feature: 'log-analyzer'
+        });
     }
 
     /**
@@ -319,9 +326,11 @@ Please provide:
 
 Format as a professional test report.`;
 
-        const ClaudeAPI = require('./claude-api');
-        const claudeApi = new ClaudeAPI();
-        return await claudeApi.analyze(prompt);
+        return await ai.json(prompt, {
+            profile: 'standard',
+            maxTokens: 4000,
+            feature: 'log-analyzer'
+        });
     }
 }
 

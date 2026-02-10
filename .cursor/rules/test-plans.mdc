@@ -1,0 +1,151 @@
+---
+description: Master test plan index -- links to all 36 area test plans
+globs:
+  - test/**
+  - "*.spec.js"
+alwaysApply: false
+---
+
+# Test Plan Index
+
+This project has 36 area-specific test plans in `test/plans/`. Each plan documents the features for that area and provides a hybrid checklist of automated (`[A]`) and manual (`[M]`) test items.
+
+## Checklist Notation
+
+- `[A]` -- Fully automatable via Playwright or REST API tests
+- `[M]` -- Requires human interaction (drag-drop, voice input, visual verification)
+- `[P]` -- Partially automated (Cursor runs the test, human verifies the result)
+
+## Area Plans
+
+### Core Features (01--17)
+
+| # | Area | File | Automated | Manual/Partial | Total |
+|---|------|------|-----------|----------------|-------|
+| 00 | Master Checklist | `test/plans/00-master-checklist.md` | -- | -- | rollup |
+| 01 | Settings | `test/plans/01-settings.md` | 10 | 3 | 13 |
+| 02 | Voice Orb | `test/plans/02-voice-orb.md` | 6 | 9 | 15 |
+| 03 | Task Exchange | `test/plans/03-task-exchange.md` | 10 | 2 | 12 |
+| 04 | Spaces API | `test/plans/04-spaces-api.md` | 30 | 5 | 35 |
+| 05 | Spaces UI | `test/plans/05-spaces-ui.md` | 8 | 10 | 18 |
+| 06 | Conversations | `test/plans/06-conversations.md` | 6 | 8 | 14 |
+| 07 | Menu | `test/plans/07-menu.md` | 8 | 8 | 16 |
+| 08 | Tools Management | `test/plans/08-tools-management.md` | 6 | 4 | 10 |
+| 09 | Agent Manager | `test/plans/09-agent-manager.md` | 10 | 6 | 16 |
+| 10 | Spaces Import/Export | `test/plans/10-spaces-import-export.md` | 8 | 6 | 14 |
+| 11 | IDW | `test/plans/11-idw.md` | 6 | 6 | 12 |
+| 12 | Main Window & Tabs | `test/plans/12-main-window-tabs.md` | 8 | 6 | 14 |
+| 13 | Authentication | `test/plans/13-authentication.md` | 6 | 6 | 12 |
+| 14 | Item Tagging | `test/plans/14-item-tagging.md` | 12 | 2 | 14 |
+| 15 | Metadata Generation | `test/plans/15-metadata-generation.md` | 8 | 6 | 14 |
+| 16 | Asset Editing | `test/plans/16-asset-editing.md` | 4 | 8 | 12 |
+| 17 | Web Monitoring | `test/plans/17-web-monitoring.md` | 10 | 4 | 14 |
+
+### AI & Infrastructure (18--19)
+
+| # | Area | File | Automated | Manual/Partial | Total |
+|---|------|------|-----------|----------------|-------|
+| 18 | AI Service & Runtimes | `test/plans/18-ai-service-runtimes.md` | 41 | 4 | 45 |
+| 19 | Budget Manager | `test/plans/19-budget-manager.md` | 22 | 34 | 56 |
+
+### Product Windows (20--23)
+
+| # | Area | File | Automated | Manual/Partial | Total |
+|---|------|------|-----------|----------------|-------|
+| 20 | Video Editor | `test/plans/20-video-editor.md` | 12 | 53 | 65 |
+| 21 | GSX Create | `test/plans/21-gsx-create.md` | 12 | 43 | 55 |
+| 22 | Agent Composer | `test/plans/22-agent-composer.md` | 5 | 35 | 40 |
+| 23 | Recorder & Capture | `test/plans/23-recorder-capture.md` | 10 | 34 | 44 |
+
+### Overlays & HUDs (24--25)
+
+| # | Area | File | Automated | Manual/Partial | Total |
+|---|------|------|-----------|----------------|-------|
+| 24 | Black Hole | `test/plans/24-black-hole.md` | 5 | 17 | 22 |
+| 25 | Command HUD | `test/plans/25-command-hud.md` | 14 | 26 | 40 |
+
+### Dashboards & Viewers (26--27)
+
+| # | Area | File | Automated | Manual/Partial | Total |
+|---|------|------|-----------|----------------|-------|
+| 26 | App Health Dashboard | `test/plans/26-app-health-dashboard.md` | 4 | 42 | 46 |
+| 27 | Log Viewer | `test/plans/27-log-viewer.md` | 10 | 20 | 30 |
+
+### Export & Sync (28, 32)
+
+| # | Area | File | Automated | Manual/Partial | Total |
+|---|------|------|-----------|----------------|-------|
+| 28 | Smart Export | `test/plans/28-smart-export.md` | 14 | 28 | 42 |
+| 32 | GSX Sync & Backup | `test/plans/32-gsx-sync-backup.md` | 6 | 20 | 26 |
+
+### Wizards & Documentation (29--31)
+
+| # | Area | File | Automated | Manual/Partial | Total |
+|---|------|------|-----------|----------------|-------|
+| 29 | Wizards & Onboarding | `test/plans/29-wizards-onboarding.md` | 12 | 38 | 50 |
+| 30 | Documentation & Tutorials | `test/plans/30-documentation-tutorials.md` | 8 | 28 | 36 |
+| 31 | Agentic Player | `test/plans/31-agentic-player.md` | 3 | 25 | 28 |
+
+### Pickers, Dialogs & Shortcuts (33--35)
+
+| # | Area | File | Automated | Manual/Partial | Total |
+|---|------|------|-----------|----------------|-------|
+| 33 | Pickers & Floating UIs | `test/plans/33-pickers-floating-ui.md` | 8 | 32 | 40 |
+| 34 | Native Dialogs | `test/plans/34-native-dialogs.md` | 0 | 28 | 28 |
+| 35 | Context Menu & Shortcuts | `test/plans/35-context-menu-shortcuts.md` | 10 | 32 | 42 |
+
+### Conversion & Pipelines (36)
+
+| # | Area | File | Automated | Manual/Partial | Total |
+|---|------|------|-----------|----------------|-------|
+| 36 | Conversion Pipeline | `test/plans/36-conversion-pipeline.md` | 100 | 12 | 112 |
+
+### Grand Totals
+
+| Category | Plans 01--17 | Plans 18--36 | Total |
+|----------|-------------|-------------|-------|
+| Automated [A] | ~160 | ~296 | ~456 |
+| Manual/Partial [M][P] | ~83 | ~551 | ~634 |
+| **All items** | **~243** | **~847** | **~1090** |
+
+## Running Tests
+
+```bash
+# Full automated journey (4 spec files, ~50s)
+npm run test:journey
+
+# Individual suites
+npm run test:smoke          # Window smoke tests
+npm run test:api            # API integration tests
+npx playwright test test/e2e/spaces-flow.spec.js
+npx playwright test test/e2e/settings-flow.spec.js
+
+# All E2E tests
+npm run test:e2e
+```
+
+## How to Use These Plans
+
+1. Open the area plan for the feature you are testing
+2. Follow the Prerequisites section to set up
+3. Work through the checklist top-to-bottom
+4. Mark items `[x]` as you complete them
+5. For `[A]` items, run the linked spec file or API command
+6. For `[M]` items, perform the action manually and verify
+7. For `[P]` items, run the automated part, then visually verify
+8. Log any failures as issues with the area name as prefix
+
+## Coverage Map: Menu to Test Plan
+
+| Menu Category | Test Plans |
+|---------------|-----------|
+| App Menu (Settings, Manage Environments) | 01, 29 |
+| IDW Menu (environments, bots, creators) | 11, 29 |
+| GSX Menu (links, file sync) | 32 |
+| Agentic University (tutorials, AI Run Times) | 30 |
+| Manage Spaces (clipboard, black hole, storage) | 04, 05, 24, 34 |
+| Tools (orb, agents, GSX Create, video, modules) | 02, 08, 09, 20, 21, 22, 23 |
+| Help (docs, bug report, debug, health, backups) | 26, 27, 30, 34 |
+| Share (download link, email, GitHub) | 34 |
+| Context Menu (right-click) | 35 |
+| Keyboard Shortcuts (all) | 35 |

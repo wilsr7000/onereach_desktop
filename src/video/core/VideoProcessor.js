@@ -13,27 +13,29 @@ import { createRequire } from 'module';
 // Electron needs to be required, not imported, when used in ES modules
 const require = createRequire(import.meta.url);
 const { app } = require('electron');
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 // Set FFmpeg paths with validation
 const ffmpegPath = ffmpegInstaller.path;
 const ffprobePath = ffprobeInstaller.path;
 
-console.log('[VideoProcessor] FFmpeg path:', ffmpegPath);
-console.log('[VideoProcessor] FFprobe path:', ffprobePath);
+log.info('video', 'FFmpeg path configured', { ffmpegPath });
+log.info('video', 'FFprobe path configured', { ffprobePath });
 
 // Validate paths exist
 if (!fs.existsSync(ffmpegPath)) {
-  console.error('[VideoProcessor] FFmpeg binary not found at:', ffmpegPath);
+  log.error('video', 'FFmpeg binary not found', { path: ffmpegPath });
 } else {
   const stats = fs.statSync(ffmpegPath);
-  console.log('[VideoProcessor] FFmpeg exists:', stats.isFile() ? 'file' : 'directory', 'size:', stats.size);
+  log.info('video', 'FFmpeg binary found', { type: stats.isFile() ? 'file' : 'directory', size: stats.size });
 }
 
 if (!fs.existsSync(ffprobePath)) {
-  console.error('[VideoProcessor] FFprobe binary not found at:', ffprobePath);
+  log.error('video', 'FFprobe binary not found', { path: ffprobePath });
 } else {
   const stats = fs.statSync(ffprobePath);
-  console.log('[VideoProcessor] FFprobe exists:', stats.isFile() ? 'file' : 'directory', 'size:', stats.size);
+  log.info('video', 'FFprobe binary found', { type: stats.isFile() ? 'file' : 'directory', size: stats.size });
 }
 
 ffmpegLib.setFfmpegPath(ffmpegPath);
@@ -131,10 +133,7 @@ export class VideoProcessor {
     // Ensure directories exist
     this.ensureDirectories();
     
-    console.log('[VideoProcessor] Initialized');
-    console.log('[VideoProcessor] FFmpeg path:', ffmpegInstaller.path);
-    console.log('[VideoProcessor] FFprobe path:', ffprobeInstaller.path);
-    console.log('[VideoProcessor] Output dir:', this.outputDir);
+    log.info('video', 'VideoProcessor initialized', { ffmpegPath: ffmpegInstaller.path, ffprobePath: ffprobeInstaller.path, outputDir: this.outputDir });
   }
 
   /**
@@ -174,14 +173,11 @@ export class VideoProcessor {
         return;
       }
 
-      console.log('[VideoProcessor] Getting info for:', inputPath);
-      console.log('[VideoProcessor] File size:', (stats.size / 1024 / 1024).toFixed(2), 'MB');
+      log.info('video', 'Getting video info', { inputPath, fileSizeMB: (stats.size / 1024 / 1024).toFixed(2) });
 
       ffmpegLib.ffprobe(inputPath, (err, metadata) => {
         if (err) {
-          console.error('[VideoProcessor] FFprobe error:', err);
-          console.error('[VideoProcessor] FFprobe path:', ffprobeInstaller.path);
-          console.error('[VideoProcessor] Input path:', inputPath);
+          log.error('video', 'FFprobe error', { error: err.message, ffprobePath: ffprobeInstaller.path, inputPath });
           
           // Provide more helpful error message for spawn ENOTDIR
           if (err.message && err.message.includes('ENOTDIR')) {

@@ -285,7 +285,17 @@ class MultiTenantStore {
       const saved = settingsManager.get('multiTenantTokens');
       if (saved) {
         this.tokens = typeof saved === 'string' ? JSON.parse(saved) : saved;
-        console.log(`[MultiTenant] Loaded mult tokens for: ${Object.keys(this.tokens).join(', ') || 'none'}`);
+        const envList = Object.keys(this.tokens);
+        console.log(`[MultiTenant] Loaded mult tokens for: ${envList.join(', ') || 'none'}`);
+        
+        // Log validity status for each token
+        envList.forEach(env => {
+          const valid = this.hasValidToken(env);
+          const token = this.tokens[env];
+          console.log(`[MultiTenant]   ${env}: valid=${valid}, valueLen=${token?.value?.length || 0}, expires=${token?.expiresAt ? new Date(token.expiresAt * 1000).toISOString() : 'none'}`);
+        });
+      } else {
+        console.log('[MultiTenant] No saved mult tokens found');
       }
       
       // Load or tokens
@@ -293,12 +303,55 @@ class MultiTenantStore {
       if (savedOr) {
         this.orTokens = typeof savedOr === 'string' ? JSON.parse(savedOr) : savedOr;
         console.log(`[MultiTenant] Loaded or tokens for: ${Object.keys(this.orTokens).join(', ') || 'none'}`);
+      } else {
+        console.log('[MultiTenant] No saved or tokens found');
       }
     } catch (err) {
       console.error('[MultiTenant] Failed to load tokens:', err.message);
       this.tokens = {};
       this.orTokens = {};
     }
+  }
+  
+  /**
+   * Get diagnostic info about all tokens (for debugging)
+   * @returns {object} Token status summary
+   */
+  getDiagnostics() {
+    const result = {
+      multTokens: {},
+      orTokens: {},
+      activePartitions: {}
+    };
+    
+    // Mult tokens
+    for (const [env, token] of Object.entries(this.tokens)) {
+      result.multTokens[env] = {
+        hasValue: !!token?.value,
+        valueLength: token?.value?.length || 0,
+        domain: token?.domain,
+        expiresAt: token?.expiresAt ? new Date(token.expiresAt * 1000).toISOString() : null,
+        isValid: this.hasValidToken(env),
+        capturedAt: token?.capturedAt ? new Date(token.capturedAt).toISOString() : null,
+        sourcePartition: token?.sourcePartition
+      };
+    }
+    
+    // Or tokens
+    for (const [env, token] of Object.entries(this.orTokens)) {
+      result.orTokens[env] = {
+        hasValue: !!token?.value,
+        valueLength: token?.value?.length || 0,
+        isValid: this.hasValidOrToken(env)
+      };
+    }
+    
+    // Active partitions
+    for (const [env, partitions] of Object.entries(this.activePartitions)) {
+      result.activePartitions[env] = Array.from(partitions);
+    }
+    
+    return result;
   }
   
   /**
@@ -489,38 +542,33 @@ class MultiTenantStore {
     
     console.log(`[MultiTenant] Propagating ${environment} token to ${targetPartitions.length} partitions`);
     
-    // Use broader domain to cover all subdomains (auth, idw, chat, api)
-    const broaderDomain = this.getBroaderDomain(environment);
+    // Use the centralized injection function for each partition
+    // Note: We use force=true because we're propagating a fresh token
+    const results = await Promise.allSettled(
+      targetPartitions.map(partition => 
+        this.injectTokenIntoPartition(environment, partition, {
+          source: 'propagateToken',
+          force: true,  // Force injection even if cookie exists (we have fresh token)
+          maxRetries: 1  // Fewer retries for propagation to avoid slowdown
+        })
+      )
+    );
     
-    for (const partition of targetPartitions) {
-      try {
-        const ses = session.fromPartition(partition);
-        
-        // Set cookie on broader domain so it's sent to all subdomains
-        await ses.cookies.set({
-          url: `https://auth${broaderDomain}`,
-          name: 'mult',
-          value: token.value,
-          domain: broaderDomain,
-          path: '/',
-          secure: true,
-          httpOnly: true,
-          sameSite: 'no_restriction',
-          expirationDate: token.expiresAt
-        });
-        
-        // CRITICAL: Flush to ensure cookie is persisted before any navigation
-        await ses.cookies.flushStore();
-        
-        // Verify cookie was set
-        const cookies = await ses.cookies.get({ name: 'mult' });
-        console.log(`[MultiTenant] Propagated to ${partition} - ${cookies.length} mult cookies:`, 
-          cookies.map(c => ({ domain: c.domain, sameSite: c.sameSite })));
-      } catch (err) {
-        console.error(`[MultiTenant] Failed to propagate to ${partition}:`, err.message);
-        // Don't throw - continue propagating to other partitions
+    // Log results
+    let successCount = 0;
+    let failCount = 0;
+    
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled' && result.value.success) {
+        successCount++;
+      } else {
+        failCount++;
+        const error = result.status === 'rejected' ? result.reason?.message : result.value?.error;
+        console.warn(`[MultiTenant] Propagation to ${targetPartitions[index]} failed: ${error}`);
       }
-    }
+    });
+    
+    console.log(`[MultiTenant] Propagation complete: ${successCount} succeeded, ${failCount} failed`);
     
     // Reset re-entrancy guard
     this.propagating = false;
@@ -573,15 +621,6 @@ class MultiTenantStore {
   }
   
   /**
-   * Get the API domain for an environment (for cookie injection)
-   * @param {string} environment - The environment
-   * @returns {string} API domain with leading dot
-   */
-  getApiDomain(environment) {
-    return ONEREACH_ENVIRONMENTS[environment]?.apiDomain || '.api.onereach.ai';
-  }
-  
-  /**
    * Get a broader domain that covers ALL subdomains for an environment
    * Used for cookie injection to enable SSO across auth, idw, chat, api subdomains
    * @param {string} environment - The environment
@@ -598,6 +637,17 @@ class MultiTenantStore {
   }
   
   /**
+   * Get the API domain for an environment
+   * Used for cookie injection to cover API subdomains like sdkapi.edison.api.onereach.ai
+   * @param {string} environment - The environment
+   * @returns {string} API domain with leading dot (e.g., '.edison.api.onereach.ai')
+   */
+  getApiDomain(environment) {
+    const config = ONEREACH_ENVIRONMENTS[environment];
+    return config?.apiDomain || '.api.onereach.ai';
+  }
+  
+  /**
    * Check if a URL belongs to OneReach (securely)
    * @param {string} url - The URL to check
    * @returns {boolean}
@@ -609,6 +659,234 @@ class MultiTenantStore {
     } catch {
       return false;
     }
+  }
+  
+  // ===== Hardened Token Injection =====
+  
+  /**
+   * Inject authentication token into a session partition
+   * This is the SINGLE SOURCE OF TRUTH for token injection logic.
+   * 
+   * Features:
+   * - Validates environment and token before injection
+   * - Injects on BOTH UI domain and API domain for full coverage
+   * - Retry logic with exponential backoff
+   * - Verification that cookies were actually set
+   * - Detailed logging for debugging
+   * - Graceful degradation on failure
+   * 
+   * @param {string} environment - The IDW environment (edison, staging, production, dev)
+   * @param {string} partition - The session partition name (e.g., 'persist:gsx-edison')
+   * @param {object} options - Optional configuration
+   * @param {number} options.maxRetries - Max retry attempts (default: 2)
+   * @param {boolean} options.force - Force injection even if cookie exists (default: false)
+   * @param {string} options.source - Caller identifier for logging (default: 'unknown')
+   * @returns {Promise<{success: boolean, cookieCount: number, domains: string[], error?: string}>}
+   */
+  async injectTokenIntoPartition(environment, partition, options = {}) {
+    const { maxRetries = 2, force = false, source = 'unknown' } = options;
+    const logPrefix = `[MultiTenant:${source}]`;
+    
+    // Result object to track what happened
+    const result = {
+      success: false,
+      cookieCount: 0,
+      domains: [],
+      error: null
+    };
+    
+    // === Validation ===
+    
+    // Validate environment
+    if (!environment || typeof environment !== 'string') {
+      result.error = 'Invalid environment parameter';
+      console.error(`${logPrefix} ${result.error}:`, environment);
+      return result;
+    }
+    
+    // Normalize environment name
+    const normalizedEnv = environment.toLowerCase().trim();
+    if (!ONEREACH_ENVIRONMENTS[normalizedEnv] && normalizedEnv !== 'default') {
+      console.warn(`${logPrefix} Unknown environment '${normalizedEnv}', using production defaults`);
+    }
+    
+    // Validate partition
+    if (!partition || typeof partition !== 'string') {
+      result.error = 'Invalid partition parameter';
+      console.error(`${logPrefix} ${result.error}:`, partition);
+      return result;
+    }
+    
+    // Ensure partition starts with 'persist:'
+    const fullPartition = partition.startsWith('persist:') ? partition : `persist:${partition}`;
+    
+    // Check for valid token
+    if (!this.hasValidToken(normalizedEnv)) {
+      result.error = `No valid token for environment '${normalizedEnv}'`;
+      console.log(`${logPrefix} ${result.error}`);
+      return result;
+    }
+    
+    const token = this.getToken(normalizedEnv);
+    if (!token || !token.value) {
+      result.error = 'Token exists but has no value';
+      console.error(`${logPrefix} ${result.error}`);
+      return result;
+    }
+    
+    // Validate token value format (basic sanity check)
+    if (token.value.length < 10) {
+      result.error = 'Token value appears too short to be valid';
+      console.error(`${logPrefix} ${result.error}: length=${token.value.length}`);
+      return result;
+    }
+    
+    // === Get domains ===
+    
+    const uiDomain = this.getBroaderDomain(normalizedEnv);
+    const apiDomain = this.getApiDomain(normalizedEnv);
+    
+    // Validate domains
+    if (!this.isValidOneReachDomain(uiDomain) || !this.isValidOneReachDomain(apiDomain)) {
+      result.error = 'Invalid domain configuration';
+      console.error(`${logPrefix} ${result.error}: ui=${uiDomain}, api=${apiDomain}`);
+      return result;
+    }
+    
+    console.log(`${logPrefix} Injecting token for ${normalizedEnv} into ${fullPartition}`);
+    console.log(`${logPrefix}   UI domain: ${uiDomain}`);
+    console.log(`${logPrefix}   API domain: ${apiDomain}`);
+    
+    // === Injection with retry ===
+    
+    let lastError = null;
+    
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const ses = session.fromPartition(fullPartition);
+        
+        // Check if cookies already exist (unless force=true)
+        if (!force) {
+          const existingUi = await ses.cookies.get({ domain: uiDomain, name: 'mult' });
+          const existingApi = await ses.cookies.get({ domain: apiDomain, name: 'mult' });
+          
+          if (existingUi.length > 0 && existingApi.length > 0) {
+            console.log(`${logPrefix} Tokens already exist in partition (ui: ${existingUi.length}, api: ${existingApi.length})`);
+            result.success = true;
+            result.cookieCount = existingUi.length + existingApi.length;
+            result.domains = [...new Set([...existingUi.map(c => c.domain), ...existingApi.map(c => c.domain)])];
+            return result;
+          }
+        }
+        
+        // Cookie options (shared between UI and API)
+        const cookieBase = {
+          name: 'mult',
+          value: token.value,
+          path: '/',
+          secure: true,
+          httpOnly: true,
+          sameSite: 'no_restriction',
+          expirationDate: token.expiresAt || (Math.floor(Date.now() / 1000) + 86400 * 30) // Default 30 days
+        };
+        
+        // Inject on UI domain
+        await ses.cookies.set({
+          ...cookieBase,
+          url: `https://auth${uiDomain}`,
+          domain: uiDomain
+        });
+        
+        // Inject on API domain
+        await ses.cookies.set({
+          ...cookieBase,
+          url: `https://api${apiDomain}`,
+          domain: apiDomain
+        });
+        
+        // CRITICAL: Flush to disk to ensure persistence
+        await ses.cookies.flushStore();
+        
+        // === Verification ===
+        
+        // Small delay to ensure cookies are committed
+        await new Promise(resolve => setTimeout(resolve, 50));
+        
+        // Get ALL mult cookies in this session (not just our expected domains)
+        const allMultCookies = await ses.cookies.get({ name: 'mult' });
+        console.log(`${logPrefix} All 'mult' cookies in session (${allMultCookies.length}):`);
+        allMultCookies.forEach(c => {
+          console.log(`${logPrefix}   domain=${c.domain}, path=${c.path}, secure=${c.secure}, httpOnly=${c.httpOnly}, sameSite=${c.sameSite}`);
+        });
+        
+        // Verify cookies were set on our target domains
+        const verifyUi = allMultCookies.filter(c => c.domain === uiDomain || c.domain === uiDomain.replace(/^\./, ''));
+        const verifyApi = allMultCookies.filter(c => c.domain === apiDomain || c.domain === apiDomain.replace(/^\./, ''));
+        
+        console.log(`${logPrefix} UI domain (${uiDomain}) cookies: ${verifyUi.length}`);
+        console.log(`${logPrefix} API domain (${apiDomain}) cookies: ${verifyApi.length}`);
+        
+        if (allMultCookies.length === 0) {
+          throw new Error('Cookie verification failed - no mult cookies found in session');
+        }
+        
+        // Check if at least one cookie has the correct value
+        const hasCorrectValue = allMultCookies.some(c => c.value === token.value);
+        
+        if (!hasCorrectValue) {
+          console.error(`${logPrefix} Cookie value mismatch! Expected length ${token.value.length}, found values with lengths: ${allMultCookies.map(c => c.value?.length).join(', ')}`);
+          throw new Error('Cookie verification failed - cookie value mismatch');
+        }
+        
+        // Success!
+        result.success = true;
+        result.cookieCount = allMultCookies.length;
+        result.domains = [...new Set(allMultCookies.map(c => c.domain))];
+        
+        console.log(`${logPrefix} Successfully injected ${result.cookieCount} cookies on domains: ${result.domains.join(', ')}`);
+        
+        return result;
+        
+      } catch (err) {
+        lastError = err;
+        console.warn(`${logPrefix} Injection attempt ${attempt + 1}/${maxRetries + 1} failed: ${err.message}`);
+        
+        if (attempt < maxRetries) {
+          // Exponential backoff: 100ms, 200ms, 400ms...
+          const delay = 100 * Math.pow(2, attempt);
+          console.log(`${logPrefix} Retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+    
+    // All retries exhausted
+    result.error = lastError?.message || 'Unknown injection error';
+    console.error(`${logPrefix} Token injection failed after ${maxRetries + 1} attempts: ${result.error}`);
+    
+    return result;
+  }
+  
+  /**
+   * Inject token and register partition in one call
+   * Convenience method that combines injection with partition registration
+   * 
+   * @param {string} environment - The IDW environment
+   * @param {string} partition - The session partition name
+   * @param {object} options - Options passed to injectTokenIntoPartition
+   * @returns {Promise<{success: boolean, cookieCount: number, domains: string[], error?: string}>}
+   */
+  async injectAndRegister(environment, partition, options = {}) {
+    // First inject the token
+    const result = await this.injectTokenIntoPartition(environment, partition, options);
+    
+    // Always register and attach listener (even if injection failed)
+    // This ensures future logins get propagated
+    const fullPartition = partition.startsWith('persist:') ? partition : `persist:${partition}`;
+    this.registerPartition(environment, fullPartition);
+    this.attachCookieListener(fullPartition);
+    
+    return result;
   }
 }
 

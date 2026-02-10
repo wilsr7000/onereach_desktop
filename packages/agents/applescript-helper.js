@@ -7,6 +7,8 @@
 
 const { exec } = require('child_process');
 const { promisify } = require('util');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 const execAsync = promisify(exec);
 
 /**
@@ -100,7 +102,7 @@ async function getRecentlyPlayed(limit = 10) {
     
     return tracks;
   } catch (e) {
-    console.warn('[AppleScript] Play history error:', e.message);
+    log.warn('agent', 'Play history error', { error: e.message });
     return [];
   }
 }
@@ -161,7 +163,7 @@ async function getTopGenres() {
     // Return top 5 unique genres
     return genres.slice(0, 5);
   } catch (e) {
-    console.warn('[AppleScript] Top genres error:', e.message);
+    log.warn('agent', 'Top genres error', { error: e.message });
     return [];
   }
 }
@@ -373,7 +375,7 @@ async function createMoodPlaylist(playlistName, criteria = {}) {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       if (attempt > 0) {
-        console.log(`[AppleScript] Playlist retry attempt ${attempt}/${maxRetries}`);
+        log.info('agent', `Playlist retry attempt ${attempt}/${maxRetries}`);
         await new Promise(r => setTimeout(r, 1000 * attempt)); // Backoff
       }
       
@@ -381,7 +383,7 @@ async function createMoodPlaylist(playlistName, criteria = {}) {
       
       if (!result.success) {
         lastError = result.error;
-        console.warn(`[AppleScript] Playlist attempt ${attempt} failed:`, result.error);
+        log.warn('agent', `Playlist attempt ${attempt} failed`, { error: result.error });
         
         // If it's a permission error, don't retry
         if (result.error?.includes('not allowed') || result.error?.includes('permission')) {
@@ -394,7 +396,7 @@ async function createMoodPlaylist(playlistName, criteria = {}) {
       const trackCount = parseInt(count) || 0;
       
       if (status === 'EMPTY') {
-        console.log('[AppleScript] No matching tracks found in library');
+        log.info('agent', 'No matching tracks found in library');
         return {
           success: false,
           playlistName,
@@ -404,7 +406,7 @@ async function createMoodPlaylist(playlistName, criteria = {}) {
       }
       
       if (status === 'SUCCESS' && trackCount > 0) {
-        console.log(`[AppleScript] Playlist created with ${trackCount} tracks`);
+        log.info('agent', `Playlist created with ${trackCount} tracks`);
         return {
           success: true,
           playlistName,
@@ -418,7 +420,7 @@ async function createMoodPlaylist(playlistName, criteria = {}) {
       
     } catch (e) {
       lastError = e.message;
-      console.warn(`[AppleScript] Playlist attempt ${attempt} error:`, e.message);
+      log.warn('agent', `Playlist attempt ${attempt} error`, { error: e.message });
       
       // Timeout errors are worth retrying
       if (!e.message?.includes('timeout')) {
@@ -427,7 +429,7 @@ async function createMoodPlaylist(playlistName, criteria = {}) {
     }
   }
   
-  console.error('[AppleScript] Playlist creation failed after retries:', lastError);
+  log.error('agent', 'Playlist creation failed after retries', { lastError });
   return {
     success: false,
     playlistName,
@@ -1210,7 +1212,7 @@ async function smartPlayWithSearchTerms(searchTerms, app = 'Music') {
   
   // Try each search term until one works
   for (const term of searchTerms) {
-    console.log(`[AppleScript] Trying search term: "${term}"`);
+    log.info('agent', `Trying search term: "${term}"`);
     
     const playlistScript = `
       tell application "Music"
@@ -1301,7 +1303,7 @@ async function smartPlayWithSearchTerms(searchTerms, app = 'Music') {
   }
   
   // None of the AI terms worked - fall back to genre play
-  console.log('[AppleScript] AI search terms failed, falling back to shuffle');
+  log.info('agent', 'AI search terms failed, falling back to shuffle');
   return smartPlayGenre(searchTerms[0], app);
 }
 
@@ -1381,7 +1383,7 @@ async function getPodcastStatus() {
       subscriptions: parts[4] ? parts[4].split(',').filter(s => s.trim()) : []
     };
   } catch (e) {
-    console.warn('[AppleScript] Podcast status error:', e.message);
+    log.warn('agent', 'Podcast status error', { error: e.message });
     return { running: false, playing: false, currentShow: null, currentEpisode: null, subscriptions: [] };
   }
 }
@@ -1702,7 +1704,7 @@ async function getSubscribedPodcasts() {
     
     return shows;
   } catch (e) {
-    console.warn('[AppleScript] Subscribed podcasts error:', e.message);
+    log.warn('agent', 'Subscribed podcasts error', { error: e.message });
     return [];
   }
 }

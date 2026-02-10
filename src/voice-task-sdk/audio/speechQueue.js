@@ -12,6 +12,8 @@
  */
 
 const EventEmitter = require('events');
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 // Priority levels
 const PRIORITY = {
@@ -49,7 +51,7 @@ class SpeechQueue extends EventEmitter {
     // Waiting for speech to complete
     this.completionResolver = null;
     
-    console.log('[SpeechQueue] Initialized');
+    log.info('voice', 'SpeechQueue initialized');
   }
   
   /**
@@ -76,7 +78,7 @@ class SpeechQueue extends EventEmitter {
    */
   async enqueue(text, options = {}) {
     if (!text || text.trim() === '') {
-      console.log('[SpeechQueue] Ignoring empty text');
+      log.info('voice', 'SpeechQueue ignoring empty text');
       return true;
     }
     
@@ -91,11 +93,11 @@ class SpeechQueue extends EventEmitter {
       createdAt: Date.now()
     };
     
-    console.log(`[SpeechQueue] Enqueuing: "${text.substring(0, 50)}..." (priority: ${priority})`);
+    log.info('voice', 'SpeechQueue enqueuing', { text: text.substring(0, 50), priority });
     
     // URGENT priority: Cancel current speech and skip queue
     if (priority === PRIORITY.URGENT) {
-      console.log('[SpeechQueue] URGENT: Cancelling current and skipping queue');
+      log.info('voice', 'SpeechQueue URGENT: cancelling current and skipping queue');
       
       // Cancel current speech if any
       if (this.isSpeaking) {
@@ -136,7 +138,7 @@ class SpeechQueue extends EventEmitter {
     }
     
     this.queue.splice(insertIndex, 0, item);
-    console.log(`[SpeechQueue] Queue size: ${this.queue.length}`);
+    log.info('voice', 'SpeechQueue queue size updated', { queueSize: this.queue.length });
   }
   
   /**
@@ -150,14 +152,14 @@ class SpeechQueue extends EventEmitter {
     
     // Nothing in queue
     if (this.queue.length === 0) {
-      console.log('[SpeechQueue] Queue empty');
+      log.info('voice', 'SpeechQueue queue empty');
       this.emit('queue_empty');
       return;
     }
     
     // Check if speak function is available
     if (!this.speakFn) {
-      console.error('[SpeechQueue] No speak function configured');
+      log.error('voice', 'SpeechQueue no speak function configured');
       return;
     }
     
@@ -165,12 +167,12 @@ class SpeechQueue extends EventEmitter {
     this.currentItem = this.queue.shift();
     this.isSpeaking = true;
     
-    console.log(`[SpeechQueue] Speaking: "${this.currentItem.text.substring(0, 50)}..."`);
+    log.info('voice', 'SpeechQueue speaking', { text: this.currentItem.text.substring(0, 50) });
     this.emit('speech_start', this.currentItem);
     
     // Set timeout protection
     this.timeoutHandle = setTimeout(() => {
-      console.warn('[SpeechQueue] Speech timeout, forcing completion');
+      log.warn('voice', 'SpeechQueue speech timeout, forcing completion');
       this.onSpeechComplete(false);
     }, this.speechTimeout);
     
@@ -181,12 +183,12 @@ class SpeechQueue extends EventEmitter {
       // Don't call onSpeechComplete here - wait for audio_done event
       // The caller should call markComplete() when audio finishes
       if (!success) {
-        console.warn('[SpeechQueue] Speak function returned false');
+        log.warn('voice', 'SpeechQueue speak function returned false');
         this.onSpeechComplete(false);
       }
       
     } catch (err) {
-      console.error('[SpeechQueue] Speech error:', err.message);
+      log.error('voice', 'SpeechQueue speech error', { error: err.message });
       this.onSpeechComplete(false);
     }
   }
@@ -197,7 +199,7 @@ class SpeechQueue extends EventEmitter {
    */
   markComplete() {
     if (this.isSpeaking) {
-      console.log('[SpeechQueue] Speech marked complete');
+      log.info('voice', 'SpeechQueue speech marked complete');
       this.onSpeechComplete(true);
     }
   }
@@ -240,13 +242,13 @@ class SpeechQueue extends EventEmitter {
       return true;
     }
     
-    console.log('[SpeechQueue] Cancelling current speech');
+    log.info('voice', 'SpeechQueue cancelling current speech');
     
     if (this.cancelFn) {
       try {
         await this.cancelFn();
       } catch (err) {
-        console.warn('[SpeechQueue] Cancel error:', err.message);
+        log.warn('voice', 'SpeechQueue cancel error', { error: err.message });
       }
     }
     
@@ -260,7 +262,7 @@ class SpeechQueue extends EventEmitter {
    * Cancel all pending speech (current + queue)
    */
   async cancelAll() {
-    console.log(`[SpeechQueue] Cancelling all (${this.queue.length} pending)`);
+    log.info('voice', 'SpeechQueue cancelling all', { pending: this.queue.length });
     
     // Resolve all pending items as cancelled
     for (const item of this.queue) {
@@ -319,7 +321,7 @@ class SpeechQueue extends EventEmitter {
    * Clear the queue (but don't cancel current speech)
    */
   clearQueue() {
-    console.log(`[SpeechQueue] Clearing queue (${this.queue.length} items)`);
+    log.info('voice', 'SpeechQueue clearing queue', { items: this.queue.length });
     
     for (const item of this.queue) {
       if (item.resolve) {

@@ -9,6 +9,8 @@ import path from 'path';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { app } = require('electron');
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 /**
  * Service for creating video slideshows from images
@@ -68,7 +70,7 @@ export class SlideshowService {
       command
         .output(output)
         .on('start', (cmd) => {
-          console.log('[SlideshowService] Slideshow creation started:', cmd);
+          log.info('video', '[SlideshowService] Slideshow creation started', { data: cmd });
           this.activeJobs.set(jobId, command);
         })
         .on('progress', (progress) => {
@@ -169,7 +171,7 @@ export class SlideshowService {
       command
         .output(output)
         .on('start', (cmd) => {
-          console.log('[SlideshowService] Crossfade slideshow started');
+          log.info('video', '[SlideshowService] Crossfade slideshow started');
           this.activeJobs.set(jobId, command);
         })
         .on('progress', (progress) => {

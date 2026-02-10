@@ -146,7 +146,7 @@ aiConversationCapture: {
   enableUndoWindow: true,
   undoWindowMinutes: 5,
   clearPauseOnRestart: true,
-  privateModeBySefault: false
+  privateModeByDefault: false
 }
 ```
 

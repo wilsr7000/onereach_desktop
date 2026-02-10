@@ -10,6 +10,8 @@
 
 const fs = require('fs');
 const path = require('path');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 
 class SnapshotStorage {
   /**
@@ -76,7 +78,7 @@ class SnapshotStorage {
       try {
         return JSON.parse(fs.readFileSync(indexPath, 'utf8'));
       } catch (error) {
-        console.error('[SnapshotStorage] Error loading index:', error);
+        log.error('app', '[SnapshotStorage] Error loading index', { error: error });
       }
     }
     
@@ -133,7 +135,7 @@ class SnapshotStorage {
 
     this._saveIndex(editorId, index);
 
-    console.log(`[SnapshotStorage] Saved snapshot: ${snapshot.name} (${editorId})`);
+    log.info('app', '[SnapshotStorage] Saved snapshot: ()', { v0: snapshot.name, v1: editorId });
     return metadata;
   }
 
@@ -156,14 +158,14 @@ class SnapshotStorage {
     const snapshotPath = this._getSnapshotPath(editorId, snapshotId);
     
     if (!fs.existsSync(snapshotPath)) {
-      console.error(`[SnapshotStorage] Snapshot not found: ${snapshotId}`);
+      log.error('app', '[SnapshotStorage] Snapshot not found:', { v0: snapshotId });
       return null;
     }
 
     try {
       return JSON.parse(fs.readFileSync(snapshotPath, 'utf8'));
     } catch (error) {
-      console.error('[SnapshotStorage] Error loading snapshot:', error);
+      log.error('app', '[SnapshotStorage] Error loading snapshot', { error: error });
       return null;
     }
   }
@@ -191,7 +193,7 @@ class SnapshotStorage {
     }
 
     this._saveIndex(editorId, newIndex);
-    console.log(`[SnapshotStorage] Deleted snapshot: ${snapshotId}`);
+    log.info('app', '[SnapshotStorage] Deleted snapshot:', { v0: snapshotId });
     return true;
   }
 
@@ -222,7 +224,7 @@ class SnapshotStorage {
       fs.writeFileSync(snapshotPath, JSON.stringify(snapshot, null, 2));
     }
 
-    console.log(`[SnapshotStorage] Renamed snapshot to: ${newName}`);
+    log.info('app', '[SnapshotStorage] Renamed snapshot to:', { v0: newName });
     return true;
   }
 
@@ -254,7 +256,7 @@ class SnapshotStorage {
       this._ensureDirectory(editorPath);
     }
 
-    console.log(`[SnapshotStorage] Cleared all snapshots for: ${editorId}`);
+    log.info('app', '[SnapshotStorage] Cleared all snapshots for:', { v0: editorId });
   }
 
   /**

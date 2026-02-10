@@ -95,7 +95,7 @@ export class AdaptiveModeManager {
   init() {
     this.setupEventListeners();
     this.startIdleCheck();
-    console.log('[AdaptiveModeManager] Initialized');
+    window.logging.info('video', 'AdaptiveModeManager Initialized');
   }
 
   /**
@@ -368,7 +368,7 @@ export class AdaptiveModeManager {
       // Emit after transition event
       this.emit('afterTransition', { from: previousMode, to: targetMode });
       
-      console.log(`[AdaptiveModeManager] Transitioned: ${previousMode} → ${targetMode}`);
+      window.logging.info('video', `AdaptiveModeManager Transitioned: ${previousMode} → ${targetMode}`);
     });
   }
 

@@ -10,6 +10,8 @@ import https from 'https';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { app, shell, BrowserWindow } = require('electron');
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 /**
  * YouTube privacy status options
@@ -70,7 +72,7 @@ export class YouTubeUploader {
       try {
         return JSON.parse(fs.readFileSync(this.settingsPath, 'utf8'));
       } catch (e) {
-        console.warn('[YouTubeUploader] Failed to load credentials:', e);
+        log.warn('video', '[YouTubeUploader] Failed to load credentials', { data: e });
       }
     }
     return {};
@@ -209,7 +211,7 @@ export class YouTubeUploader {
       });
 
       server.listen(8089, () => {
-        console.log('[YouTubeUploader] OAuth callback server listening on port 8089');
+        log.info('video', '[YouTubeUploader] OAuth callback server listening on port 8089');
         // Open browser
         shell.openExternal(authUrl.toString());
       });
@@ -255,7 +257,7 @@ export class YouTubeUploader {
     this.credentials.expiresAt = Date.now() + (tokens.expires_in * 1000);
     this.saveCredentials();
 
-    console.log('[YouTubeUploader] Tokens saved');
+    log.info('video', '[YouTubeUploader] Tokens saved');
   }
 
   /**
@@ -293,7 +295,7 @@ export class YouTubeUploader {
     this.credentials.expiresAt = Date.now() + (tokens.expires_in * 1000);
     this.saveCredentials();
 
-    console.log('[YouTubeUploader] Access token refreshed');
+    log.info('video', '[YouTubeUploader] Access token refreshed');
   }
 
   /**
@@ -356,7 +358,7 @@ export class YouTubeUploader {
 
     const fileSize = fs.statSync(videoPath).size;
     
-    console.log(`[YouTubeUploader] Starting upload: ${title} (${(fileSize / 1024 / 1024).toFixed(2)} MB)`);
+    log.info('video', '[YouTubeUploader] Starting upload: ( MB)', { v0: title, v1: (fileSize / 1024 / 1024).toFixed(2) });
 
     // Build video resource
     const videoResource = {
@@ -378,7 +380,7 @@ export class YouTubeUploader {
     // Upload the file
     const result = await this._uploadFile(uploadUrl, videoPath, fileSize, progressCallback);
     
-    console.log('[YouTubeUploader] Upload complete:', result.id);
+    log.info('video', '[YouTubeUploader] Upload complete', { data: result.id });
     
     return {
       success: true,
@@ -527,7 +529,7 @@ export class YouTubeUploader {
     delete this.credentials.refreshToken;
     delete this.credentials.expiresAt;
     this.saveCredentials();
-    console.log('[YouTubeUploader] Disconnected');
+    log.info('video', '[YouTubeUploader] Disconnected');
   }
 
   /**
@@ -543,7 +545,7 @@ export class YouTubeUploader {
       try {
         channelInfo = await this.getChannelInfo();
       } catch (e) {
-        console.warn('[YouTubeUploader] Failed to get channel info:', e);
+        log.warn('video', '[YouTubeUploader] Failed to get channel info', { data: e });
       }
     }
 

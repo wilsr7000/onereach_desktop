@@ -1,10 +1,9 @@
 const { ipcMain } = require('electron');
-const ClaudeAPI = require('./claude-api');
+const ai = require('./lib/ai-service');
 const { getSettingsManager } = require('./settings-manager');
 
 class ModuleAPIBridge {
   constructor() {
-    this.claudeAPI = new ClaudeAPI();
     this.settingsManager = getSettingsManager();
     this.setupIpcHandlers();
   }
@@ -33,39 +32,23 @@ class ModuleAPIBridge {
 
     // Generic Claude API request handler
     ipcMain.handle('module:claude:request', async (event, messages, options = {}) => {
-      const apiKey = this.getClaudeApiKey();
-      if (!apiKey) {
-        throw new Error('Claude API key not configured. Please configure it in the main app settings.');
-      }
-
       const {
-        model = this.claudeAPI.defaultModel,
         maxTokens = 1000,
         temperature = 0.7,
-        system = null
+        system = null,
+        profile = 'standard'
       } = options;
 
-      const requestData = {
-        model,
-        max_tokens: maxTokens,
+      const result = await ai.chat({
+        profile,
+        messages,
+        maxTokens,
         temperature,
-        messages
-      };
+        system,
+        feature: 'api-bridge'
+      });
 
-      if (system) {
-        requestData.system = system;
-      }
-
-      const data = await this.claudeAPI.makeRequest(`${this.claudeAPI.baseURL}/messages`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': apiKey,
-          'anthropic-version': '2023-06-01'
-        }
-      }, JSON.stringify(requestData));
-
-      return data;
+      return result;
     });
 
     // Settings access (read-only for security)

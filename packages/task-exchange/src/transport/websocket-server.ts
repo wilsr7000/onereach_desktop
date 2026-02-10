@@ -7,6 +7,8 @@ import type {
   RegisterMessage,
   RegisteredMessage,
   BidResponse,
+  TaskAckMessage,
+  TaskHeartbeatMessage,
   TaskResultMessage,
   PongMessage,
   ErrorMessage,
@@ -89,6 +91,14 @@ export class WebSocketTransport {
 
           case 'bid_response':
             this.handleBidResponse(msg as BidResponse);
+            break;
+
+          case 'task_ack':
+            this.exchange.handleTaskAck(msg as TaskAckMessage);
+            break;
+
+          case 'task_heartbeat':
+            this.exchange.handleTaskHeartbeat(msg as TaskHeartbeatMessage);
             break;
 
           case 'task_result':

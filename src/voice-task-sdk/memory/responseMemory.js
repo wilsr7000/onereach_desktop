@@ -5,6 +5,8 @@
  * undoable actions with 60-second expiry window.
  */
 
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 const responseMemory = {
   // Last response message spoken to user (for repeat)
   lastResponse: null,
@@ -20,7 +22,7 @@ const responseMemory = {
   setLastResponse(text) {
     if (text && typeof text === 'string' && text.trim()) {
       this.lastResponse = text;
-      console.log('[ResponseMemory] Stored response:', text.substring(0, 50) + (text.length > 50 ? '...' : ''));
+      log.info('voice', '[ResponseMemory] Stored response', { textPreview: text.substring(0, 50) });
     }
   },
   
@@ -40,12 +42,12 @@ const responseMemory = {
    */
   setUndoableAction(description, undoFn, expiryMs = 60000) {
     if (!undoFn || typeof undoFn !== 'function') {
-      console.warn('[ResponseMemory] setUndoableAction called without valid undoFn');
+      log.warn('voice', '[ResponseMemory] setUndoableAction called without valid undoFn');
       return;
     }
     
     if (!description || typeof description !== 'string') {
-      console.warn('[ResponseMemory] setUndoableAction called without description');
+      log.warn('voice', '[ResponseMemory] setUndoableAction called without description');
       return;
     }
     
@@ -56,7 +58,7 @@ const responseMemory = {
       createdAt: Date.now()
     };
     
-    console.log('[ResponseMemory] Stored undoable action:', description, `(expires in ${expiryMs/1000}s)`);
+    log.info('voice', '[ResponseMemory] Stored undoable action', { description, expirySeconds: expiryMs/1000 });
   },
   
   /**
@@ -66,7 +68,7 @@ const responseMemory = {
   canUndo() {
     if (!this.lastAction) return false;
     if (Date.now() >= this.lastAction.expiresAt) {
-      console.log('[ResponseMemory] Undo expired');
+      log.info('voice', '[ResponseMemory] Undo expired');
       this.lastAction = null;
       return false;
     }
@@ -97,7 +99,7 @@ const responseMemory = {
     const { description, undoFn } = this.lastAction;
     
     try {
-      console.log('[ResponseMemory] Executing undo:', description);
+      log.info('voice', '[ResponseMemory] Executing undo', { data: description });
       await undoFn();
       
       // Clear after successful undo
@@ -109,7 +111,7 @@ const responseMemory = {
         description
       };
     } catch (error) {
-      console.error('[ResponseMemory] Undo failed:', error);
+      log.error('voice', '[ResponseMemory] Undo failed', { error: error });
       return {
         success: false,
         message: "Couldn't undo that",
@@ -136,7 +138,7 @@ const responseMemory = {
   clear() {
     this.lastResponse = null;
     this.lastAction = null;
-    console.log('[ResponseMemory] Cleared');
+    log.info('voice', '[ResponseMemory] Cleared');
   },
   
   /**

@@ -114,7 +114,7 @@ export class LineScriptPanel {
     
     
     if (!this.container) {
-      console.warn('[LineScriptPanel] Container not found');
+      window.logging.warn('video', 'LineScriptPanel Container not found');
       return;
     }
     
@@ -128,7 +128,7 @@ export class LineScriptPanel {
     // Initial render
     this.render();
     
-    console.log('[LineScriptPanel] Initialized with template:', this.currentTemplateId);
+    window.logging.info('video', 'LineScriptPanel Initialized with template', { data: this.currentTemplateId });
   }
 
   /**
@@ -207,25 +207,25 @@ export class LineScriptPanel {
     // Priority 1: Live teleprompter words from main app
     if (mainApp.teleprompterWords?.length > 0) {
       this.words = [...mainApp.teleprompterWords];
-      console.log('[LineScriptPanel] Loaded', this.words.length, 'words from main app teleprompterWords');
+      window.logging.info('video', 'LineScriptPanel Loaded', { data: this.words.length, 'words from main app teleprompterWords' });
     } 
     // Priority 2: Live transcript segments from main app
     else if (mainApp.transcriptSegments?.length > 0) {
       this.transcriptSegments = mainApp.transcriptSegments;
       this.words = this.expandTranscriptToWords(this.transcriptSegments);
-      console.log('[LineScriptPanel] Loaded', this.words.length, 'words from main app transcriptSegments');
+      window.logging.info('video', 'LineScriptPanel Loaded', { data: this.words.length, 'words from main app transcriptSegments' });
     }
     // Priority 3: Check appContext snapshot (fallback)
     else if (this.app.teleprompterWords?.length > 0) {
       this.words = [...this.app.teleprompterWords];
-      console.log('[LineScriptPanel] Loaded', this.words.length, 'words from appContext teleprompterWords');
+      window.logging.info('video', 'LineScriptPanel Loaded', { data: this.words.length, 'words from appContext teleprompterWords' });
     } else if (this.app.transcriptSegments?.length > 0) {
       this.transcriptSegments = this.app.transcriptSegments;
       this.words = this.expandTranscriptToWords(this.transcriptSegments);
-      console.log('[LineScriptPanel] Loaded', this.words.length, 'words from appContext transcriptSegments');
+      window.logging.info('video', 'LineScriptPanel Loaded', { data: this.words.length, 'words from appContext transcriptSegments' });
     } else {
       this.words = [];
-      console.log('[LineScriptPanel] No transcript data available');
+      window.logging.info('video', 'LineScriptPanel No transcript data available');
     }
     
     
@@ -465,7 +465,7 @@ export class LineScriptPanel {
   addMarker(type, time, metadata = {}) {
     const markerManager = this.app.markerManager;
     if (!markerManager) {
-      console.warn('[LineScriptPanel] MarkerManager not available');
+      window.logging.warn('video', 'LineScriptPanel MarkerManager not available');
       return;
     }
     
@@ -580,7 +580,7 @@ export class LineScriptPanel {
       this.currentTemplateId = templateId;
       this.render();
       this.emit('templateChanged', { templateId });
-      console.log('[LineScriptPanel] Template changed to:', templateId);
+      window.logging.info('video', 'LineScriptPanel Template changed to', { data: templateId });
     }
   }
 
@@ -1770,7 +1770,7 @@ export class LineScriptPanel {
     if (this.app.showToast) {
       this.app.showToast(type, message);
     } else {
-      console.log(`[LineScriptPanel] ${type}: ${message}`);
+      window.logging.info('video', `LineScriptPanel ${type}: ${message}`);
     }
   }
 
@@ -1815,7 +1815,7 @@ export class LineScriptPanel {
    * @param {Object} data - Video data with duration and path
    */
   onVideoLoaded(data) {
-    console.log('[LineScriptPanel] Video loaded:', data);
+    window.logging.info('video', 'LineScriptPanel Video loaded', { data: data });
     // Reload transcript data when video loads
     this.loadTranscriptData();
     if (this.visible) {
@@ -2056,7 +2056,7 @@ export class LineScriptPanel {
           this.render();
           this.showToast(`Imported ${this.productionScriptManager.directions.length} directions`, 'success');
         } catch (error) {
-          console.error('Import error:', error);
+          window.logging.error('video', 'LineScriptPanel import error', { error: error.message || error });
           this.showToast('Failed to import production script', 'error');
         }
       };

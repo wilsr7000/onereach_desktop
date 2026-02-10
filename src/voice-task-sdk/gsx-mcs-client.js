@@ -10,6 +10,8 @@ const https = require('https');
 const http = require('http');
 const { URL } = require('url');
 const EventEmitter = require('events');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 
 /**
  * MCS Client for connecting to remote GSX servers
@@ -55,7 +57,7 @@ class GSXMCSClient extends EventEmitter {
   async connect() {
     if (this.connected || this.reconnecting) return;
     
-    console.log(`[MCSClient:${this.name}] Connecting to ${this.wsUrl}...`);
+    log.info('voice', '[MCSClient:${this.name}] Connecting to ...', { v0: this.wsUrl });
     
     try {
       this.ws = new WebSocket(this.wsUrl, {
@@ -63,7 +65,7 @@ class GSXMCSClient extends EventEmitter {
       });
       
       this.ws.on('open', () => {
-        console.log(`[MCSClient:${this.name}] Connected`);
+        log.info('voice', '[MCSClient:${this.name}] Connected');
         this.connected = true;
         this.reconnecting = false;
         this.reconnectAttempts = 0;
@@ -86,12 +88,12 @@ class GSXMCSClient extends EventEmitter {
           const message = JSON.parse(data.toString());
           this.handleMessage(message);
         } catch (e) {
-          console.error(`[MCSClient:${this.name}] Invalid message:`, e);
+          log.error('voice', '[MCSClient:${this.name}] Invalid message:', { arg0: e });
         }
       });
       
       this.ws.on('close', (code, reason) => {
-        console.log(`[MCSClient:${this.name}] Disconnected:`, code, reason?.toString());
+        log.info('voice', '[MCSClient] Disconnected', { name: this.name, code, reason: reason?.toString() });
         this.connected = false;
         this.stopHeartbeat();
         this.emit('disconnected', { code, reason: reason?.toString() });
@@ -101,12 +103,12 @@ class GSXMCSClient extends EventEmitter {
       });
       
       this.ws.on('error', (error) => {
-        console.error(`[MCSClient:${this.name}] WebSocket error:`, error.message);
+        log.error('voice', '[MCSClient:${this.name}] WebSocket error:', { arg0: error.message });
         this.emit('error', error);
       });
       
     } catch (error) {
-      console.error(`[MCSClient:${this.name}] Connection failed:`, error);
+      log.error('voice', '[MCSClient:${this.name}] Connection failed:', { arg0: error });
       this.emit('error', error);
       this.scheduleReconnect();
     }
@@ -125,7 +127,7 @@ class GSXMCSClient extends EventEmitter {
     }
     
     this.connected = false;
-    console.log(`[MCSClient:${this.name}] Disconnected`);
+    log.info('voice', '[MCSClient:${this.name}] Disconnected');
   }
   
   /**
@@ -134,7 +136,7 @@ class GSXMCSClient extends EventEmitter {
   scheduleReconnect() {
     if (this.reconnecting || this.reconnectAttempts >= this.maxReconnectAttempts) {
       if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-        console.error(`[MCSClient:${this.name}] Max reconnect attempts reached`);
+        log.error('voice', '[MCSClient:${this.name}] Max reconnect attempts reached');
         this.emit('reconnect_failed');
       }
       return;
@@ -143,7 +145,7 @@ class GSXMCSClient extends EventEmitter {
     this.reconnecting = true;
     this.reconnectAttempts++;
     
-    console.log(`[MCSClient:${this.name}] Reconnecting in ${this.reconnectIntervalMs}ms (attempt ${this.reconnectAttempts})`);
+    log.info('voice', '[MCSClient:${this.name}] Reconnecting in ms (attempt )', { v0: this.reconnectIntervalMs, v1: this.reconnectAttempts });
     
     setTimeout(() => {
       this.reconnecting = false;
@@ -177,7 +179,7 @@ class GSXMCSClient extends EventEmitter {
    */
   send(message) {
     if (!this.ws || !this.connected) {
-      console.warn(`[MCSClient:${this.name}] Not connected, cannot send`);
+      log.warn('voice', '[MCSClient:${this.name}] Not connected, cannot send');
       return false;
     }
     
@@ -185,7 +187,7 @@ class GSXMCSClient extends EventEmitter {
       this.ws.send(JSON.stringify(message));
       return true;
     } catch (error) {
-      console.error(`[MCSClient:${this.name}] Send error:`, error);
+      log.error('voice', '[MCSClient:${this.name}] Send error:', { arg0: error });
       return false;
     }
   }
@@ -202,7 +204,7 @@ class GSXMCSClient extends EventEmitter {
       case 'agents':
         // List of available agents
         this.agents = message.agents || [];
-        console.log(`[MCSClient:${this.name}] Received ${this.agents.length} agents`);
+        log.info('voice', '[MCSClient:${this.name}] Received agents', { v0: this.agents.length });
         this.emit('agents', this.agents);
         break;
         
@@ -212,7 +214,7 @@ class GSXMCSClient extends EventEmitter {
         break;
         
       case 'error':
-        console.error(`[MCSClient:${this.name}] Server error:`, message.error);
+        log.error('voice', '[MCSClient:${this.name}] Server error:', { arg0: message.error });
         this.emit('server_error', message);
         break;
         
@@ -229,7 +231,7 @@ class GSXMCSClient extends EventEmitter {
       throw new Error('No HTTP URL configured');
     }
     
-    console.log(`[MCSClient:${this.name}] Fetching agents from ${this.httpUrl}/agents`);
+    log.info('voice', '[MCSClient:${this.name}] Fetching agents from /agents', { v0: this.httpUrl });
     
     return new Promise((resolve, reject) => {
       const url = new URL(`${this.httpUrl}/agents`);
@@ -260,7 +262,7 @@ class GSXMCSClient extends EventEmitter {
             
             const json = JSON.parse(data);
             this.agents = json.agents || json || [];
-            console.log(`[MCSClient:${this.name}] Fetched ${this.agents.length} agents`);
+            log.info('voice', '[MCSClient:${this.name}] Fetched agents', { v0: this.agents.length });
             resolve(this.agents);
           } catch (e) {
             reject(new Error('Failed to parse response'));
@@ -295,7 +297,7 @@ class GSXMCSClient extends EventEmitter {
       },
     };
     
-    console.log(`[MCSClient:${this.name}] Sending task to agent ${agentId}`);
+    log.info('voice', '[MCSClient:${this.name}] Sending task to agent', { v0: agentId });
     this.send(taskMessage);
     
     // Return a promise that resolves when we get the result
@@ -345,14 +347,14 @@ class MCSClientManager {
    */
   addClient(config) {
     if (this.clients.has(config.id)) {
-      console.warn(`[MCSManager] Client ${config.id} already exists`);
+      log.warn('voice', '[MCSManager] Client already exists', { v0: config.id });
       return this.clients.get(config.id);
     }
     
     const client = new GSXMCSClient(config);
     this.clients.set(config.id, client);
     
-    console.log(`[MCSManager] Added client: ${config.name}`);
+    log.info('voice', '[MCSManager] Added client:', { v0: config.name });
     return client;
   }
   
@@ -364,7 +366,7 @@ class MCSClientManager {
     if (client) {
       client.disconnect();
       this.clients.delete(id);
-      console.log(`[MCSManager] Removed client: ${id}`);
+      log.info('voice', '[MCSManager] Removed client:', { v0: id });
     }
   }
   

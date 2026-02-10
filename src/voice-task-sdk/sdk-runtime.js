@@ -10,6 +10,8 @@
  */
 
 const crypto = require('crypto');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 
 // ============================================================================
 // QUEUE MANAGER
@@ -673,7 +675,7 @@ function createDispatcher(deps, config = {}) {
         try {
           handler(task, data);
         } catch (error) {
-          console.error(`[Dispatcher] Event handler error for ${event}:`, error);
+          log.error('voice', '[Dispatcher] Event handler error for :', { v0: event, arg0: error });
         }
       }
     }
@@ -695,7 +697,7 @@ function createDispatcher(deps, config = {}) {
     // Route to queue
     const queueName = router.route(classified);
     if (!queueName) {
-      console.warn('[Dispatcher] No route found for task:', classified.action);
+      log.warn('voice', '[Dispatcher] No route found for task', { data: classified.action });
       return null;
     }
 
@@ -716,7 +718,7 @@ function createDispatcher(deps, config = {}) {
     }
 
     emit('task:queued', task);
-    console.log(`[Dispatcher] Task queued: ${task.id} -> ${queueName}`);
+    log.info('voice', '[Dispatcher] Task queued: ->', { v0: task.id, v1: queueName });
 
     // Trigger immediate processing if running
     if (running) {
@@ -739,7 +741,7 @@ function createDispatcher(deps, config = {}) {
 
         queueManager.incrementRunning(queue.name);
         processTask(task).catch(error => {
-          console.error('[Dispatcher] Error processing task:', error);
+          log.error('voice', '[Dispatcher] Error processing task', { error: error });
         });
       }
     }
@@ -764,13 +766,13 @@ function createDispatcher(deps, config = {}) {
     // Start execution
     const startedTask = taskStore.start(task.id, agent.id);
     if (!startedTask) {
-      console.error('[Dispatcher] Failed to start task:', task.id);
+      log.error('voice', '[Dispatcher] Failed to start task', { error: task.id });
       queueManager.decrementRunning(task.queue);
       return;
     }
 
     emit('task:started', startedTask);
-    console.log(`[Dispatcher] Task started: ${task.id} by agent ${agent.name}`);
+    log.info('voice', '[Dispatcher] Task started: by agent', { v0: task.id, v1: agent.name });
 
     // Setup abort controller and timeout
     const abortController = new AbortController();
@@ -800,7 +802,7 @@ function createDispatcher(deps, config = {}) {
       if (completedTask) {
         emit('task:completed', completedTask, result);
         queueManager.incrementCompleted(task.queue);
-        console.log(`[Dispatcher] Task completed: ${task.id}`);
+        log.info('voice', '[Dispatcher] Task completed:', { v0: task.id });
       }
 
     } catch (error) {
@@ -813,7 +815,7 @@ function createDispatcher(deps, config = {}) {
       if (failedTask) {
         emit('task:failed', failedTask, error);
         queueManager.incrementFailed(task.queue);
-        console.log(`[Dispatcher] Task failed: ${task.id} - ${errorMessage}`);
+        log.info('voice', '[Dispatcher] Task failed: -', { v0: task.id, v1: errorMessage });
 
         // Check for retry
         if (failedTask.attempt < failedTask.maxAttempts) {
@@ -856,7 +858,7 @@ function createDispatcher(deps, config = {}) {
 
     processQueues();
     pollTimer = setInterval(() => processQueues(), pollIntervalMs);
-    console.log('[Dispatcher] Started');
+    log.info('voice', '[Dispatcher] Started');
   }
 
   function stop() {
@@ -875,7 +877,7 @@ function createDispatcher(deps, config = {}) {
       taskStore.cancel(taskId);
     }
     runningTasks.clear();
-    console.log('[Dispatcher] Stopped');
+    log.info('voice', '[Dispatcher] Stopped');
   }
 
   function isRunning() {
@@ -928,7 +930,7 @@ function createVoiceTaskSDK(config = {}) {
         try {
           handler(data);
         } catch (error) {
-          console.error(`[SDK] Event handler error for ${event}:`, error);
+          log.error('voice', '[SDK] Event handler error for :', { v0: event, arg0: error });
         }
       }
     }
@@ -956,7 +958,7 @@ function createVoiceTaskSDK(config = {}) {
         overflow: config.overflow || 'error',
       });
       router.setDefaultQueue(config.defaultQueue);
-      console.log(`[SDK] Created default queue: ${config.defaultQueue}`);
+      log.info('voice', '[SDK] Created default queue:', { v0: config.defaultQueue });
     } catch (e) {
       // Queue might already exist
     }

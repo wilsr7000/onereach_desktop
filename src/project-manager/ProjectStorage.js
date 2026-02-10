@@ -6,6 +6,8 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 
 class ProjectStorage {
   constructor() {
@@ -41,7 +43,7 @@ class ProjectStorage {
         return JSON.parse(data);
       }
     } catch (error) {
-      console.error('[ProjectStorage] Error loading index:', error);
+      log.error('app', '[ProjectStorage] Error loading index', { error: error });
     }
     return { projects: {}, lastModified: null };
   }
@@ -55,7 +57,7 @@ class ProjectStorage {
       index.lastModified = new Date().toISOString();
       fs.writeFileSync(this.indexFile, JSON.stringify(index, null, 2));
     } catch (error) {
-      console.error('[ProjectStorage] Error saving index:', error);
+      log.error('app', '[ProjectStorage] Error saving index', { error: error });
       throw error;
     }
   }
@@ -91,7 +93,7 @@ class ProjectStorage {
       fs.mkdirSync(projectDir, { recursive: true });
     }
     
-    console.log('[ProjectStorage] Created project:', projectId);
+    log.info('app', '[ProjectStorage] Created project', { data: projectId });
     return project;
   }
 
@@ -145,7 +147,7 @@ class ProjectStorage {
     });
     
     this.saveIndex(index);
-    console.log('[ProjectStorage] Updated project:', projectId);
+    log.info('app', '[ProjectStorage] Updated project', { data: projectId });
     return project;
   }
 
@@ -177,7 +179,7 @@ class ProjectStorage {
     delete index.projects[projectId];
     this.saveIndex(index);
     
-    console.log('[ProjectStorage] Deleted project:', projectId);
+    log.info('app', '[ProjectStorage] Deleted project', { data: projectId });
     return true;
   }
 
@@ -212,7 +214,7 @@ class ProjectStorage {
     project.modifiedAt = new Date().toISOString();
     this.saveIndex(index);
     
-    console.log('[ProjectStorage] Added asset to project:', projectId, assetId);
+    log.info('app', '[ProjectStorage] Added asset to project', { arg0: projectId, arg1: assetId });
     return asset;
   }
 
@@ -239,7 +241,7 @@ class ProjectStorage {
     project.modifiedAt = new Date().toISOString();
     this.saveIndex(index);
     
-    console.log('[ProjectStorage] Removed asset from project:', projectId, assetId);
+    log.info('app', '[ProjectStorage] Removed asset from project', { arg0: projectId, arg1: assetId });
     return true;
   }
 
@@ -309,7 +311,7 @@ class ProjectStorage {
     project.modifiedAt = new Date().toISOString();
     this.saveIndex(index);
     
-    console.log('[ProjectStorage] Created version:', versionId, 'for project:', projectId);
+    log.info('app', '[ProjectStorage] Created version', { arg0: versionId, arg1: 'for project:', arg2: projectId });
     return version;
   }
 
@@ -327,7 +329,7 @@ class ProjectStorage {
         return version;
       }
     } catch (error) {
-      console.error('[ProjectStorage] Error loading version:', error);
+      log.error('app', '[ProjectStorage] Error loading version', { error: error });
     }
     return null;
   }
@@ -373,7 +375,7 @@ class ProjectStorage {
     fs.writeFileSync(versionPath, JSON.stringify(version, null, 2));
     
     
-    console.log('[ProjectStorage] Updated version:', versionId);
+    log.info('app', '[ProjectStorage] Updated version', { data: versionId });
     return version;
   }
 
@@ -417,7 +419,7 @@ class ProjectStorage {
       }
     }
     
-    console.log('[ProjectStorage] Deleted version:', versionId);
+    log.info('app', '[ProjectStorage] Deleted version', { data: versionId });
     return true;
   }
 
@@ -452,7 +454,7 @@ class ProjectStorage {
       planning: JSON.parse(JSON.stringify(sourceVersion.planning || { characters: [], scenes: [], locations: [], storyBeats: [] }))
     });
     
-    console.log('[ProjectStorage] Branched version:', sourceVersionId, '->', newVersion.id);
+    log.info('app', '[ProjectStorage] Branched version', { arg0: sourceVersionId, arg1: '->', arg2: newVersion.id });
     return newVersion;
   }
 

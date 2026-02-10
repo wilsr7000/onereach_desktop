@@ -9,6 +9,8 @@
  */
 
 const { BrowserWindow } = require('electron');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 
 // Search window instance (reused across searches)
 let searchWindow = null;
@@ -48,7 +50,7 @@ function getSearchWindow() {
   
   // Handle window errors
   searchWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
-    console.error('[WebviewSearch] Load failed:', errorCode, errorDescription);
+    log.error('agent', 'Load failed', { errorCode, errorDescription });
   });
   
   return searchWindow;
@@ -150,11 +152,11 @@ async function search(query) {
   const cacheKey = query.toLowerCase().trim();
   const cached = searchCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    console.log('[WebviewSearch] Returning cached results for:', query);
+    log.info('agent', 'Returning cached results for', { query });
     return cached.results;
   }
   
-  console.log('[WebviewSearch] Searching for:', query);
+  log.info('agent', 'Searching for', { query });
   
   const win = getSearchWindow();
   const encodedQuery = encodeURIComponent(query);
@@ -169,7 +171,7 @@ async function search(query) {
     const timeout = setTimeout(() => {
       if (!resolved) {
         resolved = true;
-        console.log('[WebviewSearch] Search timed out');
+        log.info('agent', 'Search timed out');
         resolve([]);
       }
     }, SEARCH_TIMEOUT);
@@ -188,7 +190,7 @@ async function search(query) {
             resolved = true;
             clearTimeout(timeout);
             
-            console.log('[WebviewSearch] Found', results.length, 'results');
+            log.info('agent', 'Found', { length: results.length, detail: 'results' });
             
             // Cache results
             searchCache.set(cacheKey, {
@@ -199,7 +201,7 @@ async function search(query) {
             resolve(results);
           }
         } catch (error) {
-          console.error('[WebviewSearch] Extraction error:', error.message);
+          log.error('agent', 'Extraction error', { error: error.message });
           if (!resolved) {
             resolved = true;
             clearTimeout(timeout);
@@ -208,7 +210,7 @@ async function search(query) {
         }
       }, 2000); // Wait 2s for page to render
     }).catch(error => {
-      console.error('[WebviewSearch] Load error:', error.message);
+      log.error('agent', 'Load error', { error: error.message });
       if (!resolved) {
         resolved = true;
         clearTimeout(timeout);
@@ -223,7 +225,7 @@ async function search(query) {
  */
 function clearCache() {
   searchCache.clear();
-  console.log('[WebviewSearch] Cache cleared');
+  log.info('agent', 'Cache cleared');
 }
 
 /**

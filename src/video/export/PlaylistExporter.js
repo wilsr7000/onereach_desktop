@@ -4,12 +4,14 @@
  */
 
 import { ffmpeg } from '../core/VideoProcessor.js';
-import https from 'https';
 import fs from 'fs';
 import path from 'path';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { app } = require('electron');
+const ai = require('../../../lib/ai-service');
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 /**
  * Service for exporting video playlists
@@ -43,7 +45,7 @@ export class PlaylistExporter {
     }
 
     try {
-      console.log(`[PlaylistExporter] Exporting playlist with ${segments.length} segments`);
+      log.info('video', '[PlaylistExporter] Exporting playlist with segments', { v0: segments.length });
 
       // Extract each segment
       const segmentFiles = [];
@@ -63,7 +65,7 @@ export class PlaylistExporter {
             ])
             .output(segmentPath)
             .on('end', () => {
-              console.log(`[PlaylistExporter] Segment ${i + 1}/${segments.length} extracted`);
+              log.info('video', '[PlaylistExporter] Segment / extracted', { v0: i + 1, v1: segments.length });
               resolve();
             })
             .on('error', reject)
@@ -93,7 +95,7 @@ export class PlaylistExporter {
       // Cleanup temp files
       this.cleanupTempDir(tempDir, segmentFiles, listPath);
 
-      console.log(`[PlaylistExporter] Playlist exported to: ${output}`);
+      log.info('video', '[PlaylistExporter] Playlist exported to:', { v0: output });
 
       return {
         success: true,
@@ -164,13 +166,20 @@ ${s.notes ? `- Notes: ${s.notes}` : ''}
 Select the appropriate scenes and return JSON.`;
 
     try {
-      const response = await this.callOpenAI(systemPrompt, userPrompt, openaiKey);
+      const response = await ai.chat({
+        profile: 'fast',
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+        temperature: 0.7,
+        jsonMode: true,
+        feature: 'playlist-exporter',
+      });
 
       // Parse the AI response
-      const content = response.choices[0].message.content;
+      const content = response.content;
       const result = JSON.parse(content);
 
-      console.log('[PlaylistExporter] AI playlist result:', result);
+      log.info('video', '[PlaylistExporter] AI playlist result', { data: result });
 
       // Validate the selected IDs
       const validIds = scenes.map(s => s.id);
@@ -187,57 +196,12 @@ Select the appropriate scenes and return JSON.`;
       };
 
     } catch (error) {
-      console.error('[PlaylistExporter] AI playlist error:', error);
+      log.error('video', '[PlaylistExporter] AI playlist error', { error: error });
       return { success: false, error: error.message };
     }
   }
 
-  /**
-   * Call OpenAI API
-   * @private
-   */
-  async callOpenAI(systemPrompt, userPrompt, apiKey) {
-    return new Promise((resolve, reject) => {
-      const postData = JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-        temperature: 0.7,
-        response_format: { type: 'json_object' }
-      });
-
-      const req = https.request({
-        hostname: 'api.openai.com',
-        path: '/v1/chat/completions',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        }
-      }, (res) => {
-        let data = '';
-        res.on('data', chunk => data += chunk);
-        res.on('end', () => {
-          if (res.statusCode !== 200) {
-            try {
-              const errorJson = JSON.parse(data);
-              reject(new Error(errorJson.error?.message || `HTTP ${res.statusCode}`));
-            } catch {
-              reject(new Error(`HTTP ${res.statusCode}: ${data}`));
-            }
-            return;
-          }
-          resolve(JSON.parse(data));
-        });
-      });
-
-      req.on('error', reject);
-      req.write(postData);
-      req.end();
-    });
-  }
+  // callOpenAI removed — now uses ai-service directly in buildAIPlaylist()
 
   /**
    * Clean up temporary directory
@@ -251,7 +215,7 @@ Select the appropriate scenes and return JSON.`;
       if (listPath && fs.existsSync(listPath)) fs.unlinkSync(listPath);
       if (fs.existsSync(tempDir)) fs.rmdirSync(tempDir);
     } catch (e) {
-      console.warn('[PlaylistExporter] Cleanup error:', e);
+      log.warn('video', '[PlaylistExporter] Cleanup error', { data: e });
     }
   }
 }

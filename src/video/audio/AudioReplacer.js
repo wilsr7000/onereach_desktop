@@ -10,6 +10,8 @@ import path from 'path';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { app } = require('electron');
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 /**
  * Service for replacing audio in video files
@@ -39,7 +41,7 @@ export class AudioReplacer {
     const videoInfo = await this.videoProcessor.getVideoInfo(videoPath);
     const totalDuration = videoInfo.duration;
     
-    console.log('[AudioReplacer] Video duration:', totalDuration, 's (', (totalDuration / 60).toFixed(1), 'min)');
+    log.info('video', 'AudioReplacer video duration', { totalDuration, minutes: (totalDuration / 60).toFixed(1) });
 
     // Get audio duration to check if it matches the video segment
     const audioInfo = await new Promise((resolve, reject) => {
@@ -50,7 +52,7 @@ export class AudioReplacer {
     });
 
     const audioDuration = audioInfo.format.duration;
-    console.log('[AudioReplacer] Segment duration:', duration, 'Generated audio duration:', audioDuration);
+    log.info('video', 'AudioReplacer segment info', { segmentDuration: duration, generatedAudioDuration: audioDuration });
 
     const tempDir = path.join(this.outputDir, `temp_${Date.now()}`);
     if (!fs.existsSync(tempDir)) {
@@ -65,7 +67,7 @@ export class AudioReplacer {
 
     try {
       // Step 1: Extract video without audio (use -c:v copy for speed!)
-      console.log('[AudioReplacer] Step 1/3: Extracting video track...');
+      log.info('video', 'AudioReplacer step 1/3: extracting video track');
       if (progressCallback) {
         progressCallback({
           jobId,
@@ -80,7 +82,7 @@ export class AudioReplacer {
           .videoCodec('copy')  // Just copy, don't re-encode!
           .output(videoOnly)
           .on('start', (cmd) => {
-            console.log('[AudioReplacer] FFmpeg command:', cmd);
+            log.info('video', 'AudioReplacer FFmpeg command', { cmd });
           })
           .on('progress', (progress) => {
             if (progressCallback && progress.percent) {
@@ -93,7 +95,7 @@ export class AudioReplacer {
             }
           })
           .on('end', () => {
-            console.log('[AudioReplacer] Video track extracted');
+            log.info('video', 'AudioReplacer video track extracted');
             resolve();
           })
           .on('error', reject)
@@ -101,7 +103,7 @@ export class AudioReplacer {
       });
 
       // Step 2: Build audio track
-      console.log('[AudioReplacer] Step 2/3: Building audio track...');
+      log.info('video', 'AudioReplacer step 2/3: building audio track');
       if (progressCallback) {
         progressCallback({
           jobId,
@@ -116,7 +118,7 @@ export class AudioReplacer {
       );
 
       // Step 3: Merge video and new audio
-      console.log('[AudioReplacer] Step 3/3: Merging video and audio...');
+      log.info('video', 'AudioReplacer step 3/3: merging video and audio');
       if (progressCallback) {
         progressCallback({
           jobId,
@@ -132,7 +134,7 @@ export class AudioReplacer {
           .videoCodec('copy')  // Just copy video, don't re-encode!
           .output(outputPath)
           .on('start', (cmd) => {
-            console.log('[AudioReplacer] Merging video and audio:', cmd);
+            log.info('video', 'AudioReplacer merging video and audio', { cmd });
             this.activeJobs.set(jobId, 'merge');
           })
           .on('progress', (progress) => {
@@ -147,7 +149,7 @@ export class AudioReplacer {
             }
           })
           .on('end', () => {
-            console.log('[AudioReplacer] Merge complete!');
+            log.info('video', 'AudioReplacer merge complete');
             resolve();
           })
           .on('error', reject)
@@ -158,11 +160,11 @@ export class AudioReplacer {
       this.cleanupTempDir(tempDir);
       this.activeJobs.delete(jobId);
 
-      console.log('[AudioReplacer] Audio replacement complete:', outputPath);
+      log.info('video', 'AudioReplacer audio replacement complete', { outputPath });
       return { success: true, outputPath, jobId };
 
     } catch (error) {
-      console.error('[AudioReplacer] Error:', error);
+      log.error('video', 'AudioReplacer error', { error: error.message });
       this.cleanupTempDir(tempDir);
       this.activeJobs.delete(jobId);
       throw error;
@@ -179,13 +181,13 @@ export class AudioReplacer {
       totalDuration = videoInfo.duration;
     }
     
-    console.log('[AudioReplacer] Building audio track: before=', startTime > 0.1, 'after=', endTime < totalDuration - 0.1);
+    log.info('video', 'AudioReplacer building audio track', { hasBefore: startTime > 0.1, hasAfter: endTime < totalDuration - 0.1 });
 
     const promises = [];
 
     // Audio before (if startTime > 0)
     if (startTime > 0.1) {
-      console.log('[AudioReplacer] Extracting audio before segment (0 -', startTime, 's)');
+      log.info('video', 'AudioReplacer extracting audio before segment', { from: 0, to: startTime });
       if (progressCallback) {
         progressCallback({
           status: 'Extracting audio before segment...',
@@ -201,7 +203,7 @@ export class AudioReplacer {
             .audioCodec('libmp3lame')
             .output(audioBeforePath)
             .on('end', () => {
-              console.log('[AudioReplacer] Audio before extracted');
+              log.info('video', 'AudioReplacer audio before extracted');
               resolve();
             })
             .on('error', reject)
@@ -254,7 +256,7 @@ export class AudioReplacer {
 
     // Audio after (if endTime < total duration)
     if (endTime < totalDuration - 0.1) {
-      console.log('[AudioReplacer] Extracting audio after segment (', endTime, '-', totalDuration, 's)');
+      log.info('video', 'AudioReplacer extracting audio after segment', { from: endTime, to: totalDuration });
       if (progressCallback) {
         progressCallback({
           status: 'Extracting audio after segment...',
@@ -269,7 +271,7 @@ export class AudioReplacer {
             .audioCodec('libmp3lame')
             .output(audioAfterPath)
             .on('end', () => {
-              console.log('[AudioReplacer] Audio after extracted');
+              log.info('video', 'AudioReplacer audio after extracted');
               resolve();
             })
             .on('error', reject)
@@ -280,7 +282,7 @@ export class AudioReplacer {
 
     await Promise.all(promises);
 
-    console.log('[AudioReplacer] Concatenating audio segments...');
+    log.info('video', 'AudioReplacer concatenating audio segments');
     if (progressCallback) {
       progressCallback({
         status: 'Concatenating audio segments...',
@@ -377,7 +379,7 @@ export class AudioReplacer {
         fs.rmSync(tempDir, { recursive: true, force: true });
       }
     } catch (e) {
-      console.warn('[AudioReplacer] Failed to clean temp dir:', e);
+      log.warn('video', 'AudioReplacer failed to clean temp dir', { error: e.message });
     }
   }
 }

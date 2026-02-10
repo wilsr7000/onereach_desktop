@@ -49,7 +49,7 @@ class VoiceTaskSDK {
       onTaskCreated: options.onTaskCreated || (() => {}),
       onTaskUpdated: options.onTaskUpdated || (() => {}),
       onTaskDeleted: options.onTaskDeleted || (() => {}),
-      onError: options.onError || ((err) => console.error('[SDK]', err)),
+      onError: options.onError || ((err) => log.error('voice', '[SDK]', { error: err })),
       
       ...options
     }
@@ -76,7 +76,7 @@ class VoiceTaskSDK {
       lastTask: null
     }
 
-    console.log('[VoiceTaskSDK] Initialized (legacy mode)')
+    log.info('voice', '[VoiceTaskSDK] Initialized (legacy mode)')
   }
 
   async initializeVoice() {
@@ -93,7 +93,7 @@ class VoiceTaskSDK {
     this.voice.speechManager.initialize(this.config.apiKey)
     this.state.isInitialized = true
     
-    console.log('[VoiceTaskSDK] Voice initialized')
+    log.info('voice', '[VoiceTaskSDK] Voice initialized')
   }
 
   async startListening() {
@@ -104,7 +104,7 @@ class VoiceTaskSDK {
     const success = await this.voice.speechManager.startListening()
     if (success) {
       this.voice.isListening = true
-      console.log('[VoiceTaskSDK] Listening started')
+      log.info('voice', '[VoiceTaskSDK] Listening started')
     }
     
     return success
@@ -114,7 +114,7 @@ class VoiceTaskSDK {
     if (this.voice.speechManager) {
       this.voice.speechManager.stopListening()
       this.voice.isListening = false
-      console.log('[VoiceTaskSDK] Listening stopped')
+      log.info('voice', '[VoiceTaskSDK] Listening stopped')
     }
   }
 
@@ -122,7 +122,7 @@ class VoiceTaskSDK {
     switch (event.type) {
       case 'connected':
         this.voice.currentBackend = event.backend
-        console.log('[VoiceTaskSDK] Connected:', event.backend)
+        log.info('voice', '[VoiceTaskSDK] Connected', { data: event.backend })
         break
 
       case 'transcript_final':
@@ -142,7 +142,7 @@ class VoiceTaskSDK {
   }
 
   _processVoiceInput(text) {
-    console.log('[VoiceTaskSDK] Voice input:', text)
+    log.info('voice', '[VoiceTaskSDK] Voice input', { data: text })
     
     this.state.lastVoiceInput = text
     this.config.onVoiceInput(text)
@@ -161,7 +161,7 @@ class VoiceTaskSDK {
       if (title) {
         const task = this.tasks.add({ title, status: 'pending', priority: 'medium' })
         this.config.onTaskCreated(task)
-        console.log('[VoiceTaskSDK] Task created from voice:', task.title)
+        log.info('voice', '[VoiceTaskSDK] Task created from voice', { data: task.title })
       }
       return
     }
@@ -169,7 +169,7 @@ class VoiceTaskSDK {
     // List tasks commands
     if (normalized.includes('show tasks') || normalized.includes('list tasks') || normalized.includes('my tasks')) {
       const tasks = this.tasks.getAll()
-      console.log('[VoiceTaskSDK] Tasks requested:', tasks.length)
+      log.info('voice', '[VoiceTaskSDK] Tasks requested', { data: tasks.length })
       if (this.config.onTasksRequested) {
         this.config.onTasksRequested(tasks)
       }
@@ -185,7 +185,7 @@ class VoiceTaskSDK {
       )
       if (task) {
         this.tasks.update(task.id, { status: 'completed' })
-        console.log('[VoiceTaskSDK] Task completed:', task.title)
+        log.info('voice', '[VoiceTaskSDK] Task completed', { data: task.title })
       }
       return
     }
@@ -200,7 +200,7 @@ class VoiceTaskSDK {
       if (task) {
         this.tasks.delete(task.id)
         this.config.onTaskDeleted(task)
-        console.log('[VoiceTaskSDK] Task deleted:', task.title)
+        log.info('voice', '[VoiceTaskSDK] Task deleted', { data: task.title })
       }
       return
     }
@@ -208,7 +208,7 @@ class VoiceTaskSDK {
     // High priority tasks
     if (normalized.includes('high priority') || normalized.includes('urgent tasks')) {
       const tasks = this.tasks.getHighPriority()
-      console.log('[VoiceTaskSDK] High priority tasks:', tasks.length)
+      log.info('voice', '[VoiceTaskSDK] High priority tasks', { data: tasks.length })
       if (this.config.onTasksRequested) {
         this.config.onTasksRequested(tasks)
       }
@@ -218,7 +218,7 @@ class VoiceTaskSDK {
     // Overdue tasks
     if (normalized.includes('overdue')) {
       const tasks = this.tasks.getOverdue()
-      console.log('[VoiceTaskSDK] Overdue tasks:', tasks.length)
+      log.info('voice', '[VoiceTaskSDK] Overdue tasks', { data: tasks.length })
       if (this.config.onTasksRequested) {
         this.config.onTasksRequested(tasks)
       }
@@ -261,7 +261,7 @@ class VoiceTaskSDK {
     this.stopListening()
     this.voice.speechManager = null
     this.state.isInitialized = false
-    console.log('[VoiceTaskSDK] Destroyed')
+    log.info('voice', '[VoiceTaskSDK] Destroyed')
   }
 }
 

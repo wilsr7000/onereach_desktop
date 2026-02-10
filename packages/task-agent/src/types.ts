@@ -91,20 +91,14 @@ export interface BidDecision {
   estimatedTimeMs: number;
   
   /** How the decision was made */
-  tier: 'keyword' | 'cache' | 'llm';
+  tier: 'llm' | 'cache';
 }
 
 export interface AgentHandlers {
   /**
-   * Fast keyword matching (Tier 1)
-   * Return 0 to skip, 0.9+ for confident match
-   */
-  quickMatch?: (task: Task) => number;
-  
-  /**
-   * LLM-based evaluation (Tier 2)
-   * Called when quickMatch returns 0 < score < 0.9
-   * Return null to skip bidding
+   * LLM-based evaluation via unified-bidder.
+   * All bidding uses semantic LLM classification -- no keyword/regex shortcuts.
+   * Return null to skip bidding.
    */
   evaluate?: (task: Task, context: BiddingContext) => Promise<BidDecision | null>;
   
@@ -112,4 +106,10 @@ export interface AgentHandlers {
    * Execute the task
    */
   execute: (task: Task, context: ExecutionContext) => Promise<TaskResult>;
+
+  /**
+   * @deprecated quickMatch is no longer used -- all bidding goes through LLM evaluate.
+   * Kept for backward compatibility; the base-agent ignores this handler.
+   */
+  quickMatch?: (task: Task) => number;
 }

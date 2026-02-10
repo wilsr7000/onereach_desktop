@@ -5,6 +5,8 @@
  * Integrates with unified MicrophoneManager for mic conflict detection
  */
 
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 /**
  * Media capture class
  */
@@ -54,7 +56,7 @@ export class MediaCapture {
     // Check for mic conflict if audio is requested
     if (audio && !this.isMicAvailable()) {
       const currentUser = this.getMicUser();
-      console.warn(`[MediaCapture] Mic in use by "${currentUser}" - camera audio may conflict`);
+      log.warn('recorder', '[MediaCapture] Mic in use by "" - camera audio may conflict', { v0: currentUser });
       // Don't block, but warn - user may want to proceed anyway
     }
 
@@ -71,15 +73,15 @@ export class MediaCapture {
       // If we got audio, mark that we're using the mic
       if (audio && this.cameraStream.getAudioTracks().length > 0) {
         this.hasMicClaim = true;
-        console.log('[MediaCapture] Camera stream acquired (with mic)');
+        log.info('recorder', '[MediaCapture] Camera stream acquired (with mic)');
       } else {
-        console.log('[MediaCapture] Camera stream acquired (video only)');
+        log.info('recorder', '[MediaCapture] Camera stream acquired (video only)');
       }
       
       return this.cameraStream;
 
     } catch (error) {
-      console.error('[MediaCapture] Camera access denied:', error);
+      log.error('recorder', '[MediaCapture] Camera access denied', { error: error });
       throw error;
     }
   }
@@ -103,11 +105,11 @@ export class MediaCapture {
         audio: systemAudio
       });
 
-      console.log('[MediaCapture] Screen stream acquired');
+      log.info('recorder', '[MediaCapture] Screen stream acquired');
       return this.screenStream;
 
     } catch (error) {
-      console.error('[MediaCapture] Screen capture denied:', error);
+      log.error('recorder', '[MediaCapture] Screen capture denied', { error: error });
       throw error;
     }
   }
@@ -144,7 +146,7 @@ export class MediaCapture {
     }
 
     this.combinedStream = new MediaStream(tracks);
-    console.log('[MediaCapture] Streams combined:', tracks.length, 'tracks');
+    log.info('recorder', '[MediaCapture] Streams combined', { arg0: tracks.length, arg1: 'tracks' });
     return this.combinedStream;
   }
 
@@ -182,9 +184,9 @@ export class MediaCapture {
       // Clear mic claim
       if (this.hasMicClaim) {
         this.hasMicClaim = false;
-        console.log('[MediaCapture] Camera stopped (mic released)');
+        log.info('recorder', '[MediaCapture] Camera stopped (mic released)');
       } else {
-        console.log('[MediaCapture] Camera stopped');
+        log.info('recorder', '[MediaCapture] Camera stopped');
       }
     }
   }
@@ -196,7 +198,7 @@ export class MediaCapture {
     if (this.screenStream) {
       this.screenStream.getTracks().forEach(track => track.stop());
       this.screenStream = null;
-      console.log('[MediaCapture] Screen stopped');
+      log.info('recorder', '[MediaCapture] Screen stopped');
     }
   }
 

@@ -58,6 +58,38 @@ const tabsWithActiveLogin = new Set(); // Track tabs with queued OR in-progress 
 const LOGIN_RATE_LIMIT_MS = 30000;
 
 /**
+ * Structured auth event logger - persists to event log files AND DevTools console.
+ * All auth events are tagged with feature:'auto-login' and event:'auth:*' for filtering.
+ * Sensitive values (passwords, TOTP codes) are NEVER included.
+ * 
+ * @param {'info'|'warn'|'error'} level - Log level
+ * @param {string} message - Human-readable message
+ * @param {Object} data - Structured event data (tabId, pageType, url, etc.)
+ */
+function logAuthEvent(level, message, data = {}) {
+    const prefix = '[Auth]';
+    // DevTools console
+    if (level === 'error') {
+        console.error(`${prefix} ${message}`, Object.keys(data).length ? data : '');
+    } else if (level === 'warn') {
+        console.warn(`${prefix} ${message}`, Object.keys(data).length ? data : '');
+    } else {
+        console.log(`${prefix} ${message}`, Object.keys(data).length ? data : '');
+    }
+    // Persist to event logger via IPC
+    if (window.api && window.api.log) {
+        try {
+            const logData = { feature: 'auto-login', ...data };
+            window.api.log[level === 'warn' ? 'warn' : level === 'error' ? 'error' : 'info'](
+                `${prefix} ${message}`, logData
+            );
+        } catch (e) {
+            // Fail silently - logging should never break auth flow
+        }
+    }
+}
+
+/**
  * Show a loading overlay in a webview with countdown
  */
 function showLoginQueueOverlay(webview, waitSeconds, queuePosition) {
@@ -166,7 +198,7 @@ function hideLoginQueueOverlay(webview) {
 function queueGlobalLogin(tabId, loginFn, webview) {
     // Don't queue if this tab already has an active login (queued or in progress)
     if (tabsWithActiveLogin.has(tabId)) {
-        console.log(`[AutoLogin] Skipping queue for ${tabId} - already has active login`);
+        logAuthEvent('info', 'Queue skip - active login exists', { event: 'auth:queue-skip', tabId, reason: 'active-login' });
         return;
     }
     
@@ -185,7 +217,7 @@ function queueGlobalLogin(tabId, loginFn, webview) {
     
     tabsWithActiveLogin.add(tabId);
     globalLoginQueue.push({ tabId, loginFn, webview });
-    console.log(`[AutoLogin] Queued login for ${tabId} (queue size: ${globalLoginQueue.length})`);
+    logAuthEvent('info', 'Login queued', { event: 'auth:queued', tabId, queueSize: globalLoginQueue.length, activeLogins: tabsWithActiveLogin.size });
     
     // Check if we need to show the wait overlay
     const timeSinceLastLogin = Date.now() - globalLastLoginAttempt;
@@ -247,7 +279,7 @@ async function processGlobalLoginQueue() {
     const timeSinceLastLogin = Date.now() - globalLastLoginAttempt;
     if (timeSinceLastLogin < LOGIN_RATE_LIMIT_MS) {
         const waitTime = LOGIN_RATE_LIMIT_MS - timeSinceLastLogin;
-        console.log(`[AutoLogin] Global rate limit: waiting ${Math.ceil(waitTime/1000)}s before next login`);
+        logAuthEvent('info', `Rate limited, waiting ${Math.ceil(waitTime/1000)}s`, { event: 'auth:rate-limit', waitMs: waitTime, queueSize: globalLoginQueue.length });
         setTimeout(processGlobalLoginQueue, waitTime);
         return;
     }
@@ -269,10 +301,10 @@ async function processGlobalLoginQueue() {
     
     try {
         globalLastLoginAttempt = Date.now();
-        console.log(`[AutoLogin] Processing queued login for ${tabId}`);
+        logAuthEvent('info', 'Processing queued login', { event: 'auth:queue-process', tabId, queueRemaining: globalLoginQueue.length });
         await loginFn();
     } catch (e) {
-        console.error('[AutoLogin] Queued login error:', e);
+        logAuthEvent('error', 'Queued login error', { event: 'auth:queue-error', tabId, error: e.message });
         // On error, clear the active login so it can be retried
         clearActiveLogin(tabId);
     } finally {
@@ -281,6 +313,106 @@ async function processGlobalLoginQueue() {
         if (globalLoginQueue.length > 0) {
             setTimeout(processGlobalLoginQueue, LOGIN_RATE_LIMIT_MS);
         }
+    }
+}
+
+/**
+ * Extract accountId from a URL query parameter
+ * Used to auto-select the correct account on account selection pages
+ */
+function extractAccountIdFromUrl(url) {
+    if (!url) return null;
+    try {
+        const match = url.match(/accountId=([a-f0-9-]+)/i);
+        return match ? match[1] : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+/**
+ * Auto-select the correct account on an account selection/choice page
+ * After login + 2FA, some auth flows show an account picker. Since IDWs
+ * already specify their accountId, we can auto-select the right one.
+ */
+async function selectAccountOnPage(webview, tabId, targetAccountId) {
+    if (!targetAccountId) {
+        logAuthEvent('warn', 'No target accountId for selection', { event: 'auth:select-no-target', tabId });
+        return false;
+    }
+    
+    logAuthEvent('info', 'Attempting account selection', { event: 'auth:select-attempt', tabId, targetAccountId });
+    
+    try {
+        const result = await webview.executeJavaScript(`
+            (function() {
+                const targetId = ${JSON.stringify(targetAccountId)};
+                console.log('[AutoLogin AccountSelect] Looking for account:', targetId);
+                
+                // Strategy 1: Find links with accountId in href
+                const allLinks = document.querySelectorAll('a');
+                for (const link of allLinks) {
+                    if (link.href && link.href.includes(targetId)) {
+                        console.log('[AutoLogin AccountSelect] Found link with accountId:', link.textContent?.trim());
+                        link.click();
+                        return { success: true, method: 'link-href', text: link.textContent?.trim() };
+                    }
+                }
+                
+                // Strategy 2: Find elements with data-account-id or similar data attributes
+                const dataElements = document.querySelectorAll('[data-account-id], [data-id], [data-account]');
+                for (const el of dataElements) {
+                    const attrId = el.dataset.accountId || el.dataset.id || el.dataset.account;
+                    if (attrId === targetId) {
+                        console.log('[AutoLogin AccountSelect] Found element with data attribute');
+                        el.click();
+                        return { success: true, method: 'data-attribute' };
+                    }
+                }
+                
+                // Strategy 3: Find any clickable element whose outerHTML contains the account ID
+                const clickable = document.querySelectorAll('a, button, [role="button"], [onclick], li[class*="account"], div[class*="account"], .account-item, .account-card, .account-option');
+                for (const el of clickable) {
+                    const html = el.outerHTML || '';
+                    if (html.includes(targetId)) {
+                        console.log('[AutoLogin AccountSelect] Found clickable element containing accountId:', el.tagName, el.textContent?.trim()?.substring(0, 50));
+                        el.click();
+                        return { success: true, method: 'html-content-match' };
+                    }
+                }
+                
+                // Strategy 4: Find forms or hidden inputs with the accountId
+                const forms = document.querySelectorAll('form');
+                for (const form of forms) {
+                    const html = form.outerHTML || '';
+                    if (html.includes(targetId)) {
+                        const submitBtn = form.querySelector('button[type="submit"], button, input[type="submit"]');
+                        if (submitBtn) {
+                            console.log('[AutoLogin AccountSelect] Found form with accountId, clicking submit');
+                            submitBtn.click();
+                            return { success: true, method: 'form-submit' };
+                        }
+                    }
+                }
+                
+                // Log what we see for debugging
+                const visibleText = document.body ? document.body.innerText.substring(0, 500) : '';
+                console.log('[AutoLogin AccountSelect] Could not find account. Page text:', visibleText);
+                
+                return { success: false, reason: 'no_matching_account', visibleClickable: clickable.length };
+            })()
+        `);
+        
+        if (result.success) {
+            logAuthEvent('info', 'Account selected successfully', { event: 'auth:account-selected', tabId, targetAccountId, method: result.method, text: result.text });
+            markAutoLoginComplete(tabId, true);
+            return true;
+        }
+        logAuthEvent('warn', 'Account not found on page', { event: 'auth:account-missing', tabId, targetAccountId, reason: result.reason, clickableCount: result.visibleClickable });
+        return false;
+    } catch (e) {
+        logAuthEvent('error', 'Account selection error', { event: 'auth:select-error', tabId, error: e.message });
+        return false;
     }
 }
 
@@ -406,6 +538,7 @@ function markFormFilled(tabId) {
  * Mark auto-login as complete for a tab
  */
 function markAutoLoginComplete(tabId, success) {
+    logAuthEvent(success ? 'info' : 'warn', `Login flow ${success ? 'completed' : 'ended without success'}`, { event: success ? 'auth:complete' : 'auth:incomplete', tabId, success });
     autoLoginState.set(tabId, {
         ...(autoLoginState.get(tabId) || {}),
         inProgress: false,
@@ -439,12 +572,16 @@ async function attemptAutoLoginWithRetry(webview, url, tabId, attempt) {
     const maxAttempts = 5;
     const retryDelay = 1000;
     
+    if (attempt === 0) {
+        logAuthEvent('info', 'Login flow started', { event: 'auth:flow-start', tabId, url });
+    }
+    
     // Get the CURRENT URL from the webview (page may have navigated during queue wait)
     let currentUrl;
     try {
         currentUrl = await webview.executeJavaScript('window.location.href');
     } catch (e) {
-        console.log(`[AutoLogin] ${tabId} - webview not accessible, skipping`);
+        logAuthEvent('warn', 'Webview not accessible', { event: 'auth:webview-error', tabId });
         markAutoLoginGaveUp(tabId);
         return;
     }
@@ -466,7 +603,7 @@ async function attemptAutoLoginWithRetry(webview, url, tabId, attempt) {
         markAutoLoginInProgress(tabId, currentUrl);
     }
     
-    console.log(`[AutoLogin] Attempt ${attempt + 1}/${maxAttempts} for ${tabId} (url: ${currentUrl})`);
+    logAuthEvent('info', `Retry attempt ${attempt + 1}/${maxAttempts}`, { event: 'auth:retry', tabId, attempt: attempt + 1, maxAttempts, url: currentUrl });
     
     // Check if form fields exist yet
     const formInfo = await webview.executeJavaScript(`
@@ -512,27 +649,27 @@ async function attemptAutoLoginWithRetry(webview, url, tabId, attempt) {
         })()
     `).catch(() => ({ location: 'error', crossOrigin: false }));
     
-    console.log(`[AutoLogin] Form info for ${tabId}:`, formInfo);
+    logAuthEvent('info', `Form detection: ${formInfo.location}`, { event: 'auth:form-detect', tabId, location: formInfo.location, crossOrigin: formInfo.crossOrigin });
     
     if (formInfo.location === 'main') {
         // Form is in main document, proceed with normal login
         await attemptAutoLogin(webview, url, tabId);
     } else if (formInfo.location.startsWith('iframe-')) {
         // Form is in a same-origin iframe
-        console.log(`[AutoLogin] Form is in same-origin iframe, attempting iframe login...`);
+        logAuthEvent('info', 'Same-origin iframe form, filling', { event: 'auth:iframe-login', tabId });
         await attemptIframeAutoLogin(webview, url, tabId);
     } else if (formInfo.crossOrigin) {
         // Cross-origin iframe detected - use main process to access it
-        console.log(`[AutoLogin] Cross-origin auth iframe detected, using main process...`);
+        logAuthEvent('info', 'Cross-origin auth iframe, using IPC', { event: 'auth:cross-origin-login', tabId });
         await attemptCrossOriginAutoLogin(webview, tabId);
     } else if (formInfo.location === 'none' && attempt < maxAttempts - 1) {
         // No form yet, retry after delay
-        console.log(`[AutoLogin] No form found, retrying in ${retryDelay}ms...`);
+        logAuthEvent('info', 'No form found yet, will retry', { event: 'auth:form-pending', tabId, retryMs: retryDelay });
         setTimeout(() => {
             attemptAutoLoginWithRetry(webview, url, tabId, attempt + 1);
         }, retryDelay);
     } else {
-        console.log(`[AutoLogin] No form found after ${attempt + 1} attempts, giving up`);
+        logAuthEvent('warn', 'No form found, giving up', { event: 'auth:gave-up', tabId, attempts: attempt + 1 });
         markAutoLoginGaveUp(tabId);
     }
 }
@@ -544,11 +681,11 @@ async function attemptIframeAutoLogin(webview, url, tabId) {
     try {
         const credentials = await window.api.invoke('onereach:get-credentials');
         if (!credentials || !credentials.email || !credentials.password) {
-            console.log(`[AutoLogin] No credentials configured`);
+            logAuthEvent('warn', 'No credentials for iframe login', { event: 'auth:iframe-no-credentials', tabId });
             return;
         }
         
-        console.log(`[AutoLogin] Filling iframe login form for ${credentials.email}`);
+        logAuthEvent('info', 'Filling iframe login form', { event: 'auth:iframe-fill', tabId, email: credentials.email });
         
         const filled = await webview.executeJavaScript(`
             (function() {
@@ -608,10 +745,13 @@ async function attemptIframeAutoLogin(webview, url, tabId) {
         
         // Mark form as filled if successful
         if (filled) {
+            logAuthEvent('info', 'Iframe login form filled', { event: 'auth:iframe-filled', tabId });
             markFormFilled(tabId);
+        } else {
+            logAuthEvent('warn', 'Iframe login form not found', { event: 'auth:iframe-not-found', tabId });
         }
     } catch (error) {
-        console.error(`[AutoLogin] Iframe login error:`, error);
+        logAuthEvent('error', 'Iframe login error', { event: 'auth:iframe-error', tabId, error: error.message });
     }
 }
 
@@ -624,13 +764,13 @@ async function attemptCrossOriginAutoLogin(webview, tabId) {
         // Get credentials
         const credentials = await window.api.invoke('onereach:get-credentials');
         if (!credentials || !credentials.email || !credentials.password) {
-            console.log(`[AutoLogin] No credentials configured`);
+            logAuthEvent('warn', 'No credentials for cross-origin login', { event: 'auth:xorigin-no-creds', tabId });
             return;
         }
         
         // Get the webview's webContentsId
         const webContentsId = webview.getWebContentsId();
-        console.log(`[AutoLogin] Using webContentsId: ${webContentsId} for cross-origin login`);
+        logAuthEvent('info', 'Cross-origin login via IPC', { event: 'auth:xorigin-start', tabId, webContentsId });
         
         // Build the login script
         const loginScript = `
@@ -731,18 +871,18 @@ async function attemptCrossOriginAutoLogin(webview, tabId) {
             
             // Mark form as filled to prevent re-attempts during auth flow
             markFormFilled(tabId);
+            logAuthEvent('info', 'Cross-origin login form filled, monitoring for 2FA', { event: 'auth:xorigin-filled', tabId });
 
             // After login submission, monitor for 2FA page
-            console.log('[AutoLogin] Setting up 2FA monitoring...');
             setTimeout(() => {
                 attemptCrossOrigin2FA(webview, tabId, 0);
             }, 2000);  // Wait 2 seconds for login to process
         } else {
-            console.log('[AutoLogin] Cross-origin login failed:', result.error);
+            logAuthEvent('warn', 'Cross-origin login failed', { event: 'auth:xorigin-failed', tabId, error: result.error });
         }
         
     } catch (error) {
-        console.error(`[AutoLogin] Cross-origin login error:`, error);
+        logAuthEvent('error', 'Cross-origin login error', { event: 'auth:xorigin-error', tabId, error: error.message });
     }
 }
 
@@ -756,12 +896,12 @@ async function attemptCrossOrigin2FA(webview, tabId, attempt) {
     // Check if 2FA already completed for this tab
     const state = autoLoginState.get(tabId);
     if (state && state.twoFAComplete) {
-        console.log(`[AutoLogin 2FA] Skipping ${tabId} - 2FA already complete`);
+        logAuthEvent('info', 'Cross-origin 2FA already complete', { event: 'auth:xorigin-2fa-done', tabId });
         return;
     }
     
     try {
-        console.log(`[AutoLogin 2FA] Attempt ${attempt + 1}/${maxAttempts} for ${tabId}`);
+        logAuthEvent('info', `Cross-origin 2FA attempt ${attempt + 1}/${maxAttempts}`, { event: 'auth:xorigin-2fa-attempt', tabId, attempt: attempt + 1, maxAttempts });
         
         // Get the webview's webContentsId
         const webContentsId = webview.getWebContentsId();
@@ -825,10 +965,8 @@ async function attemptCrossOrigin2FA(webview, tabId, attempt) {
             script: detect2FAScript
         });
         
-        console.log('[AutoLogin 2FA] Detection result:', detectResult);
-        
         if (!detectResult.success) {
-            console.log('[AutoLogin 2FA] Could not access auth frame');
+            logAuthEvent('warn', 'Cannot access auth frame for 2FA', { event: 'auth:xorigin-2fa-no-frame', tabId });
             if (attempt < maxAttempts - 1) {
                 setTimeout(() => attemptCrossOrigin2FA(webview, tabId, attempt + 1), retryDelay);
             }
@@ -839,26 +977,26 @@ async function attemptCrossOrigin2FA(webview, tabId, attempt) {
         
         if (!detection || !detection.is2FAPage) {
             if (attempt < maxAttempts - 1) {
-                console.log(`[AutoLogin 2FA] Not on 2FA page yet, retrying in ${retryDelay}ms...`);
+                logAuthEvent('info', 'Not on 2FA page yet, retrying', { event: 'auth:xorigin-2fa-waiting', tabId, reason: detection?.reason });
                 setTimeout(() => attemptCrossOrigin2FA(webview, tabId, attempt + 1), retryDelay);
             } else {
-                console.log('[AutoLogin 2FA] Not on 2FA page after max attempts (login may have succeeded without 2FA)');
+                logAuthEvent('info', '2FA page not found after max retries (may not be required)', { event: 'auth:xorigin-2fa-skipped', tabId });
             }
             return;
         }
         
         // We're on the 2FA page - get the TOTP code
-        console.log('[AutoLogin 2FA] On 2FA page, getting TOTP code...');
+        logAuthEvent('info', 'Cross-origin 2FA page detected, requesting code', { event: 'auth:xorigin-2fa-detected', tabId });
         
         const codeResult = await window.api.invoke('totp:get-current-code');
         
         if (!codeResult || !codeResult.success) {
-            console.error('[AutoLogin 2FA] Failed to get TOTP code:', codeResult?.error);
+            logAuthEvent('error', 'Cross-origin TOTP code failed', { event: 'auth:xorigin-totp-failed', tabId, error: codeResult?.error });
             return;
         }
         
         const totpCode = codeResult.code;
-        console.log('[AutoLogin 2FA] Got TOTP code, filling form...');
+        logAuthEvent('info', 'TOTP code ready, filling cross-origin 2FA', { event: 'auth:xorigin-2fa-fill', tabId, timeRemaining: codeResult.timeRemaining });
         
         // Fill in the 2FA code
         const fill2FAScript = `
@@ -952,10 +1090,8 @@ async function attemptCrossOrigin2FA(webview, tabId, attempt) {
             script: fill2FAScript
         });
         
-        console.log('[AutoLogin 2FA] Fill result:', fillResult);
-
         if (fillResult.success && fillResult.result?.success) {
-            console.log('[AutoLogin 2FA] Successfully filled 2FA code!');
+            logAuthEvent('info', 'Cross-origin 2FA filled successfully', { event: 'auth:xorigin-2fa-filled', tabId, method: fillResult.result.method });
             // Mark 2FA as complete to prevent further attempts
             autoLoginState.set(tabId, {
                 ...(autoLoginState.get(tabId) || {}),
@@ -963,12 +1099,214 @@ async function attemptCrossOrigin2FA(webview, tabId, attempt) {
                 loginComplete: true,
                 completedAt: Date.now()
             });
+            logAuthEvent('info', 'Cross-origin login flow complete', { event: 'auth:xorigin-complete', tabId });
         } else {
-            console.log('[AutoLogin 2FA] Failed to fill 2FA code');
+            logAuthEvent('warn', 'Cross-origin 2FA fill failed', { event: 'auth:xorigin-2fa-fill-failed', tabId });
         }
         
     } catch (error) {
-        console.error('[AutoLogin 2FA] Error:', error);
+        logAuthEvent('error', 'Cross-origin 2FA error', { event: 'auth:xorigin-2fa-error', tabId, error: error.message });
+    }
+}
+
+/**
+ * Fill 2FA/TOTP code on the current page
+ * Shared by both the main document login flow and direct 2FA page detection
+ */
+async function fill2FACode(webview, tabId, credentials) {
+    if (!credentials.totpSecret) {
+        logAuthEvent('warn', 'No TOTP secret configured', { event: 'auth:no-totp-secret', tabId });
+        return;
+    }
+    
+    // Get current TOTP code
+    logAuthEvent('info', 'Requesting TOTP code', { event: 'auth:totp-request', tabId });
+    const codeResult = await window.api.invoke('totp:get-current-code');
+    
+    if (!codeResult || !codeResult.success) {
+        logAuthEvent('error', 'TOTP code generation failed', { event: 'auth:totp-failed', tabId, error: codeResult?.error });
+        return;
+    }
+    
+    logAuthEvent('info', 'Filling 2FA code', { event: 'auth:2fa-filling', tabId, timeRemaining: codeResult.timeRemaining });
+    
+    const filled = await webview.executeJavaScript(`
+        (function() {
+            const code = ${JSON.stringify(codeResult.code)};
+            
+            const totpInput = document.querySelector(
+                'input[name="totp"], input[name="code"], input[name="otp"], ' +
+                'input[autocomplete="one-time-code"], ' +
+                'input[inputmode="numeric"][maxlength="6"], ' +
+                'input[placeholder*="code" i], input[placeholder*="2fa" i], ' +
+                'input[type="text"][maxlength="6"], input[type="number"][maxlength="6"]'
+            );
+            
+            if (!totpInput) {
+                console.log('[AutoLogin 2FA] No TOTP input found');
+                return false;
+            }
+            
+            console.log('[AutoLogin 2FA] Found TOTP input:', totpInput.name || totpInput.id || totpInput.type);
+            
+            totpInput.focus();
+            
+            // React compatibility - set native value
+            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                window.HTMLInputElement.prototype, 'value'
+            ).set;
+            if (nativeInputValueSetter) {
+                nativeInputValueSetter.call(totpInput, code);
+            } else {
+                totpInput.value = code;
+            }
+            totpInput.dispatchEvent(new Event('input', { bubbles: true }));
+            totpInput.dispatchEvent(new Event('change', { bubbles: true }));
+            totpInput.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+            
+            // Auto-submit after a short delay
+            setTimeout(function() {
+                const submitBtn = document.querySelector(
+                    'button[type="submit"], input[type="submit"]'
+                ) || document.querySelector('form button:not([type="button"])');
+                
+                if (submitBtn) {
+                    console.log('[AutoLogin 2FA] Clicking submit:', submitBtn.textContent || submitBtn.type);
+                    submitBtn.click();
+                } else {
+                    // Try finding verify/continue button by text
+                    const buttons = document.querySelectorAll('button');
+                    for (const btn of buttons) {
+                        const text = (btn.textContent || '').toLowerCase();
+                        if (text.includes('verify') || text.includes('confirm') || text.includes('submit') || text.includes('continue')) {
+                            console.log('[AutoLogin 2FA] Clicking button by text:', btn.textContent);
+                            btn.click();
+                            break;
+                        }
+                    }
+                }
+            }, 300);
+            
+            return true;
+        })()
+    `);
+    
+    if (filled) {
+        logAuthEvent('info', '2FA code filled successfully', { event: 'auth:2fa-filled', tabId });
+    } else {
+        logAuthEvent('warn', '2FA input not found on page', { event: 'auth:2fa-input-missing', tabId });
+    }
+    
+    return filled;
+}
+
+/**
+ * Monitor post-auth flow: handles 2FA → account selection → success
+ * Continuously polls the page to detect and handle each step of the auth flow.
+ * The full flow can be: login → 2FA → account-select → success
+ */
+async function monitorPostAuth(webview, tabId, originalUrl, credentials, targetAccountId, attempt) {
+    const maxAttempts = 12;  // Up to ~18s monitoring (covers 2FA + account selection)
+    const delay = 1500;
+    
+    if (attempt >= maxAttempts) {
+        logAuthEvent('warn', 'Post-auth monitor exhausted', { event: 'auth:monitor-exhausted', tabId, maxAttempts });
+        markAutoLoginComplete(tabId, false);
+        return;
+    }
+    
+    try {
+        // Check if already completed
+        const state = autoLoginState.get(tabId);
+        if (state && state.loginComplete) {
+            logAuthEvent('info', 'Monitor: login already complete', { event: 'auth:monitor-done', tabId });
+            return;
+        }
+        
+        const curUrl = await webview.executeJavaScript('window.location.href');
+        
+        // If no longer on auth page, login flow succeeded
+        if (!isAuthPage(curUrl)) {
+            logAuthEvent('info', 'Login succeeded - navigated away from auth', { event: 'auth:login-success', tabId, finalUrl: curUrl });
+            markAutoLoginComplete(tabId, true);
+            return;
+        }
+        
+        // Detect current page type
+        const curPageType = await webview.executeJavaScript(`
+            (function() {
+                // Check for 2FA inputs
+                var totpInputs = document.querySelectorAll(
+                    'input[name="totp"], input[name="code"], input[name="otp"], ' +
+                    'input[autocomplete="one-time-code"], ' +
+                    'input[inputmode="numeric"][maxlength="6"], ' +
+                    'input[placeholder*="code" i], input[placeholder*="2fa" i], ' +
+                    'input[placeholder*="authenticator" i]'
+                );
+                var visible2FA = Array.from(totpInputs).find(function(input) {
+                    var rect = input.getBoundingClientRect();
+                    return rect.width > 0 && rect.height > 0;
+                });
+                if (visible2FA) return '2fa';
+                
+                // Check for login form (still on login page)
+                var passwordInput = document.querySelector('input[type="password"]');
+                if (passwordInput) return 'login';
+                
+                // Check for account selection page
+                var pageText = document.body ? document.body.innerText.toLowerCase() : '';
+                var hasAccountText = pageText.includes('choose') || pageText.includes('select') || 
+                                    pageText.includes('switch') || pageText.includes('account');
+                var accountLinks = document.querySelectorAll('a[href*="accountId"], [data-account-id], [data-account], .account-item, .account-card');
+                var clickableItems = document.querySelectorAll('a, button, [role="button"]');
+                var accountClickable = Array.from(clickableItems).filter(function(el) {
+                    var html = el.outerHTML || '';
+                    return html.includes('account') || html.includes('Account');
+                });
+                
+                if (accountLinks.length > 0 || (hasAccountText && accountClickable.length > 0)) {
+                    return 'account-select';
+                }
+                
+                return 'other';
+            })()
+        `);
+        
+        logAuthEvent('info', `Monitor poll ${attempt + 1}/${maxAttempts}: ${curPageType}`, { event: 'auth:monitor-poll', tabId, attempt: attempt + 1, maxAttempts, pageType: curPageType });
+        
+        if (curPageType === '2fa') {
+            logAuthEvent('info', 'Monitor detected 2FA page', { event: 'auth:monitor-2fa', tabId });
+            const filled = await fill2FACode(webview, tabId, credentials);
+            if (filled) {
+                // After 2FA, continue monitoring for account selection or success
+                setTimeout(() => monitorPostAuth(webview, tabId, originalUrl, credentials, targetAccountId, attempt + 1), 2000);
+            } else {
+                // Couldn't fill 2FA, retry
+                setTimeout(() => monitorPostAuth(webview, tabId, originalUrl, credentials, targetAccountId, attempt + 1), delay);
+            }
+        } else if (curPageType === 'account-select') {
+            if (targetAccountId) {
+                logAuthEvent('info', 'Monitor detected account selection', { event: 'auth:monitor-account-select', tabId, targetAccountId });
+                const selected = await selectAccountOnPage(webview, tabId, targetAccountId);
+                if (!selected) {
+                    logAuthEvent('warn', 'Account not found on page, retrying', { event: 'auth:account-not-found', tabId, targetAccountId });
+                    setTimeout(() => monitorPostAuth(webview, tabId, originalUrl, credentials, targetAccountId, attempt + 1), delay);
+                }
+                // If selected, selectAccountOnPage already called markAutoLoginComplete
+            } else {
+                logAuthEvent('warn', 'Account selection page but no accountId to match', { event: 'auth:no-target-account', tabId, url: originalUrl });
+                markAutoLoginComplete(tabId, false);
+            }
+        } else if (curPageType === 'login') {
+            // Still on login page, page hasn't navigated yet
+            setTimeout(() => monitorPostAuth(webview, tabId, originalUrl, credentials, targetAccountId, attempt + 1), delay);
+        } else {
+            // Unknown state (might be transitioning), keep monitoring
+            setTimeout(() => monitorPostAuth(webview, tabId, originalUrl, credentials, targetAccountId, attempt + 1), delay);
+        }
+    } catch (e) {
+        logAuthEvent('error', 'Monitor error', { event: 'auth:monitor-error', tabId, error: e.message });
+        setTimeout(() => monitorPostAuth(webview, tabId, originalUrl, credentials, targetAccountId, attempt + 1), delay);
     }
 }
 
@@ -977,16 +1315,15 @@ async function attemptCrossOrigin2FA(webview, tabId, attempt) {
  * Detects login and 2FA pages and fills them automatically
  */
 async function attemptAutoLogin(webview, url, tabId) {
-    console.log(`[AutoLogin] Checking URL: ${url} (tab: ${tabId})`);
+    logAuthEvent('info', 'Checking auth page', { event: 'auth:check-page', tabId, url });
     
     try {
         // Check if auto-login is enabled
         const settings = await window.api.getSettings();
         const autoLoginSettings = settings.autoLoginSettings || {};
-        console.log(`[AutoLogin] Settings loaded, enabled: ${autoLoginSettings.enabled !== false}`);
         
         if (autoLoginSettings.enabled === false) {
-            console.log(`[AutoLogin] Auto-login disabled, skipping`);
+            logAuthEvent('info', 'Auto-login disabled in settings', { event: 'auth:disabled', tabId });
             return;
         }
         
@@ -1043,11 +1380,28 @@ async function attemptAutoLogin(webview, url, tabId) {
                     return 'password-only';
                 }
                 
+                // Check for account selection page (appears after login/2FA)
+                // No password field, no 2FA field, but has clickable account items
+                var pageText = document.body ? document.body.innerText.toLowerCase() : '';
+                var hasAccountText = pageText.includes('choose') || pageText.includes('select') || 
+                                    pageText.includes('switch') || pageText.includes('account');
+                var accountLinks = document.querySelectorAll('a[href*="accountId"], [data-account-id], [data-account], .account-item, .account-card');
+                var clickableItems = document.querySelectorAll('a, button, [role="button"]');
+                var accountClickable = Array.from(clickableItems).filter(function(el) {
+                    var html = el.outerHTML || '';
+                    return html.includes('account') || html.includes('Account');
+                });
+                
+                if (accountLinks.length > 0 || (hasAccountText && accountClickable.length > 0)) {
+                    console.log('[AutoLogin] Account selection page detected (links:', accountLinks.length, 'text:', hasAccountText, ')');
+                    return 'account-select';
+                }
+                
                 return 'other';
             })()
         `);
         
-        console.log(`[AutoLogin] Page type for ${tabId}: ${pageType}`);
+        logAuthEvent('info', `Page type detected: ${pageType}`, { event: 'auth:page-type', tabId, pageType, url });
         
         if (pageType === 'other') {
             return; // Not a login page, nothing to do
@@ -1057,12 +1411,14 @@ async function attemptAutoLogin(webview, url, tabId) {
         const credentials = await window.api.invoke('onereach:get-credentials');
         
         if (!credentials || !credentials.email || !credentials.password) {
-            console.log(`[AutoLogin] No credentials configured`);
+            logAuthEvent('warn', 'No credentials configured', { event: 'auth:no-credentials', tabId });
             return;
         }
         
+        logAuthEvent('info', 'Credentials retrieved', { event: 'auth:credentials-ok', tabId, email: credentials.email, has2FA: !!credentials.totpSecret });
+        
         if (pageType === 'login' || pageType === 'password-only') {
-            console.log(`[AutoLogin] Filling ${pageType} form for ${credentials.email}`);
+            logAuthEvent('info', `Filling ${pageType} form`, { event: 'auth:fill-login', tabId, pageType, email: credentials.email });
             
             await webview.executeJavaScript(`
                 (function() {
@@ -1134,64 +1490,43 @@ async function attemptAutoLogin(webview, url, tabId) {
                 })()
             `);
             
+            // Track that login form was filled and clear active login lock
+            markFormFilled(tabId);
+            clearActiveLogin(tabId);
+            
+            logAuthEvent('info', 'Login form filled, submit scheduled', { event: 'auth:form-filled', tabId, email: credentials.email });
+            
+            // Extract accountId from original URL for account selection
+            const targetAccountId = extractAccountIdFromUrl(url);
+            
+            // Monitor for 2FA, account selection, or success after login form submission
+            // Wait 2s for the login submit (which has a 500ms delay) to process
+            logAuthEvent('info', 'Starting post-login monitor', { event: 'auth:monitor-start', tabId, targetAccountId });
+            setTimeout(() => monitorPostAuth(webview, tabId, url, credentials, targetAccountId, 0), 2000);
+            
         } else if (pageType === '2fa') {
-            if (!credentials.totpSecret) {
-                console.log(`[AutoLogin] No TOTP secret configured, cannot fill 2FA`);
-                return;
+            logAuthEvent('info', '2FA page detected directly, filling code', { event: 'auth:2fa-direct', tabId });
+            const filled = await fill2FACode(webview, tabId, credentials);
+            if (filled) {
+                // After 2FA, monitor for account selection or success
+                const targetAccountId = extractAccountIdFromUrl(url);
+                logAuthEvent('info', '2FA filled, starting post-2FA monitor', { event: 'auth:post-2fa-monitor', tabId, targetAccountId });
+                setTimeout(() => monitorPostAuth(webview, tabId, url, credentials, targetAccountId, 0), 2000);
+            } else {
+                logAuthEvent('warn', '2FA fill failed', { event: 'auth:2fa-fill-failed', tabId });
             }
-            
-            // Get current TOTP code
-            const codeResult = await window.api.invoke('totp:get-current-code');
-            
-            if (!codeResult.success) {
-                console.error(`[AutoLogin] Failed to get TOTP code: ${codeResult.error}`);
-                return;
+        } else if (pageType === 'account-select') {
+            const targetAccountId = extractAccountIdFromUrl(url);
+            logAuthEvent('info', 'Account selection page detected directly', { event: 'auth:account-select-direct', tabId, targetAccountId });
+            if (targetAccountId) {
+                await selectAccountOnPage(webview, tabId, targetAccountId);
+            } else {
+                logAuthEvent('warn', 'Account selection page but no accountId in URL', { event: 'auth:no-account-id', tabId, url });
             }
-            
-            console.log(`[AutoLogin] Filling 2FA code`);
-            
-            await webview.executeJavaScript(`
-                (function() {
-                    const code = ${JSON.stringify(codeResult.code)};
-                    
-                    const totpInput = document.querySelector(
-                        'input[name="totp"], input[name="code"], input[name="otp"], ' +
-                        'input[autocomplete="one-time-code"], ' +
-                        'input[inputmode="numeric"][maxlength="6"], ' +
-                        'input[placeholder*="code" i], input[placeholder*="2fa" i], ' +
-                        'input[type="text"][maxlength="6"], input[type="number"][maxlength="6"]'
-                    );
-                    
-                    if (!totpInput) return false;
-                    
-                    totpInput.focus();
-                    totpInput.value = code;
-                    totpInput.dispatchEvent(new Event('input', { bubbles: true }));
-                    totpInput.dispatchEvent(new Event('change', { bubbles: true }));
-                    
-                    // React compatibility
-                    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-                        window.HTMLInputElement.prototype, 'value'
-                    ).set;
-                    nativeInputValueSetter.call(totpInput, code);
-                    totpInput.dispatchEvent(new Event('input', { bubbles: true }));
-                    
-                    // Auto-submit
-                    const submitBtn = document.querySelector(
-                        'button[type="submit"], input[type="submit"]'
-                    ) || document.querySelector('form button');
-                    
-                    if (submitBtn) {
-                        setTimeout(() => submitBtn.click(), 300);
-                    }
-                    
-                    return true;
-                })()
-            `);
         }
         
     } catch (error) {
-        console.error(`[AutoLogin] Error:`, error);
+        logAuthEvent('error', 'Auto-login error', { event: 'auth:error', tabId, error: error.message });
     }
 }
 
@@ -1706,7 +2041,7 @@ document.addEventListener('DOMContentLoaded', () => {
             debugSessionIsolation();
         });
     } else {
-        console.error('Debug button not found in DOM');
+        console.debug('Debug button not in DOM (hidden by design)');
     }
     
     // Add Black Hole Widget button handler
@@ -2447,8 +2782,12 @@ function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = 
     
     if (environment) {
         (async () => {
+            let authStatus = { hasToken: false, injected: false, error: null };
             try {
                 const hasToken = await window.api.invoke('multi-tenant:has-token', environment);
+                authStatus.hasToken = hasToken;
+                console.log(`[Tab] Token check for ${environment}: hasToken=${hasToken}`);
+                
                 if (hasToken) {
                     console.log(`[Tab] Injecting ${environment} multi-tenant token into ${partitionName}`);
                     const result = await window.api.invoke('multi-tenant:inject-token', {
@@ -2457,6 +2796,7 @@ function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = 
                     });
                     
                     if (result.success) {
+                        authStatus.injected = true;
                         // Pre-register partition for refresh propagation
                         await window.api.invoke('multi-tenant:register-partition', {
                             environment,
@@ -2464,18 +2804,57 @@ function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = 
                         });
                         console.log(`[Tab] Successfully injected and registered ${environment} token`);
                     } else {
+                        authStatus.error = result.error;
                         console.warn(`[Tab] Token injection failed: ${result.error}`);
                     }
                 } else {
                     console.log(`[Tab] No ${environment} token available, user will need to login`);
                 }
             } catch (err) {
+                authStatus.error = err.message;
                 console.error('[Tab] Error during token injection:', err);
                 // Continue anyway - user can still login manually
             } finally {
                 // Always mark injection as complete and load URL
                 tokenInjectionComplete = true;
                 loadUrlWhenReady();
+                
+                // Show auth status notification in the webview once it loads
+                // Only show banner for success or injection failure, not for missing tokens
+                // (the login page itself tells the user they need to log in)
+                if (authStatus.injected || authStatus.hasToken) {
+                    webview.addEventListener('did-finish-load', () => {
+                        const statusColor = authStatus.injected ? '#22c55e' : '#f59e0b';
+                        const statusText = authStatus.injected 
+                            ? `Authenticated (${environment})` 
+                            : `Token exists but injection failed: ${authStatus.error}`;
+                        
+                        webview.executeJavaScript(`
+                            (function() {
+                                const existing = document.getElementById('gsx-auth-status');
+                                if (existing) existing.remove();
+                                
+                                const status = document.createElement('div');
+                                status.id = 'gsx-auth-status';
+                                status.style.cssText = 'position:fixed;bottom:10px;right:10px;padding:8px 16px;background:${statusColor};color:white;border-radius:6px;font-family:system-ui;font-size:12px;z-index:999999;box-shadow:0 2px 8px rgba(0,0,0,0.2);cursor:pointer;transition:opacity 0.3s;';
+                                status.textContent = '${statusText}';
+                                status.onclick = function() { this.style.opacity = '0'; setTimeout(() => this.remove(), 300); };
+                                document.body.appendChild(status);
+                                
+                                setTimeout(() => {
+                                    if (status.parentNode) {
+                                        status.style.opacity = '0';
+                                        setTimeout(() => status.remove(), 300);
+                                    }
+                                }, 8000);
+                                
+                                console.log('[GSX Auth] ${statusText}');
+                            })();
+                        `).catch(() => {});
+                    }, { once: true });
+                } else {
+                    console.log(`[Tab] No token for ${environment} - user will see login page`);
+                }
             }
         })();
     } else {
@@ -3007,9 +3386,9 @@ function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = 
         if (currentUrl && isAuthPage(currentUrl)) {
             // Check if we should attempt login (debounce)
             if (!shouldAttemptAutoLogin(tabId, currentUrl)) {
-                console.log(`[AutoLogin] Skipping - already in progress or complete`);
+                logAuthEvent('info', 'Auth page load skipped (debounce)', { event: 'auth:trigger-skip', tabId, url: currentUrl, trigger: 'dom-ready' });
             } else {
-                console.log(`[AutoLogin] Auth page detected, queueing auto-login for ${tabId}...`);
+                logAuthEvent('info', 'Auth page detected, queueing login', { event: 'auth:trigger', tabId, url: currentUrl, trigger: 'dom-ready' });
                 // Queue login with global rate limiting (one per tab)
                 queueGlobalLogin(tabId, async () => {
                     // Re-check state before executing (may have changed while in queue)
@@ -3160,7 +3539,7 @@ function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = 
             if (!shouldAttemptAutoLogin(tabId, e.url)) {
                 return;
             }
-            console.log(`[AutoLogin] Auth page detected via SPA navigation for ${tabId}: ${e.url}`);
+            logAuthEvent('info', 'Auth page detected via SPA nav, queueing login', { event: 'auth:trigger', tabId, url: e.url, trigger: 'will-navigate' });
             const authUrl = e.url;
             // Queue login with global rate limiting (one per tab)
             queueGlobalLogin(tabId, async () => {

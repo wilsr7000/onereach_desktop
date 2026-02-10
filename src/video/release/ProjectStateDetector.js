@@ -6,6 +6,10 @@
 
 import fs from 'fs';
 import path from 'path';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 /**
  * Release readiness states
@@ -182,7 +186,7 @@ export class ProjectStateDetector {
 
       return false;
     } catch (e) {
-      console.warn('[ProjectStateDetector] Error comparing states:', e);
+      log.warn('video', 'ProjectStateDetector Error comparing states', { data: e });
       return true; // Assume unsaved changes on error
     }
   }

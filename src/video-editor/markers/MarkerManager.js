@@ -111,7 +111,7 @@ export class MarkerManager {
         try {
           callback(data);
         } catch (e) {
-          console.error(`[MarkerManager] Event callback error for ${event}:`, e);
+          window.logging.error('video', 'MarkerManager event callback error', { event, error: e.message || e });
         }
       });
     }
@@ -593,7 +593,7 @@ export class MarkerManager {
   async startRecordReplacement(markerId) {
     const marker = this.getById(markerId);
     if (!marker) {
-      console.error('[MarkerManager] Marker not found:', markerId);
+      window.logging.error('video', 'MarkerManager Marker not found', { error: { error: markerId } });
       this.app.showToast?.('error', 'Marker not found');
       return null;
     }
@@ -602,12 +602,7 @@ export class MarkerManager {
     const inTime = marker.time || marker.inTime || 0;
     const outTime = marker.outTime || (inTime + 5); // Default 5 second duration
 
-    console.log('[MarkerManager] Starting record replacement for marker:', {
-      markerId,
-      inTime,
-      outTime,
-      duration: outTime - inTime
-    });
+    window.logging.info('video', 'MarkerManager starting record replacement', { markerId, inTime, outTime, duration: outTime - inTime });
 
     // Check if recorder window exists
     if (window.videoEditor?.openRecorderWithPreset) {
@@ -626,7 +621,7 @@ export class MarkerManager {
 
         return result;
       } catch (error) {
-        console.error('[MarkerManager] Failed to open recorder:', error);
+        window.logging.error('video', 'MarkerManager Failed to open recorder', { error: { error: error } });
         this.app.showToast?.('error', 'Failed to open recorder');
         return null;
       }
@@ -660,12 +655,12 @@ export class MarkerManager {
     const marker = this.getById(markerId);
     if (!marker) return;
 
-    console.log('[MarkerManager] Replacement recorded:', { markerId, recordingPath });
+    window.logging.info('video', 'MarkerManager replacement recorded', { markerId, recordingPath });
 
     // Get or create ADR track
     const adrTrack = this.app.adrManager?.ensureADRTrack?.();
     if (!adrTrack) {
-      console.warn('[MarkerManager] No ADR track available');
+      window.logging.warn('video', 'MarkerManager No ADR track available');
       return;
     }
 
@@ -712,7 +707,7 @@ export class MarkerManager {
   async quickRecord(trackId = null) {
     const currentTime = this.app.video?.currentTime || 0;
     
-    console.log('[MarkerManager] Starting quick record at:', currentTime);
+    window.logging.info('video', 'MarkerManager starting quick record', { time: currentTime });
 
     // Determine target track
     const targetTrackId = trackId || this.app.adrManager?.ensureADRTrack()?.id;
@@ -743,7 +738,7 @@ export class MarkerManager {
 
         return result;
       } catch (error) {
-        console.error('[MarkerManager] Quick record error:', error);
+        window.logging.error('video', 'MarkerManager Quick record error', { error: { error: error } });
         this.app.showToast?.('error', 'Failed to start recording');
         return null;
       }
@@ -840,7 +835,7 @@ export class MarkerManager {
         await this._handleReplacementRecorded(markerId, result.filePath);
       }
     } catch (error) {
-      console.error('[MarkerManager] Import replacement error:', error);
+      window.logging.error('video', 'MarkerManager Import replacement error', { error: { error: error } });
       this.app.showToast?.('error', 'Failed to import replacement');
     }
   }

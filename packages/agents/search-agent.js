@@ -17,6 +17,9 @@
 const { getCircuit } = require('./circuit-breaker');
 const { getAgentMemory } = require('../../lib/agent-memory-store');
 const omniData = require('./omni-data-agent');
+const ai = require('../../lib/ai-service');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 
 // Lazy-load webview search service (only available in main process)
 let webviewSearchService = null;
@@ -25,7 +28,7 @@ function getWebviewSearch() {
     try {
       webviewSearchService = require('./webview-search-service');
     } catch (e) {
-      console.log('[SearchAgent] Webview search not available:', e.message);
+      log.info('agent', 'Webview search not available', { error: e.message });
       webviewSearchService = false; // Mark as unavailable
     }
   }
@@ -38,17 +41,6 @@ const webCircuit = getCircuit('web-search', {
   resetTimeout: 30000,
   windowMs: 60000
 });
-
-function getOpenAIApiKey() {
-  if (global.settingsManager) {
-    const openaiKey = global.settingsManager.get('openaiApiKey');
-    if (openaiKey) return openaiKey;
-    const provider = global.settingsManager.get('llmProvider');
-    const llmKey = global.settingsManager.get('llmApiKey');
-    if (provider === 'openai' && llmKey) return llmKey;
-  }
-  return process.env.OPENAI_API_KEY;
-}
 
 // Timeout constants
 const TIMEOUT_WEB_SEARCH = 8000;      // 8 seconds for web search
@@ -111,7 +103,7 @@ const searchAgent = {
   description: 'Searches the web for any query requiring external information - podcasts, people, companies, facts, news, definitions',
   voice: 'echo',  // Authoritative, knowledgeable - see VOICE-GUIDE.md
   acks: ["Let me look that up.", "Searching now."],
-  categories: ['search', 'information', 'weather', 'knowledge'],
+  categories: ['search', 'information', 'knowledge'],
   
   // Prompt for LLM evaluation
   prompt: `Search Agent handles ANY query that requires external or current information from the internet.
@@ -119,7 +111,7 @@ const searchAgent = {
 HIGH CONFIDENCE (0.85+) - BID when the user:
 - Wants to LEARN about something: "Tell me about X", "What is X", "Who is X"
 - Mentions a SPECIFIC ENTITY: person, company, product, podcast, show, movie, book, band, place
-- Needs CURRENT information: news, prices, events, updates, scores, weather
+- Needs CURRENT information: news, prices, events, updates, scores
 - Asks for FACTS that require lookup or verification
 - Explicitly requests search: "search for", "look up", "find out about", "google"
 
@@ -135,14 +127,17 @@ Examples that REQUIRE search (bid 0.85+):
 KEY INSIGHT: If the user wants to KNOW about something external/specific, this agent handles it.
 
 LOW CONFIDENCE (0.00-0.20) - DO NOT BID:
+- Weather queries: "What's the weather?" (weather agent has live API)
 - Current time: "What time is it?" (time agent)
 - User's calendar: "What do I have Tuesday?" (calendar agent)  
 - Play media: "Play music", "Play the podcast" (DJ agent plays, Search Agent explains)
-- Greetings: "Hello", "How are you?" (smalltalk agent)
+- Greetings/chitchat: "Hello", "How are you?", "Tell me a joke" (smalltalk agent)
 - App commands: "Open spaces" (spaces agent)
+- Spelling: "How do you spell X?" (spelling agent)
 
 This agent searches the internet. It does NOT control media playback or access personal data.`,
   keywords: SEARCH_KEYWORDS,
+  executionType: 'action',  // Needs web search API for data
   
   // Memory instance
   memory: null,
@@ -180,13 +175,8 @@ This agent searches the internet. It does NOT control media playback or access p
     }
   },
   
-  /**
-   * Bid on a task - uses LLM-based unified bidder
-   */
-  bid(task) {
-    // No fast bidding - let the unified bidder handle all evaluation via LLM
-    return null;
-  },
+  // No bid() method. Routing is 100% LLM-based via unified-bidder.js.
+  // NEVER add keyword/regex bidding here. See .cursorrules.
   
   /**
    * Execute the task with overall timeout protection
@@ -205,7 +195,7 @@ This agent searches the internet. It does NOT control media playback or access p
         setTimeout(() => reject(new Error('Search timed out')), TIMEOUT_OVERALL)
       )
     ]).catch(error => {
-      console.error('[SearchAgent] Overall timeout or error:', error.message);
+      log.error('agent', 'Overall timeout or error', { error: error.message });
       return {
         success: false,
         message: "I'm having trouble searching right now. Please try again."
@@ -229,7 +219,7 @@ This agent searches the internet. It does NOT control media playback or access p
     const { onProgress = () => {} } = context;
     const action = task.data?.action || task.action;
     
-    console.log(`[SearchAgent] Searching for: "${query}" (action: ${action || 'web_search'})`);
+    log.info('agent', `Searching for: "${query}" (action: ${action || 'web_search'})`);
     
     // Track search in memory
     try {
@@ -251,7 +241,7 @@ This agent searches the internet. It does NOT control media playback or access p
       
       // Handle user_info action - answer from context, no web search
       if (action === 'user_info' || this.isUserInfoQuery(query)) {
-        console.log('[SearchAgent] Handling user info query from context');
+        log.info('agent', 'Handling user info query from context');
         const allContext = await omniData.getAll();
         const profile = await omniData.getAgentProfile();
         
@@ -264,7 +254,7 @@ This agent searches the internet. It does NOT control media playback or access p
           ? `${relevantContext.location.city}, ${relevantContext.location.state}`
           : relevantContext.location.city;
         query = `${query} in ${locationStr}`;
-        console.log(`[SearchAgent] Enhanced query with location: "${query}"`);
+        log.info('agent', `Enhanced query with location: "${query}"`);
       }
       
       // Step 1: Try web search first
@@ -272,9 +262,9 @@ This agent searches the internet. It does NOT control media playback or access p
       let searchResults = [];
       try {
         searchResults = await this.webSearch(query);
-        console.log(`[SearchAgent] Found ${searchResults.length} search results`);
+        log.info('agent', `Found ${searchResults.length} search results`);
       } catch (e) {
-        console.log(`[SearchAgent] Web search failed: ${e.message}`);
+        log.info('agent', `Web search failed: ${e.message}`);
       }
       
       // Step 2: Synthesize answer (with or without search results)
@@ -288,7 +278,7 @@ This agent searches the internet. It does NOT control media playback or access p
       };
       
     } catch (error) {
-      console.error('[SearchAgent] Error:', error.message);
+      log.error('agent', 'Error', { error: error.message });
       return {
         success: false,
         message: `I had trouble with that question. ${error.message}`
@@ -437,15 +427,15 @@ This agent searches the internet. It does NOT control media playback or access p
       const webviewSearch = getWebviewSearch();
       if (webviewSearch) {
         try {
-          console.log('[SearchAgent] Trying webview search...');
+          log.info('agent', 'Trying webview search...');
           const results = await webviewSearch.search(query);
           if (results && results.length > 0) {
-            console.log(`[SearchAgent] Webview found ${results.length} results`);
+            log.info('agent', `Webview found ${results.length} results`);
             return results;
           }
-          console.log('[SearchAgent] Webview returned no results, trying DuckDuckGo...');
+          log.info('agent', 'Webview returned no results, trying DuckDuckGo...');
         } catch (e) {
-          console.log('[SearchAgent] Webview search failed:', e.message);
+          log.info('agent', 'Webview search failed', { error: e.message });
         }
       }
       
@@ -481,7 +471,7 @@ This agent searches the internet. It does NOT control media playback or access p
         }
       }
     } catch (e) {
-      console.log('[SearchAgent] DuckDuckGo Instant API failed, trying Lite:', e.message);
+      log.info('agent', 'DuckDuckGo Instant API failed, trying Lite', { error: e.message });
     }
     
     // Fallback to DuckDuckGo Lite HTML
@@ -632,7 +622,7 @@ This agent searches the internet. It does NOT control media playback or access p
     
     // Method 2: If above didn't work, try DuckDuckGo instant answer API
     if (results.length === 0) {
-      console.log('[SearchAgent] Lite parsing found no results, returning empty');
+      log.info('agent', 'Lite parsing found no results, returning empty');
     }
     
     return results;
@@ -645,18 +635,6 @@ This agent searches the internet. It does NOT control media playback or access p
    * @returns {Promise<string>}
    */
   async synthesizeAnswer(query, results) {
-    const apiKey = getOpenAIApiKey();
-    
-    if (!apiKey) {
-      // No API key - return raw results summary
-      if (results.length === 0) {
-        return "I couldn't find any results for that search.";
-      }
-      
-      const topResult = results[0];
-      return `Here's what I found: ${topResult.title}. ${topResult.snippet || ''}`;
-    }
-    
     // Build prompt based on whether we have search results
     let systemPrompt, userPrompt;
     
@@ -692,34 +670,20 @@ Provide a brief, natural answer:`;
     }
 
     try {
-      const response = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt }
-          ],
-          temperature: 0.3,
-          max_tokens: 200
-        })
-      }, TIMEOUT_LLM);
-
-      if (!response.ok) {
-        throw new Error(`LLM API error: ${response.status}`);
-      }
-
-      const data = await response.json();
-      const answer = data.choices?.[0]?.message?.content?.trim();
+      const result = await ai.chat({
+        profile: 'fast',
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+        temperature: 0.3,
+        maxTokens: 200,
+        feature: 'search-agent'
+      });
       
+      const answer = result.content?.trim();
       return answer || `Here's what I found: ${results[0]?.title || 'No results'}`;
       
     } catch (error) {
-      console.error('[SearchAgent] LLM synthesis error:', error.message);
+      log.error('agent', 'LLM synthesis error', { error: error.message });
       // Fallback to simple result (works even on timeout)
       if (results.length > 0) {
         return `Here's what I found: ${results[0]?.title}. ${results[0]?.snippet || ''}`;

@@ -24,6 +24,9 @@ class Logger {
     
     // Performance timers
     this.timers = new Map();
+    
+    // Central logging queue sink (optional, set via setSink())
+    this._sink = null;
   }
   
   /**
@@ -41,6 +44,14 @@ class Logger {
   }
   
   /**
+   * Set a sink function that forwards logs to the central logging queue.
+   * @param {Function} sinkFn - Called with { level, category, message, data }
+   */
+  setSink(sinkFn) {
+    this._sink = typeof sinkFn === 'function' ? sinkFn : null;
+  }
+
+  /**
    * Core logging method
    */
   log(level, component, message, data = {}) {
@@ -48,6 +59,20 @@ class Logger {
     
     const elapsed = this.getElapsed();
     const levelName = Object.keys(LOG_LEVELS).find(k => LOG_LEVELS[k] === level) || 'LOG';
+    
+    // Forward to central logging queue if sink is set
+    if (this._sink) {
+      try {
+        this._sink({
+          level: levelName.toLowerCase(),
+          category: 'voice',
+          message: `[${component}] ${message}`,
+          data: { component, elapsed, sessionId: this.sessionId, ...data }
+        });
+      } catch (e) {
+        // Sink errors should not break voice logging
+      }
+    }
     
     // Color codes for terminal
     const colors = {

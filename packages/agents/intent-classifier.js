@@ -5,20 +5,9 @@
  * Replaces brittle regex matching with natural language understanding.
  */
 
-/**
- * Get OpenAI API key from app settings (same as realtime-speech.js)
- */
-function getOpenAIApiKey() {
-  if (global.settingsManager) {
-    const openaiKey = global.settingsManager.get('openaiApiKey');
-    if (openaiKey) return openaiKey;
-    
-    const provider = global.settingsManager.get('llmProvider');
-    const llmKey = global.settingsManager.get('llmApiKey');
-    if (provider === 'openai' && llmKey) return llmKey;
-  }
-  return process.env.OPENAI_API_KEY;
-}
+const ai = require('../../lib/ai-service');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 
 // Available agents and their capabilities
 const AGENT_DEFINITIONS = {
@@ -70,67 +59,33 @@ async function classifyIntent(transcript) {
     }
   }
 
-  // Get API key from app settings
-  const apiKey = getOpenAIApiKey();
-  if (!apiKey) {
-    return { 
-      agentId: null, 
-      intent: 'error', 
-      confidence: 0, 
-      entities: {},
-      error: 'OpenAI API key required. Please add it in Settings → LLM Settings.'
-    };
-  }
-
   try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          {
-            role: 'system',
-            content: buildSystemPrompt()
-          },
-          {
-            role: 'user',
-            content: transcript
-          }
-        ],
-        temperature: 0,
-        max_tokens: 150,
-        response_format: { type: 'json_object' }
-      })
+    const result = await ai.chat({
+      profile: 'fast',
+      system: buildSystemPrompt(),
+      messages: [
+        {
+          role: 'user',
+          content: transcript
+        }
+      ],
+      temperature: 0,
+      maxTokens: 150,
+      jsonMode: true,
+      feature: 'intent-classifier'
     });
-
-    if (!response.ok) {
-      const error = await response.text();
-      console.error('[IntentClassifier] API error:', error);
-      return { agentId: null, intent: 'error', confidence: 0, entities: {}, error };
-    }
-
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content;
     
-    if (!content) {
-      return { agentId: null, intent: 'error', confidence: 0, entities: {}, error: 'Empty response' };
-    }
-
-    const result = JSON.parse(content);
+    const parsed = typeof result.content === 'string' ? JSON.parse(result.content) : result.content;
     
     return {
-      agentId: result.agent_id || null,
-      intent: result.intent || 'unknown',
-      confidence: result.confidence || 0,
-      entities: result.entities || {}
+      agentId: parsed.agent_id || null,
+      intent: parsed.intent || 'unknown',
+      confidence: parsed.confidence || 0,
+      entities: parsed.entities || {}
     };
 
   } catch (error) {
-    console.error('[IntentClassifier] Error:', error.message);
+    log.error('agent', 'Error', { error: error.message });
     return { agentId: null, intent: 'error', confidence: 0, entities: {}, error: error.message };
   }
 }

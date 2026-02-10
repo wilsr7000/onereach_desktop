@@ -66,6 +66,7 @@ These documents are the source of truth for project planning and must be kept cu
 ### File Organization
 - Main products: Individual HTML files (aider-ui.html, video-editor.html, etc.)
 - Backend logic: Corresponding JS files
+- AI layer: `lib/ai-service.js` (central orchestrator), `lib/ai-providers/` (adapters)
 - Preload scripts: preload-*.js for IPC bridges
 - Documentation: Markdown files in root
 
@@ -73,7 +74,62 @@ These documents are the source of truth for project planning and must be kept cu
 - **GSX Create**: aider-ui.html, aider-bridge-client.js, app-manager-agent.js
 - **Video Editor**: video-editor.html, video-editor.js, video-editor-app.js
 - **Spaces**: spaces-api.js, clipboard-storage-v2.js
+- **AI Service**: lib/ai-service.js, lib/ai-providers/openai-adapter.js, lib/ai-providers/anthropic-adapter.js
 - **Release**: scripts/release-master.sh (hardened with checksum verification)
+
+### AI Service Architecture (MANDATORY)
+All AI/LLM calls MUST go through the centralized AI service (`lib/ai-service.js`).
+
+**Never** make direct `fetch`/`https.request` calls to `api.openai.com` or `api.anthropic.com`.
+**Never** use the deprecated wrappers (`claude-api.js`, `openai-api.js`, `unified-claude.js`).
+
+**Usage:**
+```javascript
+// Main process
+const ai = require('./lib/ai-service');
+
+const result = await ai.chat({
+  profile: 'fast',       // fast | standard | powerful | vision | large | realtime | embedding | transcription
+  system: 'You are...',  // optional system prompt
+  messages: [{ role: 'user', content: 'Hello' }],
+  maxTokens: 500,
+  temperature: 0.7,
+  jsonMode: false,        // set true for JSON output
+  feature: 'my-feature', // for cost tracking
+});
+const text = result.content;
+
+// Convenience methods
+const text = await ai.complete('prompt', { profile: 'fast' });   // returns string
+const obj  = await ai.json('prompt', { profile: 'fast' });       // returns parsed object
+const vis  = await ai.vision(imageData, 'describe', { profile: 'vision' });
+const emb  = await ai.embed('text', { profile: 'embedding' });
+
+// Image generation (DALL-E)
+const img = await ai.imageGenerate('A red circle on white', { model: 'dall-e-3', size: '1024x1024', quality: 'standard' });
+// img.images[0].b64_json or img.images[0].url
+
+// Transcription with word-level timestamps
+const txn = await ai.transcribe(audioBuffer, { responseFormat: 'verbose_json', timestampGranularities: ['word'] });
+// txn.text, txn.words, txn.segments, txn.duration
+
+// Renderer process (via preload IPC bridge)
+const result = await window.ai.chat({ profile: 'fast', messages: [...] });
+```
+
+**Profile mapping:**
+- `fast` = Claude 4.5 Haiku (fallback: gpt-4o-mini)
+- `standard` = Claude Sonnet (fallback: gpt-4o)
+- `powerful` = Claude 4.6 Opus with adaptive thinking (fallback: gpt-4o)
+- `large` = gpt-4o (fallback: Claude 4.6 Opus)
+- `vision` = Claude Sonnet (vision)
+- `realtime` = gpt-4o-realtime-preview
+- `embedding` = text-embedding-3-small
+- `transcription` = whisper-1
+
+Profiles are configurable in settings. Change the model for the whole app by updating one profile.
+
+**Extended thinking:** The `calendar-agent` and `daily-brief-agent` use the `powerful` profile with adaptive thinking enabled (`thinking: true`). This gives Claude 4.6 Opus deep reasoning for calendar scheduling and briefing composition. The adapter supports both adaptive thinking (Opus 4.6) and manual `budget_tokens` (older models). Pass `thinking: true` or `thinking: { type: 'adaptive' }` in any `ai.chat()` call to enable it.
 
 ### State Persistence
 - Use localStorage for UI state (positions, preferences)

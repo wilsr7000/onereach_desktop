@@ -17,6 +17,9 @@ const { evaluateFailure, extractIntent } = require('./retry-evaluator');
 
 // Legacy helper for compatibility
 const { smartPlay, smartPause, smartSkip, getMediaState, runScript } = require('./applescript-helper');
+const ai = require('../../lib/ai-service');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 
 // Progress reporting
 let progressReporter;
@@ -48,6 +51,7 @@ const mediaAgent = {
   categories: ['media', 'music'],
   keywords: ['play', 'pause', 'stop', 'skip', 'next', 'previous', 'volume', 'music', 'song', 'track',
              'airplay', 'speaker', 'speakers', 'homepod', 'apple tv', 'output', 'living room', 'bedroom', 'kitchen'],
+  executionType: 'action',  // Controls Music/Spotify apps via AppleScript
   
   // Prompt for LLM evaluation
   prompt: `Media Agent controls music playback on Apple Music and Spotify.
@@ -69,13 +73,8 @@ LOW CONFIDENCE (0.00-0.20) - DO NOT BID on these:
 
 This agent controls the Music app and Spotify directly. For music recommendations based on mood, the DJ agent is more appropriate.`,
   
-  /**
-   * Bid on a task - uses LLM-based unified bidder
-   */
-  bid(task) {
-    // No fast bidding - let the unified bidder handle all evaluation via LLM
-    return null;
-  },
+  // No bid() method. Routing is 100% LLM-based via unified-bidder.js.
+  // NEVER add keyword/regex bidding here. See .cursorrules.
   
   /**
    * Execute the task
@@ -121,14 +120,14 @@ This agent controls the Music app and Spotify directly. For music recommendation
       if (lower.includes('play')) {
         // Use LLM to understand the intent (extracts search term, genre, artist, AND duration)
         const intent = await extractIntent(task.content);
-        console.log(`[MediaAgent] Extracted intent:`, intent);
+        log.info('agent', `Extracted intent`, { intent });
         
         const searchTerm = intent.searchTerm || intent.genre || intent.artist;
         const isGeneric = !searchTerm;
         const durationSeconds = intent.durationSeconds || null;
         
         if (durationSeconds) {
-          console.log(`[MediaAgent] Detected play duration: ${durationSeconds} seconds`);
+          log.info('agent', `Detected play duration: ${durationSeconds} seconds`);
         }
         
         // Report progress - searching
@@ -161,7 +160,7 @@ This agent controls the Music app and Spotify directly. For music recommendation
             maxAttempts
           });
           
-          console.log(`[MediaAgent] Retry decision: ${evaluation.action} - ${evaluation.reasoning}`);
+          log.info('agent', `Retry decision: ${evaluation.action} - ${evaluation.reasoning}`);
           
           if (evaluation.shouldStop || evaluation.action === 'stop') {
             break;
@@ -230,7 +229,7 @@ This agent controls the Music app and Spotify directly. For music recommendation
           let handoff = null;
           if (durationSeconds && notificationManager) {
             const timerId = notificationManager.setTimer(durationSeconds, 'music');
-            console.log(`[MediaAgent] Set music timer for ${durationSeconds}s, id: ${timerId}`);
+            log.info('agent', `Set music timer for ${durationSeconds}s, id: ${timerId}`);
             
             // Store timer ID so we can cancel on stop
             this._activeTimer = timerId;
@@ -331,7 +330,7 @@ This agent controls the Music app and Spotify directly. For music recommendation
       };
       
     } catch (error) {
-      console.error('[MediaAgent] Error:', error);
+      log.error('agent', 'Error', { error });
       
       // Try to open the app if it's not running
       if (error.message.includes('not running')) {
@@ -481,37 +480,22 @@ This agent controls the Music app and Spotify directly. For music recommendation
       alternatives.push(words[0]);
     }
     
-    // 4. Use LLM to extract likely search terms (if we have API key)
+    // 4. Use LLM to extract likely search terms
     try {
-      const apiKey = global.settingsManager?.get('openaiApiKey');
-      if (apiKey && cleanedQuery.length > 3) {
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`
-          },
-          body: JSON.stringify({
-            model: 'gpt-4o-mini',
-            messages: [{
-              role: 'system',
-              content: 'Extract the most likely music search term from the user\'s request. Return just the search term, nothing else. For example: "some jazz" → "jazz", "that Beatles song" → "Beatles", "upbeat workout music" → "workout"'
-            }, {
-              role: 'user',
-              content: rawQuery
-            }],
-            temperature: 0,
-            max_tokens: 50
-          })
+      if (cleanedQuery.length > 3) {
+        const result = await ai.chat({
+          profile: 'fast',
+          system: 'Extract the most likely music search term from the user\'s request. Return just the search term, nothing else. For example: "some jazz" → "jazz", "that Beatles song" → "Beatles", "upbeat workout music" → "workout"',
+          messages: [{ role: 'user', content: rawQuery }],
+          temperature: 0,
+          maxTokens: 50,
+          feature: 'media-agent'
         });
         
-        if (response.ok) {
-          const data = await response.json();
-          const suggestion = data.choices?.[0]?.message?.content?.trim();
-          if (suggestion && suggestion !== cleanedQuery && !alternatives.includes(suggestion)) {
-            alternatives.unshift(suggestion); // Add as first option
-            console.log(`[MediaAgent] LLM suggested search term: "${suggestion}"`);
-          }
+        const suggestion = result.content?.trim();
+        if (suggestion && suggestion !== cleanedQuery && !alternatives.includes(suggestion)) {
+          alternatives.unshift(suggestion); // Add as first option
+          log.info('agent', `LLM suggested search term: "${suggestion}"`);
         }
       }
     } catch (e) {
@@ -528,7 +512,7 @@ This agent controls the Music app and Spotify directly. For music recommendation
    * @returns {Promise<{success: boolean, message: string}>}
    */
   async tryShuffleLibrary(app) {
-    console.log(`[MediaAgent] Attempting to shuffle ${app} library...`);
+    log.info('agent', `Attempting to shuffle ${app} library...`);
     
     try {
       if (app === 'Music') {
@@ -572,7 +556,7 @@ This agent controls the Music app and Spotify directly. For music recommendation
       
       return { success: false, message: 'Shuffle attempt did not start playback' };
     } catch (e) {
-      console.error('[MediaAgent] Shuffle failed:', e);
+      log.error('agent', 'Shuffle failed', { e });
       return { success: false, message: 'Could not shuffle library' };
     }
   },
@@ -625,7 +609,7 @@ This agent controls the Music app and Spotify directly. For music recommendation
       return null;
     }
     
-    console.log('[MediaAgent] Detected AirPlay command:', original);
+    log.info('agent', 'Detected AirPlay command', { original });
     
     // List speakers command
     if (lower.includes('list') || lower.includes('what') || lower.includes('available') || lower.includes('show')) {
@@ -770,7 +754,7 @@ This agent controls the Music app and Spotify directly. For music recommendation
         devices
       };
     } catch (error) {
-      console.error('[MediaAgent] Error listing AirPlay devices:', error);
+      log.error('agent', 'Error listing AirPlay devices', { error });
       return {
         success: false,
         message: "I couldn't get the list of AirPlay devices. Make sure Music is running."
@@ -809,7 +793,7 @@ This agent controls the Music app and Spotify directly. For music recommendation
    * @returns {Promise<Object>} - { success, message }
    */
   async setAirPlayDevice(targetDevice) {
-    console.log('[MediaAgent] Setting AirPlay device to:', targetDevice);
+    log.info('agent', 'Setting AirPlay device to', { targetDevice });
     
     try {
       // First, get available devices
@@ -884,7 +868,7 @@ This agent controls the Music app and Spotify directly. For music recommendation
       };
       
     } catch (error) {
-      console.error('[MediaAgent] Error setting AirPlay device:', error);
+      log.error('agent', 'Error setting AirPlay device', { error });
       return {
         success: false,
         message: `Couldn't switch to ${targetDevice}. ${error.message || ''}`
@@ -899,7 +883,7 @@ This agent controls the Music app and Spotify directly. For music recommendation
    * @returns {Promise<Object>} - { success, message }
    */
   async playOnDevice(musicQuery, targetDevice) {
-    console.log('[MediaAgent] Playing', musicQuery, 'on', targetDevice);
+    log.info('agent', 'Playing', { musicQuery, on: targetDevice });
     
     // First, set the output device
     const deviceResult = await this.setAirPlayDevice(targetDevice);

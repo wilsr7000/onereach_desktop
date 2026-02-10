@@ -17,6 +17,8 @@ ffmpegLib.setFfmpegPath(ffmpegStatic.path);
 ffmpegLib.setFfprobePath(ffprobeStatic.path);
 
 const { app } = require('electron');
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 import { SEGMENT_TYPES } from './EDLManager.js';
 
@@ -78,7 +80,7 @@ export class BranchRenderer {
       throw new Error('No segments to render');
     }
 
-    console.log(`[BranchRenderer] Rendering ${segments.length} segments from: ${sourceVideoPath}`);
+    log.info('video', '[BranchRenderer] Rendering segments from:', { v0: segments.length, v1: sourceVideoPath });
 
     try {
       if (progressCallback) {
@@ -107,7 +109,7 @@ export class BranchRenderer {
       );
 
     } catch (error) {
-      console.error('[BranchRenderer] Render failed:', error);
+      log.error('video', '[BranchRenderer] Render failed', { error: error });
       throw error;
     }
   }
@@ -138,7 +140,7 @@ export class BranchRenderer {
       command
         .output(outputPath)
         .on('start', (cmd) => {
-          console.log('[BranchRenderer] Simple trim started');
+          log.info('video', '[BranchRenderer] Simple trim started');
         })
         .on('progress', (progress) => {
           if (progressCallback) {
@@ -152,7 +154,7 @@ export class BranchRenderer {
           if (progressCallback) {
             progressCallback({ status: 'Complete!', percent: 100 });
           }
-          console.log('[BranchRenderer] Simple trim complete:', outputPath);
+          log.info('video', '[BranchRenderer] Simple trim complete', { data: outputPath });
           resolve({
             success: true,
             outputPath: outputPath,
@@ -246,7 +248,7 @@ export class BranchRenderer {
         return sum + ((seg.endTime || 0) - (seg.startTime || 0));
       }, 0);
 
-      console.log('[BranchRenderer] Concatenation complete:', outputPath);
+      log.info('video', '[BranchRenderer] Concatenation complete', { data: outputPath });
       
       return {
         success: true,
@@ -426,7 +428,7 @@ export class BranchRenderer {
         fs.rmSync(tempDir, { recursive: true, force: true });
       }
     } catch (e) {
-      console.warn('[BranchRenderer] Cleanup error:', e);
+      log.warn('video', '[BranchRenderer] Cleanup error', { data: e });
     }
   }
 

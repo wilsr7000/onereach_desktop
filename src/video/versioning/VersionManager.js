@@ -9,6 +9,8 @@ import path from 'path';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { app } = require('electron');
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 /**
  * Branch types for variant cuts
@@ -97,7 +99,7 @@ export class VersionManager {
     // Save project file
     this.saveProject(projectPath, project);
     
-    console.log(`[VersionManager] Created project: ${projectId}`);
+    log.info('video', '[VersionManager] Created project:', { v0: projectId });
     return { projectPath, project };
   }
 
@@ -146,7 +148,7 @@ export class VersionManager {
           const project = JSON.parse(fs.readFileSync(projectFile, 'utf8'));
           projects.push({ projectPath, project });
         } catch (e) {
-          console.warn(`[VersionManager] Failed to load project: ${dir}`, e);
+          log.warn('video', '[VersionManager] Failed to load project:', { v0: dir, arg0: e });
         }
       }
     }
@@ -169,7 +171,7 @@ export class VersionManager {
     project.branches.push(branch);
     this.saveProject(projectPath, project);
     
-    console.log(`[VersionManager] Created branch: ${branch.id}`);
+    log.info('video', '[VersionManager] Created branch:', { v0: branch.id });
     return branch;
   }
 
@@ -321,7 +323,7 @@ export class VersionManager {
     
     this.saveProject(projectPath, project);
     
-    console.log(`[VersionManager] Saved version ${newVersion} for branch ${branchId}`);
+    log.info('video', '[VersionManager] Saved version for branch', { v0: newVersion, v1: branchId });
     return versionEntry;
   }
 
@@ -354,7 +356,7 @@ export class VersionManager {
     branch.updatedAt = new Date().toISOString();
     this.saveProject(projectPath, project);
     
-    console.log(`[VersionManager] Marked ${branchId} v${version} as released`);
+    log.info('video', '[VersionManager] Marked v as released', { v0: branchId, v1: version });
   }
 
   /**
@@ -460,7 +462,7 @@ export class VersionManager {
     
     this.saveProject(projectPath, project);
     
-    console.log(`[VersionManager] Deleted branch: ${branchId}`);
+    log.info('video', '[VersionManager] Deleted branch:', { v0: branchId });
   }
 
   /**

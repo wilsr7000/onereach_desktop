@@ -228,16 +228,40 @@ export class ReputationStore extends TypedEventEmitter<ReputationEvents> {
 
   private async applyDecay(rep: AgentReputation): Promise<AgentReputation> {
     const now = Date.now();
-    const daysSinceDecay = (now - rep.lastDecayAt) / 86400000;
+    const minutesSinceDecay = (now - rep.lastDecayAt) / 60000;
 
-    if (daysSinceDecay >= 1) {
-      const decayAmount = this.config.decayRate * Math.floor(daysSinceDecay);
+    // Fast decay: every 5 minutes, failures heal towards neutral.
+    // This prevents a few transient errors from permanently penalizing an
+    // agent.  After ~15 minutes with no new failures an agent is back to
+    // full health.
+    if (minutesSinceDecay >= 5) {
+      const intervals = Math.floor(minutesSinceDecay / 5);
+      // Each 5-minute interval heals 0.05 towards neutral (fast recovery)
+      const fastHealAmount = 0.05 * intervals;
+      // Plus the original daily decay
+      const daysSinceDecay = minutesSinceDecay / 1440;
+      const dailyDecayAmount = daysSinceDecay >= 1 ? this.config.decayRate * Math.floor(daysSinceDecay) : 0;
+      const totalHeal = fastHealAmount + dailyDecayAmount;
 
       // Decay towards neutral
       if (rep.score > this.config.neutralScore) {
-        rep.score = Math.max(this.config.neutralScore, rep.score - decayAmount);
+        rep.score = Math.max(this.config.neutralScore, rep.score - totalHeal);
       } else if (rep.score < this.config.neutralScore) {
-        rep.score = Math.min(this.config.neutralScore, rep.score + decayAmount);
+        rep.score = Math.min(this.config.neutralScore, rep.score + totalHeal);
+      }
+
+      // Also heal failure/timeout counts (so they don't permanently drag the agent down)
+      if (intervals >= 1 && (rep.failCount > 0 || rep.timeoutCount > 0)) {
+        const countHeal = Math.min(intervals, rep.failCount + rep.timeoutCount);
+        const failShare = rep.failCount / Math.max(1, rep.failCount + rep.timeoutCount);
+        rep.failCount = Math.max(0, rep.failCount - Math.round(countHeal * failShare));
+        rep.timeoutCount = Math.max(0, rep.timeoutCount - Math.round(countHeal * (1 - failShare)));
+      }
+
+      // Clear flag if score recovered above threshold
+      if (rep.flaggedForReview && rep.score >= this.config.flagThreshold + 0.1) {
+        rep.flaggedForReview = false;
+        rep.flagReason = null;
       }
 
       rep.lastDecayAt = now;

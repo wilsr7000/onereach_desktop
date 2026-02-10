@@ -2,6 +2,8 @@
  * TranscriptSync - Handles transcript timing synchronization
  * Manages offset, rate adjustment, and two-point calibration
  */
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 export class TranscriptSync {
   constructor(appContext) {
     this.app = appContext;
@@ -21,7 +23,7 @@ export class TranscriptSync {
     // Clamp to reasonable range (-60s to +60s)
     this.offset = Math.max(-60, Math.min(60, this.offset));
     
-    console.log('[TranscriptSync] Offset:', this.offset.toFixed(2) + 's');
+    log.info('video', 'TranscriptSync offset applied', { offset: this.offset.toFixed(2) + 's' });
     
     this.updateLabel();
     this._updateHighlight();
@@ -36,7 +38,7 @@ export class TranscriptSync {
     // Clamp to wide range (50% to 200%)
     this.rate = Math.max(0.5, Math.min(2.0, this.rate));
     
-    console.log('[TranscriptSync] Rate:', (this.rate * 100).toFixed(1) + '%');
+    log.info('video', 'TranscriptSync Rate', { data: (this.rate * 100 }).toFixed(1) + '%');
     
     this.updateLabel();
     this._updateHighlight();
@@ -47,7 +49,7 @@ export class TranscriptSync {
    */
   resetOffset() {
     this.offset = 0;
-    console.log('[TranscriptSync] Offset reset to 0');
+    log.info('video', '[TranscriptSync] Offset reset to 0');
     
     this.updateLabel();
     this.app.showToast('info', 'Sync offset reset');
@@ -61,7 +63,7 @@ export class TranscriptSync {
     this.offset = 0;
     this.rate = 1.0;
     this.calibrationPoint = null;
-    console.log('[TranscriptSync] All sync reset to defaults');
+    log.info('video', '[TranscriptSync] All sync reset to defaults');
     
     this.updateLabel();
     this.app.showToast('info', 'Sync reset');
@@ -96,13 +98,13 @@ export class TranscriptSync {
         transcriptTime: transcriptTime
       };
       this.app.showToast('info', `Point 1 set at ${this.app.formatTime(currentVideoTime)}. Now go later in video and press Alt+2`);
-      console.log('[TranscriptSync] Calibration point 1:', this.calibrationPoint);
+      log.info('video', '[TranscriptSync] Calibration point 1', { data: this.calibrationPoint });
     } else if (pointNum === 2 && this.calibrationPoint) {
       // Second calibration point - calculate rate and offset
       const p1 = this.calibrationPoint;
       const p2 = { videoTime: currentVideoTime, transcriptTime: transcriptTime };
       
-      console.log('[TranscriptSync] Calibration point 2:', p2);
+      log.info('video', '[TranscriptSync] Calibration point 2', { data: p2 });
       
       // Solve: transcriptTime = videoTime * rate + offset
       const deltaTranscript = p2.transcriptTime - p1.transcriptTime;
@@ -120,7 +122,7 @@ export class TranscriptSync {
       this.rate = Math.max(0.5, Math.min(2.0, newRate));
       this.offset = Math.max(-60, Math.min(60, newOffset));
       
-      console.log('[TranscriptSync] Calibrated: rate=' + this.rate.toFixed(3) + 
+      log.info('video', 'TranscriptSync Calibrated: rate=', { data: + this.rate.toFixed(3 }) + 
                   ', offset=' + this.offset.toFixed(2));
       
       this.updateLabel();

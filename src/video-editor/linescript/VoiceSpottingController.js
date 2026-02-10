@@ -74,7 +74,7 @@ export class VoiceSpottingController {
   setTemplate(templateId) {
     this.templateId = templateId;
     this.voiceCommands = getVoiceCommands(templateId);
-    console.log(`[VoiceSpotting] Loaded ${Object.keys(this.voiceCommands).length} commands for ${templateId}`);
+    window.logging.info('video', `VoiceSpotting Loaded ${Object.keys(this.voiceCommands).length} commands for ${templateId}`);
   }
 
   /**
@@ -83,13 +83,13 @@ export class VoiceSpottingController {
    */
   start() {
     if (!this.isSupported) {
-      console.warn('[VoiceSpotting] Speech recognition not supported');
+      window.logging.warn('video', 'VoiceSpotting Speech recognition not supported');
       this.emit('error', { message: 'Speech recognition not supported in this browser' });
       return false;
     }
     
     if (this.isListening) {
-      console.warn('[VoiceSpotting] Already listening');
+      window.logging.warn('video', 'VoiceSpotting Already listening');
       return true;
     }
     
@@ -100,7 +100,7 @@ export class VoiceSpottingController {
       this.recognition.start();
       return true;
     } catch (error) {
-      console.error('[VoiceSpotting] Failed to start:', error);
+      window.logging.error('video', 'VoiceSpotting Failed to start', { error: error.message || error });
       this.emit('error', { error });
       return false;
     }
@@ -115,7 +115,7 @@ export class VoiceSpottingController {
     try {
       this.recognition.stop();
     } catch (error) {
-      console.error('[VoiceSpotting] Failed to stop:', error);
+      window.logging.error('video', 'VoiceSpotting Failed to stop', { error: error.message || error });
     }
     
     this.isListening = false;
@@ -142,7 +142,7 @@ export class VoiceSpottingController {
     this.isListening = true;
     this.updateStatus('listening');
     this.emit('started');
-    console.log('[VoiceSpotting] Started listening');
+    window.logging.info('video', 'VoiceSpotting Started listening');
   }
 
   /**
@@ -152,7 +152,7 @@ export class VoiceSpottingController {
     this.isListening = false;
     this.updateStatus('stopped');
     this.emit('stopped');
-    console.log('[VoiceSpotting] Stopped listening');
+    window.logging.info('video', 'VoiceSpotting Stopped listening');
     
     // Auto-restart if still supposed to be listening
     if (this.shouldAutoRestart) {
@@ -182,18 +182,18 @@ export class VoiceSpottingController {
     const transcript = lastResult[0].transcript.toLowerCase().trim();
     const confidence = lastResult[0].confidence;
     
-    console.log(`[VoiceSpotting] Heard: "${transcript}" (${(confidence * 100).toFixed(1)}%)`);
+    window.logging.info('video', `VoiceSpotting Heard: "${transcript}" (${(confidence * 100).toFixed(1)}%)`);
     
     // Check confidence
     if (confidence < this.confidenceThreshold) {
-      console.log('[VoiceSpotting] Confidence too low, ignoring');
+      window.logging.info('video', 'VoiceSpotting Confidence too low, ignoring');
       return;
     }
     
     // Check cooldown
     const now = Date.now();
     if (now - this.lastCommandTime < this.commandCooldown) {
-      console.log('[VoiceSpotting] Command cooldown, ignoring');
+      window.logging.info('video', 'VoiceSpotting Command cooldown, ignoring');
       return;
     }
     
@@ -220,7 +220,7 @@ export class VoiceSpottingController {
     }
     
     if (!command) {
-      console.log(`[VoiceSpotting] Unknown command: "${transcript}"`);
+      window.logging.info('video', `VoiceSpotting Unknown command: "${transcript}"`);
       this.updateStatus('unknown', transcript);
       return;
     }
@@ -239,7 +239,7 @@ export class VoiceSpottingController {
    * @param {string} transcript - Original transcript
    */
   executeCommand(command, transcript) {
-    console.log(`[VoiceSpotting] Executing: ${command.action}`);
+    window.logging.info('video', `VoiceSpotting Executing: ${command.action}`);
     
     // Show feedback
     this.showFeedback(command.feedback);
@@ -309,7 +309,7 @@ export class VoiceSpottingController {
    * @param {SpeechRecognitionError} event - Error event
    */
   handleError(event) {
-    console.error('[VoiceSpotting] Error:', event.error);
+    window.logging.error('video', 'VoiceSpotting Error', { error: event.error });
     
     let message = 'Voice recognition error';
     
@@ -337,7 +337,7 @@ export class VoiceSpottingController {
    * Handle no match
    */
   handleNoMatch() {
-    console.log('[VoiceSpotting] No match');
+    window.logging.info('video', 'VoiceSpotting No match');
     this.updateStatus('no-match');
   }
 

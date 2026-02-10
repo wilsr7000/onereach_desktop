@@ -11,6 +11,8 @@
  * - Conflict detection (warn if mic already in use)
  */
 
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 class MicrophoneManager {
   constructor() {
     // Stream and audio context
@@ -41,13 +43,13 @@ class MicrophoneManager {
   async acquire(consumerId, constraints = {}) {
     // Check if already in use by different consumer
     if (this.stream && this.activeConsumer !== consumerId) {
-      console.warn(`[MicManager] Mic already in use by "${this.activeConsumer}", requested by "${consumerId}"`);
+      log.warn('voice', '[MicManager] Mic already in use by "", requested by ""', { v0: this.activeConsumer, v1: consumerId });
       return null;
     }
     
     // Already acquired by this consumer
     if (this.stream && this.activeConsumer === consumerId) {
-      console.log(`[MicManager] Mic already held by "${consumerId}"`);
+      log.info('voice', '[MicManager] Mic already held by ""', { v0: consumerId });
       return { stream: this.stream, audioContext: this.audioContext };
     }
     
@@ -72,11 +74,11 @@ class MicrophoneManager {
       this.activeConsumer = consumerId;
       this.acquiredAt = Date.now();
       
-      console.log(`[MicManager] 🎤 Mic acquired by "${consumerId}"`);
+      log.info('voice', '[MicManager] 🎤 Mic acquired by ""', { v0: consumerId });
       
       return { stream: this.stream, audioContext: this.audioContext };
     } catch (error) {
-      console.error(`[MicManager] Failed to acquire mic for "${consumerId}":`, error);
+      log.error('voice', '[MicManager] Failed to acquire mic for "":', { v0: consumerId, arg0: error });
       throw error;
     }
   }
@@ -131,7 +133,7 @@ class MicrophoneManager {
     // Verify ownership
     if (this.activeConsumer !== consumerId) {
       if (this.activeConsumer) {
-        console.warn(`[MicManager] "${consumerId}" tried to release mic owned by "${this.activeConsumer}"`);
+        log.warn('voice', '[MicManager] "" tried to release mic owned by ""', { v0: consumerId, v1: this.activeConsumer });
       }
       return;
     }
@@ -161,7 +163,7 @@ class MicrophoneManager {
     this.activeConsumer = null;
     this.acquiredAt = null;
     
-    console.log(`[MicManager] 🎤 Mic released by "${consumerId}" (held for ${duration}ms)`);
+    log.info('voice', '[MicManager] 🎤 Mic released by "" (held for ms)', { v0: consumerId, v1: duration });
   }
 
   /**
@@ -170,7 +172,7 @@ class MicrophoneManager {
    */
   async forceRelease() {
     const consumer = this.activeConsumer || 'unknown';
-    console.warn(`[MicManager] Force releasing mic (was held by "${consumer}")`);
+    log.warn('voice', '[MicManager] Force releasing mic (was held by "")', { v0: consumer });
     
     if (this.processor) this.processor.disconnect();
     if (this.source) this.source.disconnect();

@@ -52,6 +52,23 @@ test-results/
 playwright-report/
 *.spec.js.snap
 
+# Test audit state (local runtime state, not committed)
+test/audit/state/
+
+# Generated media test fixtures (regenerate with: npm run test:generate-fixtures)
+# Only the generator script is tracked; binary files are generated locally.
+test/fixtures/media/sample.png
+test/fixtures/media/sample.jpg
+test/fixtures/media/sample.gif
+test/fixtures/media/sample.bmp
+test/fixtures/media/sample.svg
+test/fixtures/media/sample.webp
+test/fixtures/media/sample.wav
+test/fixtures/media/sample.mp3
+test/fixtures/media/sample.mp4
+test/fixtures/media/sample.pdf
+test/fixtures/media/sample.txt
+
 # Scripts directory (optional - remove if you want to track scripts)
 _scripts/
 

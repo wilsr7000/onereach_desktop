@@ -8,6 +8,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('hudAPI', {
   // ==================== EXISTING HUD METHODS ====================
   
+  // Resize the HUD window (for agent UI panels)
+  resizeWindow: (width, height) => ipcRenderer.invoke('command-hud:resize', width, height),
+  
   // Dismiss the HUD
   dismiss: () => ipcRenderer.send('hud:dismiss'),
   
@@ -24,6 +27,10 @@ contextBridge.exposeInMainWorld('hudAPI', {
   onResult: (callback) => ipcRenderer.on('hud:result', (_, result) => callback(result)),
   onReset: (callback) => ipcRenderer.on('hud:reset', () => callback()),
   onTaskLifecycle: (callback) => ipcRenderer.on('voice-task:lifecycle', (_, event) => callback(event)),
+  
+  // ==================== SUBTASK EVENTS ====================
+  // Listen for subtask events (spawned by agents during execution)
+  onSubtask: (callback) => ipcRenderer.on('subtask:event', (_, subtask) => callback(subtask)),
   
   // ==================== CONTEXT MENU ====================
   
@@ -88,4 +95,10 @@ contextBridge.exposeInMainWorld('hudAPI', {
   },
 });
 
-console.log('[PreloadHUD] HUD API exposed with context menu and disambiguation support');
+// ==========================================
+// CENTRALIZED HUD API (shared across tools)
+// ==========================================
+const { getHudApiMethods } = require('./preload-hud-api');
+contextBridge.exposeInMainWorld('agentHUD', getHudApiMethods());
+
+console.log('[PreloadHUD] HUD API exposed with context menu, disambiguation, and agentHUD support');

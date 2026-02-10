@@ -6,6 +6,9 @@
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { ipcMain, shell } = require('electron');
+const ai = require('../../../lib/ai-service');
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 /**
  * Register all video editor IPC handlers
@@ -15,12 +18,12 @@ const { ipcMain, shell } = require('electron');
 export function setupVideoEditorIPC(videoEditor, mainWindow) {
   // Prevent duplicate registration
   if (videoEditor.ipcHandlersRegistered) {
-    console.log('[VideoEditorIPC] IPC handlers already registered, skipping');
+    log.info('video', 'IPC handlers already registered, skipping');
     return;
   }
   videoEditor.ipcHandlersRegistered = true;
 
-  console.log('[VideoEditorIPC] Registering IPC handlers...');
+  log.info('video', 'Registering IPC handlers');
 
   // ==================== CORE OPERATIONS ====================
 
@@ -63,10 +66,10 @@ export function setupVideoEditorIPC(videoEditor, mainWindow) {
 
   ipcMain.handle('video-editor:waveform', async (event, videoPath, options) => {
     try {
-      console.log('[VideoEditorIPC] Generating waveform for:', videoPath);
+      log.info('video', 'Generating waveform', { videoPath });
       return await videoEditor.generateWaveformData(videoPath, options);
     } catch (error) {
-      console.error('[VideoEditorIPC] Waveform error:', error);
+      log.error('video', 'Waveform error', { error: error.message });
       return { error: error.message };
     }
   });
@@ -82,10 +85,10 @@ export function setupVideoEditorIPC(videoEditor, mainWindow) {
       const cachePath = path.join(videoDir, `.${videoName}.waveform-cache.json`);
       
       await fs.writeFile(cachePath, JSON.stringify(cacheData), 'utf8');
-      console.log('[VideoEditorIPC] Waveform cache saved:', cachePath);
+      log.info('video', 'Waveform cache saved', { cachePath });
       return { success: true, cachePath };
     } catch (error) {
-      console.error('[VideoEditorIPC] Save waveform cache error:', error);
+      log.error('video', 'Save waveform cache error', { error: error.message });
       return { error: error.message };
     }
   });
@@ -109,10 +112,10 @@ export function setupVideoEditorIPC(videoEditor, mainWindow) {
       
       const data = await fs.readFile(cachePath, 'utf8');
       const cacheData = JSON.parse(data);
-      console.log('[VideoEditorIPC] Waveform cache loaded:', cachePath);
+      log.info('video', 'Waveform cache loaded', { cachePath });
       return { exists: true, ...cacheData };
     } catch (error) {
-      console.error('[VideoEditorIPC] Load waveform cache error:', error);
+      log.error('video', 'Load waveform cache error', { error: error.message });
       return { exists: false, error: error.message };
     }
   });
@@ -130,10 +133,10 @@ export function setupVideoEditorIPC(videoEditor, mainWindow) {
       // Convert dataURL to buffer
       const base64Data = dataUrl.replace(/^data:image\/png;base64,/, '');
       await fs.writeFile(imagePath, base64Data, 'base64');
-      console.log('[VideoEditorIPC] Waveform image saved:', imagePath);
+      log.info('video', 'Waveform image saved', { imagePath });
       return { success: true, imagePath };
     } catch (error) {
-      console.error('[VideoEditorIPC] Save waveform image error:', error);
+      log.error('video', 'Save waveform image error', { error: error.message });
       return { error: error.message };
     }
   });
@@ -157,10 +160,10 @@ export function setupVideoEditorIPC(videoEditor, mainWindow) {
       
       const imageBuffer = await fs.readFile(imagePath);
       const dataUrl = `data:image/png;base64,${imageBuffer.toString('base64')}`;
-      console.log('[VideoEditorIPC] Waveform image loaded:', imagePath);
+      log.info('video', 'Waveform image loaded', { imagePath });
       return { exists: true, dataUrl };
     } catch (error) {
-      console.error('[VideoEditorIPC] Load waveform image error:', error);
+      log.error('video', 'Load waveform image error', { error: error.message });
       return { exists: false, error: error.message };
     }
   });
@@ -188,16 +191,16 @@ export function setupVideoEditorIPC(videoEditor, mainWindow) {
         try {
           await fs.unlink(filePath);
           deleted++;
-          console.log('[VideoEditorIPC] Deleted waveform cache:', file);
+          log.info('video', 'Deleted waveform cache file', { file });
         } catch (e) {
-          console.warn('[VideoEditorIPC] Could not delete:', file, e.message);
+          log.warn('video', 'Could not delete waveform cache file', { file, error: e.message });
         }
       }
       
-      console.log('[VideoEditorIPC] Deleted', deleted, 'waveform cache files');
+      log.info('video', 'Deleted waveform cache files', { deleted });
       return { success: true, deleted };
     } catch (error) {
-      console.error('[VideoEditorIPC] Delete waveform cache error:', error);
+      log.error('video', 'Delete waveform cache error', { error: error.message });
       return { error: error.message };
     }
   });
@@ -215,10 +218,10 @@ export function setupVideoEditorIPC(videoEditor, mainWindow) {
       const cachePath = path.join(videoDir, `.${videoName}.thumbnail-cache.json`);
 
       await fs.writeFile(cachePath, JSON.stringify(cacheData), 'utf8');
-      console.log('[VideoEditorIPC] Thumbnail cache saved:', cachePath);
+      log.info('video', 'Thumbnail cache saved', { cachePath });
       return { success: true, cachePath };
     } catch (error) {
-      console.error('[VideoEditorIPC] Save thumbnail cache error:', error);
+      log.error('video', 'Save thumbnail cache error', { error: error.message });
       return { error: error.message };
     }
   });
@@ -242,10 +245,10 @@ export function setupVideoEditorIPC(videoEditor, mainWindow) {
 
       const data = await fs.readFile(cachePath, 'utf8');
       const cacheData = JSON.parse(data);
-      console.log('[VideoEditorIPC] Thumbnail cache loaded:', cachePath);
+      log.info('video', 'Thumbnail cache loaded', { cachePath });
       return { exists: true, ...cacheData };
     } catch (error) {
-      console.error('[VideoEditorIPC] Load thumbnail cache error:', error);
+      log.error('video', 'Load thumbnail cache error', { error: error.message });
       return { exists: false, error: error.message };
     }
   });
@@ -263,10 +266,10 @@ export function setupVideoEditorIPC(videoEditor, mainWindow) {
       // Convert dataURL to buffer
       const base64Data = dataUrl.replace(/^data:image\/jpeg;base64,/, '').replace(/^data:image\/png;base64,/, '');
       await fs.writeFile(imagePath, base64Data, 'base64');
-      console.log('[VideoEditorIPC] Thumbnail strip saved:', imagePath);
+      log.info('video', 'Thumbnail strip saved', { imagePath });
       return { success: true, imagePath };
     } catch (error) {
-      console.error('[VideoEditorIPC] Save thumbnail strip error:', error);
+      log.error('video', 'Save thumbnail strip error', { error: error.message });
       return { error: error.message };
     }
   });
@@ -290,10 +293,10 @@ export function setupVideoEditorIPC(videoEditor, mainWindow) {
 
       const imageBuffer = await fs.readFile(imagePath);
       const dataUrl = `data:image/jpeg;base64,${imageBuffer.toString('base64')}`;
-      console.log('[VideoEditorIPC] Thumbnail strip loaded:', imagePath);
+      log.info('video', 'Thumbnail strip loaded', { imagePath });
       return { exists: true, dataUrl };
     } catch (error) {
-      console.error('[VideoEditorIPC] Load thumbnail strip error:', error);
+      log.error('video', 'Load thumbnail strip error', { error: error.message });
       return { exists: false, error: error.message };
     }
   });
@@ -344,13 +347,13 @@ export function setupVideoEditorIPC(videoEditor, mainWindow) {
       
       try {
         const stats = await fs.stat(cachePath);
-        console.log('[VideoEditorIPC] Audio cache found:', cachePath);
+        log.info('video', 'Audio cache found', { cachePath });
         return { exists: true, path: cachePath, size: stats.size };
       } catch {
         return { exists: false };
       }
     } catch (error) {
-      console.error('[VideoEditorIPC] Check audio cache error:', error);
+      log.error('video', 'Check audio cache error', { error: error.message });
       return { exists: false, error: error.message };
     }
   });
@@ -368,13 +371,13 @@ export function setupVideoEditorIPC(videoEditor, mainWindow) {
       // Check if cache exists
       try {
         const stats = await fs.stat(cachePath);
-        console.log('[VideoEditorIPC] Using cached audio:', cachePath);
+        log.info('video', 'Using cached audio', { cachePath });
         return { success: true, path: cachePath, cached: true, size: stats.size };
       } catch {
         // Cache miss - need to extract
       }
       
-      console.log('[VideoEditorIPC] Cache miss, extracting audio to:', cachePath);
+      log.info('video', 'Cache miss, extracting audio to', { cachePath });
       
       // Extract audio using codec copy for speed (no re-encoding)
       const result = await videoEditor.extractAudio(videoPath, {
@@ -387,7 +390,7 @@ export function setupVideoEditorIPC(videoEditor, mainWindow) {
       
       if (result.error) {
         // If codec copy fails (incompatible format), try with re-encoding
-        console.log('[VideoEditorIPC] Codec copy failed, re-encoding...');
+        log.info('video', 'Codec copy failed, re-encoding...');
         const reencodeResult = await videoEditor.extractAudio(videoPath, {
           outputPath: cachePath,
           format: 'aac',
@@ -402,11 +405,11 @@ export function setupVideoEditorIPC(videoEditor, mainWindow) {
       }
       
       const stats = await fs.stat(cachePath);
-      console.log('[VideoEditorIPC] Audio extracted and cached:', cachePath);
+      log.info('video', 'Audio extracted and cached', { cachePath });
       return { success: true, path: cachePath, cached: false, size: stats.size };
       
     } catch (error) {
-      console.error('[VideoEditorIPC] Extract audio cached error:', error);
+      log.error('video', 'Extract audio cached error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -475,20 +478,20 @@ export function setupVideoEditorIPC(videoEditor, mainWindow) {
     // Uses OpenAI Whisper API for transcription with word-level timestamps
     // Sends progress updates as each chunk completes
     try {
-      console.log('[VideoEditorIPC] Transcribe range called:', videoPath, options);
+      log.info('video', 'Transcribe range called', { videoPath, options });
       
       // Progress callback to send updates to renderer
       const onChunkComplete = (progressData) => {
         try {
           event.sender.send('video-editor:transcription-progress', progressData);
         } catch (e) {
-          console.warn('[VideoEditorIPC] Could not send progress:', e.message);
+          log.warn('video', 'Could not send progress', { error: e.message });
         }
       };
       
       return await videoEditor.transcribeRange(videoPath, { ...options, onChunkComplete });
     } catch (error) {
-      console.error('[VideoEditorIPC] Transcribe error:', error);
+      log.error('video', 'Transcribe error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -513,7 +516,7 @@ export function setupVideoEditorIPC(videoEditor, mainWindow) {
         return { success: false, error: 'No LLM API key configured. Please set your API key in Settings.' };
       }
       
-      console.log('[VideoEditorIPC] Generating scene description with', provider, model);
+      log.info('video', 'Generating scene description', { provider, model });
       
       // Build prompt
       const prompt = `You are a professional video editor's assistant. Analyze the following transcript from a video segment and write a concise, descriptive scene description.
@@ -536,89 +539,26 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
 
       let description;
       
-      if (provider === 'anthropic' || apiKey.startsWith('sk-ant-')) {
-        // Use Anthropic Claude
-        const https = await import('https');
-        
-        const requestBody = JSON.stringify({
-          model: model,
-          max_tokens: 500,
-          messages: [{
-            role: 'user',
-            content: prompt
-          }]
-        });
-        
-        const response = await new Promise((resolve, reject) => {
-          const req = https.request({
-            hostname: 'api.anthropic.com',
-            path: '/v1/messages',
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-api-key': apiKey,
-              'anthropic-version': '2023-06-01'
-            }
-          }, (res) => {
-            let data = '';
-            res.on('data', chunk => data += chunk);
-            res.on('end', () => {
-              try {
-                resolve(JSON.parse(data));
-              } catch (e) {
-                reject(new Error('Invalid response from Anthropic API'));
-              }
-            });
-          });
-          
-          req.on('error', reject);
-          req.write(requestBody);
-          req.end();
-        });
-        
-        if (response.error) {
-          throw new Error(response.error.message || 'Anthropic API error');
-        }
-        
-        description = response.content?.[0]?.text?.trim() || '';
-        
-      } else {
-        // Use OpenAI
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`
-          },
-          body: JSON.stringify({
-            model: model.startsWith('gpt') ? model : 'gpt-4o-mini',
-            messages: [{
-              role: 'user',
-              content: prompt
-            }],
-            max_tokens: 500
-          })
-        });
-        
-        const result = await response.json();
-        
-        if (result.error) {
-          throw new Error(result.error.message || 'OpenAI API error');
-        }
-        
-        description = result.choices?.[0]?.message?.content?.trim() || '';
-      }
+      // Use centralized AI service
+      const result = await ai.chat({
+        profile: provider === 'anthropic' || apiKey.startsWith('sk-ant-') ? 'standard' : 'fast',
+        messages: [{ role: 'user', content: prompt }],
+        maxTokens: 500,
+        feature: 'video-editor-ipc'
+      });
+      
+      description = result.content.trim();
       
       if (!description) {
         throw new Error('Empty response from LLM');
       }
       
-      console.log('[VideoEditorIPC] Generated description:', description.substring(0, 100) + '...');
+      log.info('video', 'Generated scene description', { descriptionPreview: description.substring(0, 100) });
       
       return { success: true, description };
       
     } catch (error) {
-      console.error('[VideoEditorIPC] Generate scene description error:', error);
+      log.error('video', 'Generate scene description error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -674,12 +614,12 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
 
   ipcMain.handle('video-editor:create-video-from-audio', async (event, audioPath, options) => {
     try {
-      console.log('[VideoEditorIPC] Creating video from audio:', audioPath);
+      log.info('video', 'Creating video from audio', { audioPath });
       return await videoEditor.createVideoFromAudio(audioPath, options, (progress) => {
         mainWindow?.webContents.send('video-editor:progress', progress);
       });
     } catch (error) {
-      console.error('[VideoEditorIPC] Audio-to-video error:', error);
+      log.error('video', 'Audio-to-video error', { error: error.message });
       return { error: error.message };
     }
   });
@@ -702,7 +642,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       
       return { filePath: result.filePaths[0] };
     } catch (error) {
-      console.error('[VideoEditorIPC] Select image error:', error);
+      log.error('video', 'Select image error', { error: error.message });
       return { error: error.message };
     }
   });
@@ -725,7 +665,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       
       return { filePaths: result.filePaths };
     } catch (error) {
-      console.error('[VideoEditorIPC] Select images error:', error);
+      log.error('video', 'Select images error', { error: error.message });
       return { error: error.message };
     }
   });
@@ -746,7 +686,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       
       return { hasKey: !!apiKey && apiKey.trim() !== '' };
     } catch (error) {
-      console.error('[VideoEditorIPC] Check ElevenLabs key error:', error);
+      log.error('video', 'Check ElevenLabs key error', { error: error.message });
       return { hasKey: false, error: error.message };
     }
   });
@@ -757,7 +697,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
         mainWindow?.webContents.send('video-editor:progress', progress);
       });
     } catch (error) {
-      console.error('[VideoEditorIPC] ElevenLabs error:', error);
+      log.error('video', 'ElevenLabs error', { error: error.message });
       return { error: error.message };
     }
   });
@@ -765,12 +705,12 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   // Generate ElevenLabs audio only (non-destructive - no video processing)
   ipcMain.handle('video-editor:generate-elevenlabs-audio', async (event, options) => {
     try {
-      console.log('[VideoEditorIPC] Generating ElevenLabs audio only:', options.text?.substring(0, 50));
+      log.info('video', 'Generating ElevenLabs audio only', { textPreview: options.text?.substring(0, 50) });
       return await videoEditor.generateElevenLabsAudioOnly(options, (progress) => {
         mainWindow?.webContents.send('video-editor:progress', progress);
       });
     } catch (error) {
-      console.error('[VideoEditorIPC] ElevenLabs generate error:', error);
+      log.error('video', 'ElevenLabs generate error', { error: error.message });
       return { error: error.message };
     }
   });
@@ -778,12 +718,12 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   // Export video with all audio replacements applied at once
   ipcMain.handle('video-editor:export-with-audio-replacements', async (event, videoPath, replacements) => {
     try {
-      console.log('[VideoEditorIPC] Exporting with', replacements.length, 'audio replacements');
+      log.info('video', 'Exporting with audio replacements', { count: replacements.length });
       return await videoEditor.exportWithAudioReplacements(videoPath, replacements, (progress) => {
         mainWindow?.webContents.send('video-editor:progress', progress);
       });
     } catch (error) {
-      console.error('[VideoEditorIPC] Export with replacements error:', error);
+      log.error('video', 'Export with replacements error', { error: error.message });
       return { error: error.message };
     }
   });
@@ -793,7 +733,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   // Generate sound effect from text prompt
   ipcMain.handle('video-editor:generate-sfx', async (event, options) => {
     try {
-      console.log('[VideoEditorIPC] Generating SFX:', options.prompt?.substring(0, 50));
+      log.info('video', 'Generating SFX', { promptPreview: options.prompt?.substring(0, 50) });
       const audioPath = await videoEditor.elevenLabsService.generateSoundEffect(
         options.prompt,
         { durationSeconds: options.durationSeconds, promptInfluence: options.promptInfluence },
@@ -801,7 +741,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       );
       return { success: true, audioPath };
     } catch (error) {
-      console.error('[VideoEditorIPC] Generate SFX error:', error);
+      log.error('video', 'Generate SFX error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -809,7 +749,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   // Generate music from text prompt using Eleven Music
   ipcMain.handle('video-editor:generate-music', async (event, options) => {
     try {
-      console.log('[VideoEditorIPC] Generating music:', options.prompt?.substring(0, 50));
+      log.info('video', 'Generating music', { promptPreview: options.prompt?.substring(0, 50) });
       const audioPath = await videoEditor.elevenLabsService.generateMusic(
         options.prompt,
         { 
@@ -821,7 +761,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       );
       return { success: true, audioPath };
     } catch (error) {
-      console.error('[VideoEditorIPC] Generate music error:', error);
+      log.error('video', 'Generate music error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -829,14 +769,14 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   // Get music composition plan/suggestions
   ipcMain.handle('video-editor:get-music-plan', async (event, options) => {
     try {
-      console.log('[VideoEditorIPC] Getting music plan:', options.prompt?.substring(0, 50));
+      log.info('video', 'Getting music plan', { promptPreview: options.prompt?.substring(0, 50) });
       const plan = await videoEditor.elevenLabsService.getMusicCompositionPlan(
         options.prompt,
         { durationMs: options.durationMs }
       );
       return { success: true, plan };
     } catch (error) {
-      console.error('[VideoEditorIPC] Get music plan error:', error);
+      log.error('video', 'Get music plan error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -844,23 +784,36 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   // Get AI-generated audio suggestions (music or SFX) for a marker
   ipcMain.handle('video-editor:get-audio-suggestions', async (event, options) => {
     try {
-      const { marker, type, apiKey } = options;
-      console.log('[VideoEditorIPC] Getting audio suggestions for:', marker?.name, 'type:', type);
+      const { marker, type } = options;
+      log.info('video', 'Getting audio suggestions', { markerName: marker?.name, type });
       
-      // Use OpenAI to generate suggestions
-      const { getOpenAIAPI } = require('../../../openai-api.js');
-      const openaiAPI = getOpenAIAPI();
+      // Use centralized AI service instead of deprecated openai-api.js
+      const ai = require('../../../lib/ai-service');
       
-      const suggestions = await openaiAPI.generateAudioSuggestions(
-        marker,
-        type,
-        apiKey,
-        { projectId: options.projectId }
-      );
+      const duration = marker.duration || (marker.outTime - marker.inTime) || 10;
+      const durationStr = duration.toFixed(1);
+      const context = {
+        name: marker.name || 'Untitled Scene',
+        description: marker.description || '',
+        transcription: marker.transcription || '',
+        tags: (marker.tags || []).join(', '),
+        duration: durationStr
+      };
+
+      const prompt = type === 'music'
+        ? `You are a professional music supervisor for film and video. Based on the scene context below, suggest 5 different music options that would work well as background music.\n\nSCENE CONTEXT:\n- Scene Name: ${context.name}\n- Description: ${context.description || 'No description provided'}\n- Transcript/Dialogue: ${context.transcription || 'No dialogue'}\n- Tags: ${context.tags || 'None'}\n- Duration: ${context.duration} seconds\n\nGenerate 5 diverse music suggestions. Each suggestion should be distinctly different in style, mood, or genre.\n\nRespond with valid JSON only:\n{"suggestions":[{"id":1,"title":"Short title","prompt":"Detailed prompt for AI music generation","description":"Why this works","genre":"Genre","mood":"Mood","tempo":"slow|medium|fast","instrumental":true}]}`
+        : `You are a professional sound designer for film and video. Based on the scene context below, suggest 5 different sound effect options.\n\nSCENE CONTEXT:\n- Scene Name: ${context.name}\n- Description: ${context.description || 'No description provided'}\n- Transcript/Dialogue: ${context.transcription || 'No dialogue'}\n- Tags: ${context.tags || 'None'}\n- Duration: ${context.duration} seconds\n\nGenerate 5 diverse sound effect suggestions.\n\nRespond with valid JSON only:\n{"suggestions":[{"id":1,"title":"Short title","prompt":"Detailed sound description","description":"Why this works","category":"Category","layers":["layer1"]}]}`;
+
+      const result = await ai.json(prompt, {
+        profile: 'fast',
+        maxTokens: 2000,
+        feature: 'video-audio-suggestions'
+      });
       
+      const suggestions = result.suggestions || [];
       return { success: true, suggestions };
     } catch (error) {
-      console.error('[VideoEditorIPC] Get audio suggestions error:', error);
+      log.error('video', 'Get audio suggestions error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -868,7 +821,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   // Speech-to-Speech voice transformation
   ipcMain.handle('video-editor:speech-to-speech', async (event, options) => {
     try {
-      console.log('[VideoEditorIPC] Speech-to-Speech:', options.audioPath);
+      log.info('video', 'Speech-to-Speech', { options.audioPath });
       const audioPath = await videoEditor.elevenLabsService.speechToSpeech(
         options.audioPath,
         options.voiceId,
@@ -877,7 +830,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       );
       return { success: true, audioPath };
     } catch (error) {
-      console.error('[VideoEditorIPC] Speech-to-Speech error:', error);
+      log.error('video', 'Speech-to-Speech error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -885,14 +838,14 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   // Audio isolation (remove background noise)
   ipcMain.handle('video-editor:isolate-audio', async (event, audioPath, options = {}) => {
     try {
-      console.log('[VideoEditorIPC] Isolating audio:', audioPath);
+      log.info('video', 'Isolating audio', { audioPath });
       const isolatedPath = await videoEditor.elevenLabsService.isolateAudio(
         audioPath,
         { projectId: options.projectId }
       );
       return { success: true, audioPath: isolatedPath };
     } catch (error) {
-      console.error('[VideoEditorIPC] Isolate audio error:', error);
+      log.error('video', 'Isolate audio error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -900,7 +853,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   // Create dubbing project
   ipcMain.handle('video-editor:create-dubbing', async (event, options) => {
     try {
-      console.log('[VideoEditorIPC] Creating dubbing project:', options.videoPath);
+      log.info('video', 'Creating dubbing project', { options.videoPath });
       const result = await videoEditor.elevenLabsService.createDubbingProject(
         options.videoPath,
         options.targetLanguages,
@@ -914,7 +867,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       );
       return { success: true, ...result };
     } catch (error) {
-      console.error('[VideoEditorIPC] Create dubbing error:', error);
+      log.error('video', 'Create dubbing error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -925,7 +878,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       const result = await videoEditor.elevenLabsService.getDubbingStatus(dubbingId);
       return { success: true, ...result };
     } catch (error) {
-      console.error('[VideoEditorIPC] Get dubbing status error:', error);
+      log.error('video', 'Get dubbing status error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -936,7 +889,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       const audioPath = await videoEditor.elevenLabsService.downloadDubbedAudio(dubbingId, languageCode);
       return { success: true, audioPath };
     } catch (error) {
-      console.error('[VideoEditorIPC] Download dubbed audio error:', error);
+      log.error('video', 'Download dubbed audio error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -947,7 +900,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       const voices = await videoEditor.elevenLabsService.listVoices();
       return { success: true, voices };
     } catch (error) {
-      console.error('[VideoEditorIPC] List voices error:', error);
+      log.error('video', 'List voices error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -958,7 +911,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       const subscription = await videoEditor.elevenLabsService.getUserSubscription();
       return { success: true, subscription };
     } catch (error) {
-      console.error('[VideoEditorIPC] Get subscription error:', error);
+      log.error('video', 'Get subscription error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -969,7 +922,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       const user = await videoEditor.elevenLabsService.getUserInfo();
       return { success: true, user };
     } catch (error) {
-      console.error('[VideoEditorIPC] Get user info error:', error);
+      log.error('video', 'Get user info error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -980,7 +933,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       const stats = await videoEditor.elevenLabsService.getUsageStats(options);
       return { success: true, stats };
     } catch (error) {
-      console.error('[VideoEditorIPC] Get usage stats error:', error);
+      log.error('video', 'Get usage stats error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -990,12 +943,12 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   // Transcribe audio using ElevenLabs Scribe (replaces Whisper for transcription)
   ipcMain.handle('video-editor:transcribe-scribe', async (event, audioPath, options = {}) => {
     try {
-      console.log('[VideoEditorIPC] Transcribe with Scribe called:', audioPath);
+      log.info('video', 'Transcribe with Scribe called', { audioPath });
       const result = await videoEditor.elevenLabsService.transcribeAudio(audioPath, options);
-      console.log('[VideoEditorIPC] Scribe transcription complete, words:', result.words?.length || 0);
+      log.info('video', 'Scribe transcription complete', { wordCount: result.words?.length || 0 });
       return { success: true, ...result };
     } catch (error) {
-      console.error('[VideoEditorIPC] Scribe transcription error:', error);
+      log.error('video', 'Scribe transcription error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -1031,7 +984,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
         mainWindow?.webContents.send('video-editor:progress', progress);
       });
     } catch (error) {
-      console.error('[VideoEditorIPC] Edit list error:', error);
+      log.error('video', 'Edit list error', { error: error.message });
       return { error: error.message };
     }
   });
@@ -1042,7 +995,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       const clipboardManager = global.clipboardManager;
       return await videoEditor.finalizeVideoWorkflow(spaceItemId, editedVideoPath, scenes, clipboardManager);
     } catch (error) {
-      console.error('[VideoEditorIPC] Finalize error:', error);
+      log.error('video', 'Finalize error', { error: error.message });
       return { error: error.message };
     }
   });
@@ -1051,7 +1004,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
     try {
       return await videoEditor.detectScenes(videoPath, options);
     } catch (error) {
-      console.error('[VideoEditorIPC] Scene detection error:', error);
+      log.error('video', 'Scene detection error', { error: error.message });
       return { error: error.message };
     }
   });
@@ -1062,7 +1015,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
     try {
       return await videoEditor.translateWithQualityLoop(sourceText, options);
     } catch (error) {
-      console.error('[VideoEditorIPC] Translation error:', error);
+      log.error('video', 'Translation error', { error: error.message });
       return { error: error.message };
     }
   });
@@ -1075,7 +1028,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       }
       return await videoEditor.translateText(sourceText, options, openaiKey);
     } catch (error) {
-      console.error('[VideoEditorIPC] Translation error:', error);
+      log.error('video', 'Translation error', { error: error.message });
       return { error: error.message };
     }
   });
@@ -1088,7 +1041,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       }
       return await videoEditor.evaluateTranslation(sourceText, translatedText, options, anthropicKey || openaiKey);
     } catch (error) {
-      console.error('[VideoEditorIPC] Evaluation error:', error);
+      log.error('video', 'Evaluation error', { error: error.message });
       return { error: error.message };
     }
   });
@@ -1125,7 +1078,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
         metadata
       };
     } catch (error) {
-      console.error('[VideoEditorIPC] Get space video error:', error);
+      log.error('video', 'Get space video error', { error: error.message });
       return { error: error.message };
     }
   });
@@ -1156,7 +1109,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
 
       return { success: true, scenesCount: scenes.length };
     } catch (error) {
-      console.error('[VideoEditorIPC] Save scenes error:', error);
+      log.error('video', 'Save scenes error', { error: error.message });
       return { error: error.message };
     }
   });
@@ -1177,7 +1130,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       
       return await releaseManager.getReleaseOptions(projectPath);
     } catch (error) {
-      console.error('[VideoEditorIPC] Get release options error:', error);
+      log.error('video', 'Get release options error', { error: error.message });
       return { error: error.message };
     }
   });
@@ -1195,7 +1148,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       
       return result;
     } catch (error) {
-      console.error('[VideoEditorIPC] Release current video error:', error);
+      log.error('video', 'Release current video error', { error: error.message });
       return { error: error.message };
     }
   });
@@ -1217,7 +1170,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       
       return result;
     } catch (error) {
-      console.error('[VideoEditorIPC] Release branch error:', error);
+      log.error('video', 'Release branch error', { error: error.message });
       return { error: error.message };
     }
   });
@@ -1236,7 +1189,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       }
       return { error: 'Unknown service' };
     } catch (error) {
-      console.error('[VideoEditorIPC] Get upload service status error:', error);
+      log.error('video', 'Get upload service status error', { error: error.message });
       return { error: error.message };
     }
   });
@@ -1255,7 +1208,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       }
       return { error: 'Unknown service' };
     } catch (error) {
-      console.error('[VideoEditorIPC] Authenticate upload service error:', error);
+      log.error('video', 'Authenticate upload service error', { error: error.message });
       return { error: error.message };
     }
   });
@@ -1271,7 +1224,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       global.currentVideoProjectPath = result.projectPath;
       return result;
     } catch (error) {
-      console.error('[VideoEditorIPC] Create project error:', error);
+      log.error('video', 'Create project error', { error: error.message });
       return { error: error.message };
     }
   });
@@ -1283,7 +1236,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       const versionManager = new VersionManager();
       return versionManager.getAllProjects();
     } catch (error) {
-      console.error('[VideoEditorIPC] Get projects error:', error);
+      log.error('video', 'Get projects error', { error: error.message });
       return { error: error.message };
     }
   });
@@ -1306,7 +1259,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
         forkFromVersion
       });
     } catch (error) {
-      console.error('[VideoEditorIPC] Create branch error:', error);
+      log.error('video', 'Create branch error', { error: error.message });
       return { error: error.message };
     }
   });
@@ -1324,7 +1277,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       
       return versionManager.getBranches(projectPath);
     } catch (error) {
-      console.error('[VideoEditorIPC] Get branches error:', error);
+      log.error('video', 'Get branches error', { error: error.message });
       return { error: error.message };
     }
   });
@@ -1342,7 +1295,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       
       return await versionManager.saveVersion(projectPath, branchId, edlData, message);
     } catch (error) {
-      console.error('[VideoEditorIPC] Save version error:', error);
+      log.error('video', 'Save version error', { error: error.message });
       return { error: error.message };
     }
   });
@@ -1360,7 +1313,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       
       return versionManager.loadEDL(projectPath, branchId, version);
     } catch (error) {
-      console.error('[VideoEditorIPC] Load EDL error:', error);
+      log.error('video', 'Load EDL error', { error: error.message });
       return { error: error.message };
     }
   });
@@ -1370,11 +1323,11 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   // Create a Studio project
   ipcMain.handle('video-editor:elevenlabs-create-studio-project', async (event, name, options = {}) => {
     try {
-      console.log('[VideoEditorIPC] Creating ElevenLabs Studio project:', name);
+      log.info('video', 'Creating ElevenLabs Studio project', { name });
       const result = await videoEditor.elevenLabsService.createStudioProject(name, options);
       return { success: true, ...result };
     } catch (error) {
-      console.error('[VideoEditorIPC] Create Studio project error:', error);
+      log.error('video', 'Create Studio project error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -1385,7 +1338,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       const result = await videoEditor.elevenLabsService.getStudioProject(projectId);
       return { success: true, project: result };
     } catch (error) {
-      console.error('[VideoEditorIPC] Get Studio project error:', error);
+      log.error('video', 'Get Studio project error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -1396,7 +1349,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       const projects = await videoEditor.elevenLabsService.listStudioProjects();
       return { success: true, projects };
     } catch (error) {
-      console.error('[VideoEditorIPC] List Studio projects error:', error);
+      log.error('video', 'List Studio projects error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -1404,11 +1357,11 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   // Delete a Studio project
   ipcMain.handle('video-editor:elevenlabs-delete-studio-project', async (event, projectId) => {
     try {
-      console.log('[VideoEditorIPC] Deleting ElevenLabs Studio project:', projectId);
+      log.info('video', 'Deleting ElevenLabs Studio project', { projectId });
       await videoEditor.elevenLabsService.deleteStudioProject(projectId);
       return { success: true };
     } catch (error) {
-      console.error('[VideoEditorIPC] Delete Studio project error:', error);
+      log.error('video', 'Delete Studio project error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -1418,11 +1371,11 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   // Clone a voice from audio samples
   ipcMain.handle('video-editor:elevenlabs-clone-voice', async (event, name, audioFilePaths, options = {}) => {
     try {
-      console.log('[VideoEditorIPC] Cloning voice:', name, 'with', audioFilePaths.length, 'samples');
+      log.info('video', 'Cloning voice', { name, sampleCount: audioFilePaths.length });
       const result = await videoEditor.elevenLabsService.cloneVoice(name, audioFilePaths, options);
       return { success: true, ...result };
     } catch (error) {
-      console.error('[VideoEditorIPC] Clone voice error:', error);
+      log.error('video', 'Clone voice error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -1430,11 +1383,11 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   // Delete a voice
   ipcMain.handle('video-editor:elevenlabs-delete-voice', async (event, voiceId) => {
     try {
-      console.log('[VideoEditorIPC] Deleting voice:', voiceId);
+      log.info('video', 'Deleting voice', { voiceId });
       await videoEditor.elevenLabsService.deleteVoice(voiceId);
       return { success: true };
     } catch (error) {
-      console.error('[VideoEditorIPC] Delete voice error:', error);
+      log.error('video', 'Delete voice error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -1442,11 +1395,11 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   // Edit voice settings
   ipcMain.handle('video-editor:elevenlabs-edit-voice', async (event, voiceId, updates) => {
     try {
-      console.log('[VideoEditorIPC] Editing voice:', voiceId);
+      log.info('video', 'Editing voice', { voiceId });
       const result = await videoEditor.elevenLabsService.editVoice(voiceId, updates);
       return { success: true, voice: result };
     } catch (error) {
-      console.error('[VideoEditorIPC] Edit voice error:', error);
+      log.error('video', 'Edit voice error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -1457,7 +1410,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       const result = await videoEditor.elevenLabsService.getVoice(voiceId);
       return { success: true, voice: result };
     } catch (error) {
-      console.error('[VideoEditorIPC] Get voice error:', error);
+      log.error('video', 'Get voice error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -1467,11 +1420,11 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   // Design a voice from parameters
   ipcMain.handle('video-editor:elevenlabs-design-voice', async (event, options = {}) => {
     try {
-      console.log('[VideoEditorIPC] Designing voice:', options.gender, options.age, options.accent);
+      log.info('video', 'Designing voice', { gender: options.gender, age: options.age, accent: options.accent });
       const result = await videoEditor.elevenLabsService.designVoice(options);
       return { success: true, ...result };
     } catch (error) {
-      console.error('[VideoEditorIPC] Design voice error:', error);
+      log.error('video', 'Design voice error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -1479,11 +1432,11 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   // Save a designed voice to library
   ipcMain.handle('video-editor:elevenlabs-save-designed-voice', async (event, generatedVoiceId, name, description = '') => {
     try {
-      console.log('[VideoEditorIPC] Saving designed voice:', name);
+      log.info('video', 'Saving designed voice', { name });
       const result = await videoEditor.elevenLabsService.saveDesignedVoice(generatedVoiceId, name, description);
       return { success: true, ...result };
     } catch (error) {
-      console.error('[VideoEditorIPC] Save designed voice error:', error);
+      log.error('video', 'Save designed voice error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -1493,11 +1446,11 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   // Detect language in audio
   ipcMain.handle('video-editor:elevenlabs-detect-language', async (event, audioPath) => {
     try {
-      console.log('[VideoEditorIPC] Detecting language in:', audioPath);
+      log.info('video', 'Detecting language in', { audioPath });
       const result = await videoEditor.elevenLabsService.detectLanguage(audioPath);
       return { success: true, ...result };
     } catch (error) {
-      console.error('[VideoEditorIPC] Detect language error:', error);
+      log.error('video', 'Detect language error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -1510,7 +1463,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       const models = await videoEditor.elevenLabsService.listModels();
       return { success: true, models };
     } catch (error) {
-      console.error('[VideoEditorIPC] List models error:', error);
+      log.error('video', 'List models error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -1520,14 +1473,14 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   // Generate audio with streaming
   ipcMain.handle('video-editor:elevenlabs-generate-stream', async (event, text, voice, options = {}) => {
     try {
-      console.log('[VideoEditorIPC] Generating audio stream:', text.substring(0, 50) + '...');
+      log.info('video', 'Generating audio stream', { textPreview: text.substring(0, 50) });
       const outputPath = await videoEditor.elevenLabsService.generateAudioStream(text, voice, options, (chunk) => {
         // Send audio chunks to renderer for real-time playback if needed
         mainWindow?.webContents.send('video-editor:audio-stream-chunk', chunk);
       });
       return { success: true, audioPath: outputPath };
     } catch (error) {
-      console.error('[VideoEditorIPC] Generate stream error:', error);
+      log.error('video', 'Generate stream error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -1540,7 +1493,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       const result = await videoEditor.elevenLabsService.getHistory(options);
       return { success: true, ...result };
     } catch (error) {
-      console.error('[VideoEditorIPC] Get history error:', error);
+      log.error('video', 'Get history error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -1551,7 +1504,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       const result = await videoEditor.elevenLabsService.getHistoryItem(historyItemId);
       return { success: true, item: result };
     } catch (error) {
-      console.error('[VideoEditorIPC] Get history item error:', error);
+      log.error('video', 'Get history item error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -1559,11 +1512,11 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   // Get audio for a history item
   ipcMain.handle('video-editor:elevenlabs-get-history-audio', async (event, historyItemId) => {
     try {
-      console.log('[VideoEditorIPC] Getting history audio:', historyItemId);
+      log.info('video', 'Getting history audio', { historyItemId });
       const audioPath = await videoEditor.elevenLabsService.getHistoryItemAudio(historyItemId);
       return { success: true, audioPath };
     } catch (error) {
-      console.error('[VideoEditorIPC] Get history audio error:', error);
+      log.error('video', 'Get history audio error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -1571,11 +1524,11 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   // Delete a history item
   ipcMain.handle('video-editor:elevenlabs-delete-history-item', async (event, historyItemId) => {
     try {
-      console.log('[VideoEditorIPC] Deleting history item:', historyItemId);
+      log.info('video', 'Deleting history item', { historyItemId });
       await videoEditor.elevenLabsService.deleteHistoryItem(historyItemId);
       return { success: true };
     } catch (error) {
-      console.error('[VideoEditorIPC] Delete history item error:', error);
+      log.error('video', 'Delete history item error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -1583,11 +1536,11 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   // Delete multiple history items
   ipcMain.handle('video-editor:elevenlabs-delete-history-items', async (event, historyItemIds) => {
     try {
-      console.log('[VideoEditorIPC] Deleting', historyItemIds.length, 'history items');
+      log.info('video', 'Deleting history items', { count: historyItemIds.length });
       await videoEditor.elevenLabsService.deleteHistoryItems(historyItemIds);
       return { success: true };
     } catch (error) {
-      console.error('[VideoEditorIPC] Delete history items error:', error);
+      log.error('video', 'Delete history items error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -1597,7 +1550,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   // Capture a frame at a specific time
   ipcMain.handle('video-editor:capture-frame-at-time', async (event, videoPath, timestamp, options = {}) => {
     try {
-      console.log('[VideoEditorIPC] Capturing frame at:', timestamp);
+      log.info('video', 'Capturing frame at', { timestamp });
       
       const { width = 640, format = 'base64' } = options;
       
@@ -1610,7 +1563,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       
       return { success: true, framePath: thumbnail, timestamp };
     } catch (error) {
-      console.error('[VideoEditorIPC] Capture frame error:', error);
+      log.error('video', 'Capture frame error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -1628,7 +1581,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
         templateId 
       } = options;
 
-      console.log('[VideoEditorIPC] Analyzing scene with vision:', { startTime, endTime, templateId });
+      log.info('video', 'Analyzing scene with vision', { startTime, endTime, templateId });
 
       // Get API key from settings
       const { getSettingsManager } = await import('../../../settings-manager.js');
@@ -1655,41 +1608,16 @@ Provide analysis in JSON format:
   "keyMoments": []
 }`;
 
-      // Call OpenAI Vision API
+      // Call Vision API
       if (provider === 'openai' && frameBase64) {
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            model: 'gpt-4o',
-            messages: [
-              {
-                role: 'user',
-                content: [
-                  { type: 'text', text: fullPrompt },
-                  {
-                    type: 'image_url',
-                    image_url: {
-                      url: frameBase64.startsWith('data:') ? frameBase64 : `data:image/png;base64,${frameBase64}`
-                    }
-                  }
-                ]
-              }
-            ],
-            max_tokens: 1000
-          })
+        const imageData = frameBase64.startsWith('data:') ? frameBase64 : `data:image/png;base64,${frameBase64}`;
+        const result = await ai.vision(imageData, fullPrompt, {
+          profile: 'fast',
+          maxTokens: 1000,
+          feature: 'video-editor-ipc'
         });
-
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.error?.message || 'Vision API error');
-        }
-
-        const data = await response.json();
-        const content = data.choices?.[0]?.message?.content || '';
+        
+        const content = result.content || '';
 
         // Try to parse JSON from response
         try {
@@ -1719,7 +1647,7 @@ Provide analysis in JSON format:
       };
 
     } catch (error) {
-      console.error('[VideoEditorIPC] Analyze scene error:', error);
+      log.error('video', 'Analyze scene error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -1729,7 +1657,7 @@ Provide analysis in JSON format:
     try {
       const { transcript, maxQuotes = 10, criteria = [] } = options;
 
-      console.log('[VideoEditorIPC] Finding quotes in transcript');
+      log.info('video', 'Finding quotes in transcript');
 
       // Get API key
       const { getSettingsManager } = await import('../../../settings-manager.js');
@@ -1762,38 +1690,30 @@ Return JSON array of quotes:
   }
 ]`;
 
-      // Use Anthropic or OpenAI
+      // Use centralized AI service
       let quotes = [];
       
-      if (provider === 'anthropic') {
-        const response = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: {
-            'x-api-key': apiKey,
-            'Content-Type': 'application/json',
-            'anthropic-version': '2023-06-01'
-          },
-          body: JSON.stringify({
-            model: 'claude-sonnet-4-5-20250929',
-            max_tokens: 2000,
-            messages: [{ role: 'user', content: prompt }]
-          })
+      try {
+        const result = await ai.chat({
+          profile: provider === 'anthropic' ? 'standard' : 'fast',
+          messages: [{ role: 'user', content: prompt }],
+          maxTokens: 2000,
+          feature: 'video-editor-ipc'
         });
-
-        if (response.ok) {
-          const data = await response.json();
-          const content = data.content?.[0]?.text || '';
-          const jsonMatch = content.match(/\[[\s\S]*\]/);
-          if (jsonMatch) {
-            quotes = JSON.parse(jsonMatch[0]);
-          }
+        
+        const content = result.content || '';
+        const jsonMatch = content.match(/\[[\s\S]*\]/);
+        if (jsonMatch) {
+          quotes = JSON.parse(jsonMatch[0]);
         }
+      } catch (err) {
+        log.warn('video', 'Find quotes error', { error: err.message });
       }
 
       return { success: true, quotes };
 
     } catch (error) {
-      console.error('[VideoEditorIPC] Find quotes error:', error);
+      log.error('video', 'Find quotes error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -1803,7 +1723,7 @@ Return JSON array of quotes:
     try {
       const { transcript, detectSpeakerChanges = true, detectMoodShifts = true } = options;
 
-      console.log('[VideoEditorIPC] Detecting topics in transcript');
+      log.info('video', 'Detecting topics in transcript');
 
       // Get API key
       const { getSettingsManager } = await import('../../../settings-manager.js');
@@ -1833,34 +1753,28 @@ Return JSON array:
   }
 ]`;
 
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'x-api-key': apiKey,
-          'Content-Type': 'application/json',
-          'anthropic-version': '2023-06-01'
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-5-20250929',
-          max_tokens: 2000,
-          messages: [{ role: 'user', content: prompt }]
-        })
-      });
-
       let topics = [];
-      if (response.ok) {
-        const data = await response.json();
-        const content = data.content?.[0]?.text || '';
+      try {
+        const result = await ai.chat({
+          profile: 'standard',
+          messages: [{ role: 'user', content: prompt }],
+          maxTokens: 2000,
+          feature: 'video-editor-ipc'
+        });
+        
+        const content = result.content || '';
         const jsonMatch = content.match(/\[[\s\S]*\]/);
         if (jsonMatch) {
           topics = JSON.parse(jsonMatch[0]);
         }
+      } catch (err) {
+        log.warn('video', 'Detect topics error', { error: err.message });
       }
 
       return { success: true, topics };
 
     } catch (error) {
-      console.error('[VideoEditorIPC] Detect topics error:', error);
+      log.error('video', 'Detect topics error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -1870,7 +1784,7 @@ Return JSON array:
     try {
       const { transcript, segments } = options;
 
-      console.log('[VideoEditorIPC] Analyzing hooks');
+      log.info('video', 'Analyzing hooks');
 
       // Get API key
       const { getSettingsManager } = await import('../../../settings-manager.js');
@@ -1905,34 +1819,28 @@ Return JSON:
   "bestOpening": "The best hook to use as opening"
 }`;
 
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'x-api-key': apiKey,
-          'Content-Type': 'application/json',
-          'anthropic-version': '2023-06-01'
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-5-20250929',
-          max_tokens: 2000,
-          messages: [{ role: 'user', content: prompt }]
-        })
-      });
-
       let result = { hooks: [], bestOpening: null };
-      if (response.ok) {
-        const data = await response.json();
-        const content = data.content?.[0]?.text || '';
+      try {
+        const aiResult = await ai.chat({
+          profile: 'standard',
+          messages: [{ role: 'user', content: prompt }],
+          maxTokens: 2000,
+          feature: 'video-editor-ipc'
+        });
+        
+        const content = aiResult.content || '';
         const jsonMatch = content.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           result = JSON.parse(jsonMatch[0]);
         }
+      } catch (err) {
+        log.warn('video', 'Analyze hooks error', { error: err.message });
       }
 
       return { success: true, ...result };
 
     } catch (error) {
-      console.error('[VideoEditorIPC] Analyze hooks error:', error);
+      log.error('video', 'Analyze hooks error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
@@ -1942,7 +1850,7 @@ Return JSON:
     try {
       const { transcript, criteria, templateId, customGoals } = options;
 
-      console.log('[VideoEditorIPC] Rating project with AI');
+      log.info('video', 'Rating project with AI');
 
       // Get API key
       const { getSettingsManager } = await import('../../../settings-manager.js');
@@ -1991,39 +1899,33 @@ Return JSON:
   }
 }`;
 
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'x-api-key': apiKey,
-          'Content-Type': 'application/json',
-          'anthropic-version': '2023-06-01'
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-5-20250929',
-          max_tokens: 3000,
-          messages: [{ role: 'user', content: prompt }]
-        })
-      });
-
       let result = {};
-      if (response.ok) {
-        const data = await response.json();
-        const content = data.content?.[0]?.text || '';
+      try {
+        const aiResult = await ai.chat({
+          profile: 'standard',
+          messages: [{ role: 'user', content: prompt }],
+          maxTokens: 3000,
+          feature: 'video-editor-ipc'
+        });
+        
+        const content = aiResult.content || '';
         const jsonMatch = content.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           result = JSON.parse(jsonMatch[0]);
         }
+      } catch (err) {
+        log.warn('video', 'Rate project error', { error: err.message });
       }
 
       return { success: true, ...result };
 
     } catch (error) {
-      console.error('[VideoEditorIPC] Rate project error:', error);
+      log.error('video', 'Rate project error', { error: error.message });
       return { success: false, error: error.message };
     }
   });
 
-  console.log('[VideoEditorIPC] All IPC handlers registered successfully');
+  log.info('video', 'All IPC handlers registered successfully');
 }
 
 

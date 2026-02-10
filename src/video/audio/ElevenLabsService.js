@@ -13,6 +13,8 @@ const { app } = require('electron');
 import { getSettingsManager } from '../../../settings-manager.js';
 const { getBudgetManager } = require('../../../budget-manager.js');
 const logger = require('../../logger.js');
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 // ElevenLabs voice IDs (popular voices)
 const VOICE_IDS = {
@@ -137,8 +139,7 @@ export class ElevenLabsService {
         }
       };
 
-      console.log('[ElevenLabsService] Calling ElevenLabs API with voice:', voice, voiceId);
-      console.log(`[ElevenLabsService] Text length: ${characterCount} characters`);
+      log.info('video', 'ElevenLabsService calling API', { voice, voiceId, characterCount });
 
       const file = fs.createWriteStream(outputPath);
       const req = https.request(options, (res) => {
@@ -156,7 +157,7 @@ export class ElevenLabsService {
         res.pipe(file);
         file.on('finish', () => {
           file.close();
-          console.log('[ElevenLabsService] Audio generated:', outputPath);
+          log.info('video', 'ElevenLabsService audio generated', { outputPath });
           
           // Track usage after successful generation
           try {
@@ -219,7 +220,7 @@ export class ElevenLabsService {
         progressCallback({ jobId, status: 'Calling ElevenLabs API...', percent: 5 });
       }
 
-      console.log('[ElevenLabsService] Generating audio for text:', text.substring(0, 100) + (text.length > 100 ? '...' : ''));
+      log.info('video', 'ElevenLabsService generating audio for text', { textPreview: text.substring(0, 100) });
       
       // Call ElevenLabs API to generate audio (with budget tracking)
       const audioFilePath = await this.generateAudio(text, voice, {
@@ -227,8 +228,7 @@ export class ElevenLabsService {
         operation: `replaceAudio:${markerName}`
       });
       
-      console.log('[ElevenLabsService] Audio generated, now processing video...');
-      console.log('[ElevenLabsService] This may take several minutes for long videos.');
+      log.info('video', 'ElevenLabsService audio generated, processing video (may take minutes)');
       
       if (progressCallback) {
         progressCallback({ jobId, status: 'Audio generated! Processing video (may take a few minutes)...', percent: 15 });
@@ -304,7 +304,7 @@ export class ElevenLabsService {
               reject(new Error(result.detail?.message || `API error: ${res.statusCode}`));
               return;
             }
-            console.log(`[ElevenLabsService] Fetched ${result.voices?.length || 0} voices`);
+            log.info('video', 'ElevenLabsService fetched voices', { count: result.voices?.length || 0 });
             resolve(result.voices || []);
           } catch (e) {
             reject(new Error('Failed to parse voices response'));
@@ -355,7 +355,7 @@ export class ElevenLabsService {
         }
       };
 
-      console.log('[ElevenLabsService] Generating SFX:', prompt.substring(0, 50));
+      log.info('video', 'ElevenLabsService generating SFX', { prompt: prompt.substring(0, 50) });
 
       const file = fs.createWriteStream(outputPath);
       const req = https.request(requestOptions, (res) => {
@@ -371,7 +371,7 @@ export class ElevenLabsService {
         res.pipe(file);
         file.on('finish', () => {
           file.close();
-          console.log('[ElevenLabsService] SFX generated:', outputPath);
+          log.info('video', 'ElevenLabsService SFX generated', { outputPath });
           
           // Track usage
           try {
@@ -382,7 +382,7 @@ export class ElevenLabsService {
               durationSeconds
             });
           } catch (e) {
-            console.warn('[ElevenLabsService] Usage tracking error:', e.message);
+            log.warn('video', 'ElevenLabsService usage tracking error', { error: e.message });
           }
           
           resolve(outputPath);
@@ -443,8 +443,7 @@ export class ElevenLabsService {
         }
       };
 
-      console.log('[ElevenLabsService] Generating music:', prompt.substring(0, 50));
-      console.log('[ElevenLabsService] Duration:', durationMs, 'ms, Instrumental:', instrumental);
+      log.info('video', 'ElevenLabsService generating music', { prompt: prompt.substring(0, 50), durationMs, instrumental });
 
       const file = fs.createWriteStream(outputPath);
       const req = https.request(requestOptions, (res) => {
@@ -460,7 +459,7 @@ export class ElevenLabsService {
         res.pipe(file);
         file.on('finish', () => {
           file.close();
-          console.log('[ElevenLabsService] Music generated:', outputPath);
+          log.info('video', 'ElevenLabsService music generated', { outputPath });
           
           // Track usage
           try {
@@ -471,7 +470,7 @@ export class ElevenLabsService {
               durationMs
             });
           } catch (e) {
-            console.warn('[ElevenLabsService] Usage tracking error:', e.message);
+            log.warn('video', 'ElevenLabsService usage tracking error', { error: e.message });
           }
           
           resolve(outputPath);
@@ -522,7 +521,7 @@ export class ElevenLabsService {
         }
       };
 
-      console.log('[ElevenLabsService] Getting music composition plan for:', prompt.substring(0, 50));
+      log.info('video', 'ElevenLabsService getting music composition plan', { prompt: prompt.substring(0, 50) });
 
       let responseData = '';
       const req = https.request(requestOptions, (res) => {
@@ -534,7 +533,7 @@ export class ElevenLabsService {
               reject(new Error(result.detail?.message || `Music plan error: ${res.statusCode}`));
               return;
             }
-            console.log('[ElevenLabsService] Music composition plan received');
+            log.info('video', 'ElevenLabsService music composition plan received');
             resolve(result);
           } catch (e) {
             reject(new Error('Failed to parse music plan response: ' + e.message));
@@ -604,7 +603,7 @@ export class ElevenLabsService {
         }
       };
 
-      console.log('[ElevenLabsService] Speech-to-Speech transformation with voice:', voiceId);
+      log.info('video', 'ElevenLabsService speech-to-speech transformation', { voiceId });
 
       const file = fs.createWriteStream(outputPath);
       const req = https.request(requestOptions, (res) => {
@@ -620,7 +619,7 @@ export class ElevenLabsService {
         res.pipe(file);
         file.on('finish', () => {
           file.close();
-          console.log('[ElevenLabsService] STS output generated:', outputPath);
+          log.info('video', 'ElevenLabsService STS output generated', { outputPath });
           
           // Track usage
           try {
@@ -630,7 +629,7 @@ export class ElevenLabsService {
               voiceId
             });
           } catch (e) {
-            console.warn('[ElevenLabsService] Usage tracking error:', e.message);
+            log.warn('video', 'ElevenLabsService usage tracking error', { error: e.message });
           }
           
           resolve(outputPath);
@@ -695,7 +694,7 @@ export class ElevenLabsService {
         }
       };
 
-      console.log('[ElevenLabsService] Isolating audio from:', audioPath);
+      log.info('video', 'ElevenLabsService isolating audio', { audioPath });
 
       const file = fs.createWriteStream(outputPath);
       const req = https.request(requestOptions, (res) => {
@@ -711,7 +710,7 @@ export class ElevenLabsService {
         res.pipe(file);
         file.on('finish', () => {
           file.close();
-          console.log('[ElevenLabsService] Audio isolated:', outputPath);
+          log.info('video', 'ElevenLabsService audio isolated', { outputPath });
           
           // Track usage
           try {
@@ -720,7 +719,7 @@ export class ElevenLabsService {
               operation: 'isolateAudio'
             });
           } catch (e) {
-            console.warn('[ElevenLabsService] Usage tracking error:', e.message);
+            log.warn('video', 'ElevenLabsService usage tracking error', { error: e.message });
           }
           
           resolve(outputPath);
@@ -828,8 +827,7 @@ export class ElevenLabsService {
         }
       };
 
-      console.log('[ElevenLabsService] Creating dubbing project:', projectName);
-      console.log('[ElevenLabsService] Target languages:', targetLanguages);
+      log.info('video', 'ElevenLabsService creating dubbing project', { projectName, targetLanguages });
 
       let responseData = '';
       const req = https.request(requestOptions, (res) => {
@@ -842,7 +840,7 @@ export class ElevenLabsService {
               return;
             }
             
-            console.log('[ElevenLabsService] Dubbing project created:', result.dubbing_id);
+            log.info('video', 'ElevenLabsService dubbing project created', { dubbingId: result.dubbing_id });
             
             // Track usage
             try {
@@ -853,7 +851,7 @@ export class ElevenLabsService {
                 targetLanguages
               });
             } catch (e) {
-              console.warn('[ElevenLabsService] Usage tracking error:', e.message);
+              log.warn('video', 'ElevenLabsService usage tracking error', { error: e.message });
             }
             
             resolve(result);
@@ -938,7 +936,7 @@ export class ElevenLabsService {
         }
       };
 
-      console.log('[ElevenLabsService] Downloading dubbed audio:', languageCode);
+      log.info('video', 'ElevenLabsService downloading dubbed audio', { languageCode });
 
       const file = fs.createWriteStream(outputPath);
       const req = https.request(options, (res) => {
@@ -954,7 +952,7 @@ export class ElevenLabsService {
         res.pipe(file);
         file.on('finish', () => {
           file.close();
-          console.log('[ElevenLabsService] Dubbed audio downloaded:', outputPath);
+          log.info('video', 'ElevenLabsService dubbed audio downloaded', { outputPath });
           resolve(outputPath);
         });
       });
@@ -999,7 +997,7 @@ export class ElevenLabsService {
               reject(new Error(result.detail?.message || `Subscription error: ${res.statusCode}`));
               return;
             }
-            console.log('[ElevenLabsService] Got subscription info');
+            log.info('video', 'ElevenLabsService got subscription info');
             resolve(result);
           } catch (e) {
             reject(new Error('Failed to parse subscription response'));
@@ -1087,8 +1085,7 @@ export class ElevenLabsService {
       modelId = 'scribe_v1'
     } = options;
 
-    console.log('[ElevenLabsService] Transcribing with Scribe:', path.basename(audioPath));
-    console.log('[ElevenLabsService] Speaker diarization:', diarize ? 'enabled' : 'disabled');
+    log.info('video', 'ElevenLabsService transcribing with Scribe', { file: path.basename(audioPath), diarize });
 
     // Read the audio file
     const audioBuffer = fs.readFileSync(audioPath);
@@ -1183,7 +1180,7 @@ export class ElevenLabsService {
         }
       };
 
-      console.log('[ElevenLabsService] Calling Scribe API for transcription...');
+      log.info('video', 'ElevenLabsService calling Scribe API for transcription');
 
       let responseData = '';
       const req = https.request(requestOptions, (res) => {
@@ -1196,15 +1193,14 @@ export class ElevenLabsService {
               return;
             }
             
-            console.log('[ElevenLabsService] Scribe transcription complete');
-            console.log(`[ElevenLabsService] Language: ${result.language_code}, Words: ${result.words?.length || 0}`);
+            log.info('video', 'ElevenLabsService Scribe transcription complete', { language: result.language_code, wordCount: result.words?.length || 0 });
             
             // Extract unique speakers from the transcription
             const speakers = new Set();
             (result.words || []).forEach(w => {
               if (w.speaker_id) speakers.add(w.speaker_id);
             });
-            console.log(`[ElevenLabsService] Detected speakers: ${speakers.size > 0 ? Array.from(speakers).join(', ') : 'none'}`);
+            log.info('video', 'ElevenLabsService detected speakers', { speakers: Array.from(speakers), count: speakers.size });
             
             // Track usage
             try {
@@ -1216,7 +1212,7 @@ export class ElevenLabsService {
                 speakerCount: speakers.size
               });
             } catch (e) {
-              console.warn('[ElevenLabsService] Usage tracking error:', e.message);
+              log.warn('video', 'ElevenLabsService usage tracking error', { error: e.message });
             }
             
             // Return in a format compatible with the existing code
@@ -1290,7 +1286,7 @@ export class ElevenLabsService {
               reject(new Error(result.detail?.message || `Usage stats error: ${res.statusCode}`));
               return;
             }
-            console.log('[ElevenLabsService] Got usage stats');
+            log.info('video', 'ElevenLabsService got usage stats');
             resolve(result);
           } catch (e) {
             reject(new Error('Failed to parse usage stats response'));
@@ -1354,7 +1350,7 @@ export class ElevenLabsService {
         }
       };
 
-      console.log('[ElevenLabsService] Creating Studio project:', name);
+      log.info('video', 'ElevenLabsService creating Studio project', { name });
 
       let responseData = '';
       const req = https.request(requestOptions, (res) => {
@@ -1366,7 +1362,7 @@ export class ElevenLabsService {
               reject(new Error(result.detail?.message || `Studio project error: ${res.statusCode}`));
               return;
             }
-            console.log('[ElevenLabsService] Studio project created:', result.project_id);
+            log.info('video', 'ElevenLabsService Studio project created', { projectId: result.project_id });
             resolve(result);
           } catch (e) {
             reject(new Error('Failed to parse studio project response: ' + e.message));
@@ -1455,7 +1451,7 @@ export class ElevenLabsService {
               reject(new Error(result.detail?.message || `List projects error: ${res.statusCode}`));
               return;
             }
-            console.log(`[ElevenLabsService] Found ${result.projects?.length || 0} studio projects`);
+            log.info('video', 'ElevenLabsService found studio projects', { count: result.projects?.length || 0 });
             resolve(result.projects || []);
           } catch (e) {
             reject(new Error('Failed to parse projects response'));
@@ -1490,14 +1486,14 @@ export class ElevenLabsService {
         }
       };
 
-      console.log('[ElevenLabsService] Deleting Studio project:', projectId);
+      log.info('video', 'ElevenLabsService deleting Studio project', { projectId });
 
       const req = https.request(options, (res) => {
         let data = '';
         res.on('data', chunk => data += chunk);
         res.on('end', () => {
           if (res.statusCode === 200 || res.statusCode === 204) {
-            console.log('[ElevenLabsService] Studio project deleted:', projectId);
+            log.info('video', 'ElevenLabsService Studio project deleted', { projectId });
             resolve(true);
           } else {
             try {
@@ -1601,7 +1597,7 @@ export class ElevenLabsService {
         }
       };
 
-      console.log('[ElevenLabsService] Cloning voice:', name, 'with', audioFilePaths.length, 'samples');
+      log.info('video', 'ElevenLabsService cloning voice', { name, sampleCount: audioFilePaths.length });
 
       let responseData = '';
       const req = https.request(requestOptions, (res) => {
@@ -1613,7 +1609,7 @@ export class ElevenLabsService {
               reject(new Error(result.detail?.message || `Voice cloning error: ${res.statusCode}`));
               return;
             }
-            console.log('[ElevenLabsService] Voice cloned:', result.voice_id);
+            log.info('video', 'ElevenLabsService voice cloned', { voiceId: result.voice_id });
             resolve(result);
           } catch (e) {
             reject(new Error('Failed to parse voice cloning response: ' + e.message));
@@ -1649,14 +1645,14 @@ export class ElevenLabsService {
         }
       };
 
-      console.log('[ElevenLabsService] Deleting voice:', voiceId);
+      log.info('video', 'ElevenLabsService deleting voice', { voiceId });
 
       const req = https.request(options, (res) => {
         let data = '';
         res.on('data', chunk => data += chunk);
         res.on('end', () => {
           if (res.statusCode === 200 || res.statusCode === 204) {
-            console.log('[ElevenLabsService] Voice deleted:', voiceId);
+            log.info('video', 'ElevenLabsService voice deleted', { voiceId });
             resolve(true);
           } else {
             try {
@@ -1732,7 +1728,7 @@ export class ElevenLabsService {
         }
       };
 
-      console.log('[ElevenLabsService] Editing voice:', voiceId);
+      log.info('video', 'ElevenLabsService editing voice', { voiceId });
 
       let responseData = '';
       const req = https.request(requestOptions, (res) => {
@@ -1744,7 +1740,7 @@ export class ElevenLabsService {
               reject(new Error(result.detail?.message || `Edit voice error: ${res.statusCode}`));
               return;
             }
-            console.log('[ElevenLabsService] Voice updated:', voiceId);
+            log.info('video', 'ElevenLabsService voice updated', { voiceId });
             resolve(result);
           } catch (e) {
             reject(new Error('Failed to parse edit voice response: ' + e.message));
@@ -1852,7 +1848,7 @@ export class ElevenLabsService {
         }
       };
 
-      console.log('[ElevenLabsService] Designing voice:', gender, age, accent);
+      log.info('video', 'ElevenLabsService designing voice', { gender, age, accent });
 
       const file = fs.createWriteStream(outputPath);
       const req = https.request(requestOptions, (res) => {
@@ -1871,7 +1867,7 @@ export class ElevenLabsService {
         res.pipe(file);
         file.on('finish', () => {
           file.close();
-          console.log('[ElevenLabsService] Voice design preview generated:', outputPath);
+          log.info('video', 'ElevenLabsService voice design preview generated', { outputPath });
           resolve({
             audioPath: outputPath,
             generatedVoiceId: generatedVoiceId,
@@ -1922,7 +1918,7 @@ export class ElevenLabsService {
         }
       };
 
-      console.log('[ElevenLabsService] Saving designed voice:', name);
+      log.info('video', 'ElevenLabsService saving designed voice', { name });
 
       let responseData = '';
       const req = https.request(requestOptions, (res) => {
@@ -1934,7 +1930,7 @@ export class ElevenLabsService {
               reject(new Error(result.detail?.message || `Save voice error: ${res.statusCode}`));
               return;
             }
-            console.log('[ElevenLabsService] Designed voice saved:', result.voice_id);
+            log.info('video', 'ElevenLabsService designed voice saved', { voiceId: result.voice_id });
             resolve(result);
           } catch (e) {
             reject(new Error('Failed to parse save voice response: ' + e.message));
@@ -1994,7 +1990,7 @@ export class ElevenLabsService {
         }
       };
 
-      console.log('[ElevenLabsService] Detecting language in:', path.basename(audioPath));
+      log.info('video', 'ElevenLabsService detecting language', { file: path.basename(audioPath) });
 
       let responseData = '';
       const req = https.request(requestOptions, (res) => {
@@ -2006,7 +2002,7 @@ export class ElevenLabsService {
               reject(new Error(result.detail?.message || `Language detection error: ${res.statusCode}`));
               return;
             }
-            console.log('[ElevenLabsService] Detected language:', result.detected_language);
+            log.info('video', 'ElevenLabsService detected language', { language: result.detected_language });
             resolve(result);
           } catch (e) {
             reject(new Error('Failed to parse language detection response: ' + e.message));
@@ -2053,7 +2049,7 @@ export class ElevenLabsService {
               reject(new Error(result.detail?.message || `List models error: ${res.statusCode}`));
               return;
             }
-            console.log(`[ElevenLabsService] Found ${result.length || 0} models`);
+            log.info('video', 'ElevenLabsService found models', { count: result.length || 0 });
             resolve(result);
           } catch (e) {
             reject(new Error('Failed to parse models response'));
@@ -2117,7 +2113,7 @@ export class ElevenLabsService {
         }
       };
 
-      console.log('[ElevenLabsService] Starting audio stream for:', text.substring(0, 50) + '...');
+      log.info('video', 'ElevenLabsService starting audio stream', { textPreview: text.substring(0, 50) });
 
       const file = fs.createWriteStream(outputPath);
       const req = https.request(requestOptions, (res) => {
@@ -2139,7 +2135,7 @@ export class ElevenLabsService {
 
         res.on('end', () => {
           file.end();
-          console.log('[ElevenLabsService] Stream complete:', outputPath);
+          log.info('video', 'ElevenLabsService stream complete', { outputPath });
           resolve(outputPath);
         });
       });
@@ -2197,7 +2193,7 @@ export class ElevenLabsService {
               reject(new Error(result.detail?.message || `Get history error: ${res.statusCode}`));
               return;
             }
-            console.log(`[ElevenLabsService] Got ${result.history?.length || 0} history items`);
+            log.info('video', 'ElevenLabsService got history items', { count: result.history?.length || 0 });
             resolve(result);
           } catch (e) {
             reject(new Error('Failed to parse history response'));
@@ -2292,7 +2288,7 @@ export class ElevenLabsService {
         res.pipe(file);
         file.on('finish', () => {
           file.close();
-          console.log('[ElevenLabsService] History audio downloaded:', outputPath);
+          log.info('video', 'ElevenLabsService history audio downloaded', { outputPath });
           resolve(outputPath);
         });
       });
@@ -2328,14 +2324,14 @@ export class ElevenLabsService {
         }
       };
 
-      console.log('[ElevenLabsService] Deleting history item:', historyItemId);
+      log.info('video', 'ElevenLabsService deleting history item', { historyItemId });
 
       const req = https.request(options, (res) => {
         let data = '';
         res.on('data', chunk => data += chunk);
         res.on('end', () => {
           if (res.statusCode === 200 || res.statusCode === 204) {
-            console.log('[ElevenLabsService] History item deleted:', historyItemId);
+            log.info('video', 'ElevenLabsService history item deleted', { historyItemId });
             resolve(true);
           } else {
             try {
@@ -2381,14 +2377,14 @@ export class ElevenLabsService {
         }
       };
 
-      console.log('[ElevenLabsService] Deleting', historyItemIds.length, 'history items');
+      log.info('video', 'ElevenLabsService deleting history items', { count: historyItemIds.length });
 
       const req = https.request(requestOptions, (res) => {
         let data = '';
         res.on('data', chunk => data += chunk);
         res.on('end', () => {
           if (res.statusCode === 200 || res.statusCode === 204) {
-            console.log('[ElevenLabsService] History items deleted');
+            log.info('video', 'ElevenLabsService history items deleted');
             resolve(true);
           } else {
             try {

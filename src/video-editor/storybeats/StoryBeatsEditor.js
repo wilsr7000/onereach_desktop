@@ -192,7 +192,7 @@ export class StoryBeatsEditor {
     if (this.templates[templateId]) {
       this.selectedTemplate = templateId;
       this.render();
-      console.log('[LineScript] Template changed to:', templateId);
+      window.logging.info('video', 'LineScript template changed', { templateId });
     }
   }
 
@@ -204,7 +204,7 @@ export class StoryBeatsEditor {
     this.editorContent = document.getElementById('storyBeatsEditorContent');
     
     if (!this.container || !this.editorContent) {
-      console.warn('[StoryBeatsEditor] Container not found');
+      window.logging.warn('video', 'StoryBeatsEditor Container not found');
       return;
     }
     
@@ -223,8 +223,7 @@ export class StoryBeatsEditor {
     // Setup event listeners
     this.setupEventListeners();
     
-    console.log('[StoryBeatsEditor] Initialized:', this.words.length, 'words,', 
-                this.markers.length, 'scenes,', this.speakers.length, 'speakers');
+    window.logging.info('video', 'StoryBeatsEditor initialized', { words: this.words.length, scenes: this.markers.length, speakers: this.speakers.length });
   }
 
   /**
@@ -301,7 +300,7 @@ export class StoryBeatsEditor {
         });
       }
       
-      console.log('[StoryBeatsEditor] Parsed', this.dialogueBlocks.length, 'dialogue blocks');
+      window.logging.info('video', 'StoryBeatsEditor parsed dialogue blocks', { count: this.dialogueBlocks.length });
     }
     
     // If no speaker-identified transcript, create blocks from words grouped by timing
@@ -1080,7 +1079,7 @@ export class StoryBeatsEditor {
    * Show notes panel for a scene
    */
   showNotesPanel(markerId, noteType = 'director') {
-    console.log('[LineScript] Show notes panel:', markerId, noteType);
+    window.logging.info('video', 'LineScript show notes panel', { markerId, noteType });
     
     // Initialize notes panel if needed
     if (!this.notesPanel) {
@@ -1089,7 +1088,7 @@ export class StoryBeatsEditor {
         this.notesPanel = new NotesPanel(this.app);
         this.notesPanel.show(markerId, noteType);
       }).catch(err => {
-        console.error('[LineScript] Failed to load NotesPanel:', err);
+        window.logging.error('video', 'LineScript Failed to load NotesPanel', { error: { error: err } });
         this.app.showToast?.('error', 'Failed to load notes panel');
       });
     } else {

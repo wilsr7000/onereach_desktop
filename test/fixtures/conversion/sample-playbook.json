@@ -1,0 +1,89 @@
+{
+  "id": "playbook-test-001",
+  "title": "Customer Onboarding Playbook",
+  "content": "This playbook outlines the standard process for onboarding new enterprise customers. It covers initial setup, configuration, training, and handoff to the success team.",
+  "keywords": [
+    "onboarding",
+    "enterprise",
+    "customer-success",
+    "setup"
+  ],
+  "status": "published",
+  "framework": {
+    "phases": [
+      {
+        "id": "phase-1",
+        "name": "Discovery",
+        "description": "Gather requirements and understand customer needs",
+        "steps": [
+          {
+            "id": "step-1-1",
+            "action": "Schedule kickoff call",
+            "owner": "account-manager"
+          },
+          {
+            "id": "step-1-2",
+            "action": "Document technical requirements",
+            "owner": "solutions-engineer"
+          }
+        ]
+      },
+      {
+        "id": "phase-2",
+        "name": "Configuration",
+        "description": "Set up the environment and configure integrations",
+        "steps": [
+          {
+            "id": "step-2-1",
+            "action": "Provision tenant",
+            "owner": "platform-team"
+          },
+          {
+            "id": "step-2-2",
+            "action": "Configure SSO and permissions",
+            "owner": "security-team"
+          },
+          {
+            "id": "step-2-3",
+            "action": "Set up data integrations",
+            "owner": "solutions-engineer"
+          }
+        ]
+      },
+      {
+        "id": "phase-3",
+        "name": "Training and Handoff",
+        "description": "Train users and transition to ongoing support",
+        "steps": [
+          {
+            "id": "step-3-1",
+            "action": "Conduct admin training",
+            "owner": "training-team"
+          },
+          {
+            "id": "step-3-2",
+            "action": "Conduct end-user training",
+            "owner": "training-team"
+          },
+          {
+            "id": "step-3-3",
+            "action": "Handoff to customer success",
+            "owner": "account-manager"
+          }
+        ]
+      }
+    ],
+    "metrics": {
+      "targetDays": 30,
+      "checkpoints": [
+        "kickoff-complete",
+        "env-ready",
+        "training-done",
+        "handoff-done"
+      ]
+    }
+  },
+  "createdAt": "2025-01-15T10:00:00Z",
+  "updatedAt": "2025-06-20T14:30:00Z",
+  "version": "2.1.0"
+}

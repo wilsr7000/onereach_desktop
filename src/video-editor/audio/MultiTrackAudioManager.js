@@ -8,6 +8,8 @@
  * - Seamless seeking across all tracks
  */
 
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 // Cross-platform helper to convert file path to file:// URL
 function pathToFileUrl(filePath) {
   if (!filePath) return '';
@@ -36,7 +38,7 @@ export class MultiTrackAudioManager {
     // Reference to video element
     this.videoElement = null;
     
-    console.log('[MultiTrackAudio] Manager initialized');
+    log.info('video', '[MultiTrackAudio] Manager initialized');
   }
 
   /**
@@ -62,7 +64,7 @@ export class MultiTrackAudioManager {
     // Set up video event listeners for sync
     this._setupVideoSync();
     
-    console.log('[MultiTrackAudio] Audio context initialized');
+    log.info('video', '[MultiTrackAudio] Audio context initialized');
   }
 
   /**
@@ -102,7 +104,7 @@ export class MultiTrackAudioManager {
       this.stopAllTracks();
     });
     
-    console.log('[MultiTrackAudio] Video sync listeners attached');
+    log.info('video', '[MultiTrackAudio] Video sync listeners attached');
   }
   
   /**
@@ -113,7 +115,7 @@ export class MultiTrackAudioManager {
       this._originalVideoMuted = this.videoElement.muted;
       this.videoElement.muted = true;
       this._multiTrackActive = true;
-      console.log('[MultiTrackAudio] Multi-track mode enabled, video native audio muted');
+      log.info('video', '[MultiTrackAudio] Multi-track mode enabled, video native audio muted');
     }
   }
   
@@ -124,7 +126,7 @@ export class MultiTrackAudioManager {
     if (this._multiTrackActive && this.videoElement) {
       this.videoElement.muted = this._originalVideoMuted || false;
       this._multiTrackActive = false;
-      console.log('[MultiTrackAudio] Multi-track mode disabled, video native audio restored');
+      log.info('video', '[MultiTrackAudio] Multi-track mode disabled, video native audio restored');
     }
   }
   
@@ -163,7 +165,7 @@ export class MultiTrackAudioManager {
         // Use video's audio - check if we already have it cached
         if (this.app.audioBuffer) {
           audioBuffer = this.app.audioBuffer;
-          console.log('[MultiTrackAudio] Using cached video audio buffer for track:', trackId);
+          log.info('video', '[MultiTrackAudio] Using cached video audio buffer for track', { data: trackId });
         } else {
           audioBuffer = await this._loadAudioFromVideo();
           // Cache it for other tracks
@@ -188,15 +190,12 @@ export class MultiTrackAudioManager {
         solo: solo
       });
       
-      console.log('[MultiTrackAudio] Loaded audio for track:', trackId, {
-        duration: audioBuffer.duration.toFixed(2) + 's',
-        channels: audioBuffer.numberOfChannels
-      });
+      log.info('video', 'MultiTrackAudio loaded audio for track', { trackId, duration: audioBuffer.duration.toFixed(2) + 's', channels: audioBuffer.numberOfChannels });
       
       return true;
       
     } catch (error) {
-      console.error('[MultiTrackAudio] Failed to load audio for track:', trackId, error);
+      log.error('video', 'MultiTrackAudio failed to load audio for track', { trackId, error: error.message || error });
       return false;
     }
   }
@@ -215,7 +214,7 @@ export class MultiTrackAudioManager {
     // Check if we should use chunked loading for long audio
     const CHUNK_THRESHOLD = 600; // 10 minutes
     if (audioBuffer.duration > CHUNK_THRESHOLD) {
-      console.log('[MultiTrackAudio] Long audio detected, enabling chunked mode:', audioBuffer.duration.toFixed(0) + 's');
+      log.info('video', 'MultiTrackAudio long audio detected, enabling chunked mode', { duration: audioBuffer.duration.toFixed(0) + 's' });
       // Store full buffer but flag for chunked playback
       this._useChunkedPlayback = true;
       this._chunkDuration = 120; // 2 minute chunks
@@ -291,14 +290,14 @@ export class MultiTrackAudioManager {
     if (currentTime > currentChunkStart + preloadAhead) {
       const cacheKey = `${trackId}-${nextChunkStart}`;
       if (!this._chunkCache?.has(cacheKey)) {
-        console.log('[MultiTrackAudio] Preloading next chunk:', nextChunkStart);
+        log.info('video', '[MultiTrackAudio] Preloading next chunk', { data: nextChunkStart });
         // Preload in background (non-blocking)
         this._loadAudioRange(trackData.audioPath, nextChunkStart, chunkDuration)
           .then(buffer => {
             if (!this._chunkCache) this._chunkCache = new Map();
             this._chunkCache.set(cacheKey, buffer);
           })
-          .catch(err => console.warn('[MultiTrackAudio] Chunk preload failed:', err));
+          .catch(err => log.warn('video', 'MultiTrackAudio Chunk preload failed', { data: err }));
       }
     }
   }
@@ -379,7 +378,7 @@ export class MultiTrackAudioManager {
       this._startTrack(trackId, trackData, startTime);
     });
     
-    console.log('[MultiTrackAudio] Started all tracks at:', startTime.toFixed(2) + 's');
+    log.info('video', 'MultiTrackAudio started all tracks', { startTime: startTime.toFixed(2) + 's' });
   }
 
   /**
@@ -428,7 +427,7 @@ export class MultiTrackAudioManager {
       }
     });
     
-    console.log('[MultiTrackAudio] Stopped all tracks');
+    log.info('video', '[MultiTrackAudio] Stopped all tracks');
   }
 
   /**
@@ -447,7 +446,7 @@ export class MultiTrackAudioManager {
       trackData.gain.gain.value = volume;
     }
     
-    console.log('[MultiTrackAudio] Set volume for track:', trackId, volume);
+    log.info('video', 'MultiTrackAudio set volume for track', { trackId, volume });
   }
 
   /**
@@ -464,7 +463,7 @@ export class MultiTrackAudioManager {
     // Update gain
     this._updateTrackGain(trackId, trackData);
     
-    console.log('[MultiTrackAudio] Toggle mute for track:', trackId, trackData.muted);
+    log.info('video', 'MultiTrackAudio toggle mute for track', { trackId, muted: trackData.muted });
     return trackData.muted;
   }
 
@@ -495,7 +494,7 @@ export class MultiTrackAudioManager {
     // Update all track gains (solo affects other tracks)
     this._updateSoloState();
     
-    console.log('[MultiTrackAudio] Toggle solo for track:', trackId, trackData.solo);
+    log.info('video', 'MultiTrackAudio toggle solo for track', { trackId, solo: trackData.solo });
     return trackData.solo;
   }
 
@@ -564,7 +563,7 @@ export class MultiTrackAudioManager {
     }
     
     this.trackAudio.delete(trackId);
-    console.log('[MultiTrackAudio] Removed track:', trackId);
+    log.info('video', '[MultiTrackAudio] Removed track', { data: trackId });
   }
 
   /**
@@ -591,16 +590,16 @@ export class MultiTrackAudioManager {
    */
   async loadTrackFromFile(trackId, filePath, options = {}) {
     if (!filePath) {
-      console.warn('[MultiTrackAudio] loadTrackFromFile called without filePath');
+      log.warn('video', '[MultiTrackAudio] loadTrackFromFile called without filePath');
       return false;
     }
     
-    console.log('[MultiTrackAudio] Loading track from file:', trackId, filePath);
+    log.info('video', 'MultiTrackAudio loading track from file', { trackId, filePath });
     
     try {
       return await this.loadTrackAudio(trackId, filePath, options);
     } catch (error) {
-      console.error('[MultiTrackAudio] Failed to load track from file:', trackId, error);
+      log.error('video', '[MultiTrackAudio] Failed to load track from file', { error: trackId, error });
       return false;
     }
   }
@@ -627,7 +626,7 @@ export class MultiTrackAudioManager {
       sampleRate
     );
     
-    console.log('[MultiTrackAudio] Starting offline render:', {
+    log.info('video', 'MultiTrackAudio starting offline render', {
       duration: duration.toFixed(2) + 's',
       tracks: tracks.length,
       sampleRate,
@@ -702,7 +701,7 @@ export class MultiTrackAudioManager {
     
     // Render to buffer
     const renderedBuffer = await offlineCtx.startRendering();
-    console.log('[MultiTrackAudio] Offline render complete:', renderedBuffer.duration.toFixed(2) + 's');
+    log.info('video', 'MultiTrackAudio offline render complete', { duration: renderedBuffer.duration.toFixed(2) + 's' });
     
     return renderedBuffer;
   }
@@ -792,7 +791,7 @@ export class MultiTrackAudioManager {
       this.audioContext = null;
     }
     
-    console.log('[MultiTrackAudio] Disposed');
+    log.info('video', '[MultiTrackAudio] Disposed');
   }
   
   /**

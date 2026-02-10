@@ -68,7 +68,7 @@ export class SpottingController {
     this.shortcuts['escape'] = { action: 'cancel', label: 'Esc - Cancel' };
     this.shortcuts['z'] = { action: 'undo', label: 'Z - Undo', requiresCtrl: true };
     
-    console.log(`[SpottingController] Loaded ${Object.keys(this.shortcuts).length} shortcuts for ${templateId}`);
+    window.logging.info('video', `SpottingController Loaded ${Object.keys(this.shortcuts).length} shortcuts for ${templateId}`);
   }
 
   /**
@@ -137,7 +137,7 @@ export class SpottingController {
   executeShortcut(shortcut, key) {
     const time = this.getCurrentTime();
     
-    console.log(`[SpottingController] Executing: ${shortcut.action} at ${time.toFixed(2)}s`);
+    window.logging.info('video', `SpottingController Executing: ${shortcut.action} at ${time.toFixed(2)}s`);
     
     // Show visual feedback
     this.showFeedback(`[${key.toUpperCase()}] ${shortcut.label || shortcut.action}`);

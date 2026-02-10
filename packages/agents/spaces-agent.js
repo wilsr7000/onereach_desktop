@@ -16,18 +16,9 @@
  */
 
 const { getAgentMemory } = require('../../lib/agent-memory-store');
-
-// Get OpenAI API key from settings
-function getOpenAIApiKey() {
-  if (global.settingsManager) {
-    const openaiKey = global.settingsManager.get('openaiApiKey');
-    if (openaiKey) return openaiKey;
-    const provider = global.settingsManager.get('llmProvider');
-    const llmKey = global.settingsManager.get('llmApiKey');
-    if (provider === 'openai' && llmKey) return llmKey;
-  }
-  return process.env.OPENAI_API_KEY;
-}
+const ai = require('../../lib/ai-service');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 
 // Get the Spaces API (lazy load to avoid circular deps)
 let spacesAPI = null;
@@ -37,7 +28,7 @@ function getSpacesAPI() {
       const SpacesAPIClass = require('../../spaces-api');
       spacesAPI = new SpacesAPIClass();
     } catch (e) {
-      console.error('[SpacesAgent] Failed to load Spaces API:', e.message);
+      log.error('agent', 'Failed to load Spaces API', { error: e.message });
     }
   }
   return spacesAPI;
@@ -66,6 +57,7 @@ const spacesAgent = {
     'screenshots', 'notes', 'files', 'content', 'storage',
     'create space', 'new space', 'add note', 'save note', 'remember this'
   ],
+  executionType: 'action',  // Reads/writes Spaces data
   
   // Pending note content (for multi-turn note creation)
   _pendingNote: null,
@@ -104,13 +96,8 @@ const spacesAgent = {
     }
   },
 
-  /**
-   * Bid on a task - uses LLM-based unified bidder
-   */
-  bid(task) {
-    // No fast bidding - let the unified bidder handle all evaluation via LLM
-    return null;
-  },
+  // No bid() method. Routing is 100% LLM-based via unified-bidder.js.
+  // NEVER add keyword/regex bidding here. See .cursorrules.
 
   /**
    * Execute the task
@@ -128,7 +115,7 @@ const spacesAgent = {
       // Check if this is a follow-up response to a previous needsInput
       const action = task.context?.action;
       if (action) {
-        console.log(`[SpacesAgent] Handling follow-up for action: ${action}`);
+        log.info('agent', `Handling follow-up for action: ${action}`);
         
         if (action === 'create-space') {
           // User is providing the space name
@@ -191,7 +178,7 @@ const spacesAgent = {
       return this._summarizeAndOffer(task, onProgress);
 
     } catch (error) {
-      console.error('[SpacesAgent] Execute error:', error);
+      log.error('agent', 'Execute error', { error });
       return {
         success: false,
         message: 'Sorry, I had trouble accessing your Spaces. Please try again.'
@@ -274,7 +261,7 @@ const spacesAgent = {
         }
       };
     } catch (error) {
-      console.error('[SpacesAgent] Search error:', error);
+      log.error('agent', 'Search error', { error });
       return {
         success: true,
         message: `I had trouble searching. Opening Spaces so you can search manually.`,
@@ -373,7 +360,7 @@ const spacesAgent = {
 
       return { success: true, message: response };
     } catch (error) {
-      console.error('[SpacesAgent] Analytics error:', error);
+      log.error('agent', 'Analytics error', { error });
       return { success: false, message: 'I had trouble counting your items.' };
     }
   },
@@ -471,7 +458,7 @@ const spacesAgent = {
         }
       };
     } catch (error) {
-      console.error('[SpacesAgent] Create space error:', error);
+      log.error('agent', 'Create space error', { error });
       return {
         success: false,
         message: `Sorry, I couldn't create the space: ${error.message}`
@@ -536,7 +523,7 @@ const spacesAgent = {
         }
       };
     } catch (error) {
-      console.error('[SpacesAgent] Create space error:', error);
+      log.error('agent', 'Create space error', { error });
       return {
         success: false,
         message: `Sorry, I couldn't create the space: ${error.message}`
@@ -590,7 +577,7 @@ const spacesAgent = {
         message: `Done! I saved your note "${title}" to Unclassified.`
       };
     } catch (error) {
-      console.error('[SpacesAgent] Add note error:', error);
+      log.error('agent', 'Add note error', { error });
       return {
         success: false,
         message: `Sorry, I couldn't save the note: ${error.message}`
@@ -650,7 +637,7 @@ const spacesAgent = {
         }
       };
     } catch (error) {
-      console.error('[SpacesAgent] Add note error:', error);
+      log.error('agent', 'Add note error', { error });
       return {
         success: false,
         message: `Sorry, I couldn't save the note: ${error.message}`
@@ -695,7 +682,7 @@ const spacesAgent = {
         message: response
       };
     } catch (error) {
-      console.error('[SpacesAgent] List spaces error:', error);
+      log.error('agent', 'List spaces error', { error });
       return {
         success: false,
         message: 'Sorry, I had trouble getting your spaces.'
@@ -796,7 +783,7 @@ const spacesAgent = {
       return allItems.filter(item => item.timestamp >= cutoff)
         .sort((a, b) => b.timestamp - a.timestamp);
     } catch (error) {
-      console.error('[SpacesAgent] Error getting recent items:', error);
+      log.error('agent', 'Error getting recent items', { error });
       return [];
     }
   },
@@ -819,7 +806,7 @@ const spacesAgent = {
 
       return allItems;
     } catch (error) {
-      console.error('[SpacesAgent] Error getting all items:', error);
+      log.error('agent', 'Error getting all items', { error });
       return [];
     }
   },
@@ -842,7 +829,7 @@ const spacesAgent = {
 
       return pinned;
     } catch (error) {
-      console.error('[SpacesAgent] Error getting pinned items:', error);
+      log.error('agent', 'Error getting pinned items', { error });
       return [];
     }
   },
@@ -857,7 +844,7 @@ const spacesAgent = {
     try {
       return await api.list();
     } catch (error) {
-      console.error('[SpacesAgent] Error getting spaces:', error);
+      log.error('agent', 'Error getting spaces', { error });
       return [];
     }
   },
@@ -909,13 +896,6 @@ const spacesAgent = {
    * Generate smart summary using LLM
    */
   async _generateSummary(itemsData, userQuery) {
-    const apiKey = getOpenAIApiKey();
-    
-    // If no API key or no items, give simple response
-    if (!apiKey) {
-      return this._generateSimpleSummary(itemsData);
-    }
-
     if (itemsData.totalRecentCount === 0) {
       return "Opening Spaces. Nothing new in the last 24 hours.";
     }
@@ -939,40 +919,17 @@ Generate a brief, natural summary (1-2 sentences max) for voice output. Start wi
 
 Be conversational and brief. Don't list everything - pick the most interesting pattern.`;
 
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [{ role: 'user', content: prompt }],
-          temperature: 0.7,
-          max_tokens: 100
-        })
+      const result = await ai.chat({
+        profile: 'fast',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.7,
+        maxTokens: 100,
+        feature: 'spaces-agent'
       });
 
-      if (!response.ok) {
-        console.error('[SpacesAgent] LLM error:', response.status);
-        return this._generateSimpleSummary(itemsData);
-      }
-
-      const data = await response.json();
-      
-      // Track usage
-      if (global.budgetManager && data.usage) {
-        global.budgetManager.trackUsage({
-          model: 'gpt-4o-mini',
-          inputTokens: data.usage.prompt_tokens || 0,
-          outputTokens: data.usage.completion_tokens || 0,
-          source: 'spaces-agent'
-        });
-      }
-
-      return data.choices?.[0]?.message?.content?.trim() || this._generateSimpleSummary(itemsData);
+      return result.content?.trim() || this._generateSimpleSummary(itemsData);
     } catch (error) {
-      console.error('[SpacesAgent] LLM error:', error);
+      log.error('agent', 'LLM error', { error });
       return this._generateSimpleSummary(itemsData);
     }
   },

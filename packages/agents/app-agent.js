@@ -14,6 +14,9 @@
 
 const { getAgentMemory } = require('../../lib/agent-memory-store');
 const { learnFromInteraction } = require('../../lib/thinking-agent');
+const ai = require('../../lib/ai-service');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 
 // ==================== APP KNOWLEDGE BASE ====================
 
@@ -535,6 +538,27 @@ const appAgent = {
     ...Object.values(APP_PRODUCTS).flatMap(p => p.keywords),
     ...Object.values(PLAYBOOKS).flatMap(p => p.keywords)
   ],
+  executionType: 'action',  // Opens windows, navigates menus
+  
+  prompt: `App Guide opens app windows, navigates to features, and gives tours.
+
+HIGH CONFIDENCE (0.85+) for:
+- "Open settings" / "Open the settings" → opens the Settings window
+- "Show me the video editor" → opens Video Editor
+- "Open spaces" / "Show clipboard" → opens Spaces/Clipboard
+- "Launch GSX Create" → opens the coding assistant
+- "Open ChatGPT" / "Open Claude" → opens AI service tabs
+- "Give me a tour" / "Show me around" → interactive feature tour
+- Any request to OPEN, LAUNCH, SHOW, or NAVIGATE TO a specific app feature
+
+This agent can OPEN and NAVIGATE to any part of the app. It knows all features.
+
+LOW CONFIDENCE (0.00) -- do NOT bid on:
+- Actual tasks: "What time is it?" (time agent does that)
+- Weather queries: "What's the weather?" (weather agent)
+- Greetings: "Hello" (smalltalk agent)
+- General questions about capabilities: "What can you do?" (help agent)
+- Playing music: "Play jazz" (DJ agent)`,
   
   // Memory for tracking user's learning progress
   memory: null,
@@ -612,7 +636,7 @@ const appAgent = {
       
       // Use LLM to classify intent and route appropriately
       const intent = await this._classifyIntent(task.content);
-      console.log(`[AppAgent] LLM classified intent: ${intent.type} (confidence: ${intent.confidence})`);
+      log.info('agent', `LLM classified intent: ${intent.type} (confidence: ${intent.confidence})`);
       
       switch (intent.type) {
         case 'open_app':
@@ -670,7 +694,7 @@ const appAgent = {
       }
       
     } catch (error) {
-      console.error('[AppAgent] Error:', error);
+      log.error('agent', 'Error', { error });
       return { success: false, message: "I had trouble understanding that. Could you rephrase your question?" };
     }
   },
@@ -680,15 +704,6 @@ const appAgent = {
    */
   async _classifyIntent(userRequest) {
     try {
-      const apiKey = this._getOpenAIApiKey();
-      if (!apiKey) {
-        console.warn('[AppAgent] No API key, defaulting to open_app intent');
-        return { type: 'open_app', confidence: 0.5 };
-      }
-      
-      const { getBudgetManager } = require('../../budget-manager');
-      const budgetManager = getBudgetManager();
-      
       const prompt = `Classify this user request into ONE of these intent types:
 - open_app: User wants to open/launch an app, tool, or feature
 - run_tutorial: User wants a step-by-step guide or playbook tutorial
@@ -703,37 +718,16 @@ USER REQUEST: "${userRequest}"
 Respond with JSON only:
 {"type": "<intent_type>", "confidence": <0.0-1.0>}`;
 
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [{ role: 'user', content: prompt }],
-          temperature: 0.1,
-          max_tokens: 50
-        })
+      const result = await ai.chat({
+        profile: 'fast',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.1,
+        maxTokens: 50,
+        jsonMode: true,
+        feature: 'app-agent-intent'
       });
       
-      if (!response.ok) {
-        console.error('[AppAgent] LLM API error:', response.status);
-        return { type: 'open_app', confidence: 0.5 };
-      }
-      
-      const data = await response.json();
-      const content = data.choices?.[0]?.message?.content || '';
-      
-      // Track usage
-      if (budgetManager && data.usage) {
-        budgetManager.trackUsage({
-          model: 'gpt-4o-mini',
-          inputTokens: data.usage.prompt_tokens || 0,
-          outputTokens: data.usage.completion_tokens || 0,
-          source: 'app-agent-intent'
-        });
-      }
+      const content = result.content || '';
       
       // Parse response
       const jsonMatch = content.match(/\{[\s\S]*\}/);
@@ -744,24 +738,9 @@ Respond with JSON only:
       return { type: 'open_app', confidence: 0.5 };
       
     } catch (error) {
-      console.error('[AppAgent] Intent classification error:', error.message);
+      log.error('agent', 'Intent classification error', { error: error.message });
       return { type: 'open_app', confidence: 0.5 };
     }
-  },
-  
-  /**
-   * Get OpenAI API key
-   */
-  _getOpenAIApiKey() {
-    if (global.settingsManager) {
-      const openaiKey = global.settingsManager.get('openaiApiKey');
-      if (openaiKey) return openaiKey;
-      
-      const provider = global.settingsManager.get('llmProvider');
-      const llmKey = global.settingsManager.get('llmApiKey');
-      if (provider === 'openai' && llmKey) return llmKey;
-    }
-    return process.env.OPENAI_API_KEY;
   },
   
   /**
@@ -833,14 +812,18 @@ Respond with JSON only:
    */
   async _openMenuItemWithLLM(userRequest) {
     try {
-      // Get menu.js findMenuItem function (LLM-based)
-      const { findMenuItem } = require('../../menu.js');
-      
-      console.log(`[AppAgent] Using LLM to find menu item for: "${userRequest}"`);
-      const menuItem = await findMenuItem(userRequest);
+      // Use MenuDataManager for menu item search (LLM-based)
+      let menuItem;
+      log.info('agent', `Using LLM to find menu item for: "${userRequest}"`);
+      if (global.menuDataManager) {
+        menuItem = await global.menuDataManager.findMenuItem(userRequest);
+      } else {
+        const { findMenuItem } = require('../../menu.js');
+        menuItem = await findMenuItem(userRequest);
+      }
       
       if (menuItem) {
-        console.log(`[AppAgent] LLM matched to: ${menuItem.name} (${menuItem.type})`);
+        log.info('agent', `LLM matched to: ${menuItem.name} (${menuItem.type})`);
         return {
           success: true,
           message: `Opening ${menuItem.name} for you.`,
@@ -854,11 +837,11 @@ Respond with JSON only:
         };
       }
       
-      console.log(`[AppAgent] LLM found no menu item match for: "${userRequest}"`);
+      log.info('agent', `LLM found no menu item match for: "${userRequest}"`);
       return null;
       
     } catch (error) {
-      console.error('[AppAgent] Error in LLM menu matching:', error.message);
+      log.error('agent', 'Error in LLM menu matching', { error: error.message });
       return null;
     }
   },

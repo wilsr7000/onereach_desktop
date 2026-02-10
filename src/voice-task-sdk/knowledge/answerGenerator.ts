@@ -1,7 +1,11 @@
 /**
- * Answer Generator - LLM-based answer synthesis
+ * Answer Generator - LLM-based answer synthesis via unified ai-service
  * 
- * Generates natural language answers from search results using OpenAI.
+ * Generates natural language answers from search results using the
+ * centralized AI service. Supports provider fallback, retry, and cost tracking.
+ * 
+ * Note: config.apiKey is accepted for backward compatibility but no longer
+ * used directly -- ai-service manages API keys via settingsManager.
  */
 
 import type { 
@@ -11,7 +15,9 @@ import type {
   GeneratedAnswer 
 } from './types'
 
-const DEFAULT_MODEL = 'gpt-4o-mini'
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const ai = require('../../../lib/ai-service')
+
 const DEFAULT_MAX_TOKENS = 1024
 const DEFAULT_TEMPERATURE = 0.3
 
@@ -26,7 +32,6 @@ Guidelines:
 - Maintain a helpful and professional tone`
 
 export function createAnswerGenerator(config: AnswerConfig): AnswerGenerator {
-  const model = config.model ?? DEFAULT_MODEL
   const maxTokens = config.maxTokens ?? DEFAULT_MAX_TOKENS
   const temperature = config.temperature ?? DEFAULT_TEMPERATURE
   const systemPrompt = config.systemPrompt ?? DEFAULT_SYSTEM_PROMPT
@@ -90,39 +95,27 @@ export function createAnswerGenerator(config: AnswerConfig): AnswerGenerator {
   async function generate(context: AnswerContext): Promise<GeneratedAnswer> {
     const userPrompt = buildContextPrompt(context)
 
-    const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
+    const messages = [
+      { role: 'user' as const, content: userPrompt },
     ]
 
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${config.apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages,
-        max_tokens: maxTokens,
-        temperature,
-      }),
+    const result = await ai.chat({
+      profile: 'fast',
+      system: systemPrompt,
+      messages,
+      maxTokens,
+      temperature,
+      feature: 'knowledge-answer-generator',
     })
 
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}))
-      throw new Error(`OpenAI API error: ${response.status} ${error.error?.message || response.statusText}`)
-    }
-
-    const data = await response.json()
-    const answer = data.choices[0]?.message?.content ?? ''
-    const tokensUsed = data.usage?.total_tokens ?? 0
+    const answer = result.content ?? ''
+    const tokensUsed = (result.usage?.promptTokens || 0) + (result.usage?.completionTokens || 0)
 
     return {
       answer,
       sources: extractSourceReferences(answer, context),
       confidence: calculateConfidence(context),
-      model,
+      model: result.model || 'ai-service',
       tokensUsed,
     }
   }
@@ -131,7 +124,7 @@ export function createAnswerGenerator(config: AnswerConfig): AnswerGenerator {
     generate,
     getConfig: () => ({
       apiKey: config.apiKey,
-      model,
+      model: 'ai-service/fast',
       maxTokens,
       temperature,
       systemPrompt,

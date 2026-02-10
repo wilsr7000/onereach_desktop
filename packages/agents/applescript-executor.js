@@ -15,18 +15,9 @@ const execAsync = promisify(exec);
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-
-// Get API key from app settings
-function getOpenAIApiKey() {
-  if (global.settingsManager) {
-    const openaiKey = global.settingsManager.get('openaiApiKey');
-    if (openaiKey) return openaiKey;
-    const provider = global.settingsManager.get('llmProvider');
-    const llmKey = global.settingsManager.get('llmApiKey');
-    if (provider === 'openai' && llmKey) return llmKey;
-  }
-  return process.env.OPENAI_API_KEY;
-}
+const ai = require('../../lib/ai-service');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 
 // ============================================================================
 // ERROR CATEGORIZATION
@@ -211,11 +202,6 @@ async function getAppState(app) {
  * Generate an AppleScript with comprehensive error handling
  */
 async function generateScript(intent, context = {}) {
-  const apiKey = getOpenAIApiKey();
-  if (!apiKey) {
-    throw new Error('OpenAI API key required for script generation');
-  }
-
   const { 
     previousAttempts = [], 
     targetApp = null,
@@ -270,29 +256,18 @@ ${previousAttempts.map((a, i) => `${i + 1}. Script failed with: ${a.error}`).joi
 ${currentState ? `CURRENT APP STATE: ${JSON.stringify(currentState)}` : ''}
 ${constraints.length > 0 ? `CONSTRAINTS: ${constraints.join(', ')}` : ''}`;
 
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model: 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: `Generate AppleScript to: ${intent}` }
-      ],
-      temperature: 0.1,
-      max_tokens: 1500
-    })
+  const result = await ai.chat({
+    profile: 'fast',
+    system: systemPrompt,
+    messages: [
+      { role: 'user', content: `Generate AppleScript to: ${intent}` }
+    ],
+    temperature: 0.1,
+    maxTokens: 1500,
+    feature: 'applescript-executor',
   });
-
-  if (!response.ok) {
-    throw new Error(`API error: ${response.status}`);
-  }
-
-  const data = await response.json();
-  let script = data.choices?.[0]?.message?.content || '';
+  
+  let script = result.content || '';
   
   // Clean up any markdown
   script = script.replace(/^```applescript\n?/i, '').replace(/^```\n?/i, '').replace(/\n?```$/gi, '');
@@ -366,37 +341,24 @@ UNFIXABLE situations (set canFix: false):
 
 For all other errors, provide a fix. Be creative but practical.`;
 
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model: 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: `Intent: ${intent}
+  const aiResult = await ai.chat({
+    profile: 'fast',
+    system: systemPrompt,
+    messages: [{ role: 'user', content: `Intent: ${intent}
 
 Script that failed:
 ${originalScript}
 
 Error: ${error}
 
-${stateBefore ? `State before execution: ${JSON.stringify(stateBefore)}` : ''}` }
-      ],
-      temperature: 0.2,
-      max_tokens: 2000,
-      response_format: { type: 'json_object' }
-    })
+${stateBefore ? `State before execution: ${JSON.stringify(stateBefore)}` : ''}` }],
+    temperature: 0.2,
+    maxTokens: 2000,
+    jsonMode: true,
+    feature: 'applescript-executor',
   });
 
-  if (!response.ok) {
-    throw new Error(`API error: ${response.status}`);
-  }
-
-  const data = await response.json();
-  const result = JSON.parse(data.choices?.[0]?.message?.content || '{}');
+  const result = JSON.parse(aiResult.content || '{}');
   
   // Clean up script if needed
   if (result.fixedScript) {
@@ -513,13 +475,13 @@ async function executeIntent(intent, options = {}) {
   if (detectedApp) {
     initialState = await getAppState(detectedApp);
     if (verbose) {
-      console.log(`[Executor] Initial ${detectedApp} state:`, initialState);
+      log.info('agent', `Initial ${detectedApp} state`, { initialState });
     }
   }
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     if (verbose) {
-      console.log(`[Executor] Attempt ${attempt}/${maxAttempts}: "${intent}"`);
+      log.info('agent', `Attempt ${attempt}/${maxAttempts}: "${intent}"`);
     }
 
     try {
@@ -530,7 +492,7 @@ async function executeIntent(intent, options = {}) {
           currentState: initialState
         });
         if (verbose) {
-          console.log('[Executor] Generated script:', currentScript.substring(0, 150) + '...');
+          log.info('agent', 'Generated script', { detail: currentScript.substring(0, 150) + '...' });
         }
       } else {
         // Analyze and fix based on previous error
@@ -546,7 +508,7 @@ async function executeIntent(intent, options = {}) {
         
         if (!fix.canFix) {
           if (verbose) {
-            console.log('[Executor] Unfixable:', fix.explanation);
+            log.info('agent', 'Unfixable', { explanation: fix.explanation });
           }
           return {
             success: false,
@@ -560,7 +522,7 @@ async function executeIntent(intent, options = {}) {
         appliedFixes.push(fix.fixApplied);
         
         if (verbose) {
-          console.log(`[Executor] Applied fix: ${fix.fixApplied} - ${fix.explanation}`);
+          log.info('agent', `Applied fix: ${fix.fixApplied} - ${fix.explanation}`);
         }
       }
 
@@ -593,7 +555,7 @@ async function executeIntent(intent, options = {}) {
           });
           
           if (verbose) {
-            console.log(`[Executor] Verification: ${verification.verified ? '✓' : '✗'} ${verification.reason}`);
+            log.info('agent', `Verification: ${verification.verified ? '✓' : '✗'} ${verification.reason}`);
           }
           
           if (!verification.verified && !verification.partialSuccess && attempt < maxAttempts) {
@@ -627,7 +589,7 @@ async function executeIntent(intent, options = {}) {
       
       if (result.unfixable) {
         if (verbose) {
-          console.log('[Executor] Error is unfixable:', result.error);
+          log.info('agent', 'Error is unfixable', { error: result.error });
         }
         return {
           success: false,
@@ -638,12 +600,12 @@ async function executeIntent(intent, options = {}) {
       }
       
       if (verbose) {
-        console.log(`[Executor] Failed (${result.errorType}): ${result.error}`);
+        log.info('agent', `Failed (${result.errorType}): ${result.error}`);
       }
 
     } catch (error) {
       if (verbose) {
-        console.error('[Executor] Exception:', error.message);
+        log.error('agent', 'Exception', { error: error.message });
       }
       attempts.push({
         attempt,
@@ -776,7 +738,7 @@ async function executeQuickOrIntent(patternKey, intent, options = {}) {
       };
     }
     
-    console.log(`[Executor] Quick pattern failed, using intelligent execution...`);
+    log.info('agent', `Quick pattern failed, using intelligent execution...`);
   }
   
   const intentResult = await executeIntent(intent, options);

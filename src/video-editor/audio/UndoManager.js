@@ -8,6 +8,8 @@
  * - Memory-efficient state management
  */
 
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 export class UndoManager {
   constructor(options = {}) {
     this.maxHistory = options.maxHistory || 50;
@@ -17,7 +19,7 @@ export class UndoManager {
     // Optional callback when state changes
     this.onStateChange = options.onStateChange || null;
     
-    console.log('[UndoManager] Initialized with maxHistory:', this.maxHistory);
+    log.info('video', '[UndoManager] Initialized with maxHistory', { data: this.maxHistory });
   }
   
   /**
@@ -43,7 +45,7 @@ export class UndoManager {
       this.undoStack.shift(); // Remove oldest
     }
     
-    console.log(`[UndoManager] Pushed state: "${description}" (stack: ${this.undoStack.length})`);
+    log.info('video', '[UndoManager] Pushed state: "" (stack: )', { v0: description, v1: this.undoStack.length });
     
     this._notifyStateChange();
   }
@@ -54,7 +56,7 @@ export class UndoManager {
    */
   undo() {
     if (this.undoStack.length === 0) {
-      console.log('[UndoManager] Nothing to undo');
+      log.info('video', '[UndoManager] Nothing to undo');
       return null;
     }
     
@@ -65,7 +67,7 @@ export class UndoManager {
     // Get the previous state (or null if we've undone everything)
     const previousState = this.undoStack[this.undoStack.length - 1]?.state || null;
     
-    console.log(`[UndoManager] Undo: "${current.description}" (undo: ${this.undoStack.length}, redo: ${this.redoStack.length})`);
+    log.info('video', '[UndoManager] Undo: "" (undo: , redo: )', { v0: current.description, v1: this.undoStack.length, v2: this.redoStack.length });
     
     this._notifyStateChange();
     
@@ -78,14 +80,14 @@ export class UndoManager {
    */
   redo() {
     if (this.redoStack.length === 0) {
-      console.log('[UndoManager] Nothing to redo');
+      log.info('video', '[UndoManager] Nothing to redo');
       return null;
     }
     
     const state = this.redoStack.pop();
     this.undoStack.push(state);
     
-    console.log(`[UndoManager] Redo: "${state.description}" (undo: ${this.undoStack.length}, redo: ${this.redoStack.length})`);
+    log.info('video', '[UndoManager] Redo: "" (undo: , redo: )', { v0: state.description, v1: this.undoStack.length, v2: this.redoStack.length });
     
     this._notifyStateChange();
     
@@ -142,7 +144,7 @@ export class UndoManager {
   clear() {
     this.undoStack = [];
     this.redoStack = [];
-    console.log('[UndoManager] History cleared');
+    log.info('video', '[UndoManager] History cleared');
     this._notifyStateChange();
   }
   
@@ -173,7 +175,7 @@ export class UndoManager {
     this.undoStack = [];
     this.redoStack = [];
     this.onStateChange = null;
-    console.log('[UndoManager] Disposed');
+    log.info('video', '[UndoManager] Disposed');
   }
 }
 

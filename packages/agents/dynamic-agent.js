@@ -6,30 +6,31 @@
  */
 
 const path = require('path');
+const ai = require('../../lib/ai-service');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 
 /**
  * Execute a task using the app's LLM client
  */
 async function executeWithAppLLM(prompt, systemPrompt, task) {
   try {
-    // Try to get the claude API from main process
-    const claudeAPI = require('../../claude-api');
-    
-    const response = await claudeAPI.chat([
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: prompt }
-    ], {
+    const response = await ai.chat({
+      profile: 'standard',
+      system: systemPrompt,
+      messages: [{ role: 'user', content: prompt }],
       maxTokens: 1024,
-      temperature: 0.7
+      temperature: 0.7,
+      feature: 'dynamic-agent',
     });
     
     return {
       success: true,
-      result: response,
+      result: response.content,
       action: 'llm_response'
     };
   } catch (error) {
-    console.error('[DynamicAgent] LLM execution error:', error.message);
+    log.error('agent', 'LLM execution error', { error: error.message });
     return {
       success: false,
       error: error.message
@@ -48,8 +49,8 @@ function createDynamicAgent(exchangeUrl, agentDefinitions, llmClient) {
     const agentPkg = require('../task-agent/dist/index.js');
     createAgent = agentPkg.createAgent;
   } catch (error) {
-    console.error('[DynamicAgent] Failed to load task-agent package:', error.message);
-    console.log('[DynamicAgent] Make sure to run: cd packages/task-agent && npm run build');
+    log.error('agent', 'Failed to load task-agent package', { error: error.message });
+    log.info('agent', 'Make sure to run: cd packages/task-agent && npm run build');
     throw error;
   }
   
@@ -65,8 +66,8 @@ function createDynamicAgent(exchangeUrl, agentDefinitions, llmClient) {
   allCategories.add('user-defined');
   allCategories.add('custom');
   
-  console.log('[DynamicAgent] Creating with', agentDefinitions.length, 'definitions');
-  console.log('[DynamicAgent] Categories:', Array.from(allCategories).join(', '));
+  log.info('agent', 'Creating dynamic agent', { definitionCount: agentDefinitions.length });
+  log.info('agent', 'Categories', { categories: Array.from(allCategories).join(', ') });
   
   return createAgent({
     name: 'dynamic-user-agent',
@@ -79,40 +80,8 @@ function createDynamicAgent(exchangeUrl, agentDefinitions, llmClient) {
       reconnectIntervalMs: 3000,
     },
     
-    // Fast keyword matching
-    quickMatch: (task) => {
-      const content = task.content.toLowerCase();
-      
-      let bestMatch = null;
-      let bestScore = 0;
-      
-      for (const def of agentDefinitions) {
-        if (!def.enabled) continue;
-        
-        // Count matching keywords
-        const matchedKeywords = (def.keywords || []).filter(kw => 
-          content.includes(kw.toLowerCase())
-        );
-        
-        if (matchedKeywords.length > 0) {
-          // Score based on keyword match ratio
-          const score = Math.min(1, matchedKeywords.length / def.keywords.length + 0.5);
-          const finalScore = Math.max(score, def.settings?.confidenceThreshold || 0.7);
-          
-          if (finalScore > bestScore) {
-            bestScore = finalScore;
-            bestMatch = def;
-          }
-        }
-      }
-      
-      if (bestMatch) {
-        console.log('[DynamicAgent] Quick match:', bestMatch.name, 'score:', bestScore);
-        return bestScore;
-      }
-      
-      return 0;
-    },
+    // Bidding is handled entirely by the unified LLM bidder (unified-bidder.js).
+    // No quickMatch -- per project policy, no keyword/regex classification.
     
     // Execute using the matching agent's prompt
     execute: async (task, context) => {
@@ -147,7 +116,7 @@ function createDynamicAgent(exchangeUrl, agentDefinitions, llmClient) {
         };
       }
       
-      console.log('[DynamicAgent] Executing with agent:', bestMatch.name, 'type:', bestMatch.executionType);
+      log.info('agent', 'Executing with agent', { name: bestMatch.name, type: bestMatch.executionType });
       
       // Build the prompt based on agent definition
       const systemPrompt = bestMatch.systemPrompt || `You are ${bestMatch.name}. ${bestMatch.description || ''}`;
@@ -161,7 +130,7 @@ function createDynamicAgent(exchangeUrl, agentDefinitions, llmClient) {
           
         case 'script':
           // For script type, we'd execute a predefined script
-          console.log('[DynamicAgent] Script execution not yet implemented');
+          log.info('agent', 'Script execution not yet implemented');
           return {
             success: false,
             error: 'Script execution not yet implemented'
@@ -169,7 +138,7 @@ function createDynamicAgent(exchangeUrl, agentDefinitions, llmClient) {
           
         case 'api':
           // For API type, we'd call an external API
-          console.log('[DynamicAgent] API execution not yet implemented');
+          log.info('agent', 'API execution not yet implemented');
           return {
             success: false,
             error: 'API execution not yet implemented'
@@ -196,40 +165,40 @@ async function startDynamicAgent(exchangeUrl) {
     const definitions = agentStore.getLocalAgents().filter(agent => agent.enabled !== false);
     
     if (definitions.length === 0) {
-      console.log('[DynamicAgent] No user-defined agents to start');
+      log.info('agent', 'No user-defined agents to start');
       return null;
     }
     
-    console.log('[DynamicAgent] Starting with', definitions.length, 'agent definitions');
+    log.info('agent', 'Starting with', { length: definitions.length, detail: 'agent definitions' });
     
     const agent = createDynamicAgent(exchangeUrl, definitions);
     
     agent.on('connected', () => {
-      console.log('[DynamicAgent] Connected to exchange');
+      log.info('agent', 'Connected to exchange');
     });
     
     agent.on('disconnected', ({ reason }) => {
-      console.log('[DynamicAgent] Disconnected:', reason);
+      log.info('agent', 'Disconnected', { reason });
     });
     
     agent.on('bid:requested', ({ task }) => {
-      console.log('[DynamicAgent] Bid requested for:', task.content.substring(0, 50));
+      log.info('agent', 'Bid requested', { content: task.content.substring(0, 50) });
     });
     
     agent.on('task:assigned', ({ task }) => {
-      console.log('[DynamicAgent] Task assigned:', task.id);
+      log.info('agent', 'Task assigned', { id: task.id });
     });
     
     agent.on('task:completed', ({ taskId, success }) => {
-      console.log('[DynamicAgent] Task completed:', taskId, success ? 'SUCCESS' : 'FAILED');
+      log.info('agent', 'Task completed', { taskId, success: success ? 'SUCCESS' : 'FAILED' });
     });
     
     await agent.start();
-    console.log('[DynamicAgent] Started successfully');
+    log.info('agent', 'Started successfully');
     
     return agent;
   } catch (error) {
-    console.error('[DynamicAgent] Failed to start:', error);
+    log.error('agent', 'Failed to start', { error });
     return null;
   }
 }

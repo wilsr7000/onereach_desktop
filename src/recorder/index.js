@@ -35,14 +35,14 @@ export function createRecorder() {
    * Initialize recorder
    */
   const init = async () => {
-    console.log('[Recorder] Initializing...');
+    window.logging.info('recorder', 'Recorder Initializing..');
     
     // Request permissions
     try {
       const devices = await capture.getDevices();
-      console.log('[Recorder] Available devices:', devices);
+      window.logging.info('recorder', 'Recorder Available devices', { data: devices });
     } catch (e) {
-      console.warn('[Recorder] Could not enumerate devices:', e);
+      window.logging.warn('recorder', 'Recorder Could not enumerate devices', { data: e });
     }
   };
 
@@ -55,7 +55,7 @@ export function createRecorder() {
       ui.showPreview(stream, 'camera');
       return stream;
     } catch (error) {
-      console.error('[Recorder] Camera error:', error);
+      window.logging.error('recorder', 'Recorder Camera error', { error: error.message || error });
       throw error;
     }
   };
@@ -69,7 +69,7 @@ export function createRecorder() {
       ui.showPreview(stream, 'screen');
       return stream;
     } catch (error) {
-      console.error('[Recorder] Screen error:', error);
+      window.logging.error('recorder', 'Recorder Screen error', { error: error.message || error });
       throw error;
     }
   };
@@ -177,7 +177,7 @@ let recorder;
 document.addEventListener('DOMContentLoaded', () => {
   recorder = createRecorder();
   window.recorder = recorder;
-  console.log('[Recorder] Ready');
+  window.logging.info('recorder', 'Recorder Ready');
 });
 
 export default createRecorder;

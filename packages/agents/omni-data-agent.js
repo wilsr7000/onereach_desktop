@@ -29,6 +29,8 @@
 
 const path = require('path');
 const fs = require('fs');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 
 const CONTEXT_SPACE_ID = 'gsx-agent';
 const MAIN_FILE = 'main.md';
@@ -86,7 +88,7 @@ async function getRelevantContext(task, agentInfo = {}) {
   const agentId = agentInfo?.id || '';
   const agentName = agentInfo?.name || '';
   
-  console.log(`[OmniData] Analyzing context for task: "${taskContent.substring(0, 50)}..." agent: ${agentId || agentName}`);
+  log.info('agent', `Analyzing context for task: "${taskContent.substring(0, 50)}..." agent: ${agentId || agentName}`);
   
   // Check each context type for relevance
   for (const [contextKey, keywords] of Object.entries(CONTEXT_KEYWORDS)) {
@@ -94,7 +96,7 @@ async function getRelevantContext(task, agentInfo = {}) {
     
     if (isRelevant && allContext[contextKey]) {
       relevantContext[contextKey] = allContext[contextKey];
-      console.log(`[OmniData] Including ${contextKey} context (keyword match)`);
+      log.info('agent', `Including ${contextKey} context (keyword match)`);
     }
   }
   
@@ -105,7 +107,7 @@ async function getRelevantContext(task, agentInfo = {}) {
       // Check if task might benefit from location
       if (/weather|forecast|temperature|rain|snow|local|near/i.test(taskContent)) {
         relevantContext.location = allContext.location;
-        console.log('[OmniData] Including location for search agent');
+        log.info('agent', 'Including location for search agent');
       }
     }
   }
@@ -114,7 +116,7 @@ async function getRelevantContext(task, agentInfo = {}) {
     // Time agent needs timezone
     if (allContext.timezone && !relevantContext.timezone) {
       relevantContext.timezone = allContext.timezone;
-      console.log('[OmniData] Including timezone for time task');
+      log.info('agent', 'Including timezone for time task');
     }
   }
   
@@ -123,21 +125,21 @@ async function getRelevantContext(task, agentInfo = {}) {
     // Check for preference-sensitive queries
     if (/celsius|fahrenheit|metric|imperial|format/i.test(taskContent)) {
       relevantContext.preferences = allContext.preferences;
-      console.log('[OmniData] Including preferences');
+      log.info('agent', 'Including preferences');
     }
   }
   
   // Include system info if relevant
   if (allContext.system && /computer|mac|system|machine|os|version/i.test(taskContent)) {
     relevantContext.system = allContext.system;
-    console.log('[OmniData] Including system info');
+    log.info('agent', 'Including system info');
   }
   
   // Include apps if relevant
   if (allContext.apps && allContext.apps.length > 0) {
     if (/app|application|install|open|launch|run|start/i.test(taskContent)) {
       relevantContext.apps = allContext.apps;
-      console.log('[OmniData] Including installed apps');
+      log.info('agent', 'Including installed apps');
     }
   }
   
@@ -146,12 +148,12 @@ async function getRelevantContext(task, agentInfo = {}) {
     for (const [key, value] of Object.entries(allContext.customData)) {
       if (taskContent.includes(key.toLowerCase())) {
         relevantContext[key] = value;
-        console.log(`[OmniData] Including custom data: ${key}`);
+        log.info('agent', `Including custom data: ${key}`);
       }
     }
   }
   
-  console.log(`[OmniData] Returning ${Object.keys(relevantContext).length} context items`);
+  log.info('agent', `Returning ${Object.keys(relevantContext).length} context items`);
   return relevantContext;
 }
 
@@ -177,45 +179,51 @@ async function loadContext() {
   };
   
   try {
-    const homeDir = process.env.HOME || process.env.USERPROFILE;
-    const storageRoot = path.join(homeDir, 'Documents', 'OR-Spaces');
+    // Use Spaces API instead of direct filesystem access
+    const { getSpacesAPI } = require('../../spaces-api');
+    const spacesAPI = getSpacesAPI();
     
-    // Primary: Try to read from indexed item (gsx-agent-main-context)
-    // Check for different possible extensions since UI might change it
-    const itemDir = path.join(storageRoot, 'items', 'gsx-agent-main-context');
     let mainContent = null;
     
-    if (fs.existsSync(itemDir)) {
-      const possibleFiles = ['content.md', 'content.yaml', 'content.txt'];
-      for (const file of possibleFiles) {
-        const filePath = path.join(itemDir, file);
-        if (fs.existsSync(filePath)) {
-          mainContent = fs.readFileSync(filePath, 'utf-8');
-          console.log(`[OmniData] Loaded context from ${file}`);
-          break;
+    // Primary: Try to read from indexed item via Spaces API
+    try {
+      const item = await spacesAPI.items.get(CONTEXT_SPACE_ID, 'gsx-agent-main-context');
+      if (item && item.content) {
+        mainContent = item.content;
+        log.info('agent', 'Loaded context via Spaces API (item)');
+      }
+    } catch (e) {
+      // Item not found via API, try fallback
+    }
+    
+    if (!mainContent) {
+      // Fallback: Try to read main.md from the gsx-agent space via filesystem
+      // (for backward compatibility with old storage layout)
+      const homeDir = process.env.HOME || process.env.USERPROFILE;
+      const storageRoot = path.join(homeDir, 'Documents', 'OR-Spaces');
+      const itemDir = path.join(storageRoot, 'items', 'gsx-agent-main-context');
+      
+      if (fs.existsSync(itemDir)) {
+        const possibleFiles = ['content.md', 'content.yaml', 'content.txt'];
+        for (const file of possibleFiles) {
+          const filePath = path.join(itemDir, file);
+          if (fs.existsSync(filePath)) {
+            mainContent = fs.readFileSync(filePath, 'utf-8');
+            log.info('agent', `Loaded context from ${file} (filesystem fallback)`);
+            break;
+          }
         }
       }
     }
     
     if (mainContent) {
       parseMainFile(mainContent, context);
-      // Also store raw content for freeform queries
       context.rawContent = mainContent;
     } else {
-      // Fallback: Try old space-based file location
-      const spacePath = path.join(storageRoot, 'spaces', CONTEXT_SPACE_ID);
-      const mainPath = path.join(spacePath, MAIN_FILE);
-      if (fs.existsSync(mainPath)) {
-        const content = fs.readFileSync(mainPath, 'utf-8');
-        parseMainFile(content, context);
-        context.rawContent = content;
-        console.log('[OmniData] Loaded context from main.md (legacy location)');
-      } else {
-        console.log('[OmniData] No main.md found');
-      }
+      log.info('agent', 'No main.md found');
     }
   } catch (error) {
-    console.error('[OmniData] Error loading context:', error.message);
+    log.error('agent', 'Error loading context', { error: error.message });
   }
   
   contextCache = context;
@@ -226,7 +234,7 @@ async function loadContext() {
     if (Array.isArray(v)) return v.length > 0;
     return v !== null && (typeof v !== 'object' || Object.keys(v).length > 0);
   });
-  console.log('[OmniData] Context loaded:', contextSummary.join(', ') || 'empty');
+  log.info('agent', 'Context loaded', { summary: contextSummary.join(', ') || 'empty' });
   
   return context;
 }
@@ -323,7 +331,7 @@ async function loadFromIndividualFiles(spacePath, context) {
       parseContextFile(file, content, context);
     }
   } catch (e) {
-    console.error('[OmniData] Error loading individual files:', e.message);
+    log.error('agent', 'Error loading individual files', { error: e.message });
   }
 }
 
@@ -360,38 +368,47 @@ async function loadAgentProfile() {
   };
   
   try {
-    const homeDir = process.env.HOME || process.env.USERPROFILE;
-    const storageRoot = path.join(homeDir, 'Documents', 'OR-Spaces');
+    // Use Spaces API instead of direct filesystem access
+    const { getSpacesAPI } = require('../../spaces-api');
+    const spacesAPI = getSpacesAPI();
     
-    // Primary: Try to read from indexed item (gsx-agent-profile)
-    const profileItemDir = path.join(storageRoot, 'items', 'gsx-agent-profile');
     let profileContent = null;
     
-    if (fs.existsSync(profileItemDir)) {
-      const possibleFiles = ['content.md', 'content.yaml', 'content.txt'];
-      for (const file of possibleFiles) {
-        const filePath = path.join(profileItemDir, file);
-        if (fs.existsSync(filePath)) {
-          profileContent = fs.readFileSync(filePath, 'utf-8');
-          console.log(`[OmniData] Loaded agent profile from ${file}`);
-          break;
+    // Primary: Try to read from indexed item via Spaces API
+    try {
+      const item = await spacesAPI.items.get(CONTEXT_SPACE_ID, 'gsx-agent-profile');
+      if (item && item.content) {
+        profileContent = item.content;
+        log.info('agent', 'Loaded agent profile via Spaces API (item)');
+      }
+    } catch (e) {
+      // Item not found via API, try fallback
+    }
+    
+    if (!profileContent) {
+      // Fallback: Try to read from filesystem for backward compatibility
+      const homeDir = process.env.HOME || process.env.USERPROFILE;
+      const storageRoot = spacesAPI.storage?.baseDir || path.join(homeDir, 'Documents', 'OR-Spaces');
+      const profileItemDir = path.join(storageRoot, 'items', 'gsx-agent-profile');
+      
+      if (fs.existsSync(profileItemDir)) {
+        const possibleFiles = ['content.md', 'content.yaml', 'content.txt'];
+        for (const file of possibleFiles) {
+          const filePath = path.join(profileItemDir, file);
+          if (fs.existsSync(filePath)) {
+            profileContent = fs.readFileSync(filePath, 'utf-8');
+            log.info('agent', `Loaded agent profile from ${file} (filesystem fallback)`);
+            break;
+          }
         }
       }
     }
     
     if (profileContent) {
       parseProfileFile(profileContent, profile);
-    } else {
-      // Fallback: Try old space-based file location
-      const profilePath = path.join(storageRoot, 'spaces', CONTEXT_SPACE_ID, PROFILE_FILE);
-      if (fs.existsSync(profilePath)) {
-        const content = fs.readFileSync(profilePath, 'utf-8');
-        parseProfileFile(content, profile);
-        console.log('[OmniData] Loaded agent profile (legacy location)');
-      }
     }
   } catch (error) {
-    console.error('[OmniData] Error loading agent profile:', error.message);
+    log.error('agent', 'Error loading agent profile', { error: error.message });
   }
   
   profileCache = profile;
@@ -519,7 +536,7 @@ function clearCache() {
   profileCache = null;
   cacheTimestamp = 0;
   profileCacheTimestamp = 0;
-  console.log('[OmniData] Cache cleared');
+  log.info('agent', 'Cache cleared');
 }
 
 /**

@@ -7,10 +7,10 @@ A cross-platform desktop application built with Electron for Mac and Windows.
 - Modern and responsive UI
 - Cross-platform compatibility (macOS and Windows)
 - Secure IPC communication between main and renderer processes
+- **Centralized AI Service**: Unified `lib/ai-service.js` for all LLM calls (OpenAI, Anthropic) with model profiles, auto-retry, provider fallback, circuit breakers, and cost monitoring
 - **AI Run Times RSS Reader**: Advanced RSS reader with intelligent reading time estimation
 - IDW (Intelligent Digital Worker) environment management
-- GSX (Global Service Exchange) integr
-ation
+- GSX (Global Service Exchange) integration
 - Reading progress tracking and analytics
 
 ## Development

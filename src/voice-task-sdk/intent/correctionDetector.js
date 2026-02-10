@@ -6,6 +6,9 @@
  */
 
 const { getCircuit } = require('../../../packages/agents/circuit-breaker');
+const ai = require('../../../lib/ai-service');
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 // Circuit breaker for OpenAI API calls
 const openaiCircuit = getCircuit('openai-correction', {
@@ -32,12 +35,6 @@ function getOpenAIApiKey() {
  * @returns {Promise<Object>} - { isCorrection, correctedIntent, confidence, reasoning }
  */
 async function analyzeWithLLM(transcript, context = {}) {
-  const apiKey = getOpenAIApiKey();
-  
-  if (!apiKey) {
-    return { isCorrection: false, reasoning: 'No API key available' };
-  }
-
   const systemPrompt = `You determine if the user is correcting a previous misunderstood command.
 
 Context:
@@ -69,35 +66,20 @@ Examples:
 - User says "no thanks" → NOT correction, just declining`;
 
   try {
-    const data = await openaiCircuit.execute(async () => {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: transcript }
-          ],
+    const result = await openaiCircuit.execute(async () => {
+      return await ai.json(
+        transcript,
+        {
+          profile: 'fast',
+          system: systemPrompt,
           temperature: 0.1,
-          max_tokens: 200,
-          response_format: { type: 'json_object' }
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status}`);
-      }
-
-      return response.json();
+          maxTokens: 200,
+          feature: 'correction-detector'
+        }
+      );
     });
-
-    const result = JSON.parse(data.choices?.[0]?.message?.content || '{}');
     
-    console.log('[CorrectionDetector] LLM analysis:', result.reasoning);
+    log.info('voice', '[CorrectionDetector] LLM analysis', { data: result.reasoning });
     
     return {
       isCorrection: result.isCorrection === true,
@@ -107,7 +89,7 @@ Examples:
     };
 
   } catch (error) {
-    console.error('[CorrectionDetector] LLM error:', error.message);
+    log.error('voice', '[CorrectionDetector] LLM error', { error: error.message });
     return { isCorrection: false, reasoning: `LLM error: ${error.message}` };
   }
 }

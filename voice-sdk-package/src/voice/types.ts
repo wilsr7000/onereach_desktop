@@ -73,6 +73,9 @@ export interface WhisperConfig extends SpeechServiceConfig {
   chunkDurationMs?: number
   minChunkDurationMs?: number
   maxSilenceMs?: number
+  /** IPC-proxied transcription function (from window.ai.transcribe). When provided,
+   *  bypasses the direct Whisper API fetch and routes through the centralized ai-service. */
+  transcribeFn?: (audioBuffer: ArrayBuffer, opts: Record<string, unknown>) => Promise<{ text: string }>
 }
 
 // ============================================================================

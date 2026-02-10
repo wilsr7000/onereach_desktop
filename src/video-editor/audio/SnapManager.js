@@ -7,6 +7,8 @@
  * - Toggle enable/disable
  */
 
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 export class SnapManager {
   constructor(options = {}) {
     this.snapTargets = [];
@@ -17,7 +19,7 @@ export class SnapManager {
     this.timeToPixels = options.timeToPixels || ((time) => time * 100);
     this.pixelsToTime = options.pixelsToTime || ((pixels) => pixels / 100);
     
-    console.log('[SnapManager] Initialized with threshold:', this.snapThreshold, 'px');
+    log.info('video', '[SnapManager] Initialized with threshold', { arg0: this.snapThreshold, arg1: 'px' });
   }
   
   /**
@@ -174,7 +176,7 @@ export class SnapManager {
    */
   setEnabled(enabled) {
     this.enabled = enabled;
-    console.log('[SnapManager] Enabled:', enabled);
+    log.info('video', '[SnapManager] Enabled', { data: enabled });
   }
   
   /**
@@ -182,7 +184,7 @@ export class SnapManager {
    */
   toggle() {
     this.enabled = !this.enabled;
-    console.log('[SnapManager] Toggled:', this.enabled);
+    log.info('video', '[SnapManager] Toggled', { data: this.enabled });
     return this.enabled;
   }
   
@@ -191,7 +193,7 @@ export class SnapManager {
    */
   setThreshold(pixels) {
     this.snapThreshold = Math.max(1, pixels);
-    console.log('[SnapManager] Threshold set:', this.snapThreshold, 'px');
+    log.info('video', '[SnapManager] Threshold set', { arg0: this.snapThreshold, arg1: 'px' });
   }
   
   /**
@@ -223,7 +225,7 @@ export class SnapManager {
     this.snapTargets = [];
     this.timeToPixels = null;
     this.pixelsToTime = null;
-    console.log('[SnapManager] Disposed');
+    log.info('video', '[SnapManager] Disposed');
   }
 }
 

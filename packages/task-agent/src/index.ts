@@ -45,14 +45,13 @@ export interface CreateAgentOptions {
   llm?: LLMProvider;
   
   /**
-   * Fast keyword matching (Tier 1)
-   * Return 0 to skip, 0.9+ for confident match
+   * @deprecated quickMatch is ignored. All bidding uses LLM evaluate.
    */
   quickMatch?: (task: Task) => number;
   
   /**
-   * LLM-based evaluation (Tier 2)
-   * Called when quickMatch returns 0 < score < 0.9
+   * LLM-based evaluation (via unified-bidder).
+   * This is the only way agents bid on tasks.
    */
   evaluate?: (task: Task, context: BiddingContext) => Promise<BidDecision | null>;
   
@@ -75,7 +74,7 @@ export function createAgent(options: CreateAgentOptions): BaseAgent {
     categories: options.categories,
     exchange: options.exchange,
     capabilities: {
-      quickMatch: !!options.quickMatch,
+      quickMatch: false,   // Deprecated -- all bidding goes through LLM
       llmEvaluate: !!options.evaluate || !!options.llm,
       maxConcurrent: options.maxConcurrent ?? 5,
     },
@@ -157,30 +156,23 @@ Respond with JSON:
 // === Utility Functions ===
 
 /**
- * Create a keyword-based quickMatch function
+ * @deprecated All bidding now uses LLM evaluation via unified-bidder.
+ * Keyword matching violates the project's classification policy.
+ * Kept only for backward compatibility -- base-agent ignores quickMatch.
  */
 export function createKeywordMatcher(keywords: string[]): (task: Task) => number {
-  const lowerKeywords = keywords.map(k => k.toLowerCase());
-
-  return (task: Task): number => {
-    const content = task.content.toLowerCase();
-    const matches = lowerKeywords.filter(kw => content.includes(kw));
-
-    if (matches.length === 0) return 0;
-    
-    // Score based on match ratio (at least 0.5 if any match)
-    const ratio = matches.length / lowerKeywords.length;
-    return Math.max(0.5, ratio);
-  };
+  console.warn('[DEPRECATED] createKeywordMatcher is deprecated. Use LLM-based evaluate handler instead.');
+  return () => 0;
 }
 
 /**
- * Create a pattern-based quickMatch function
+ * @deprecated All bidding now uses LLM evaluation via unified-bidder.
+ * Pattern matching violates the project's classification policy.
+ * Kept only for backward compatibility -- base-agent ignores quickMatch.
  */
 export function createPatternMatcher(patterns: RegExp[]): (task: Task) => number {
-  return (task: Task): number => {
-    const content = task.content;
-    const matches = patterns.filter(p => p.test(content));
+  console.warn('[DEPRECATED] createPatternMatcher is deprecated. Use LLM-based evaluate handler instead.');
+  return () => 0;
 
     if (matches.length === 0) return 0;
     

@@ -9,6 +9,8 @@ import path from 'path';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { app } = require('electron');
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 /**
  * Service for generating video thumbnails
@@ -125,7 +127,7 @@ export class ThumbnailService {
         const cached = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
         // Verify all files exist
         if (cached.thumbnails && cached.thumbnails.every(f => fs.existsSync(f))) {
-          console.log(`[ThumbnailService] Using cached ${count} thumbnails`);
+          log.info('video', '[ThumbnailService] Using cached thumbnails', { v0: count });
           return cached.thumbnails;
         }
       } catch (e) {
@@ -153,7 +155,7 @@ export class ThumbnailService {
 
     // Return empty array for audio-only files
     if (!hasVideo) {
-      console.log('[ThumbnailService] Audio-only file detected, skipping thumbnail generation');
+      log.info('video', '[ThumbnailService] Audio-only file detected, skipping thumbnail generation');
       return [];
     }
 
@@ -161,7 +163,7 @@ export class ThumbnailService {
       return [];
     }
 
-    console.log(`[ThumbnailService] Generating ${count} timeline thumbnails (parallel)...`);
+    log.info('video', '[ThumbnailService] Generating timeline thumbnails (parallel)...', { v0: count });
     const startTime = Date.now();
 
     // Calculate timestamps
@@ -204,7 +206,7 @@ export class ThumbnailService {
               resolve();
             })
             .on('error', (err) => {
-              console.warn(`[ThumbnailService] Failed to generate thumbnail ${i}:`, err.message);
+              log.warn('video', '[ThumbnailService] Failed to generate thumbnail :', { v0: i, arg0: err.message });
               resolve(); // Don't fail entire batch
             })
             .run();
@@ -226,7 +228,7 @@ export class ThumbnailService {
     }
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    console.log(`[ThumbnailService] Generated ${validThumbnails.length} thumbnails in ${elapsed}s`);
+    log.info('video', '[ThumbnailService] Generated thumbnails in s', { v0: validThumbnails.length, v1: elapsed });
 
     return validThumbnails;
   }
@@ -272,7 +274,7 @@ export class ThumbnailService {
       fs.mkdirSync(grabsDir, { recursive: true });
     }
 
-    console.log(`[ThumbnailService] Generating ${count} screengrabs`);
+    log.info('video', '[ThumbnailService] Generating screengrabs', { v0: count });
 
     const results = [];
     
@@ -305,7 +307,7 @@ export class ThumbnailService {
         });
 
       } catch (error) {
-        console.error(`[ThumbnailService] Error generating frame at ${time}:`, error);
+        log.error('video', '[ThumbnailService] Error generating frame at :', { v0: time, arg0: error });
       }
     }
 

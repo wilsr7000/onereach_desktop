@@ -40,6 +40,9 @@ export interface Task {
   assignedAgent: string | null;
   backupQueue: string[];
   currentBackupIndex: number;
+  executionMode?: 'single' | 'parallel' | 'series';
+  selectedWinners?: string[];  // All winners from master evaluator
+  _parentTaskId?: string;      // Set on subtasks during parallel execution
 
   // Timing
   createdAt: number;
@@ -49,6 +52,10 @@ export interface Task {
   timeoutAt: number | null;
   completedAt: number | null;
 
+  // Locking
+  lockedAt: number | null;         // Timestamp when agent locked the task
+  lockedBy: string | null;         // Agent ID holding the lock
+
   // Result
   result: TaskResult | null;
   error: string | null;
@@ -56,16 +63,19 @@ export interface Task {
 
 export interface TaskResult {
   success: boolean;
+  message?: string;
+  output?: string;
   data?: unknown;
   error?: string;
   durationMs?: number;
+  needsInput?: unknown;
 }
 
 // =============================================================================
 // Bid Types
 // =============================================================================
 
-export type BidTier = 'keyword' | 'cache' | 'llm';
+export type BidTier = 'keyword' | 'cache' | 'llm' | 'builtin';
 
 export interface Bid {
   agentId: string;
@@ -75,6 +85,7 @@ export interface Bid {
   estimatedTimeMs: number;
   timestamp: number;
   tier: BidTier;
+  result?: string | null;    // Fast-path: if informational agent can answer directly, skip execution
 }
 
 export interface EvaluatedBid extends Bid {
@@ -96,7 +107,8 @@ export interface AgentInfo {
 }
 
 export interface AgentCapabilities {
-  quickMatch: boolean;       // Has fast keyword matching
+  /** @deprecated Always false -- keyword matching removed, all bidding uses LLM */
+  quickMatch: boolean;
   llmEvaluate: boolean;      // Has LLM evaluation
   maxConcurrent: number;     // How many tasks can run at once
 }
@@ -188,6 +200,7 @@ export interface BidRequest {
 export interface BiddingContext {
   queueDepth: number;
   conversationHistory: ConversationMessage[];
+  conversationText: string;
   participatingAgents: string[];
 }
 
@@ -208,6 +221,7 @@ export interface BidResponse {
     reasoning: string;
     estimatedTimeMs: number;
     tier: BidTier;
+    result?: string | null;  // Fast-path result from informational agents
   } | null;                  // null = no bid
 }
 
@@ -222,7 +236,24 @@ export interface TaskAssignment {
   previousErrors: string[];
 }
 
-// Agent → Exchange
+// Agent → Exchange: immediate acknowledgment ("I received the task")
+export interface TaskAckMessage {
+  type: 'task_ack';
+  taskId: string;
+  agentId: string;
+  estimatedMs?: number;   // Agent's own estimate of execution time
+}
+
+// Agent → Exchange: progress heartbeat ("still working, reset my timeout")
+export interface TaskHeartbeatMessage {
+  type: 'task_heartbeat';
+  taskId: string;
+  agentId: string;
+  progress?: string;      // Optional progress message (e.g. "Fetching calendar events...")
+  extendMs?: number;      // Optional: request specific extension (default: executionTimeoutMs)
+}
+
+// Agent → Exchange: final result
 export interface TaskResultMessage {
   type: 'task_result';
   taskId: string;
@@ -256,6 +287,8 @@ export type ProtocolMessage =
   | BidRequest
   | BidResponse
   | TaskAssignment
+  | TaskAckMessage
+  | TaskHeartbeatMessage
   | TaskResultMessage
   | PingMessage
   | PongMessage
@@ -296,6 +329,8 @@ export interface AuctionConfig {
   dominanceMargin: number;
   maxAuctionAttempts: number;
   executionTimeoutMs: number;
+  ackTimeoutMs: number;            // Time for agent to send task_ack (fast, agent is dead if missed)
+  heartbeatExtensionMs: number;    // How much time each heartbeat adds
 }
 
 export interface RateLimitConfig {
@@ -371,10 +406,13 @@ export interface ExchangeEvents {
     allBids: EvaluatedBid[];
   };
   'task:executing': { task: Task; agentId: string; attempt: number };
-  'task:settled': { task: Task; result: TaskResult; agentId: string; attempt: number };
+  'task:locked': { task: Task; agentId: string; timeoutMs: number };
+  'task:unlocked': { task: Task; reason: 'completed' | 'failed' | 'timeout' | 'reauction' };
+  'task:settled': { task: Task; result: TaskResult; agentId: string; attempt: number; fastPath?: boolean };
   'task:busted': { task: Task; agentId: string; error: string; isTimeout: boolean; backupsRemaining: number };
   'task:cancelled': { task: Task; reason?: string };
   'task:dead_letter': { task: Task; reason: string; totalAttempts: number };
+  'task:route_to_error_agent': { task: Task; reason: string };
   'task:agent_disconnected': { task: Task; agentId: string };
 }
 

@@ -1,0 +1,22 @@
+# Sample configuration for conversion testing
+app:
+  name: TestApp
+  version: "1.0.0"
+  debug: false
+
+database:
+  host: localhost
+  port: 5432
+  name: testdb
+  pool_size: 10
+
+features:
+  - name: conversion
+    enabled: true
+  - name: export
+    enabled: false
+
+logging:
+  level: info
+  format: json
+  output: stdout

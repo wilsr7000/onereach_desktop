@@ -35,6 +35,17 @@ const DEFAULT_CONFIG: LoggerConfig = {
   colors: true,
 };
 
+// Central logging queue sink (shared across all Logger instances)
+let _sink: ((event: { level: string; category: string; message: string; data?: unknown }) => void) | null = null;
+
+/**
+ * Set a sink function that forwards logs to the central logging queue.
+ * @param sinkFn - Called with { level, category, message, data }
+ */
+export function setLogSink(sinkFn: ((event: { level: string; category: string; message: string; data?: unknown }) => void) | null): void {
+  _sink = sinkFn;
+}
+
 export class Logger {
   private config: LoggerConfig;
 
@@ -80,25 +91,44 @@ export class Logger {
     return `${timestamp} ${levelStr} ${prefix} ${message}${dataStr}`.trim();
   }
 
+  private _forwardToSink(level: LogLevel, message: string, data?: unknown): void {
+    if (_sink) {
+      try {
+        _sink({
+          level,
+          category: 'task-exchange',
+          message: this.config.prefix ? `[${this.config.prefix}] ${message}` : message,
+          data: data !== undefined ? data : undefined
+        });
+      } catch (e) {
+        // Sink errors should not break task-exchange logging
+      }
+    }
+  }
+
   debug(message: string, data?: unknown): void {
+    this._forwardToSink('debug', message, data);
     if (this.shouldLog('debug')) {
       console.log(this.formatMessage('debug', message, data));
     }
   }
 
   info(message: string, data?: unknown): void {
+    this._forwardToSink('info', message, data);
     if (this.shouldLog('info')) {
       console.log(this.formatMessage('info', message, data));
     }
   }
 
   warn(message: string, data?: unknown): void {
+    this._forwardToSink('warn', message, data);
     if (this.shouldLog('warn')) {
       console.warn(this.formatMessage('warn', message, data));
     }
   }
 
   error(message: string, data?: unknown): void {
+    this._forwardToSink('error', message, data);
     if (this.shouldLog('error')) {
       console.error(this.formatMessage('error', message, data));
     }

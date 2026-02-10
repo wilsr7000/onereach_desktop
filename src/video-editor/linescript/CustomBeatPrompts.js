@@ -13,6 +13,8 @@
  * - Custom user-defined beats
  */
 
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 /**
  * Beat template categories
  */
@@ -672,7 +674,7 @@ export class CustomBeatPrompts {
         this.customTemplates = JSON.parse(stored);
       }
     } catch (e) {
-      console.warn('[CustomBeatPrompts] Failed to load custom templates:', e);
+      log.warn('video', '[CustomBeatPrompts] Failed to load custom templates', { data: e });
     }
   }
 
@@ -683,7 +685,7 @@ export class CustomBeatPrompts {
     try {
       localStorage.setItem('customBeatTemplates', JSON.stringify(this.customTemplates));
     } catch (e) {
-      console.warn('[CustomBeatPrompts] Failed to save custom templates:', e);
+      log.warn('video', '[CustomBeatPrompts] Failed to save custom templates', { data: e });
     }
   }
 

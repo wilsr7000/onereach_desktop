@@ -5,6 +5,13 @@
  * Provides slider-based filter controls and displays results.
  */
 
+// Use renderer-safe logging (window.logging is exposed via preload.js)
+const log = window.logging || {
+  info: (cat, msg, data) => console.log(`[${cat}] ${msg}`, data || ''),
+  warn: (cat, msg, data) => console.warn(`[${cat}] ${msg}`, data || ''),
+  error: (cat, msg, data) => console.error(`[${cat}] ${msg}`, data || ''),
+  debug: (cat, msg, data) => console.debug(`[${cat}] ${msg}`, data || '')
+};
 // Filter definitions (must match backend)
 const FILTER_DEFINITIONS = {
   // Context-Aware
@@ -184,7 +191,7 @@ class GenerativeSearchPanel {
     try {
       localStorage.setItem('gs_search_history', JSON.stringify(this.searchHistory.slice(0, 20)));
     } catch (e) {
-      console.warn('Could not save search history');
+      log.warn('app', 'Could not save search history');
     }
   }
   
@@ -225,7 +232,7 @@ class GenerativeSearchPanel {
     try {
       localStorage.setItem('gs_saved_searches', JSON.stringify(this.savedSearches));
     } catch (e) {
-      console.warn('Could not save searches');
+      log.warn('app', 'Could not save searches');
     }
   }
   
@@ -693,7 +700,7 @@ class GenerativeSearchPanel {
       }
     } catch (error) {
       this.hideProgress();
-      console.error('[GenerativeSearch] Search error:', error);
+      log.error('app', '[GenerativeSearch] Search error', { error: error });
       alert('Search failed: ' + error.message);
     }
     

@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const os = require('os');
+const MetadataSchema = require('./lib/metadata-schema');
 
 // Handle Electron imports gracefully
 let app, nativeImage;
@@ -15,12 +16,16 @@ try {
   nativeImage = null;
 }
 
+// Structured logging
+const { getLogQueue } = require('./lib/log-event-queue');
+const log = getLogQueue();
+
 // DuckDB for primary storage and cross-space queries
 let DuckDB = null;
 try {
   DuckDB = require('@duckdb/node-api');
 } catch (e) {
-  console.warn('[Storage] @duckdb/node-api not installed, falling back to JSON');
+  log.warn('clipboard', '@duckdb/node-api not installed, falling back to JSON')
 }
 
 // Legacy: DuckDB for cross-space queries (to be merged)
@@ -31,10 +36,44 @@ function getEventDB() {
       const { getEventDB: getDB } = require('./event-db');
       eventDB = getDB();
     } catch (e) {
-      console.warn('[Storage] EventDB not available:', e.message);
+      log.warn('clipboard', 'EventDB not available', { error: e.message })
     }
   }
   return eventDB;
+}
+
+/**
+ * Extract custom metadata fields that don't belong to known schema fields.
+ * These are preserved in the extensions namespace to avoid data loss.
+ * @param {Object} meta - Raw metadata object passed by caller
+ * @returns {Object} Object with custom fields placed in extensions
+ */
+function _extractCustomMetadata(meta) {
+  if (!meta || typeof meta !== 'object') return {};
+  
+  // Fields that are handled explicitly by the schema factory
+  const knownFields = new Set([
+    'title', 'description', 'author', 'source', 'sourceUrl', 'sourceApp',
+    'tags', 'notes', 'pinned', 'language', 'scenes',
+    'conversationId', 'threadId', 'participants', 'channel',
+    'ai_metadata_generated', 'ai_metadata_timestamp', 'space_context_used',
+    'gsxPush', 'youtubeUrl', 'youtubeDescription', 'uploader',
+    'fileSize', 'mimeType'
+  ]);
+  
+  const custom = {};
+  for (const key of Object.keys(meta)) {
+    if (!knownFields.has(key)) {
+      custom[key] = meta[key];
+    }
+  }
+  
+  // If there are custom fields, put them in extensions.custom
+  if (Object.keys(custom).length > 0) {
+    return { extensions: { custom } };
+  }
+  
+  return {};
 }
 
 class ClipboardStorageV2 {
@@ -58,11 +97,18 @@ class ClipboardStorageV2 {
     this.dbReady = false;
     this.dbInitPromise = null;
     
+    // Transaction serialization lock (prevents nested/overlapping BEGIN TRANSACTION)
+    this._txQueue = Promise.resolve();
+    
     // Ensure directories exist
     this.ensureDirectories();
     
     // Load or create index (legacy JSON - kept for migration/backup)
     this.index = this.loadIndex();
+    
+    // In-memory cache for performance (must be before ensureGSXAgentDefaultFiles which calls addItem)
+    this.cache = new Map();
+    this.cacheSize = 100; // Keep last 100 items in cache
     
     // Create default GSX Agent context files (after index is loaded)
     this.ensureGSXAgentDefaultFiles();
@@ -75,10 +121,6 @@ class ClipboardStorageV2 {
     
     // Ensure system spaces exist (Web Monitors, etc.)
     this.ensureSystemSpaces();
-    
-    // In-memory cache for performance
-    this.cache = new Map();
-    this.cacheSize = 100; // Keep last 100 items in cache
     
     // PERFORMANCE: Debounce save operations (for legacy JSON backup)
     this._saveTimeout = null;
@@ -101,12 +143,11 @@ class ClipboardStorageV2 {
   
   async _performDuckDBInit() {
     if (!DuckDB) {
-      console.log('[Storage] DuckDB not available, using JSON-only mode');
+      log.info('clipboard', 'DuckDB not available, using JSON-only mode')
       return false;
     }
     
-    try {
-      console.log('[Storage] Initializing DuckDB at:', this.dbPath);
+    try { dbPath: log.info('clipboard', 'Initializing DuckDB at', { dbPath: this.dbPath })
       
       // Create DuckDB instance (persistent file)
       this.dbInstance = await DuckDB.DuckDBInstance.create(this.dbPath);
@@ -118,15 +159,15 @@ class ClipboardStorageV2 {
       // Check if migration is needed
       const itemCount = await this._dbGetItemCount();
       if (itemCount === 0 && this.index.items.length > 0) {
-        console.log('[Storage] DuckDB empty but JSON has data - migrating...');
+        log.info('clipboard', 'DuckDB empty but JSON has data - migrating...')
         await this._migrateFromJSON();
       }
       
       this.dbReady = true;
-      console.log('[Storage] DuckDB initialized successfully');
+      log.info('clipboard', 'DuckDB initialized successfully')
       return true;
     } catch (error) {
-      console.error('[Storage] Failed to initialize DuckDB:', error);
+      log.error('clipboard', 'Failed to initialize DuckDB', { error: error.message || error })
       this.dbReady = false;
       return false;
     }
@@ -181,6 +222,36 @@ class ClipboardStorageV2 {
       // Column already exists, ignore
     }
     
+    // GSX Push columns - add if they don't exist (migration for existing DBs)
+    const gsxColumns = [
+      { name: 'gsx_push_status', type: 'TEXT DEFAULT \'not_pushed\'' },
+      { name: 'gsx_file_url', type: 'TEXT' },
+      { name: 'gsx_share_link', type: 'TEXT' },
+      { name: 'gsx_graph_node_id', type: 'TEXT' },
+      { name: 'gsx_visibility', type: 'TEXT' },
+      { name: 'gsx_version', type: 'TEXT' },
+      { name: 'gsx_pushed_hash', type: 'TEXT' },
+      { name: 'gsx_local_hash', type: 'TEXT' },
+      { name: 'gsx_pushed_at', type: 'TEXT' },
+      { name: 'gsx_pushed_by', type: 'TEXT' },
+      { name: 'gsx_unpushed_at', type: 'TEXT' }
+    ];
+    
+    for (const col of gsxColumns) {
+      try {
+        await this._dbRun(`ALTER TABLE items ADD COLUMN ${col.name} ${col.type}`);
+      } catch (e) {
+        // Column already exists, ignore
+      }
+    }
+    
+    // Create index for GSX push status queries
+    try {
+      await this._dbRun('CREATE INDEX IF NOT EXISTS idx_items_gsx_status ON items(gsx_push_status)');
+    } catch (e) {
+      // Index might already exist
+    }
+    
     // Preferences table - replacing index.json preferences
     await this._dbRun(`
       CREATE TABLE IF NOT EXISTS preferences (
@@ -207,7 +278,7 @@ class ClipboardStorageV2 {
       VALUES ('gsx-agent', 'GSX Agent', '●', '#8b5cf6')
     `);
     
-    console.log('[Storage] DuckDB schema created');
+    log.info('clipboard', 'DuckDB schema created')
   }
   
   /**
@@ -224,102 +295,137 @@ class ClipboardStorageV2 {
   // ========== DUCKDB HELPER METHODS ==========
   
   /**
-   * Execute a SQL statement (no results)
+   * Check if an error indicates DuckDB connection/IO failure (caller may retry after reinit).
+   */
+  _isDuckDBConnectionError(err) {
+    const msg = (err && err.message) ? String(err.message).toLowerCase() : '';
+    return msg.includes('closed') || msg.includes('lock') || msg.includes('io error') ||
+      msg.includes('database is locked') || msg.includes('connection') || msg.includes('interrupted');
+  }
+
+  /**
+   * Mark DuckDB as unavailable and clear connection (call after connection-style errors).
+   */
+  _markDuckDBUnavailable() {
+    this.dbReady = false;
+    this.dbConnection = null;
+    this.dbInstance = null;
+    this.dbInitPromise = null;
+    log.warn('clipboard', 'DuckDB marked unavailable; falling back to JSON-only mode')
+  }
+
+  /**
+   * Execute a SQL statement (no results). On connection-style errors, marks DB unavailable and optionally retries once after reinit.
    * @param {string} sql - SQL statement
    * @param {Array} params - Optional parameters
    */
   async _dbRun(sql, params = []) {
-    if (!this.dbConnection) {
-      throw new Error('DuckDB not initialized');
-    }
-    
-    if (params.length === 0) {
-      // Simple execution without parameters
-      await this.dbConnection.run(sql);
-      return;
-    }
-    
-    // Use prepared statement for parameterized queries
-    const stmt = await this.dbConnection.prepare(sql);
-    try {
-      // Bind parameters by index (1-based in DuckDB)
-      for (let i = 0; i < params.length; i++) {
-        const param = params[i];
-        const idx = i + 1; // DuckDB uses 1-based indices
-        
-        if (param === null || param === undefined) {
-          stmt.bindNull(idx);
-        } else if (typeof param === 'boolean') {
-          stmt.bindBoolean(idx, param);
-        } else if (typeof param === 'number') {
-          if (Number.isInteger(param)) {
-            stmt.bindBigInt(idx, BigInt(param));
-          } else {
-            stmt.bindDouble(idx, param);
-          }
-        } else if (typeof param === 'string') {
-          stmt.bindVarchar(idx, param);
-        } else if (Array.isArray(param)) {
-          // Convert arrays to JSON strings for storage
-          stmt.bindVarchar(idx, JSON.stringify(param));
-        } else {
-          stmt.bindVarchar(idx, String(param));
-        }
+    const run = async () => {
+      if (!this.dbConnection) throw new Error('DuckDB not initialized');
+      if (params.length === 0) {
+        await this.dbConnection.run(sql);
+        return;
       }
-      await stmt.run();
-    } finally {
-      stmt.destroySync();
+      const stmt = await this.dbConnection.prepare(sql);
+      try {
+        for (let i = 0; i < params.length; i++) {
+          const param = params[i];
+          const idx = i + 1;
+          if (param === null || param === undefined) stmt.bindNull(idx);
+          else if (typeof param === 'boolean') stmt.bindBoolean(idx, param);
+          else if (typeof param === 'number') {
+            if (Number.isInteger(param)) stmt.bindBigInt(idx, BigInt(param));
+            else stmt.bindDouble(idx, param);
+          } else if (typeof param === 'string') stmt.bindVarchar(idx, param);
+          else if (Array.isArray(param)) stmt.bindVarchar(idx, JSON.stringify(param));
+          else stmt.bindVarchar(idx, String(param));
+        }
+        await stmt.run();
+      } finally {
+        stmt.destroySync();
+      }
+    };
+    try {
+      await run();
+    } catch (err) {
+      if (this._isDuckDBConnectionError(err)) {
+        this._markDuckDBUnavailable();
+        await this._initDuckDB();
+        if (this.dbReady) await run();
+        else throw err;
+      } else {
+        throw err;
+      }
     }
   }
-  
+
   /**
-   * Execute a SQL query and return all rows
+   * Run a function inside a serialized DB transaction.
+   * Queues the work so only one BEGIN TRANSACTION is active at a time,
+   * preventing "cannot start a transaction within a transaction" errors.
+   * @param {Function} fn - Async function that receives no args and should call _dbRun() for its SQL
+   */
+  async _dbTransaction(fn) {
+    // Chain onto the queue so transactions don't overlap
+    const ticket = this._txQueue.then(async () => {
+      await this._dbRun('BEGIN TRANSACTION');
+      try {
+        const result = await fn();
+        await this._dbRun('COMMIT');
+        return result;
+      } catch (error) {
+        try { await this._dbRun('ROLLBACK'); } catch (e) { /* ignore rollback errors */ }
+        throw error;
+      }
+    });
+    // Update queue (ignore errors so queue keeps flowing)
+    this._txQueue = ticket.catch(() => {});
+    return ticket;
+  }
+
+  /**
+   * Execute a SQL query and return all rows. On connection-style errors, marks DB unavailable and optionally retries once after reinit.
    * @param {string} sql - SQL query
-   * @param {Array} params - Optional parameters  
+   * @param {Array} params - Optional parameters
    * @returns {Array} Array of row arrays
    */
   async _dbQuery(sql, params = []) {
-    if (!this.dbConnection) {
-      throw new Error('DuckDB not initialized');
-    }
-    
-    if (params.length === 0) {
-      // Simple query without parameters
-      const reader = await this.dbConnection.runAndReadAll(sql);
-      return reader.getRows();
-    }
-    
-    // Use prepared statement for parameterized queries
-    const stmt = await this.dbConnection.prepare(sql);
-    try {
-      // Bind parameters
-      for (let i = 0; i < params.length; i++) {
-        const param = params[i];
-        const idx = i + 1;
-        
-        if (param === null || param === undefined) {
-          stmt.bindNull(idx);
-        } else if (typeof param === 'boolean') {
-          stmt.bindBoolean(idx, param);
-        } else if (typeof param === 'number') {
-          if (Number.isInteger(param)) {
-            stmt.bindBigInt(idx, BigInt(param));
-          } else {
-            stmt.bindDouble(idx, param);
-          }
-        } else if (typeof param === 'string') {
-          stmt.bindVarchar(idx, param);
-        } else if (Array.isArray(param)) {
-          stmt.bindVarchar(idx, JSON.stringify(param));
-        } else {
-          stmt.bindVarchar(idx, String(param));
-        }
+    const query = async () => {
+      if (!this.dbConnection) throw new Error('DuckDB not initialized');
+      if (params.length === 0) {
+        const reader = await this.dbConnection.runAndReadAll(sql);
+        return reader.getRows();
       }
-      
-      const reader = await stmt.runAndReadAll();
-      return reader.getRows();
-    } finally {
-      stmt.destroySync();
+      const stmt = await this.dbConnection.prepare(sql);
+      try {
+        for (let i = 0; i < params.length; i++) {
+          const param = params[i];
+          const idx = i + 1;
+          if (param === null || param === undefined) stmt.bindNull(idx);
+          else if (typeof param === 'boolean') stmt.bindBoolean(idx, param);
+          else if (typeof param === 'number') {
+            if (Number.isInteger(param)) stmt.bindBigInt(idx, BigInt(param));
+            else stmt.bindDouble(idx, param);
+          } else if (typeof param === 'string') stmt.bindVarchar(idx, param);
+          else if (Array.isArray(param)) stmt.bindVarchar(idx, JSON.stringify(param));
+          else stmt.bindVarchar(idx, String(param));
+        }
+        const reader = await stmt.runAndReadAll();
+        return reader.getRows();
+      } finally {
+        stmt.destroySync();
+      }
+    };
+    try {
+      return await query();
+    } catch (err) {
+      if (this._isDuckDBConnectionError(err)) {
+        this._markDuckDBUnavailable();
+        await this._initDuckDB();
+        if (this.dbReady) return await query();
+        throw err;
+      }
+      throw err;
     }
   }
   
@@ -353,12 +459,11 @@ class ClipboardStorageV2 {
    * Migrate data from index.json to DuckDB
    */
   async _migrateFromJSON() {
-    console.log('[Storage] Starting migration from JSON to DuckDB...');
+    log.info('clipboard', 'Starting migration from JSON to DuckDB...')
     
     try {
-      // Begin transaction for atomic migration
-      await this._dbRun('BEGIN TRANSACTION');
-      
+      // Use serialized transaction for atomic migration
+      await this._dbTransaction(async () => {
       // Migrate spaces
       for (const space of this.index.spaces) {
         await this._dbRun(`
@@ -372,7 +477,7 @@ class ClipboardStorageV2 {
           space.itemCount || 0
         ]);
       }
-      console.log(`[Storage] Migrated ${this.index.spaces.length} spaces`);
+      log.info('clipboard', 'Migrated ... spaces', { indexCount: this.index.spaces.length })
       
       // Migrate items
       let itemsMigrated = 0;
@@ -420,7 +525,7 @@ class ClipboardStorageV2 {
         ]);
         itemsMigrated++;
       }
-      console.log(`[Storage] Migrated ${itemsMigrated} items`);
+      log.info('clipboard', 'Migrated ... items', { itemsMigrated })
       
       // Migrate preferences
       if (this.index.preferences) {
@@ -432,14 +537,11 @@ class ClipboardStorageV2 {
         }
       }
       
-      // Commit transaction
-      await this._dbRun('COMMIT');
-      console.log('[Storage] Migration completed successfully');
+      log.info('clipboard', 'Migration completed successfully')
+      }); // end _dbTransaction
       
     } catch (error) {
-      // Rollback on error
-      await this._dbRun('ROLLBACK');
-      console.error('[Storage] Migration failed:', error);
+      log.error('clipboard', 'Migration failed', { error: error.message || error })
       throw error;
     }
   }
@@ -449,98 +551,93 @@ class ClipboardStorageV2 {
    * Use this for recovery when the database is corrupted
    */
   async rebuildIndexFromFiles() {
-    console.log('[Storage] Rebuilding index from metadata files...');
+    log.info('clipboard', 'Rebuilding index from metadata files...')
     
     if (!this.dbReady) {
       await this.ensureDBReady();
     }
     
     try {
-      // Begin transaction
-      await this._dbRun('BEGIN TRANSACTION');
-      
-      // Clear existing items
-      await this._dbRun('DELETE FROM items');
-      
-      // Scan all item directories
-      const itemDirs = fs.readdirSync(this.itemsDir);
       let rebuilt = 0;
-      
-      for (const itemId of itemDirs) {
-        const itemDir = path.join(this.itemsDir, itemId);
-        const metaPath = path.join(itemDir, 'metadata.json');
+      await this._dbTransaction(async () => {
+        // Clear existing items
+        await this._dbRun('DELETE FROM items');
         
-        if (!fs.existsSync(metaPath)) {
-          console.warn(`[Storage] No metadata.json found for item: ${itemId}`);
-          continue;
-        }
+        // Scan all item directories
+        const itemDirs = fs.readdirSync(this.itemsDir);
         
-        try {
-          const metadata = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+        for (const itemId of itemDirs) {
+          const itemDir = path.join(this.itemsDir, itemId);
+          const metaPath = path.join(itemDir, 'metadata.json');
           
-          // Determine content path by scanning directory
-          const files = fs.readdirSync(itemDir);
-          let contentPath = null;
-          let thumbnailPath = null;
-          
-          for (const file of files) {
-            if (file === 'metadata.json') continue;
-            if (file.startsWith('thumbnail.')) {
-              thumbnailPath = `items/${itemId}/${file}`;
-            } else if (file.startsWith('content.') || (!file.includes('.'))) {
-              contentPath = `items/${itemId}/${file}`;
-            } else if (!thumbnailPath && !contentPath) {
-              // Assume it's the content file
-              contentPath = `items/${itemId}/${file}`;
-            }
+          if (!fs.existsSync(metaPath)) {
+            log.warn('clipboard', 'No metadata.json found for item: ...', { itemId })
+            continue;
           }
           
-          // Insert into database
-          await this._dbRun(`
-            INSERT INTO items (
-              id, type, space_id, timestamp, preview,
-              content_path, thumbnail_path, metadata_path, tags, pinned,
-              created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `, [
-            itemId,
-            metadata.type || 'text',
-            metadata.spaceId || 'unclassified',
-            metadata.dateCreated ? new Date(metadata.dateCreated).getTime() : Date.now(),
-            metadata.preview || 'Item',
-            contentPath,
-            thumbnailPath,
-            `items/${itemId}/metadata.json`,
-            metadata.tags || [],
-            false,
-            metadata.dateCreated || new Date().toISOString()
-          ]);
-          
-          rebuilt++;
-        } catch (e) {
-          console.error(`[Storage] Error rebuilding item ${itemId}:`, e.message);
+          try {
+            const metadata = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+            
+            // Determine content path by scanning directory
+            const files = fs.readdirSync(itemDir);
+            let contentPath = null;
+            let thumbnailPath = null;
+            
+            for (const file of files) {
+              if (file === 'metadata.json') continue;
+              if (file.startsWith('thumbnail.')) {
+                thumbnailPath = `items/${itemId}/${file}`;
+              } else if (file.startsWith('content.') || (!file.includes('.'))) {
+                contentPath = `items/${itemId}/${file}`;
+              } else if (!thumbnailPath && !contentPath) {
+                // Assume it's the content file
+                contentPath = `items/${itemId}/${file}`;
+              }
+            }
+            
+            // Insert into database
+            await this._dbRun(`
+              INSERT INTO items (
+                id, type, space_id, timestamp, preview,
+                content_path, thumbnail_path, metadata_path, tags, pinned,
+                created_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `, [
+              itemId,
+              metadata.type || 'text',
+              metadata.spaceId || 'unclassified',
+              metadata.dateCreated ? new Date(metadata.dateCreated).getTime() : Date.now(),
+              metadata.preview || 'Item',
+              contentPath,
+              thumbnailPath,
+              `items/${itemId}/metadata.json`,
+              metadata.tags || [],
+              false,
+              metadata.dateCreated || new Date().toISOString()
+            ]);
+            
+            rebuilt++;
+          } catch (e) {
+            log.error('clipboard', 'Error rebuilding item ...', { itemId })
+          }
         }
-      }
-      
-      // Update space counts
-      await this._dbRun(`
-        UPDATE spaces SET item_count = (
-          SELECT COUNT(*) FROM items WHERE items.space_id = spaces.id
-        )
-      `);
-      
-      // Commit transaction
-      await this._dbRun('COMMIT');
+        
+        // Update space counts
+        await this._dbRun(`
+          UPDATE spaces SET item_count = (
+            SELECT COUNT(*) FROM items WHERE items.space_id = spaces.id
+          )
+        `);
+      }); // end _dbTransaction
       
       // Also sync to JSON index for backup
       await this._syncDBToJSON();
       
-      console.log(`[Storage] Rebuilt ${rebuilt} items from metadata files`);
+      log.info('clipboard', 'Rebuilt ... items from metadata files', { rebuilt })
       return rebuilt;
       
     } catch (error) {
-      await this._dbRun('ROLLBACK');
-      console.error('[Storage] Rebuild failed:', error);
+      log.error('clipboard', 'Rebuild failed', { error: error.message || error })
       throw error;
     }
   }
@@ -568,9 +665,9 @@ class ClipboardStorageV2 {
       
       // Save JSON
       this.saveIndexSync();
-      console.log('[Storage] Synced DB to JSON backup');
+      log.info('clipboard', 'Synced DB to JSON backup')
     } catch (e) {
-      console.error('[Storage] Error syncing DB to JSON:', e);
+      log.error('clipboard', 'Error syncing DB to JSON', { error: e.message || e })
     }
   }
   
@@ -628,8 +725,40 @@ class ClipboardStorageV2 {
     
     const index = this.index.items.findIndex(item => item.id === itemId);
     if (index >= 0) {
+      const item = this.index.items[index];
+      
+      // CRITICAL SAFETY CHECK: Never delete items that have files on disk!
+      // Only remove truly orphaned items (where the directory/files are missing)
+      if (item.type === 'file') {
+        const itemDir = path.join(this.itemsDir, itemId);
+        if (fs.existsSync(itemDir)) {
+          // Check if there are actual content files
+          try {
+            const files = fs.readdirSync(itemDir).filter(f => 
+              !f.endsWith('.json') && !f.endsWith('.png') && !f.endsWith('.svg') && !f.startsWith('.')
+            );
+            if (files.length > 0) {
+              log.error('clipboard', 'BLOCKED: Refusing to remove item ... - it has ... content file(s) on disk!', { itemId, filesCount: files.length })
+              log.error('clipboard', 'Files: ...', { detail: files.join(', ') })
+              return false; // DO NOT DELETE - the item has real files!
+            }
+          } catch (e) {
+            // If we can't read the directory, don't delete
+            log.error('clipboard', 'BLOCKED: Cannot verify item ... files, refusing to delete', { itemId })
+            return false;
+          }
+        }
+      } else if (item.contentPath) {
+        const fullPath = path.join(this.storageRoot, item.contentPath);
+        if (fs.existsSync(fullPath)) {
+          log.error('clipboard', 'BLOCKED: Refusing to remove item ... - content file exists at ...', { itemId, contentPath: item.contentPath })
+          return false;
+        }
+      }
+      
+      // Only proceed with removal if files are truly missing
       const removed = this.index.items.splice(index, 1);
-      console.log(`[Storage] Removed orphaned item from index: ${itemId}`);
+      log.info('clipboard', 'Removed orphaned item from index: ... (verified files missing)', { itemId })
       this.saveIndex();
       
       // Also remove from cache if present
@@ -654,13 +783,26 @@ class ClipboardStorageV2 {
     const originalCount = this.index.items.length;
     const removedItems = [];
     
+    // CRITICAL FIX: Don't clean up items added in the last 60 seconds
+    // This prevents race conditions where newly added items are incorrectly
+    // identified as orphans before the file system has fully synced
+    const GRACE_PERIOD_MS = 60000; // 60 seconds
+    const now = Date.now();
+    
     this.index.items = this.index.items.filter(item => {
+      // Skip items added recently (within grace period)
+      const itemAge = now - (item.timestamp || 0);
+      if (itemAge < GRACE_PERIOD_MS) {
+        log.info('clipboard', 'Orphan cleanup: skipping ... (added ...s ago, within grace period)', { itemId: item.id, detail: Math.round(itemAge/1000) })
+        return true; // Keep the item
+      }
+      
       // For file-type items, check if the directory exists
       if (item.type === 'file') {
         const itemDir = path.join(this.itemsDir, item.id);
         if (!fs.existsSync(itemDir)) {
           removedItems.push(item.id);
-          console.log(`[Storage] Orphan cleanup: removing ${item.id} (directory missing)`);
+          log.info('clipboard', 'Orphan cleanup: removing (directory missing)', { itemId: item.id })
           return false;
         }
         
@@ -671,12 +813,12 @@ class ClipboardStorageV2 {
           );
           if (files.length === 0) {
             removedItems.push(item.id);
-            console.log(`[Storage] Orphan cleanup: removing ${item.id} (no content files)`);
+            log.info('clipboard', 'Orphan cleanup: removing (no content files)', { itemId: item.id })
             return false;
           }
         } catch (e) {
           removedItems.push(item.id);
-          console.log(`[Storage] Orphan cleanup: removing ${item.id} (read error: ${e.message})`);
+          log.info('clipboard', 'Orphan cleanup: removing ... (read error: ...)', { itemId: item.id, error: e.message })
           return false;
         }
       } else if (item.contentPath) {
@@ -684,7 +826,7 @@ class ClipboardStorageV2 {
         const fullPath = path.join(this.storageRoot, item.contentPath);
         if (!fs.existsSync(fullPath)) {
           removedItems.push(item.id);
-          console.log(`[Storage] Orphan cleanup: removing ${item.id} (contentPath missing)`);
+          log.info('clipboard', 'Orphan cleanup: removing (contentPath missing)', { itemId: item.id })
           return false;
         }
       }
@@ -702,33 +844,33 @@ class ClipboardStorageV2 {
         this.cache.delete(id);
       }
       
-      console.log(`[Storage] Orphan cleanup complete: removed ${removed} entries`);
+      log.info('clipboard', 'Orphan cleanup complete: removed ... entries', { removed })
     }
     
     return removed;
   }
   
   ensureDirectories() {
-    fs.mkdirSync(this.storageRoot, { recursive: true });
-    fs.mkdirSync(this.itemsDir, { recursive: true });
-    fs.mkdirSync(this.spacesDir, { recursive: true });
-    
-    // Ensure "unclassified" space has a directory and metadata file
-    this.ensureSpaceMetadata('unclassified', {
-      name: 'Unclassified',
-      icon: '◯',
-      color: '#64c8ff',
-      isSystem: true
-    });
-    
-    // Ensure "gsx-agent" space has a directory and metadata file (system space for agent context)
-    this.ensureSpaceMetadata('gsx-agent', {
-      name: 'GSX Agent',
-      icon: '●',
-      color: '#8b5cf6',
-      isSystem: true
-    });
-    // Note: GSX Agent default files are created after index is loaded (in constructor)
+    try {
+      fs.mkdirSync(this.storageRoot, { recursive: true });
+      fs.mkdirSync(this.itemsDir, { recursive: true });
+      fs.mkdirSync(this.spacesDir, { recursive: true });
+      this.ensureSpaceMetadata('unclassified', {
+        name: 'Unclassified',
+        icon: '◯',
+        color: '#64c8ff',
+        isSystem: true
+      });
+      this.ensureSpaceMetadata('gsx-agent', {
+        name: 'GSX Agent',
+        icon: '●',
+        color: '#8b5cf6',
+        isSystem: true
+      });
+    } catch (error) {
+      log.error('clipboard', 'Failed to create storage directories', { error: error.message })
+      throw new Error(`Spaces storage failed to initialize: ${error.message}`);
+    }
   }
   
   /**
@@ -761,9 +903,9 @@ class ClipboardStorageV2 {
             category: 'context'
           }
         });
-        console.log('[Storage] Created main.md item for GSX Agent space');
+        log.info('clipboard', 'Created main.md item for GSX Agent space')
       } catch (e) {
-        console.error('[Storage] Error creating main.md item:', e.message);
+      log.error('clipboard', 'Error creating main.md item', { error: e.message })
       }
     }
     
@@ -784,9 +926,9 @@ class ClipboardStorageV2 {
             category: 'profile'
           }
         });
-        console.log('[Storage] Created agent-profile.md item for GSX Agent space');
+        log.info('clipboard', 'Created agent-profile.md item for GSX Agent space')
       } catch (e) {
-        console.error('[Storage] Error creating agent-profile.md item:', e.message);
+      log.error('clipboard', 'Error creating agent-profile.md item', { error: e.message })
       }
     }
   }
@@ -925,7 +1067,7 @@ proactive_suggestions: true
     const metadataPath = path.join(spaceDir, 'space-metadata.json');
     if (!fs.existsSync(metadataPath)) {
       this.initSpaceMetadata(spaceId, spaceInfo);
-      console.log('[Storage] Created space-metadata.json for space:', spaceId);
+      log.info('clipboard', 'Created space-metadata.json for space', { spaceId })
     }
   }
   
@@ -936,7 +1078,7 @@ proactive_suggestions: true
     for (const space of this.index.spaces) {
       this.ensureSpaceMetadata(space.id, space);
     }
-    console.log('[Storage] Verified metadata files for all', this.index.spaces.length, 'spaces');
+    log.info('clipboard', 'Verified metadata files for all', { arg1: this.index.spaces.length, arg2: 'spaces' })
   }
   
   /**
@@ -972,7 +1114,7 @@ proactive_suggestions: true
         // Migration: There's an existing space with the same name but different ID
         // We need to update the ID and migrate all items
         const oldId = existsByName.id;
-        console.log(`[Storage] Migrating system space "${systemSpace.name}" from ID "${oldId}" to "${systemSpace.id}"`);
+        log.info('clipboard', 'Migrating system space "..." from ID "..." to "..."', { systemSpaceName: systemSpace.name, oldId, systemSpaceId: systemSpace.id })
         
         // Update the space properties
         existsByName.id = systemSpace.id;
@@ -989,18 +1131,17 @@ proactive_suggestions: true
           }
         });
         
-        console.log(`[Storage] Migrated ${migratedCount} items to new space ID`);
+        log.info('clipboard', 'Migrated ... items to new space ID', { migratedCount })
         
         // Save the index
         this.saveIndexSync();
-        console.log(`[Storage] System space migration complete`);
+        log.info('clipboard', `[Storage] System space migration complete`)
         
-      } else if (!existsById) {
-        console.log(`[Storage] Creating system space: ${systemSpace.name}`);
+      } else if (!existsById) { logName: log.info('clipboard', 'Creating system space: ...', { systemSpaceName: systemSpace.name })
         try {
           this.createSpace(systemSpace);
         } catch (error) {
-          console.error(`[Storage] Failed to create system space ${systemSpace.id}:`, error);
+          log.error('clipboard', 'Failed to create system space ...', { systemSpaceId: systemSpace.id })
         }
       } else {
         // Update existing space properties if needed
@@ -1009,14 +1150,14 @@ proactive_suggestions: true
         if (!existsById.isSystem) {
           existsById.isSystem = true;
           needsSave = true;
-          console.log(`[Storage] Marked existing space ${systemSpace.id} as system`);
+          log.info('clipboard', 'Marked existing space ... as system', { systemSpaceId: systemSpace.id })
         }
         
         // Update icon if it's not a proper SVG (fix for corrupted icons)
         if (!existsById.icon || !existsById.icon.includes('<svg')) {
           existsById.icon = systemSpace.icon;
           needsSave = true;
-          console.log(`[Storage] Updated icon for system space ${systemSpace.id}`);
+          log.info('clipboard', 'Updated icon for system space ...', { systemSpaceId: systemSpace.id })
         }
         
         if (needsSave) {
@@ -1026,48 +1167,17 @@ proactive_suggestions: true
     }
   }
   
-  loadIndex() {
-    if (fs.existsSync(this.indexPath)) {
-      try {
-        const data = fs.readFileSync(this.indexPath, 'utf8');
-        const parsed = JSON.parse(data);
-        return parsed;
-      } catch (error) {
-        console.error('Error loading index, checking backup:', error);
-        
-        // Try backup
-        const backupPath = this.indexPath + '.backup';
-        if (fs.existsSync(backupPath)) {
-          const backupData = fs.readFileSync(backupPath, 'utf8');
-          const index = JSON.parse(backupData);
-          
-          // Restore from backup
-          this.saveIndex(index);
-          return index;
-        }
-      }
-    }
-    
-    // Create new index
+  /**
+   * Return a fresh default index structure (used when primary and backup are corrupt or missing).
+   */
+  _getDefaultIndex() {
     return {
       version: '2.0',
       lastModified: new Date().toISOString(),
       items: [],
       spaces: [
-        {
-          id: 'unclassified',
-          name: 'Unclassified',
-          icon: '◯',
-          color: '#64c8ff',
-          isSystem: true
-        },
-        {
-          id: 'gsx-agent',
-          name: 'GSX Agent',
-          icon: '●',
-          color: '#8b5cf6',
-          isSystem: true
-        }
+        { id: 'unclassified', name: 'Unclassified', icon: '◯', color: '#64c8ff', isSystem: true },
+        { id: 'gsx-agent', name: 'GSX Agent', icon: '●', color: '#8b5cf6', isSystem: true }
       ],
       preferences: {
         spacesEnabled: true,
@@ -1075,6 +1185,41 @@ proactive_suggestions: true
         currentSpace: 'unclassified'
       }
     };
+  }
+
+  loadIndex() {
+    if (fs.existsSync(this.indexPath)) {
+      try {
+        const data = fs.readFileSync(this.indexPath, 'utf8');
+        const parsed = JSON.parse(data);
+        return parsed;
+      } catch (error) {
+        log.error('clipboard', 'Error loading index, checking backup', { error: error.message })
+        const backupPath = this.indexPath + '.backup';
+        if (fs.existsSync(backupPath)) {
+          try {
+            const backupData = fs.readFileSync(backupPath, 'utf8');
+            const index = JSON.parse(backupData);
+            this.saveIndex(index);
+            return index;
+          } catch (backupError) {
+            log.error('clipboard', 'Backup also corrupt or unreadable, using default index', { error: backupError.message })
+            try {
+              fs.renameSync(this.indexPath, this.indexPath + '.corrupt');
+            } catch (e) {
+              // Ignore rename failure
+            }
+            try {
+              fs.renameSync(backupPath, backupPath + '.corrupt');
+            } catch (e) {
+              // Ignore rename failure
+            }
+          }
+        }
+        return this._getDefaultIndex();
+      }
+    }
+    return this._getDefaultIndex();
   }
   
   /**
@@ -1093,7 +1238,7 @@ proactive_suggestions: true
     // Reload from disk
     this.index = this.loadIndex();
     
-    console.log('[Storage] Index reloaded from disk');
+    log.info('clipboard', 'Index reloaded from disk')
     return this.index;
   }
   
@@ -1107,78 +1252,93 @@ proactive_suggestions: true
     this._scheduleAsyncSave(index);
   }
   
-  // Internal: Schedule an async save with debouncing
-  _scheduleAsyncSave(index) {
-    // Clear any pending save
+  // Internal: Schedule an async save with debouncing (optional retryCount for retries after failure)
+  _scheduleAsyncSave(index, retryCount = 0) {
     if (this._saveTimeout) {
       clearTimeout(this._saveTimeout);
     }
-    
-    // Mark that we have pending changes
     this._pendingIndex = index;
-    
-    // Schedule save after 100ms (debounce rapid changes)
+    this._pendingRetryCount = retryCount;
+    const delay = retryCount > 0 ? 2000 : 100; // 2s backoff on retry
     this._saveTimeout = setTimeout(() => {
       this._performAsyncSave();
-    }, 100);
+    }, delay);
   }
-  
-  // Internal: Perform the actual async save
+
+  /** Max retries for async index save on transient failure */
+  static ASYNC_SAVE_MAX_RETRIES = 2;
+
+  // Internal: Perform the actual async save (retries on failure up to ASYNC_SAVE_MAX_RETRIES)
   async _performAsyncSave() {
     if (!this._pendingIndex) return;
-    
-    // Mark save in progress BEFORE clearing _pendingIndex
-    // This prevents race conditions with flushPendingSaves/reloadIndex
+
+    // Prevent concurrent saves -- queue if one is in progress
+    if (this._saveInProgress) {
+      return; // debounce will reschedule
+    }
+
     this._saveInProgress = true;
-    
     const index = this._pendingIndex;
+    const retryCount = this._pendingRetryCount || 0;
     this._pendingIndex = null;
     this._saveTimeout = null;
-    
-    const tempPath = this.indexPath + '.tmp';
+    this._pendingRetryCount = 0;
+
+    // Unique temp path per save to avoid race between overlapping operations
+    const tempPath = this.indexPath + '.async-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6) + '.tmp';
     const backupPath = this.indexPath + '.backup';
-    
+
     try {
       const fsPromises = fs.promises;
+      // Ensure parent directory exists
+      const dir = path.dirname(this.indexPath);
+      await fsPromises.mkdir(dir, { recursive: true }).catch(() => {});
       
-      // Write to temp file asynchronously
       await fsPromises.writeFile(tempPath, JSON.stringify(index, null, 2));
-      
-      // Backup current if exists
       try {
         await fsPromises.access(this.indexPath);
         await fsPromises.copyFile(this.indexPath, backupPath);
       } catch (e) {
         // File doesn't exist, no backup needed
       }
-      
-      // Atomic rename
       await fsPromises.rename(tempPath, this.indexPath);
-      
-      console.log('[Storage] Index saved asynchronously');
+      log.info('clipboard', 'Index saved asynchronously')
     } catch (error) {
-      console.error('[Storage] Error saving index:', error);
-      // Clean up temp file if it exists
+      log.error('clipboard', 'Error saving index', { error: error.message })
       try {
-        await fs.promises.unlink(tempPath);
+        await fs.promises.unlink(tempPath).catch(() => {});
       } catch (e) {
         // Ignore cleanup errors
       }
+      if (retryCount < ClipboardStorageV2.ASYNC_SAVE_MAX_RETRIES) {
+        log.info('clipboard', 'Will retry async save in 2s')
+        this._scheduleAsyncSave(index, retryCount + 1);
+      }
     } finally {
-      // Always clear the in-progress flag
       this._saveInProgress = false;
+      // If new data arrived while we were saving, kick off another save
+      if (this._pendingIndex) {
+        this._scheduleAsyncSave(this._pendingIndex, 0);
+      }
     }
   }
   
   // Synchronous save for critical operations (e.g., before app quit)
   saveIndexSync(index = this.index) {
-    const tempPath = this.indexPath + '.tmp';
+    // Use unique temp path to avoid race with debounced saveIndex()
+    const tempPath = this.indexPath + '.sync-tmp';
     const backupPath = this.indexPath + '.backup';
     
     // Update lastModified
     index.lastModified = new Date().toISOString();
     
     try {
+      // Ensure parent directory exists (guard against ENOENT)
+      const dir = path.dirname(this.indexPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      
       // Write to temp file
       fs.writeFileSync(tempPath, JSON.stringify(index, null, 2));
       
@@ -1190,13 +1350,11 @@ proactive_suggestions: true
       // Atomic rename
       fs.renameSync(tempPath, this.indexPath);
       
-      console.log('[Storage] Index saved synchronously');
+      log.info('clipboard', 'Index saved synchronously')
     } catch (error) {
-      console.error('[Storage] Error saving index:', error);
+      log.error('clipboard', 'Error saving index', { error: error.message || error })
       // Clean up temp file if it exists
-      if (fs.existsSync(tempPath)) {
-        fs.unlinkSync(tempPath);
-      }
+      try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch { /* ignore */ }
       throw error;
     }
   }
@@ -1207,15 +1365,13 @@ proactive_suggestions: true
     if (item.spaceId === 'gsx-agent') {
       const spaceExists = this.index?.spaces?.find(s => s.id === 'gsx-agent');
       if (!spaceExists) {
-        console.log('[Storage] GSX Agent space not in index, creating it...');
-        try {
-          this.createSpace({
+        log.info('clipboard', 'GSX Agent space not in index, creating it...')
+        try { createSpace: this.createSpace({
             id: 'gsx-agent',
             name: 'GSX Agent',
             icon: '🤖',
             color: '#8b5cf6',
-            isSystem: true
-          });
+            isSystem: true });
         } catch (e) {
           // Space might already exist on disk, just ensure metadata
           this.ensureSpaceMetadata('gsx-agent', {
@@ -1236,7 +1392,7 @@ proactive_suggestions: true
       const originalFileName = item.fileName;
       item.fileName = this.sanitizeFileName(item.fileName);
       if (item.fileName !== originalFileName) {
-        console.log(`[Storage] Sanitized filename: "${originalFileName}" -> "${item.fileName}"`);
+        log.info('clipboard', 'Sanitized filename: "..." -> "..."', { originalFileName, fileName: item.fileName })
       }
     }
     
@@ -1297,6 +1453,20 @@ proactive_suggestions: true
       indexEntry.settings = item.settings || { aiDescriptions: false };
     }
     
+    // Add data-source specific properties
+    if (item.type === 'data-source') {
+      const ds = item.dataSource || {};
+      indexEntry.sourceType = ds.sourceType || item.sourceType || null;
+      indexEntry.dataSourceUrl = (ds.connection && ds.connection.url) || item.url || '';
+      indexEntry.protocol = (ds.connection && ds.connection.protocol) || '';
+      indexEntry.authType = (ds.auth && ds.auth.type) || 'none';
+      indexEntry.dataSourceStatus = ds.status || item.status || 'inactive';
+      indexEntry.lastTestedAt = ds.lastTestedAt || null;
+      indexEntry.documentVisibility = (ds.document && ds.document.visibility) || 'private';
+      indexEntry.name = item.name || (ds.mcp && ds.mcp.serverName) || '';
+      indexEntry.dataSource = ds;
+    }
+    
     try {
       // 1. Create item directory
       fs.mkdirSync(itemDir, { recursive: true });
@@ -1309,18 +1479,37 @@ proactive_suggestions: true
         this.saveThumbnail(item.thumbnail, itemDir);
       }
       
-      // 4. Save metadata.json (self-describing file)
-      const metadata = {
+      // 4. Save metadata.json (SPACE framework v2.0 schema)
+      const metadata = MetadataSchema.createItemMetadata({
         id: itemId,
         type: item.type,
         spaceId: indexEntry.spaceId,
-        dateCreated: new Date(timestamp).toISOString(),
-        author: require('os').userInfo().username || 'Unknown',
-        source: item.source || 'clipboard',
-        tags: tags,
-        scenes: item.scenes || [],
-        ...item.metadata
-      };
+        overrides: {
+          dateCreated: new Date(timestamp).toISOString(),
+          dateModified: new Date(timestamp).toISOString(),
+          system: {
+            source: item.source || 'clipboard',
+            fileSize: item.fileSize || null,
+            mimeType: item.mimeType || null
+          },
+          physical: {
+            sourceUrl: (item.metadata && item.metadata.sourceUrl) || item.sourceUrl || null,
+            sourceApp: (item.metadata && item.metadata.sourceApp) || null
+          },
+          attributes: {
+            title: (item.metadata && item.metadata.title) || item.title || null,
+            description: (item.metadata && item.metadata.description) || null,
+            tags: tags,
+            notes: (item.metadata && item.metadata.notes) || null
+          },
+          events: {
+            capturedAt: new Date(timestamp).toISOString()
+          },
+          scenes: item.scenes || [],
+          // Preserve any additional custom metadata passed by callers
+          ...(item.metadata ? _extractCustomMetadata(item.metadata) : {})
+        }
+      });
       
       fs.writeFileSync(
         path.join(itemDir, 'metadata.json'),
@@ -1335,7 +1524,12 @@ proactive_suggestions: true
       // 6. Update legacy JSON index (backup)
       this.index.items.unshift(indexEntry);
       this.updateSpaceCount(indexEntry.spaceId);
-      this.saveIndex();
+      
+      // CRITICAL FIX: Use synchronous save for file additions to ensure index is persisted
+      // before returning success. The debounced saveIndex() was causing race conditions
+      // where the agent's orphan cleanup would run before the index was saved,
+      // incorrectly identifying newly added items as orphans.
+      this.saveIndexSync();
       
       // 7. Update cache
       let cacheContent = item.content;
@@ -1365,7 +1559,7 @@ proactive_suggestions: true
     // Note: In Node.js we can't truly block, but the DB operation
     // is fast enough that it will complete before the next tick
     promise.catch(err => {
-      console.error('[Storage] DB insert error (will sync on next load):', err.message);
+      log.warn('clipboard', 'DB insert deferred (will sync on next load)', { error: err.message })
     });
   }
   
@@ -1417,10 +1611,10 @@ proactive_suggestions: true
     try {
       if (fs.existsSync(itemDir)) {
         fs.rmSync(itemDir, { recursive: true, force: true });
-        console.log('[Storage] Cleaned up partial item:', itemDir);
+        log.info('clipboard', 'Cleaned up partial item', { itemDir })
       }
     } catch (e) {
-      console.error('[Storage] Error cleaning up partial item:', e.message);
+      log.error('clipboard', 'Error cleaning up partial item', { error: e.message })
     }
   }
   
@@ -1448,7 +1642,7 @@ proactive_suggestions: true
         const files = fs.readdirSync(itemDir).filter(f => 
           !f.endsWith('.json') && !f.endsWith('.png') && !f.endsWith('.svg') && !f.startsWith('.')
         );
-        console.log(`[Storage] Found files in ${itemId}:`, files);
+        log.info('clipboard', 'Found files in ...', { itemId })
         
         if (files.length > 0) {
           // Prefer video files over audio files
@@ -1473,9 +1667,9 @@ proactive_suggestions: true
             return 0;
           });
           
-          console.log(`[Storage] Sorted files (video first):`, sortedFiles);
+          log.info('clipboard', `[Storage] Sorted files (video first):`)
           actualContentPath = path.join(itemDir, sortedFiles[0]);
-          console.log(`[Storage] Selected content path:`, actualContentPath);
+          log.info('clipboard', `[Storage] Selected content path:`)
           
           // Verify the file exists and has content
           if (fs.existsSync(actualContentPath)) {
@@ -1483,11 +1677,11 @@ proactive_suggestions: true
             if (stats.size > 0) {
               content = actualContentPath;
             } else {
-              console.error(`[Storage] File has 0 bytes: ${actualContentPath}`);
+              log.error('clipboard', 'File has 0 bytes: ...', { actualContentPath })
             }
           }
         } else {
-          console.error(`[Storage] No content file found in: ${itemDir}`);
+          log.error('clipboard', 'No content file found in: ...', { itemDir })
         }
       }
     } else {
@@ -1628,7 +1822,7 @@ proactive_suggestions: true
     // Protect system context files
     const protectedIds = ['gsx-agent-main-context', 'gsx-agent-profile'];
     if (protectedIds.includes(itemId)) {
-      console.warn('[Storage] Cannot delete protected system item:', itemId);
+      log.warn('clipboard', 'Cannot delete protected system item', { itemId })
       throw new Error('Cannot delete protected system file');
     }
     
@@ -1667,7 +1861,7 @@ proactive_suggestions: true
       return true;
       
     } catch (error) {
-      console.error('[Storage] Error deleting item:', error);
+      log.error('clipboard', 'Error deleting item', { error: error.message || error })
       // Reload index to ensure consistency
       this.reloadIndex();
       throw error;
@@ -1680,7 +1874,8 @@ proactive_suggestions: true
   _deleteItemFromDBSync(itemId, spaceId = null) {
     const promise = this._deleteItemFromDB(itemId, spaceId);
     promise.catch(err => {
-      console.error('[Storage] DB delete error:', err.message);
+      // Downgrade to debug -- concurrent space deletion already handles cleanup
+      log.debug('clipboard', 'DB item delete skipped (likely concurrent space delete)', { itemId, error: err.message })
     });
   }
   
@@ -1746,7 +1941,7 @@ proactive_suggestions: true
       return true;
       
     } catch (error) {
-      console.error('[Storage] Error moving item:', error);
+      log.error('clipboard', 'Error moving item', { error: error.message || error })
       throw error;
     }
   }
@@ -1757,7 +1952,7 @@ proactive_suggestions: true
   _moveItemInDBSync(itemId, oldSpaceId, newSpaceId) {
     const promise = this._moveItemInDB(itemId, oldSpaceId, newSpaceId);
     promise.catch(err => {
-      console.error('[Storage] DB move error:', err.message);
+      log.warn('clipboard', 'DB move deferred (will sync on next load)', { error: err.message })
     });
   }
   
@@ -1767,10 +1962,7 @@ proactive_suggestions: true
   async _moveItemInDB(itemId, oldSpaceId, newSpaceId) {
     if (!this.dbReady) return;
     
-    // Begin transaction
-    await this._dbRun('BEGIN TRANSACTION');
-    
-    try {
+    await this._dbTransaction(async () => {
       // Update item
       await this._dbRun(`
         UPDATE items SET space_id = ?, modified_at = ? WHERE id = ?
@@ -1784,12 +1976,7 @@ proactive_suggestions: true
       await this._dbRun(`
         UPDATE spaces SET item_count = item_count + 1 WHERE id = ?
       `, [newSpaceId]);
-      
-      await this._dbRun('COMMIT');
-    } catch (error) {
-      await this._dbRun('ROLLBACK');
-      throw error;
-    }
+    });
   }
   
   // Toggle pin (transactional)
@@ -1806,7 +1993,7 @@ proactive_suggestions: true
     if (this.dbReady) {
       this._dbRun('UPDATE items SET pinned = ?, modified_at = ? WHERE id = ?', 
         [newPinned, new Date().toISOString(), itemId]
-      ).catch(err => console.error('[Storage] DB pin update error:', err.message));
+      ).catch(err => log.warn('clipboard', 'DB pin update deferred', { error: err.message }))
     }
     
     // FIX: Use synchronous save for pin updates to ensure persistence
@@ -1856,7 +2043,7 @@ proactive_suggestions: true
         
         // Save updated metadata
         fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
-        console.log('[Storage] Metadata file updated:', metadataPath, 'fields:', metadataFields.filter(f => updates[f] !== undefined));
+        log.info('clipboard', 'Metadata file updated', { metadataPath, arg2: 'fields:', arg3: metadataFields.filter(f => updates[f] !== undefined) })
         
         // Remove metadata fields from updates (they're in the file, not index)
         // But keep tags in updates since they're also in DuckDB
@@ -1866,7 +2053,7 @@ proactive_suggestions: true
           }
         }
       } catch (err) {
-        console.error('[Storage] Error updating metadata file:', err.message);
+        log.error('clipboard', 'Error updating metadata file', { error: err.message })
       }
     }
     
@@ -1881,7 +2068,7 @@ proactive_suggestions: true
           if (contentFile) {
             const contentPath = path.join(itemDir, contentFile);
             fs.writeFileSync(contentPath, updates.content, 'utf8');
-            console.log('[Storage] Content file updated:', contentPath);
+            log.info('clipboard', 'Content file updated', { contentPath })
             
             // Auto-update preview if not explicitly provided
             if (!updates.preview) {
@@ -1893,11 +2080,11 @@ proactive_suggestions: true
             const contentPath = path.join(itemDir, `content.${ext}`);
             fs.writeFileSync(contentPath, updates.content, 'utf8');
             item.contentPath = `items/${itemId}/content.${ext}`;
-            console.log('[Storage] Content file created:', contentPath);
+            log.info('clipboard', 'Content file created', { contentPath })
           }
         }
       } catch (err) {
-        console.error('[Storage] Error updating content file:', err.message);
+        log.error('clipboard', 'Error updating content file', { error: err.message })
       }
       // Don't store content in the index - it's in the file
       delete updates.content;
@@ -1911,7 +2098,7 @@ proactive_suggestions: true
     // Update DuckDB if ready
     if (this.dbReady) {
       this._updateItemInDB(itemId, updates).catch(err => {
-        console.error('[Storage] DB update error:', err.message);
+        log.warn('clipboard', 'DB update deferred (will sync on next load)', { error: err.message })
       });
     }
     
@@ -1971,7 +2158,7 @@ proactive_suggestions: true
     // Sanitize space name to be safe for GSX sync
     const sanitizedName = this.sanitizeFileName(space.name);
     if (sanitizedName !== space.name) {
-      console.log(`[Storage] Sanitized space name: "${space.name}" -> "${sanitizedName}"`);
+      log.info('clipboard', 'Sanitized space name: "..." -> "..."', { spaceName: space.name, sanitizedName })
     }
     
     const newSpace = {
@@ -2006,7 +2193,7 @@ proactive_suggestions: true
       return newSpace;
       
     } catch (error) {
-      console.error('[Storage] Error creating space:', error);
+      log.error('clipboard', 'Error creating space', { error: error.message || error })
       throw error;
     }
   }
@@ -2016,7 +2203,7 @@ proactive_suggestions: true
    */
   _createSpaceInDBSync(space) {
     const promise = this._createSpaceInDB(space);
-    promise.catch(err => console.error('[Storage] DB space create error:', err.message));
+    promise.catch(err => log.warn('clipboard', 'DB space create deferred', { error: err.message }))
   }
   
   /**
@@ -2039,56 +2226,40 @@ proactive_suggestions: true
     ]);
   }
   
-  // Initialize space metadata file
+  // Initialize space metadata file (SPACE framework v2.0 schema)
   initSpaceMetadata(spaceId, space) {
     const metadataPath = path.join(this.spacesDir, spaceId, 'space-metadata.json');
     
-    const metadata = {
-      version: '1.0',
-      spaceId: spaceId,
+    const metadata = MetadataSchema.createSpaceMetadata({
+      id: spaceId,
       name: space.name,
       icon: space.icon || '◯',
       color: space.color || '#64c8ff',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      author: require('os').userInfo().username || 'Unknown',
-      
-      // Project config (for GSX Create)
-      projectConfig: {
-        setupComplete: false,
-        currentVersion: 0,
-        mainFile: null,
-        description: null,
-        targetUsers: null,
-        stylePreference: null
-      },
-      
-      // All file metadata in one place
-      files: {},
-      
-      // Asset metadata (journey map, style guide, etc.)
-      assets: {},
-      
-      // Approval tracking
-      approvals: {},
-      
-      // Version history
-      versions: []
-    };
+      overrides: {
+        physical: {
+          storagePath: path.join(this.spacesDir, spaceId)
+        },
+        attributes: {
+          isSystem: space.isSystem || false
+        }
+      }
+    });
     
     fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
     return metadata;
   }
   
-  // Get space metadata
+  // Get space metadata (auto-migrates v1.0 to v2.0 SPACE schema on read)
   getSpaceMetadata(spaceId) {
     const metadataPath = path.join(this.spacesDir, spaceId, 'space-metadata.json');
     
     if (fs.existsSync(metadataPath)) {
       try {
-        return JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+        let metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+        
+        return metadata;
       } catch (e) {
-        console.error('[Storage] Error reading space metadata:', e);
+        log.error('clipboard', 'Error reading space metadata', { error: e.message || e })
       }
     }
     
@@ -2107,7 +2278,7 @@ proactive_suggestions: true
     let metadata = this.getSpaceMetadata(spaceId);
     
     if (!metadata) {
-      console.error('[Storage] Space not found:', spaceId);
+      log.error('clipboard', 'Space not found', { spaceId })
       return null;
     }
     
@@ -2182,24 +2353,35 @@ proactive_suggestions: true
     return this.updateSpaceMetadata(spaceId, { approvals: metadata.approvals });
   }
   
-  // Add version to history
-  addVersion(spaceId, versionData) {
-    const metadata = this.getSpaceMetadata(spaceId);
-    if (!metadata) return null;
-    
-    const version = {
-      version: (metadata.versions.length || 0) + 1,
-      ...versionData,
-      createdAt: new Date().toISOString()
-    };
-    
-    metadata.versions.push(version);
-    metadata.projectConfig.currentVersion = version.version;
-    
-    return this.updateSpaceMetadata(spaceId, { 
-      versions: metadata.versions,
-      projectConfig: metadata.projectConfig
+  // Add version -- creates a Git commit via SpacesGit
+  // Version history is tracked by Git, not metadata arrays.
+  async addVersion(spaceId, versionData) {
+    const { getSpacesGit } = require('./lib/spaces-git');
+    const spacesGit = getSpacesGit();
+
+    if (!spacesGit.isInitialized()) {
+      log.warn('clipboard', 'Git not initialized -- cannot add version')
+      return null;
+    }
+
+    const message = versionData.notes || versionData.message || `Version update for space ${spaceId}`;
+    const authorName = versionData.author || 'system';
+
+    // Commit all pending changes in this space
+    const spaceDir = `spaces/${spaceId}`;
+    const result = await spacesGit.commitAll({
+      message,
+      authorName,
+      authorEmail: `${authorName}@onereach.ai`,
     });
+
+    return {
+      sha: result.sha,
+      message,
+      author: authorName,
+      createdAt: new Date().toISOString(),
+      filesChanged: result.filesChanged,
+    };
   }
   
   // Update project config
@@ -2245,7 +2427,7 @@ proactive_suggestions: true
     if (updates.name) {
       const sanitizedName = this.sanitizeFileName(updates.name);
       if (sanitizedName !== updates.name) {
-        console.log(`[Storage] Sanitized space name: "${updates.name}" -> "${sanitizedName}"`);
+        log.info('clipboard', 'Sanitized space name: "..." -> "..."', { updatesName: updates.name, sanitizedName })
         updates.name = sanitizedName;
       }
     }
@@ -2260,8 +2442,7 @@ proactive_suggestions: true
     // Update DuckDB if ready
     if (this.dbReady) {
       this._updateSpaceInDB(spaceId, updates).catch(err =>
-        console.error('[Storage] DB space update error:', err.message)
-      );
+        log.warn('clipboard', 'DB space update deferred', { error: err.message }))
     }
     
     // Use synchronous save to ensure data is persisted before returning
@@ -2355,7 +2536,7 @@ proactive_suggestions: true
       return true;
       
     } catch (error) {
-      console.error('[Storage] Error deleting space:', error);
+      log.error('clipboard', 'Error deleting space', { error: error.message || error })
       throw error;
     }
   }
@@ -2365,7 +2546,7 @@ proactive_suggestions: true
    */
   _deleteSpaceFromDBSync(spaceId) {
     const promise = this._deleteSpaceFromDB(spaceId);
-    promise.catch(err => console.error('[Storage] DB space delete error:', err.message));
+    promise.catch(err => log.warn('clipboard', 'DB space delete error (non-fatal)', { error: err.message }))
   }
   
   /**
@@ -2374,9 +2555,7 @@ proactive_suggestions: true
   async _deleteSpaceFromDB(spaceId) {
     if (!this.dbReady) return;
     
-    await this._dbRun('BEGIN TRANSACTION');
-    
-    try {
+    await this._dbTransaction(async () => {
       // Count items being moved
       const countResult = await this._dbQueryOne(
         'SELECT COUNT(*) FROM items WHERE space_id = ?', [spaceId]
@@ -2397,12 +2576,7 @@ proactive_suggestions: true
       
       // Delete space
       await this._dbRun('DELETE FROM spaces WHERE id = ?', [spaceId]);
-      
-      await this._dbRun('COMMIT');
-    } catch (error) {
-      await this._dbRun('ROLLBACK');
-      throw error;
-    }
+    });
   }
   
   // Helper methods
@@ -2629,34 +2803,47 @@ proactive_suggestions: true
       }
       
       fs.writeFileSync(contentPath, contentToSave, 'utf8');
-      console.log(`[Storage] Saved content as .${finalExt} (detected from content)`);
+      log.info('clipboard', 'Saved content as .... (detected from content)', { finalExt })
     } else if (item.type === 'image') {
       // Determine extension from data URL or default to png
       const ext = this.getExtension('image', item.content);
       const contentPath = path.join(itemDir, `content.${ext}`);
       const base64Data = item.content.replace(/^data:image\/[^;]+;base64,/, '');
       fs.writeFileSync(contentPath, Buffer.from(base64Data, 'base64'));
-      console.log(`[Storage] Saved image as .${ext}`);
+      log.info('clipboard', 'Saved image as ....', { ext })
     } else if (item.type === 'file' && item.filePath && item.fileName) {
       // Copy file with its original name
       if (fs.existsSync(item.filePath)) {
         const destPath = path.join(itemDir, item.fileName);
         try {
           fs.copyFileSync(item.filePath, destPath);
-          console.log(`[Storage] Successfully copied file from ${item.filePath} to ${destPath}`);
+          log.info('clipboard', 'Successfully copied file from ... to ...', { filePath: item.filePath, destPath })
           
-          // Verify the copy
-          if (fs.existsSync(destPath)) {
-            const sourceStats = fs.statSync(item.filePath);
-            const destStats = fs.statSync(destPath);
-            console.log(`[Storage] Source size: ${sourceStats.size}, Dest size: ${destStats.size}`);
+          // Verify the copy succeeded
+          if (!fs.existsSync(destPath)) {
+            throw new Error('File copy succeeded but destination file does not exist');
+          }
+          
+          const sourceStats = fs.statSync(item.filePath);
+          const destStats = fs.statSync(destPath);
+          log.info('clipboard', 'Source size: ..., Dest size: ...', { size: sourceStats.size, size: destStats.size })
+          
+          // Verify sizes match
+          if (sourceStats.size !== destStats.size) {
+            log.error('clipboard', 'WARNING: File size mismatch! Source: ..., Dest: ...', { size: sourceStats.size, size: destStats.size })
+          }
+          
+          if (destStats.size === 0) {
+            throw new Error('Copied file has 0 bytes');
           }
         } catch (error) {
-          console.error(`[Storage] Error copying file: ${error.message}`);
-          console.error(`[Storage] Source: ${item.filePath}, Dest: ${destPath}`);
+          log.error('clipboard', 'CRITICAL: Error copying file: ...', { error: error.message })
+          log.error('clipboard', 'Source: ..., Dest: ...', { filePath: item.filePath, destPath })
+          throw new Error(`Failed to copy file: ${error.message}`);
         }
       } else {
-        console.error(`[Storage] Source file not found: ${item.filePath}`);
+        log.error('clipboard', 'CRITICAL: Source file not found: ...', { filePath: item.filePath })
+        throw new Error(`Source file not found: ${item.filePath}`);
       }
     } else if (item.type === 'file' && item.content) {
       // File type with content but no filePath - save the content directly
@@ -2667,14 +2854,14 @@ proactive_suggestions: true
       } else {
         fs.writeFileSync(destPath, item.content);
       }
-      console.log(`[Storage] Saved file content directly as ${fileName}`);
+      log.info('clipboard', 'Saved file content directly as ...', { fileName })
     } else if (item.content) {
       // Fallback: save any item with content as text
-      console.warn(`[Storage] Unhandled item type '${item.type}', saving content as text fallback`);
+      log.warn('clipboard', 'Unhandled item type \'...\', saving content as text fallback', { type: item.type })
       const contentPath = path.join(itemDir, 'content.txt');
       fs.writeFileSync(contentPath, String(item.content), 'utf8');
     } else {
-      console.error(`[Storage] Cannot save item: no content and no file path. Type: ${item.type}, ID: ${item.id}`);
+      log.error('clipboard', 'Cannot save item: no content and no file path. Type: ..., ID: ...', { type: item.type, itemId: item.id })
     }
   }
   
@@ -2697,6 +2884,11 @@ proactive_suggestions: true
       return 'Image';
     } else if (item.type === 'file') {
       return `File: ${item.fileName}`;
+    } else if (item.type === 'data-source') {
+      const ds = item.dataSource || {};
+      const label = item.name || (ds.mcp && ds.mcp.serverName) || (ds.connection && ds.connection.url) || 'Data Source';
+      const subtype = ds.sourceType ? `[${ds.sourceType.toUpperCase()}]` : '';
+      return `${subtype} ${label}`.trim();
     }
     
     return 'Item';
@@ -2960,7 +3152,7 @@ proactive_suggestions: true
   
   // Migrate existing spaces to use unified metadata
   migrateAllSpaces() {
-    console.log('[Storage] Starting migration to unified metadata...');
+    log.info('clipboard', 'Starting migration to unified metadata...')
     let migrated = 0;
     
     for (const space of this.index.spaces) {
@@ -2973,7 +3165,7 @@ proactive_suggestions: true
       }
     }
     
-    console.log(`[Storage] Migration complete. Migrated ${migrated} spaces.`);
+    log.info('clipboard', 'Migration complete. Migrated ... spaces.', { migrated })
     return migrated;
   }
   
@@ -2981,17 +3173,17 @@ proactive_suggestions: true
   migrateSpace(spaceId) {
     const spaceDir = path.join(this.spacesDir, spaceId);
     if (!fs.existsSync(spaceDir)) {
-      console.log(`[Storage] Space directory not found: ${spaceId}`);
+      log.info('clipboard', 'Space directory not found: ...', { spaceId })
       return false;
     }
     
     const space = this.index.spaces.find(s => s.id === spaceId);
     if (!space) {
-      console.log(`[Storage] Space not found in index: ${spaceId}`);
+      log.info('clipboard', 'Space not found in index: ...', { spaceId })
       return false;
     }
     
-    console.log(`[Storage] Migrating space: ${space.name} (${spaceId})`);
+    log.info('clipboard', 'Migrating space: ... (...)', { spaceName: space.name, spaceId })
     
     // Create unified metadata
     const metadata = this.initSpaceMetadata(spaceId, space);
@@ -3041,9 +3233,9 @@ proactive_suggestions: true
             metadata.costHistory = oldData;
           }
           
-          console.log(`[Storage] Merged old metadata: ${oldFile}`);
+          log.info('clipboard', 'Merged old metadata: ...', { oldFile })
         } catch (e) {
-          console.error(`[Storage] Error reading old metadata ${oldFile}:`, e.message);
+          log.error('clipboard', 'Error reading old metadata ...', { oldFile })
         }
       }
     }
@@ -3052,7 +3244,7 @@ proactive_suggestions: true
     const metadataPath = path.join(spaceDir, 'space-metadata.json');
     fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
     
-    console.log(`[Storage] Migrated space: ${space.name}`);
+    log.info('clipboard', 'Migrated space: ...', { spaceName: space.name })
     return true;
   }
   

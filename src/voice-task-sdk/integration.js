@@ -11,6 +11,8 @@
 
 const { ipcMain, BrowserWindow } = require('electron');
 const { createVoiceTaskSDK } = require('./sdk-runtime');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 
 // Context provider system (lazy loaded to avoid circular deps)
 let contextRegistry = null;
@@ -50,9 +52,9 @@ async function initializeContextProviders() {
     contextRegistry.register(customFactsProvider);
     contextRegistry.enable('custom-facts');
     
-    console.log('[VoiceTaskSDK] Context providers initialized');
+    log.info('voice', '[VoiceTaskSDK] Context providers initialized');
   } catch (e) {
-    console.warn('[VoiceTaskSDK] Could not initialize context providers:', e.message);
+    log.warn('voice', '[VoiceTaskSDK] Could not initialize context providers', { data: e.message });
     // Context providers are optional - continue without them
   }
 }
@@ -69,7 +71,7 @@ async function getAggregatedContext() {
     const aggregated = await contextRegistry.aggregate();
     return aggregated.providers;
   } catch (e) {
-    console.warn('[VoiceTaskSDK] Error aggregating context:', e);
+    log.warn('voice', '[VoiceTaskSDK] Error aggregating context', { data: e });
     return {};
   }
 }
@@ -146,7 +148,7 @@ function saveHistoryToSettings() {
       global.settingsManager.set('voiceConversationHistory', conversationHistory);
     }
   } catch (e) {
-    console.warn('[VoiceTaskSDK] Could not save history:', e);
+    log.warn('voice', '[VoiceTaskSDK] Could not save history', { data: e });
   }
 }
 
@@ -159,11 +161,11 @@ function loadHistoryFromSettings() {
       const saved = global.settingsManager.get('voiceConversationHistory');
       if (Array.isArray(saved)) {
         conversationHistory = saved.slice(-MAX_HISTORY_LENGTH);
-        console.log('[VoiceTaskSDK] Loaded', conversationHistory.length, 'history entries');
+        log.info('voice', '[VoiceTaskSDK] Loaded', { arg0: conversationHistory.length, arg1: 'history entries' });
       }
     }
   } catch (e) {
-    console.warn('[VoiceTaskSDK] Could not load history:', e);
+    log.warn('voice', '[VoiceTaskSDK] Could not load history', { data: e });
   }
 }
 
@@ -287,7 +289,7 @@ function createDefaultAgent() {
     queues: ['voice-commands'],
     priority: 0,
     resolve: async (task, ctx) => {
-      console.log(`[VoiceAgent] Executing task: ${task.action}`, task.params);
+      log.info('voice', '[VoiceAgent] Executing task:', { v0: task.action, arg0: task.params });
       
       // Simulate execution time
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -350,10 +352,10 @@ function broadcastToWindows(channel, data) {
 function initializeVoiceTaskSDK(config = {}) {
   const mergedConfig = { ...defaultConfig, ...config };
 
-  console.log('[VoiceTaskSDK] Initializing with config:', {
-    defaultQueue: mergedConfig.defaultQueue,
-    defaultConcurrency: mergedConfig.defaultConcurrency,
-    maxQueueSize: mergedConfig.maxQueueSize,
+  log.info('voice', '[VoiceTaskSDK] Initializing with config', {
+    arg0: mergedConfig.defaultQueue,
+    arg1: mergedConfig.defaultConcurrency,
+    arg2: mergedConfig.maxQueueSize
   });
   
   // Load conversation history from settings
@@ -361,7 +363,7 @@ function initializeVoiceTaskSDK(config = {}) {
   
   // Initialize context providers (non-blocking)
   initializeContextProviders().catch(e => {
-    console.warn('[VoiceTaskSDK] Context provider init failed:', e);
+    log.warn('voice', '[VoiceTaskSDK] Context provider init failed', { data: e });
   });
 
   // Create SDK instance
@@ -370,11 +372,11 @@ function initializeVoiceTaskSDK(config = {}) {
   // Register default agent
   const defaultAgent = createDefaultAgent();
   sdk.agents.create(defaultAgent);
-  console.log('[VoiceTaskSDK] Default agent registered');
+  log.info('voice', '[VoiceTaskSDK] Default agent registered');
 
   // Wire up events to broadcast to windows and HUD
   sdk.on('queued', (task) => {
-    console.log('[VoiceTaskSDK] Task queued:', task.id, task.action);
+    log.info('voice', '[VoiceTaskSDK] Task queued', { arg0: task.id, arg1: task.action });
     broadcastToWindows('voice-task:queued', task);
     
     // Show HUD if available
@@ -387,7 +389,7 @@ function initializeVoiceTaskSDK(config = {}) {
   });
 
   sdk.on('started', (task) => {
-    console.log('[VoiceTaskSDK] Task started:', task.id);
+    log.info('voice', '[VoiceTaskSDK] Task started', { data: task.id });
     broadcastToWindows('voice-task:started', task);
     
     // Update HUD
@@ -401,7 +403,7 @@ function initializeVoiceTaskSDK(config = {}) {
   });
 
   sdk.on('completed', ({ task, result }) => {
-    console.log('[VoiceTaskSDK] Task completed:', task.id);
+    log.info('voice', '[VoiceTaskSDK] Task completed', { data: task.id });
     broadcastToWindows('voice-task:completed', { task, result });
     
     // Update HUD with result
@@ -414,7 +416,7 @@ function initializeVoiceTaskSDK(config = {}) {
   });
 
   sdk.on('failed', ({ task, error }) => {
-    console.log('[VoiceTaskSDK] Task failed:', task.id, error);
+    log.info('voice', '[VoiceTaskSDK] Task failed', { arg0: task.id, arg1: error });
     broadcastToWindows('voice-task:failed', { task, error: String(error) });
     
     // Update HUD with error
@@ -428,29 +430,29 @@ function initializeVoiceTaskSDK(config = {}) {
   });
 
   sdk.on('retry', ({ task, attempt }) => {
-    console.log('[VoiceTaskSDK] Task retry:', task.id, 'attempt', attempt);
+    log.info('voice', '[VoiceTaskSDK] Task retry', { arg0: task.id, arg1: 'attempt', arg2: attempt });
     broadcastToWindows('voice-task:retry', { task, attempt });
   });
 
   sdk.on('deadletter', ({ task, reason }) => {
-    console.log('[VoiceTaskSDK] Task deadletter:', task.id, reason);
+    log.info('voice', '[VoiceTaskSDK] Task deadletter', { arg0: task.id, arg1: reason });
     broadcastToWindows('voice-task:deadletter', { task, reason });
   });
 
   sdk.on('cancelled', (task) => {
-    console.log('[VoiceTaskSDK] Task cancelled:', task.id);
+    log.info('voice', '[VoiceTaskSDK] Task cancelled', { data: task.id });
     broadcastToWindows('voice-task:cancelled', task);
   });
 
   // Start the dispatcher
   sdk.start();
-  console.log('[VoiceTaskSDK] Dispatcher started');
+  log.info('voice', '[VoiceTaskSDK] Dispatcher started');
 
   // Setup IPC handlers
   setupSDKIPC();
 
   isInitialized = true;
-  console.log('[VoiceTaskSDK] Initialization complete');
+  log.info('voice', '[VoiceTaskSDK] Initialization complete');
 }
 
 /**
@@ -473,7 +475,7 @@ function setupSDKIPC() {
       throw new Error('SDK not initialized');
     }
 
-    console.log('[VoiceTaskSDK] Submit transcript:', transcript);
+    log.info('voice', '[VoiceTaskSDK] Submit transcript', { data: transcript });
     
     // Add to conversation history
     addUserMessage(transcript);
@@ -506,7 +508,7 @@ function setupSDKIPC() {
 
     // Handle special actions that open windows directly
     if (classification.action === 'create-agent' || classification.action === 'open-agent-composer') {
-      console.log('[VoiceTaskSDK] Opening Agent Composer');
+      log.info('voice', '[VoiceTaskSDK] Opening Agent Composer');
       
       // Extract description from params if this is a create-agent request
       const description = classification.params?.description || '';
@@ -518,7 +520,7 @@ function setupSDKIPC() {
           main.createClaudeCodeWindow({ initialDescription: description });
         }
       } catch (e) {
-        console.error('[VoiceTaskSDK] Could not open Agent Composer window:', e);
+        log.error('voice', '[VoiceTaskSDK] Could not open Agent Composer window', { error: e });
       }
       
       // Set global flag that we're in agent creation mode (for voice relay)
@@ -539,7 +541,7 @@ function setupSDKIPC() {
     }
     
     if (classification.action === 'open-agent-manager') {
-      console.log('[VoiceTaskSDK] Opening Agent Manager');
+      log.info('voice', '[VoiceTaskSDK] Opening Agent Manager');
       
       // Open the Agent Manager window
       try {
@@ -548,7 +550,7 @@ function setupSDKIPC() {
           main.createAgentManagerWindow();
         }
       } catch (e) {
-        console.error('[VoiceTaskSDK] Could not open Agent Manager window:', e);
+        log.error('voice', '[VoiceTaskSDK] Could not open Agent Manager window', { error: e });
       }
       
       addAssistantMessage('Opening the Agent Manager.');
@@ -591,7 +593,7 @@ function setupSDKIPC() {
     
     const { action, params, originalTranscript, clarification } = actionData;
     
-    console.log('[VoiceTaskSDK] Submit action directly:', action);
+    log.info('voice', '[VoiceTaskSDK] Submit action directly', { data: action });
     
     // Add clarification to history if provided
     if (clarification) {
@@ -601,7 +603,7 @@ function setupSDKIPC() {
     
     // Handle special actions that open windows directly
     if (action === 'create-agent' || action === 'open-agent-composer') {
-      console.log('[VoiceTaskSDK] Opening Agent Composer');
+      log.info('voice', '[VoiceTaskSDK] Opening Agent Composer');
       
       // Extract description from params if available
       const description = params?.description || '';
@@ -612,7 +614,7 @@ function setupSDKIPC() {
           main.createClaudeCodeWindow({ initialDescription: description });
         }
       } catch (e) {
-        console.error('[VoiceTaskSDK] Could not open Agent Composer window:', e);
+        log.error('voice', '[VoiceTaskSDK] Could not open Agent Composer window', { error: e });
       }
       
       // Set global flag that we're in agent creation mode (for voice relay)
@@ -633,7 +635,7 @@ function setupSDKIPC() {
     }
     
     if (action === 'open-agent-manager') {
-      console.log('[VoiceTaskSDK] Opening Agent Manager');
+      log.info('voice', '[VoiceTaskSDK] Opening Agent Manager');
       
       try {
         const main = require('../../main');
@@ -641,7 +643,7 @@ function setupSDKIPC() {
           main.createAgentManagerWindow();
         }
       } catch (e) {
-        console.error('[VoiceTaskSDK] Could not open Agent Manager window:', e);
+        log.error('voice', '[VoiceTaskSDK] Could not open Agent Manager window', { error: e });
       }
       
       addAssistantMessage('Opening the Agent Manager.');
@@ -847,7 +849,7 @@ function setupSDKIPC() {
     return [];
   });
 
-  console.log('[VoiceTaskSDK] IPC handlers registered');
+  log.info('voice', '[VoiceTaskSDK] IPC handlers registered');
 }
 
 /**
@@ -923,7 +925,7 @@ function cleanup() {
     }
   });
 
-  console.log('[VoiceTaskSDK] Cleanup complete');
+  log.info('voice', '[VoiceTaskSDK] Cleanup complete');
 }
 
 module.exports = {

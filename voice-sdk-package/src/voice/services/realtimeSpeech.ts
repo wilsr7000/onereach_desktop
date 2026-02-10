@@ -3,11 +3,16 @@
  * 
  * Uses WebSocket connection for low-latency streaming transcription.
  * Falls back to Whisper if Realtime API is unavailable.
+ * 
+ * NOTE: This intentionally uses a direct WebSocket connection rather than
+ * routing through the centralized ai-service. Real-time audio streaming
+ * requires browser-native WebSocket for acceptable latency. The API key
+ * and model are provided via config from the centralized service.
  */
 
 import type { SpeechService, RealtimeConfig, VoiceState } from '../types'
 
-const REALTIME_API_URL = 'wss://api.openai.com/v1/realtime'
+const DEFAULT_REALTIME_API_URL = 'wss://api.openai.com/v1/realtime'
 const DEFAULT_MODEL = 'gpt-4o-realtime-preview-2024-10-01'
 
 export interface RealtimeSpeechService extends SpeechService {
@@ -119,7 +124,7 @@ export function createRealtimeSpeechService(config: RealtimeConfig): RealtimeSpe
       try {
         updateState({ connectionState: 'connecting' })
 
-        const url = `${REALTIME_API_URL}?model=${model}`
+        const url = `${DEFAULT_REALTIME_API_URL}?model=${model}`
         ws = new WebSocket(url, [
           'realtime',
           `openai-insecure-api-key.${apiKey}`,

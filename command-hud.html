@@ -760,6 +760,339 @@
             0%, 100% { opacity: 1; transform: scale(1); }
             50% { opacity: 0.5; transform: scale(0.8); }
         }
+        
+        /* ==================== SUBTASK STYLES ==================== */
+        .subtasks-section {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        
+        .subtasks-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        
+        .subtasks-title {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: #808080;
+            letter-spacing: 0.5px;
+        }
+        
+        .subtasks-progress {
+            font-size: 11px;
+            color: #a0a0a0;
+        }
+        
+        .subtasks-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        
+        .subtask-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 8px;
+            border-left: 3px solid rgba(139, 92, 246, 0.3);
+        }
+        
+        .subtask-item.active {
+            background: rgba(139, 92, 246, 0.1);
+            border-left-color: #8b5cf6;
+        }
+        
+        .subtask-item.completed {
+            background: rgba(34, 197, 94, 0.08);
+            border-left-color: #22c55e;
+        }
+        
+        .subtask-item.failed {
+            background: rgba(239, 68, 68, 0.08);
+            border-left-color: #ef4444;
+        }
+        
+        .subtask-status {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            flex-shrink: 0;
+        }
+        
+        .subtask-status.pending {
+            background: rgba(100, 100, 100, 0.2);
+            border: 1px solid rgba(100, 100, 100, 0.3);
+            color: #888;
+        }
+        
+        .subtask-status.active {
+            background: rgba(139, 92, 246, 0.2);
+            border: 1px solid rgba(139, 92, 246, 0.4);
+            color: #c4b5fd;
+            animation: subtask-pulse 1.5s ease-in-out infinite;
+        }
+        
+        .subtask-status.completed {
+            background: rgba(34, 197, 94, 0.2);
+            border: 1px solid rgba(34, 197, 94, 0.4);
+            color: #22c55e;
+        }
+        
+        .subtask-status.failed {
+            background: rgba(239, 68, 68, 0.2);
+            border: 1px solid rgba(239, 68, 68, 0.4);
+            color: #ef4444;
+        }
+        
+        @keyframes subtask-pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+
+        /* ==================== LOCK STATE ==================== */
+        .lock-indicator {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            margin-top: 8px;
+            background: rgba(234, 179, 8, 0.1);
+            border: 1px solid rgba(234, 179, 8, 0.25);
+            border-radius: 6px;
+            font-size: 11px;
+            color: #eab308;
+        }
+        .lock-indicator.visible {
+            display: flex;
+        }
+        .lock-timer {
+            font-variant-numeric: tabular-nums;
+            font-weight: 600;
+        }
+        .lock-indicator.unlocking {
+            animation: unlock-flash 0.5s ease-out;
+            border-color: rgba(34, 197, 94, 0.4);
+            color: #22c55e;
+        }
+        @keyframes unlock-flash {
+            0% { background: rgba(234, 179, 8, 0.2); }
+            100% { background: rgba(34, 197, 94, 0.1); }
+        }
+
+        /* ==================== DECOMPOSITION ==================== */
+        .decomposition-banner {
+            display: none;
+            padding: 8px 12px;
+            margin-top: 8px;
+            background: rgba(139, 92, 246, 0.08);
+            border: 1px solid rgba(139, 92, 246, 0.2);
+            border-radius: 6px;
+            font-size: 12px;
+            color: #c4b5fd;
+        }
+        .decomposition-banner.visible {
+            display: block;
+        }
+        .decomposition-banner .label {
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        .decomposition-banner .subtask-list {
+            list-style: none;
+            padding: 0;
+            margin: 4px 0 0;
+        }
+        .decomposition-banner .subtask-list li {
+            padding: 2px 0;
+            color: #a78bfa;
+            font-size: 11px;
+        }
+        .decomposition-banner .subtask-list li::before {
+            content: '\2022';
+            margin-right: 6px;
+            opacity: 0.5;
+        }
+
+        /* ==================== ERROR ROUTED ==================== */
+        .error-routed-banner {
+            display: none;
+            padding: 8px 12px;
+            margin-top: 8px;
+            background: rgba(239, 68, 68, 0.08);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            border-radius: 6px;
+            font-size: 12px;
+            color: #fca5a5;
+        }
+        .error-routed-banner.visible {
+            display: block;
+        }
+        
+        .subtask-content {
+            flex: 1;
+            font-size: 12px;
+            color: #d0d0d0;
+            line-height: 1.3;
+        }
+        
+        .subtask-item.completed .subtask-content {
+            color: #888;
+            text-decoration: line-through;
+        }
+        
+        .subtask-index {
+            font-size: 10px;
+            color: #666;
+            flex-shrink: 0;
+        }
+        
+        /* ==================== AGENT UI PANELS ==================== */
+        .agent-ui-panels {
+            display: none;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 12px;
+            max-height: 320px;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(255,255,255,0.1) transparent;
+        }
+        .agent-ui-panels::-webkit-scrollbar {
+            width: 4px;
+        }
+        .agent-ui-panels::-webkit-scrollbar-thumb {
+            background: rgba(255,255,255,0.15);
+            border-radius: 2px;
+        }
+        .agent-ui-panels.visible {
+            display: flex;
+        }
+        
+        .agent-ui-card {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+            padding: 12px;
+            animation: cardSlideIn 0.25s ease;
+        }
+        @keyframes cardSlideIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        .agent-ui-card-header {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #c4b5fd;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .agent-ui-card-body {
+            /* Agent HTML renders here */
+        }
+        
+        /* Shared UI primitives for agent-provided HTML */
+        .hud-action-btn {
+            padding: 8px 16px;
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 8px;
+            background: rgba(139, 92, 246, 0.15);
+            color: #c4b5fd;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s;
+            font-family: inherit;
+        }
+        .hud-action-btn:hover {
+            background: rgba(139, 92, 246, 0.25);
+            border-color: rgba(139, 92, 246, 0.4);
+        }
+        .hud-action-btn:active {
+            transform: scale(0.97);
+        }
+        .hud-action-btn.danger {
+            background: rgba(239, 68, 68, 0.15);
+            border-color: rgba(239, 68, 68, 0.3);
+            color: #fca5a5;
+        }
+        .hud-action-btn.danger:hover {
+            background: rgba(239, 68, 68, 0.25);
+            border-color: rgba(239, 68, 68, 0.4);
+        }
+        .hud-action-btn.success {
+            background: rgba(34, 197, 94, 0.15);
+            border-color: rgba(34, 197, 94, 0.3);
+            color: #86efac;
+        }
+        .hud-action-btn.success:hover {
+            background: rgba(34, 197, 94, 0.25);
+            border-color: rgba(34, 197, 94, 0.4);
+        }
+        
+        .hud-option-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            background: rgba(139, 92, 246, 0.05);
+            border: 1px solid rgba(139, 92, 246, 0.12);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .hud-option-item:hover {
+            background: rgba(139, 92, 246, 0.12);
+            border-color: rgba(139, 92, 246, 0.25);
+            transform: translateX(3px);
+        }
+        .hud-option-item:active {
+            transform: translateX(1px);
+            background: rgba(139, 92, 246, 0.18);
+        }
+        .hud-option-item .option-number {
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(139, 92, 246, 0.2);
+            border-radius: 5px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #c4b5fd;
+            flex-shrink: 0;
+        }
+        
+        .hud-card {
+            padding: 10px 12px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 8px;
+            color: #d0d0d0;
+            font-size: 13px;
+            line-height: 1.4;
+        }
+        .hud-card p {
+            margin: 0 0 4px 0;
+        }
+        .hud-card p:last-child {
+            margin-bottom: 0;
+        }
     </style>
 </head>
 <body>
@@ -842,6 +1175,36 @@
                     <span>Confidence</span>
                     <span class="confidence-value high" id="confidenceValue">95%</span>
                 </div>
+                
+                <!-- Subtasks Section -->
+                <div class="subtasks-section" id="subtasksSection" style="display: none;">
+                    <div class="subtasks-header">
+                        <span class="subtasks-title">Subtasks</span>
+                        <span class="subtasks-progress" id="subtasksProgress">0 / 0</span>
+                    </div>
+                    <div class="subtasks-list" id="subtasksList">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
+                
+                <!-- Lock indicator (shown when agent is executing) -->
+                <div class="lock-indicator" id="lockIndicator">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                    <span id="lockAgentName">Agent</span> executing
+                    <span class="lock-timer" id="lockTimer">--s</span>
+                </div>
+
+                <!-- Decomposition banner (shown when task is split) -->
+                <div class="decomposition-banner" id="decompositionBanner">
+                    <div class="label">Request split into separate tasks:</div>
+                    <ul class="subtask-list" id="decompositionList"></ul>
+                </div>
+
+                <!-- Error routed banner -->
+                <div class="error-routed-banner" id="errorRoutedBanner"></div>
+
+                <!-- Agent UI Panels (multi-agent interactive content) -->
+                <div class="agent-ui-panels" id="agentUIPanels"></div>
                 
                 <div class="hud-actions" id="hudActions" style="display: none;">
                     <button class="hud-btn" id="btnDismiss">Dismiss</button>
@@ -984,8 +1347,18 @@
         const pendingContextIndicator = document.getElementById('pendingContextIndicator');
         const pendingContextText = document.getElementById('pendingContextText');
         
+        // Subtask elements
+        const subtasksSection = document.getElementById('subtasksSection');
+        const subtasksProgress = document.getElementById('subtasksProgress');
+        const subtasksList = document.getElementById('subtasksList');
+        
         // Bids list expanded state
         let bidsExpanded = false;
+        
+        // ==================== SUBTASK TRACKING ====================
+        // Track subtasks for the current parent task
+        let currentSubtasks = new Map(); // subtaskId -> { content, status, index }
+        let currentParentTaskId = null;
         
         // Toggle bids list
         bidsToggle.addEventListener('click', () => {
@@ -1208,6 +1581,31 @@
         function displayResult(result) {
             const isSuccess = result.success !== false && !result.error;
             
+            // ---- Agent UI HTML Panel ----
+            // If the result carries html, show it as a rich agent panel instead
+            // of the generic success/fail card. The agent keeps its panel alive
+            // when needsInput is set (multi-turn conversation).
+            if (result.html) {
+                const agentId = result.agentId || result.metadata?.agentId || 'unknown';
+                const agentName = result.agentName || result.metadata?.agentName || agentId;
+                addAgentUIPanel(agentId, agentName, result.html);
+                
+                // Still show the text result underneath if present
+                if (!result.needsInput) {
+                    updateStatus(isSuccess ? 'completed' : 'failed');
+                    progressSection.style.display = 'none';
+                    resultSection.style.display = 'block';
+                    resultSection.className = 'result-section ' + (isSuccess ? 'success' : 'error');
+                    resultIcon.textContent = isSuccess ? '+' : 'x';
+                    resultLabel.textContent = isSuccess ? 'Completed' : 'Failed';
+                    resultMessage.textContent = result.message || 'Done';
+                    hudActions.style.display = 'flex';
+                    btnRetry.style.display = 'none';
+                    // Don't auto-hide when we have UI panels showing
+                }
+                return;
+            }
+            
             updateStatus(isSuccess ? 'completed' : 'failed');
             
             // Hide progress, show result
@@ -1251,8 +1649,171 @@
             bidsExpanded = false;
             bidsList.classList.remove('expanded');
             bidsArrow.textContent = '+';
+            
+            // Reset subtasks
+            clearSubtasks();
+            
+            // Reset agent UI panels
+            clearAllAgentUIPanels();
         }
         
+        // ==================== SUBTASK FUNCTIONS ====================
+        
+        // Clear all subtasks
+        function clearSubtasks() {
+            currentSubtasks.clear();
+            currentParentTaskId = null;
+            subtasksList.innerHTML = '';
+            subtasksSection.style.display = 'none';
+        }
+        
+        // Add a new subtask
+        function addSubtask(subtask) {
+            const { subtaskId, parentTaskId, content, subtaskIndex } = subtask;
+            
+            // If this is for a different parent, clear existing
+            if (currentParentTaskId && currentParentTaskId !== parentTaskId) {
+                clearSubtasks();
+            }
+            
+            currentParentTaskId = parentTaskId;
+            
+            // Track the subtask
+            currentSubtasks.set(subtaskId, {
+                content,
+                status: 'pending',
+                index: subtaskIndex
+            });
+            
+            // Show subtasks section
+            subtasksSection.style.display = 'block';
+            
+            // Render all subtasks
+            renderSubtasks();
+        }
+        
+        // Update subtask status
+        function updateSubtaskStatus(subtaskId, status) {
+            const subtask = currentSubtasks.get(subtaskId);
+            if (subtask) {
+                subtask.status = status;
+                renderSubtasks();
+            }
+        }
+        
+        // Render subtasks list
+        function renderSubtasks() {
+            const subtasksArray = Array.from(currentSubtasks.entries())
+                .sort((a, b) => a[1].index - b[1].index);
+            
+            let completedCount = 0;
+            subtasksArray.forEach(([id, s]) => {
+                if (s.status === 'completed') completedCount++;
+            });
+            
+            // Update progress
+            subtasksProgress.textContent = `${completedCount} / ${subtasksArray.length}`;
+            
+            // Render list
+            subtasksList.innerHTML = subtasksArray.map(([id, subtask]) => {
+                const statusIcon = getSubtaskStatusIcon(subtask.status);
+                const itemClass = subtask.status === 'active' ? 'active' : 
+                                  subtask.status === 'completed' ? 'completed' :
+                                  subtask.status === 'failed' ? 'failed' : '';
+                
+                return `
+                    <div class="subtask-item ${itemClass}" data-subtask-id="${id}">
+                        <div class="subtask-status ${subtask.status}">${statusIcon}</div>
+                        <div class="subtask-content">${escapeHtml(subtask.content)}</div>
+                        <div class="subtask-index">#${subtask.index}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        // Get status icon for subtask
+        function getSubtaskStatusIcon(status) {
+            switch (status) {
+                case 'pending': return '&bull;';
+                case 'active': return '&rarr;';
+                case 'completed': return '&check;';
+                case 'failed': return '&times;';
+                default: return '&bull;';
+            }
+        }
+        
+        // Escape HTML for safe rendering
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // ==================== LOCK STATE ====================
+        let lockTimerInterval = null;
+
+        function showLockState(taskId, agentId, timeoutMs) {
+            const lockIndicator = document.getElementById('lockIndicator');
+            const lockAgentName = document.getElementById('lockAgentName');
+            const lockTimer = document.getElementById('lockTimer');
+            
+            // Format agent name
+            const agentName = agentId.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+            lockAgentName.textContent = agentName;
+            lockIndicator.classList.remove('unlocking');
+            lockIndicator.classList.add('visible');
+            
+            // Start countdown
+            const deadline = Date.now() + timeoutMs;
+            if (lockTimerInterval) clearInterval(lockTimerInterval);
+            lockTimerInterval = setInterval(() => {
+                const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+                lockTimer.textContent = `${remaining}s`;
+                if (remaining <= 0) {
+                    clearInterval(lockTimerInterval);
+                    lockTimerInterval = null;
+                }
+            }, 1000);
+            // Initial display
+            lockTimer.textContent = `${Math.ceil(timeoutMs / 1000)}s`;
+        }
+
+        function hideLockState(taskId, reason) {
+            const lockIndicator = document.getElementById('lockIndicator');
+            if (lockTimerInterval) {
+                clearInterval(lockTimerInterval);
+                lockTimerInterval = null;
+            }
+            // Flash unlock animation
+            lockIndicator.classList.add('unlocking');
+            setTimeout(() => {
+                lockIndicator.classList.remove('visible', 'unlocking');
+            }, 500);
+        }
+
+        // ==================== DECOMPOSITION ====================
+        function showDecomposition(originalTranscript, subtaskContents, subtaskIds) {
+            const banner = document.getElementById('decompositionBanner');
+            const list = document.getElementById('decompositionList');
+            
+            list.innerHTML = (subtaskContents || [])
+                .map(content => `<li>${escapeHtml(content)}</li>`)
+                .join('');
+            
+            banner.classList.add('visible');
+        }
+
+        // ==================== ERROR ROUTED ====================
+        function showErrorRouted(taskId, reason) {
+            const banner = document.getElementById('errorRoutedBanner');
+            banner.textContent = `Handling issue: ${reason}`;
+            banner.classList.add('visible');
+            // Auto-hide after error agent responds (the result display will replace it)
+            setTimeout(() => {
+                banner.classList.remove('visible');
+            }, 10000);
+        }
+
         // Button handlers
         btnDismiss.addEventListener('click', () => {
             hide();
@@ -1326,6 +1887,10 @@
                         displayResult({
                             success: true,
                             message: event.result?.data?.message || 'Task completed successfully',
+                            html: event.result?.data?.html,
+                            needsInput: event.result?.data?.needsInput,
+                            agentId: event.agentId || event.task?.agentId,
+                            agentName: event.agentName || event.task?.agentName,
                         });
                         break;
                         
@@ -1373,11 +1938,177 @@
                             updateStatus(event.status || 'running');
                         }
                         break;
+                        
+                    // ==================== SUBTASK EVENTS ====================
+                    case 'subtask:created':
+                        // A new subtask was spawned by an agent
+                        console.log('[CommandHUD] Subtask created:', event);
+                        addSubtask({
+                            subtaskId: event.subtaskId,
+                            parentTaskId: event.parentTaskId,
+                            content: event.content,
+                            subtaskIndex: event.subtaskIndex || 1
+                        });
+                        break;
+                        
+                    case 'subtask:active':
+                        // Subtask is now being processed
+                        console.log('[CommandHUD] Subtask active:', event.subtaskId);
+                        updateSubtaskStatus(event.subtaskId, 'active');
+                        break;
+                        
+                    case 'subtask:completed':
+                        // Subtask completed successfully
+                        console.log('[CommandHUD] Subtask completed:', event.subtaskId);
+                        updateSubtaskStatus(event.subtaskId, 'completed');
+                        break;
+                        
+                    case 'subtask:failed':
+                        // Subtask failed
+                        console.log('[CommandHUD] Subtask failed:', event.subtaskId);
+                        updateSubtaskStatus(event.subtaskId, 'failed');
+                        break;
+
+                    // ==================== LOCK/UNLOCK EVENTS ====================
+                    case 'task:locked':
+                        console.log('[CommandHUD] Task locked by', event.agentId);
+                        showLockState(event.taskId, event.agentId, event.timeoutMs);
+                        break;
+
+                    case 'task:unlocked':
+                        console.log('[CommandHUD] Task unlocked:', event.reason);
+                        hideLockState(event.taskId, event.reason);
+                        break;
+
+                    // ==================== DECOMPOSITION EVENTS ====================
+                    case 'task:decomposed':
+                        console.log('[CommandHUD] Task decomposed into', event.subtaskIds?.length, 'subtasks');
+                        showDecomposition(event.originalTranscript, event.subtaskContents, event.subtaskIds);
+                        break;
+
+                    // ==================== ERROR AGENT EVENTS ====================
+                    case 'task:error_routed':
+                        console.log('[CommandHUD] Task routed to error agent:', event.reason);
+                        showErrorRouted(event.taskId, event.reason);
+                        break;
                 }
             });
+            
+            // Also listen for direct subtask events (not via lifecycle)
+            if (window.hudAPI.onSubtask) {
+                window.hudAPI.onSubtask((subtask) => {
+                    console.log('[CommandHUD] Direct subtask event:', subtask);
+                    if (subtask.type === 'created') {
+                        addSubtask(subtask);
+                    } else if (subtask.type === 'status') {
+                        updateSubtaskStatus(subtask.subtaskId, subtask.status);
+                    }
+                });
+            }
         }
         
-        console.log('[CommandHUD] HUD initialized with SDK lifecycle events');
+        // ==================== AGENT UI PANEL MANAGER ====================
+        
+        const agentUIPanels = document.getElementById('agentUIPanels');
+        const activeAgentPanels = new Map(); // agentId -> DOM element
+        
+        const BASE_HUD_HEIGHT = 420;
+        const PANEL_HEIGHT_ESTIMATE = 120;
+        
+        function addAgentUIPanel(agentId, agentName, html) {
+            if (!agentId || !html) return;
+            
+            // If panel already exists for this agent, update it
+            if (activeAgentPanels.has(agentId)) {
+                const existing = activeAgentPanels.get(agentId);
+                const body = existing.querySelector('.agent-ui-card-body');
+                if (body) body.innerHTML = html;
+                return;
+            }
+            
+            const card = document.createElement('div');
+            card.className = 'agent-ui-card';
+            card.dataset.agentId = agentId;
+            card.innerHTML = `
+                <div class="agent-ui-card-header">
+                    <span>${escapeHtml(agentName || agentId)}</span>
+                </div>
+                <div class="agent-ui-card-body">${html}</div>
+            `;
+            
+            agentUIPanels.appendChild(card);
+            activeAgentPanels.set(agentId, card);
+            
+            agentUIPanels.classList.add('visible');
+            recalculateHUDSize();
+            console.log('[CommandHUD] Added agent UI panel:', agentId);
+        }
+        
+        function removeAgentUIPanel(agentId) {
+            const card = activeAgentPanels.get(agentId);
+            if (card) {
+                card.style.opacity = '0';
+                card.style.transform = 'translateY(-8px)';
+                card.style.transition = 'opacity 0.2s, transform 0.2s';
+                setTimeout(() => {
+                    card.remove();
+                    activeAgentPanels.delete(agentId);
+                    if (activeAgentPanels.size === 0) {
+                        agentUIPanels.classList.remove('visible');
+                    }
+                    recalculateHUDSize();
+                }, 200);
+                console.log('[CommandHUD] Removed agent UI panel:', agentId);
+            }
+        }
+        
+        function clearAllAgentUIPanels() {
+            agentUIPanels.innerHTML = '';
+            activeAgentPanels.clear();
+            agentUIPanels.classList.remove('visible');
+            recalculateHUDSize();
+        }
+        
+        function recalculateHUDSize() {
+            const panelCount = activeAgentPanels.size;
+            if (window.hudAPI && window.hudAPI.resizeWindow) {
+                if (panelCount === 0) {
+                    window.hudAPI.resizeWindow(340, BASE_HUD_HEIGHT);
+                } else {
+                    const needed = BASE_HUD_HEIGHT + (panelCount * PANEL_HEIGHT_ESTIMATE);
+                    const maxHeight = 700;
+                    window.hudAPI.resizeWindow(340, Math.min(needed, maxHeight));
+                }
+            }
+        }
+        
+        // Delegated click handler for agent UI panels
+        agentUIPanels.addEventListener('click', (e) => {
+            const target = e.target.closest('[data-value]');
+            if (!target) return;
+            
+            const value = target.dataset.value;
+            const card = target.closest('.agent-ui-card');
+            const agentId = card?.dataset?.agentId;
+            
+            console.log('[CommandHUD] Agent UI click:', value, 'for agent:', agentId);
+            
+            // Route back to the correct agent via submitTask
+            if (window.agentHUD && window.agentHUD.submitTask) {
+                window.agentHUD.submitTask(value, {
+                    toolId: 'command-hud',
+                    skipFilter: true,
+                    metadata: { targetAgentId: agentId },
+                });
+            }
+            
+            // Remove this agent's panel (response sent)
+            if (agentId) {
+                removeAgentUIPanel(agentId);
+            }
+        });
+        
+        console.log('[CommandHUD] HUD initialized with SDK lifecycle events and subtask support');
         
         // ==================== TEXT INPUT MODE ====================
         
@@ -1638,6 +2369,56 @@
         }
         
         console.log('[CommandHUD] Disambiguation mode initialized');
+        
+        // ==================== CENTRALIZED HUD API EVENTS ====================
+        // Listen for HUD API events in addition to existing hudAPI events.
+        // These are emitted by the centralized HUD API for all tools.
+        if (window.agentHUD) {
+            console.log('[CommandHUD] Setting up centralized HUD API event listeners');
+            
+            // Disambiguation events from HUD API
+            window.agentHUD.onDisambiguation((state) => {
+                console.log('[CommandHUD] HUD API disambiguation:', state);
+                if (!state.toolId || state.toolId === 'command-hud') {
+                    // Show disambiguation UI
+                    if (disambiguationSection && state.options?.length > 0) {
+                        showDisambiguation({
+                            stateId: state.stateId,
+                            question: state.question,
+                            options: state.options,
+                        });
+                    }
+                }
+            });
+            
+            // Needs-input events from HUD API
+            window.agentHUD.onNeedsInput((request) => {
+                console.log('[CommandHUD] HUD API needs-input:', request);
+                if (!request.toolId || request.toolId === 'command-hud') {
+                    // Show the prompt text in the HUD
+                    if (typeof showResult === 'function') {
+                        showResult({
+                            success: true,
+                            message: request.prompt,
+                            needsInput: true,
+                            agentId: request.agentId,
+                        });
+                    }
+                }
+            });
+            
+            // Lifecycle events from HUD API
+            window.agentHUD.onLifecycle((event) => {
+                console.log('[CommandHUD] HUD API lifecycle:', event.type);
+            });
+            
+            // Result events from HUD API
+            window.agentHUD.onResult((result) => {
+                console.log('[CommandHUD] HUD API result:', result);
+            });
+            
+            console.log('[CommandHUD] Centralized HUD API event listeners ready');
+        }
     </script>
 </body>
 </html>

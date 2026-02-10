@@ -11,20 +11,31 @@
             box-sizing: border-box;
         }
         
+        html {
+            /* Ensure opaque background covers entire window - prevents 
+               transparent pixel click-through on macOS with transparent: true */
+            background: #1a1a1a;
+            width: 100%;
+            height: 100%;
+        }
+        
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: #1a1a1a;
             color: #fff;
             overflow: hidden;
             -webkit-font-smoothing: antialiased;
+            width: 100%;
+            height: 100%;
         }
         
         .container {
             height: 100vh;
+            width: 100%;
             display: flex;
             flex-direction: column;
-            border-radius: 4px;
             overflow: hidden;
+            background: #1a1a1a;
         }
         
         /* Title bar for window controls */
@@ -195,7 +206,8 @@
             color: rgba(255, 255, 255, 0.7);
         }
         
-        .space-item:hover {
+        .space-item:hover,
+        .space-item.is-hovered {
             background: rgba(255, 255, 255, 0.05);
             color: rgba(255, 255, 255, 0.95);
         }
@@ -235,6 +247,7 @@
         }
         
         .space-item:hover .space-icon,
+        .space-item.is-hovered .space-icon,
         .space-item.active .space-icon {
             opacity: 1;
         }
@@ -265,6 +278,7 @@
         }
         
         .space-item:hover .space-count,
+        .space-item.is-hovered .space-count,
         .space-item.active .space-count {
             color: rgba(255, 255, 255, 0.5);
         }
@@ -277,7 +291,8 @@
             margin-left: 4px;
         }
         
-        .space-item:hover .space-actions {
+        .space-item:hover .space-actions,
+        .space-item.is-hovered .space-actions {
             opacity: 1;
         }
         
@@ -327,21 +342,77 @@
             -webkit-user-drag: element;
         }
         
-        /* Make content areas pass drag events to parent, but keep buttons interactive */
+        /* All elements clickable */
+        .history-item,
+        .history-item *,
+        .item-actions,
+        .item-actions button,
+        .action-btn {
+            pointer-events: auto;
+        }
+        
+        /* Ensure action buttons are ALWAYS on top of any tile content */
+        .history-item .item-actions {
+            z-index: 9999 !important;
+        }
+        
+        .history-item .action-btn {
+            z-index: 10000 !important;
+        }
+        
+        /* Keep all tile content below action buttons AND non-blocking */
         .history-item .item-content,
-        .history-item .item-preview,
-        .history-item .item-text,
-        .history-item .item-image,
-        .history-item .item-header .item-type,
-        .history-item .item-header .item-timestamp {
+        .history-item .item-header,
+        .history-item .item-title,
+        .history-item .pdf-preview-container,
+        .history-item .video-tile,
+        .history-item [class*="-tile"],
+        .history-item [class*="-preview"],
+        .history-item [class*="-card"] {
+            z-index: 1 !important;
+            /* Let clicks pass through to action buttons above */
             pointer-events: none;
         }
         
-        /* Keep action buttons interactive */
-        .history-item .item-actions,
-        .history-item .item-actions button,
-        .history-item .action-btn {
+        /* Re-enable pointer events for interactive elements within tiles */
+        .history-item .item-content a,
+        .history-item .item-content button,
+        .history-item .item-content input,
+        .history-item .item-content audio,
+        .history-item .item-content video,
+        .history-item [class*="-tile"] a,
+        .history-item [class*="-tile"] button,
+        .history-item [class*="-card"] a,
+        .history-item [class*="-card"] button {
             pointer-events: auto;
+        }
+        
+        /* ========================================================================
+           PERMANENT FIX: Action Button Stacking Context
+           This ensures .item-actions ALWAYS appears above ANY content element,
+           regardless of what tile types are added in the future.
+           DO NOT REMOVE - prevents mouse-over icon visibility issues.
+           ======================================================================== */
+        
+        /* All nested positioned elements within content stay at low z-index */
+        .history-item .item-content,
+        .history-item .item-header,
+        .history-item [class*="-tile"],
+        .history-item [class*="-card"],
+        .history-item [class*="-preview"] {
+            position: relative;
+            z-index: 1;
+        }
+        
+        /* Item actions ALWAYS on top - highest z-index wins */
+        .history-item .item-actions {
+            z-index: 9999 !important;
+        }
+        
+        /* Checkbox wrapper stays absolutely positioned, above content but below actions */
+        .history-item .item-checkbox-wrapper {
+            z-index: 50 !important;
+            /* position: absolute is set in .item-checkbox-wrapper rule below */
         }
         
         /* Bulk Actions Toolbar */
@@ -405,6 +476,309 @@
         .bulk-action-btn.danger:hover {
             background: rgba(239, 68, 68, 0.3);
             border-color: rgba(239, 68, 68, 0.5);
+        }
+        
+        .bulk-action-btn.gsx-push {
+            background: rgba(100, 200, 255, 0.15);
+            border-color: rgba(100, 200, 255, 0.4);
+            color: #64c8ff;
+        }
+        
+        .bulk-action-btn.gsx-push:hover {
+            background: rgba(100, 200, 255, 0.25);
+            border-color: rgba(100, 200, 255, 0.6);
+        }
+        
+        .gsx-icon {
+            font-size: 14px;
+        }
+        
+        /* GSX Context Menu Items */
+        .gsx-menu-item {
+            color: #64c8ff;
+        }
+        
+        .gsx-menu-item:hover {
+            background: rgba(100, 200, 255, 0.15) !important;
+        }
+        
+        /* GSX Status Icon on item cards */
+        .gsx-status-icon {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            width: 20px;
+            height: 20px;
+            z-index: 5;
+            cursor: help;
+        }
+        
+        .gsx-status-icon.not-pushed {
+            color: #666;
+            opacity: 0.5;
+        }
+        
+        .gsx-status-icon.pushed {
+            color: #64c8ff;
+        }
+        
+        .gsx-status-icon.changed {
+            color: #FF9800;
+        }
+        
+        .gsx-status-icon.changed .gsx-pulse {
+            animation: gsx-pulse 1.5s ease-in-out infinite;
+        }
+        
+        .gsx-status-icon.unpushed {
+            color: #666;
+            opacity: 0.4;
+        }
+        
+        @keyframes gsx-pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.9); }
+        }
+        
+        /* GSX Push Modal */
+        .gsx-push-modal .modal {
+            max-width: 420px;
+        }
+        
+        .gsx-push-summary {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+        
+        .gsx-push-summary-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+            font-size: 13px;
+        }
+        
+        .gsx-push-summary-label {
+            color: #999;
+        }
+        
+        .gsx-push-summary-value {
+            color: #fff;
+            font-weight: 500;
+        }
+        
+        .gsx-visibility-options {
+            display: flex;
+            gap: 12px;
+            margin: 16px 0;
+        }
+        
+        .gsx-visibility-option {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            padding: 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 2px solid transparent;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .gsx-visibility-option:hover {
+            background: rgba(255, 255, 255, 0.08);
+        }
+        
+        .gsx-visibility-option.selected {
+            border-color: #64c8ff;
+            background: rgba(100, 200, 255, 0.1);
+        }
+        
+        .gsx-visibility-icon {
+            font-size: 24px;
+        }
+        
+        .gsx-visibility-label {
+            font-size: 14px;
+            font-weight: 500;
+        }
+        
+        .gsx-visibility-desc {
+            font-size: 11px;
+            color: #999;
+            text-align: center;
+        }
+        
+        /* GSX Links Panel in Metadata */
+        .gsx-links-panel {
+            background: rgba(100, 200, 255, 0.05);
+            border: 1px solid rgba(100, 200, 255, 0.2);
+            border-radius: 8px;
+            padding: 16px;
+            margin-top: 16px;
+        }
+        
+        .gsx-links-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #64c8ff;
+        }
+        
+        .gsx-link-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        
+        .gsx-link-label {
+            flex: 0 0 100px;
+            font-size: 12px;
+            color: #999;
+        }
+        
+        .gsx-link-value {
+            flex: 1;
+            font-size: 12px;
+            color: #fff;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            background: rgba(0, 0, 0, 0.2);
+            padding: 6px 10px;
+            border-radius: 4px;
+        }
+        
+        .gsx-link-copy-btn {
+            flex: 0 0 auto;
+            padding: 6px 12px;
+            background: rgba(100, 200, 255, 0.15);
+            border: 1px solid rgba(100, 200, 255, 0.3);
+            color: #64c8ff;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 11px;
+            transition: all 0.2s;
+        }
+        
+        .gsx-link-copy-btn:hover {
+            background: rgba(100, 200, 255, 0.25);
+        }
+        
+        /* GSX Tab Panel Styles */
+        .gsx-link-item {
+            margin-bottom: 12px;
+        }
+        
+        .gsx-link-item:last-child {
+            margin-bottom: 0;
+        }
+        
+        .gsx-link-input {
+            flex: 1;
+            padding: 8px 12px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 12px;
+            font-family: 'SF Mono', Monaco, monospace;
+        }
+        
+        .gsx-link-open-btn {
+            flex: 0 0 auto;
+            padding: 6px;
+            background: rgba(100, 200, 255, 0.1);
+            border: 1px solid rgba(100, 200, 255, 0.3);
+            color: #64c8ff;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            text-decoration: none;
+        }
+        
+        .gsx-link-open-btn:hover {
+            background: rgba(100, 200, 255, 0.25);
+        }
+        
+        .gsx-status-summary {
+            padding: 16px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+        }
+        
+        .gsx-status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 14px;
+        }
+        
+        .gsx-status-indicator .gsx-status-icon {
+            width: 32px;
+            height: 32px;
+        }
+        
+        .gsx-status-text {
+            color: rgba(255, 255, 255, 0.8);
+        }
+        
+        .gsx-action-buttons {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        
+        .gsx-action-btn {
+            padding: 10px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        #gsxPushBtn {
+            background: rgba(100, 200, 255, 0.15);
+            border: 1px solid rgba(100, 200, 255, 0.3);
+            color: #64c8ff;
+        }
+        
+        #gsxPushBtn:hover {
+            background: rgba(100, 200, 255, 0.25);
+        }
+        
+        .gsx-visibility-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: rgba(255, 255, 255, 0.8);
+        }
+        
+        .gsx-visibility-btn:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+        
+        .gsx-unpush-btn {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #EF4444;
+        }
+        
+        .gsx-unpush-btn:hover {
+            background: rgba(239, 68, 68, 0.2);
         }
         
         /* Item selection checkbox - Simple & Minimalist */
@@ -789,13 +1163,14 @@
             flex-direction: column;
             overflow: hidden;
             min-height: 0;
+            -webkit-app-region: no-drag;
         }
         
         .header {
             padding: 20px 24px;
             background: rgba(40, 40, 40, 0.8);
             border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-            -webkit-app-region: drag;
+            -webkit-app-region: no-drag;
             min-height: fit-content;
         }
         
@@ -966,6 +1341,7 @@
             padding: 20px;
             position: relative;
             min-height: 0;
+            -webkit-app-region: no-drag;
         }
         
         .history-list.grid-view {
@@ -977,13 +1353,11 @@
             overflow-x: auto;
             min-height: 0;
         }
-        }
         
         .history-list.list-view {
             display: flex;
             flex-direction: column;
             gap: 12px;
-            align-content: start;
             min-height: 0;
         }
         
@@ -995,10 +1369,10 @@
             cursor: pointer;
             transition: background 0.1s ease, border-color 0.1s ease;
             position: relative;
-            overflow: hidden;
-            flex-shrink: 0;
-            width: 100%;
+            overflow: visible;
             box-sizing: border-box;
+            pointer-events: auto;
+            -webkit-app-region: no-drag;
         }
         
         .grid-view .history-item {
@@ -1033,14 +1407,9 @@
         
         .list-view .history-item {
             margin-bottom: 0;
-            max-width: 100%;
         }
         
-        .history-item:hover {
-            background: rgba(255, 255, 255, 0.08);
-            border-color: rgba(255, 255, 255, 0.12);
-            cursor: pointer;
-        }
+        /* Hover disabled */
         
         .history-item.pinned {
             background: rgba(255, 200, 100, 0.08);
@@ -1171,7 +1540,7 @@
             border-radius: 8px;
             padding: 4px;
             box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-            z-index: 1000;
+            z-index: 100000;
             display: none;
             max-height: calc(100vh - 16px);
             overflow-y: auto;
@@ -1408,12 +1777,15 @@
             justify-content: space-between;
             align-items: center;
             margin-bottom: 8px;
+            /* Don't let header intercept clicks meant for action buttons */
+            pointer-events: none;
         }
         
         .item-type {
             display: flex;
             align-items: center;
             gap: 8px;
+            pointer-events: auto; /* Re-enable for type badge clicks */
         }
         
         .type-icon {
@@ -1471,6 +1843,8 @@
             display: -webkit-box;
             -webkit-line-clamp: 2;
             -webkit-box-orient: vertical;
+            /* Don't let title intercept clicks meant for action buttons */
+            pointer-events: none;
         }
         
         .item-content {
@@ -1482,6 +1856,18 @@
             display: -webkit-box;
             -webkit-line-clamp: 2;
             -webkit-box-orient: vertical;
+            /* Don't let content intercept clicks meant for action buttons above */
+            pointer-events: none;
+        }
+        
+        /* Re-enable pointer events for interactive content */
+        .item-content a,
+        .item-content button,
+        .item-content input,
+        .item-content [onclick],
+        .item-content audio,
+        .item-content video {
+            pointer-events: auto;
         }
         
         .item-content.code {
@@ -1615,6 +2001,8 @@
             border: 1px solid rgba(0, 212, 255, 0.2);
             border-radius: 8px;
             padding: 16px;
+            position: relative;
+            z-index: 1;
         }
         
         .doc-header {
@@ -1668,12 +2056,10 @@
             right: 12px;
             display: flex;
             gap: 8px;
-            opacity: 0;
-            transition: opacity 0.2s;
-        }
-        
-        .history-item:hover .item-actions {
             opacity: 1;
+            pointer-events: auto;
+            z-index: 1000;
+            -webkit-app-region: no-drag;
         }
         
         .action-btn {
@@ -1684,6 +2070,9 @@
             justify-content: center;
             background: rgba(255, 255, 255, 0.08);
             border: 1px solid rgba(255, 255, 255, 0.12);
+            position: relative;
+            z-index: 1001;
+            cursor: pointer;
             border-radius: 4px;
             color: rgba(255, 255, 255, 0.7);
             cursor: pointer;
@@ -1893,6 +2282,7 @@
             border-radius: 8px;
             padding: 10px;
             position: relative;
+            z-index: 1;
         }
         
         .video-tile.has-thumbnail {
@@ -2194,13 +2584,7 @@
             transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
         }
         
-        .history-item:hover {
-            background: linear-gradient(145deg, rgba(45, 45, 55, 0.98) 0%, rgba(35, 35, 45, 0.99) 100%);
-            border-color: rgba(255, 255, 255, 0.1);
-            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25), 
-                        inset 0 1px 0 rgba(255, 255, 255, 0.05);
-            transform: translateY(-1px);
-        }
+        /* Enhanced hover disabled */
         
         /* Type accent bar - left edge indicator */
         .history-item::after {
@@ -2213,12 +2597,10 @@
             border-radius: 0 2px 2px 0;
             opacity: 0.7;
             transition: opacity 0.2s, width 0.2s;
+            pointer-events: none;
         }
         
-        .history-item:hover::after {
-            opacity: 1;
-            width: 4px;
-        }
+        /* Hover accent disabled */
         
         /* ===== IMAGE TILES ===== */
         /* Rich warm accent, focus on the visual */
@@ -2295,6 +2677,8 @@
             background: linear-gradient(135deg, rgba(236, 72, 153, 0.08) 0%, rgba(219, 39, 119, 0.04) 100%);
             border-radius: 10px;
             border: 1px solid rgba(236, 72, 153, 0.12);
+            position: relative;
+            z-index: 1;
         }
         
         .audio-tile-icon {
@@ -2444,6 +2828,8 @@
             border-radius: 10px;
             border: 1px solid rgba(59, 130, 246, 0.12);
             margin-top: 8px;
+            position: relative;
+            z-index: 1;
         }
         
         .url-tile-favicon {
@@ -2493,6 +2879,8 @@
             border-radius: 12px;
             border: 1px solid rgba(74, 158, 255, 0.2);
             margin-top: 8px;
+            position: relative;
+            z-index: 1;
         }
         
         .web-monitor-header {
@@ -2576,6 +2964,126 @@
             color: rgba(255, 255, 255, 0.4);
         }
         
+        /* ===== DATA SOURCE TILES ===== */
+        .data-source-card {
+            padding: 14px;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(79, 70, 229, 0.05) 100%);
+            border-radius: 12px;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .data-source-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 10px;
+        }
+        
+        .data-source-icon {
+            width: 44px;
+            height: 44px;
+            background: rgba(99, 102, 241, 0.15);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        
+        .data-source-info {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .data-source-name {
+            font-size: 14px;
+            font-weight: 600;
+            color: rgba(255, 255, 255, 0.95);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .data-source-url {
+            font-size: 11px;
+            color: rgba(99, 102, 241, 0.8);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .data-source-status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 500;
+            flex-shrink: 0;
+        }
+        
+        .data-source-status .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+        }
+        
+        .data-source-badges {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-top: auto;
+        }
+        
+        .ds-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 500;
+            letter-spacing: 0.3px;
+            text-transform: uppercase;
+        }
+        
+        .ds-badge-type {
+            background: rgba(99, 102, 241, 0.2);
+            color: rgba(99, 102, 241, 0.9);
+        }
+        
+        .ds-badge-protocol {
+            background: rgba(59, 130, 246, 0.15);
+            color: rgba(59, 130, 246, 0.8);
+        }
+        
+        .ds-badge-auth {
+            background: rgba(245, 158, 11, 0.15);
+            color: rgba(245, 158, 11, 0.8);
+        }
+        
+        .ds-badge-ops {
+            background: rgba(16, 185, 129, 0.15);
+            color: rgba(16, 185, 129, 0.8);
+            font-family: monospace;
+            letter-spacing: 1px;
+        }
+        
+        .ds-badge-vis {
+            background: rgba(255, 255, 255, 0.08);
+            color: rgba(255, 255, 255, 0.5);
+        }
+        
+        .history-item.tile-data-source::after {
+            background: linear-gradient(180deg, #6366f1, #4f46e5);
+        }
+        
+        .history-item.tile-data-source {
+            border-color: rgba(99, 102, 241, 0.15);
+        }
+        
         /* ===== HTML TILES ===== */
         /* Purple accent for HTML/rich content */
         .history-item[data-type="html"]::after,
@@ -2640,6 +3148,8 @@
             background: linear-gradient(135deg, rgba(6, 182, 212, 0.08) 0%, rgba(139, 92, 246, 0.06) 100%);
             border-radius: 12px;
             border: 1px solid rgba(139, 92, 246, 0.15);
+            position: relative;
+            z-index: 1;
         }
         
         .ai-conversation-header {
@@ -4036,6 +4546,173 @@
             overflow-x: hidden;
         }
 
+        #tabDatasource {
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+
+        /* Data Source Config Styles */
+        .ds-config-status-bar {
+            display: flex;
+            gap: 16px;
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.04);
+            border-radius: 8px;
+            margin-bottom: 16px;
+        }
+
+        .ds-config-section {
+            margin-bottom: 16px;
+            padding: 14px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .ds-config-section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: rgba(255, 255, 255, 0.6);
+            margin-bottom: 12px;
+        }
+
+        .metadata-field-row {
+            display: flex;
+            gap: 10px;
+        }
+
+        .ds-operations-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .ds-operation-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 8px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 6px;
+        }
+
+        .ds-operation-row label {
+            width: 60px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        .ds-operation-row input[type="checkbox"] {
+            margin: 0;
+        }
+
+        .ds-operation-row input[type="text"],
+        .ds-operation-row select {
+            flex: 1;
+            padding: 4px 8px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 12px;
+        }
+
+        .ds-capabilities-list {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.5);
+            padding: 8px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 4px;
+        }
+
+        .ds-capabilities-list .ds-cap-tag {
+            display: inline-block;
+            padding: 2px 8px;
+            margin: 2px;
+            background: rgba(99, 102, 241, 0.15);
+            color: rgba(99, 102, 241, 0.9);
+            border-radius: 4px;
+            font-size: 11px;
+        }
+
+        .ds-doc-tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 8px;
+        }
+
+        .ds-doc-tab {
+            padding: 4px 12px;
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 11px;
+            cursor: pointer;
+        }
+
+        .ds-doc-tab.active {
+            background: rgba(99, 102, 241, 0.2);
+            color: rgba(99, 102, 241, 0.9);
+            border-color: rgba(99, 102, 241, 0.3);
+        }
+
+        .ds-doc-preview {
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 6px;
+            min-height: 120px;
+            font-size: 13px;
+            line-height: 1.6;
+            color: rgba(255, 255, 255, 0.85);
+        }
+
+        .ds-doc-preview h1, .ds-doc-preview h2, .ds-doc-preview h3 {
+            color: rgba(255, 255, 255, 0.95);
+            margin-top: 12px;
+            margin-bottom: 6px;
+        }
+
+        .ds-doc-visibility-toggle select {
+            padding: 2px 8px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 11px;
+        }
+
+        .ds-config-actions {
+            padding-top: 12px;
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        .ds-test-result {
+            margin-top: 8px;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+        }
+
+        .ds-test-result.success {
+            background: rgba(16, 185, 129, 0.15);
+            color: rgba(16, 185, 129, 0.9);
+        }
+
+        .ds-test-result.error {
+            background: rgba(239, 68, 68, 0.15);
+            color: rgba(239, 68, 68, 0.9);
+        }
+
         .metadata-tab-panel {
             display: none;
         }
@@ -4775,6 +5452,7 @@
             padding: 4px;
             border-radius: 8px;
             backdrop-filter: blur(10px);
+            /* z-index controlled by permanent fix in stacking context section */
         }
         
         .grid-view .action-btn {
@@ -5190,6 +5868,7 @@
                     </div>
                 </div>
                 <button class="add-space-btn" id="addSpaceBtn">+ New Space</button>
+                <button class="add-space-btn" id="addDataSourceBtn" style="margin-top: 4px; background: rgba(99, 102, 241, 0.1); border-color: rgba(99, 102, 241, 0.2);" onclick="showCreateDataSourceDialog()">+ Data Source</button>
                 
                 <!-- Tag Sidebar Section -->
                 <div class="sidebar-tags-section" id="sidebarTagsSection">
@@ -5260,6 +5939,7 @@
                         <button class="filter-btn" data-filter="video">Videos</button>
                         <button class="filter-btn" data-filter="audio">Audio</button>
                         <button class="filter-btn" data-filter="file">Files</button>
+                        <button class="filter-btn" data-filter="data-source">Data Sources</button>
                         <button class="filter-btn" data-filter="screenshot">Screenshots</button>
                         <button class="filter-btn" data-filter="pinned">Pinned</button>
                     </div>
@@ -5290,6 +5970,10 @@
                             </div>
                         </div>
                     </div>
+                    <button class="bulk-action-btn gsx-push" id="bulkPushBtn" title="Push selected items to GSX">
+                        <span class="gsx-icon">⬡</span>
+                        <span>Push to GSX</span>
+                    </button>
                     <div style="flex: 1;"></div>
                     <button class="bulk-action-btn danger" id="bulkDeleteBtn" title="Delete selected items">
                         <span>×</span>
@@ -5332,9 +6016,91 @@
             <span>◇</span>
             <span>Pin Item</span>
         </div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item gsx-menu-item" data-action="gsx-push" id="ctxPushToGsx">
+            <span class="gsx-icon">⬡</span>
+            <span>Push to GSX...</span>
+        </div>
+        <div class="context-menu-item gsx-menu-item" data-action="gsx-push-changes" id="ctxPushChanges" style="display: none;">
+            <span class="gsx-icon">⬡</span>
+            <span>Push Changes</span>
+        </div>
+        <div class="context-menu-item gsx-menu-item" data-action="gsx-copy-link" id="ctxCopyLink" style="display: none;">
+            <span>⎘</span>
+            <span>Copy File URL</span>
+        </div>
+        <div class="context-menu-item gsx-menu-item" data-action="gsx-copy-share-link" id="ctxCopyShareLink" style="display: none;">
+            <span>↗</span>
+            <span>Copy Share Link</span>
+        </div>
+        <div class="context-menu-item gsx-menu-item" data-action="gsx-visibility" id="ctxChangeVisibility" style="display: none;">
+            <span>◐</span>
+            <span>Change Visibility</span>
+        </div>
+        <div class="context-menu-item gsx-menu-item" data-action="gsx-unpush" id="ctxUnpush" style="display: none;">
+            <span>⊘</span>
+            <span>Unpush from GSX</span>
+        </div>
+        <div class="context-menu-separator"></div>
         <div class="context-menu-item" data-action="delete">
             <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 16px; height: 16px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
             <span>Delete</span>
+        </div>
+    </div>
+    
+    <!-- GSX Push Modal -->
+    <div class="modal-overlay gsx-push-modal" id="gsxPushModal">
+        <div class="modal">
+            <h2 class="modal-title">Push to GSX</h2>
+            
+            <div class="gsx-push-summary">
+                <div class="gsx-push-summary-item">
+                    <span class="gsx-push-summary-label">Items to push:</span>
+                    <span class="gsx-push-summary-value" id="gsxPushCount">1</span>
+                </div>
+                <div class="gsx-push-summary-item">
+                    <span class="gsx-push-summary-label">Space:</span>
+                    <span class="gsx-push-summary-value" id="gsxPushSpace">Unclassified</span>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Visibility</label>
+                <div class="gsx-visibility-options">
+                    <div class="gsx-visibility-option selected" data-visibility="private" id="gsxVisPrivate">
+                        <span class="gsx-visibility-icon">◐</span>
+                        <span class="gsx-visibility-label">Private</span>
+                        <span class="gsx-visibility-desc">Only you can access</span>
+                    </div>
+                    <div class="gsx-visibility-option" data-visibility="public" id="gsxVisPublic">
+                        <span class="gsx-visibility-icon">●</span>
+                        <span class="gsx-visibility-label">Public</span>
+                        <span class="gsx-visibility-desc">Anyone with link can view</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="gsxPushCancel">Cancel</button>
+                <button class="btn btn-primary" id="gsxPushConfirm">
+                    <span class="gsx-icon">⬡</span>
+                    Push to GSX
+                </button>
+            </div>
+            
+            <div class="gsx-push-progress" id="gsxPushProgress" style="display: none; margin-top: 16px;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                    <span style="font-size: 13px; color: #999;">Pushing...</span>
+                    <span style="font-size: 13px; color: #fff;" id="gsxPushProgressText">0/0</span>
+                </div>
+                <div style="background: rgba(0, 0, 0, 0.3); height: 4px; border-radius: 2px; overflow: hidden;">
+                    <div id="gsxPushProgressBar" style="background: #64c8ff; height: 100%; width: 0%; transition: width 0.3s;"></div>
+                </div>
+            </div>
+            
+            <div class="gsx-push-result" id="gsxPushResult" style="display: none; margin-top: 16px;">
+                <!-- Results shown after push completes -->
+            </div>
         </div>
     </div>
     
@@ -5437,8 +6203,10 @@
             <div class="metadata-tabs">
                 <button class="metadata-tab active" data-tab="details"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 6px;"><path d="M4 7h16M4 12h16M4 17h10"/></svg>Details</button>
                 <button class="metadata-tab" data-tab="monitor" id="monitorTab" style="display: none;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 6px;"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>Monitor</button>
+                <button class="metadata-tab" data-tab="datasource" id="dataSourceTab" style="display: none;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 6px;"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M20 5v6c0 1.66-3.58 3-8 3s-8-1.34-8-3V5"/><path d="M20 11v6c0 1.66-3.58 3-8 3s-8-1.34-8-3v-6"/></svg>Data Source</button>
                 <button class="metadata-tab" data-tab="ai" id="aiTab" style="display: none;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 6px;"><path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z"/><circle cx="7.5" cy="14.5" r="1.5"/><circle cx="16.5" cy="14.5" r="1.5"/></svg>AI Watch</button>
                 <button class="metadata-tab" data-tab="transcript" id="transcriptTab" style="display: none;">Transcript</button>
+                <button class="metadata-tab" data-tab="gsx" id="gsxTab" style="display: none;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 6px;"><path d="M12 3c0 2 1.5 3 4 4" stroke-linecap="round"/><circle cx="4" cy="4" r="1.5" fill="currentColor"/><circle cx="20" cy="4" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="5" stroke-width="1.5"/><text x="12" y="13" font-size="4.5" font-weight="700" fill="currentColor" text-anchor="middle">GSX</text></svg>GSX</button>
                 <button class="metadata-tab" data-tab="system">System</button>
             </div>
 
@@ -5562,6 +6330,222 @@
                             </div>
                             <div class="ai-desc-content" id="aiDescContent"></div>
                         </div>
+                    </div>
+                </div>
+
+                <!-- Data Source Tab (for data-source items) -->
+                <div class="metadata-tab-panel" id="tabDatasource">
+                    <!-- Status Bar -->
+                    <div class="ds-config-status-bar">
+                        <div class="monitor-status-item">
+                            <span class="status-label">Status</span>
+                            <span class="status-value" id="dsStatusValue">Inactive</span>
+                        </div>
+                        <div class="monitor-status-item">
+                            <span class="status-label">Last Tested</span>
+                            <span class="status-value" id="dsLastTestedValue">Never</span>
+                        </div>
+                        <div class="monitor-status-item">
+                            <span class="status-label">Type</span>
+                            <span class="status-value" id="dsSourceTypeValue">-</span>
+                        </div>
+                    </div>
+
+                    <!-- Test Connection -->
+                    <div class="ds-config-section">
+                        <div class="ds-config-section-header">
+                            <span>Test Connection</span>
+                            <button class="btn btn-secondary btn-sm" id="dsTestBtn">Test</button>
+                        </div>
+                        <div class="ds-test-credentials" id="dsTestCredentials" style="display: none;">
+                            <div class="metadata-field">
+                                <label>Credential / Token</label>
+                                <input type="password" id="dsTestCredentialInput" placeholder="Enter credential to test..." autocomplete="off">
+                            </div>
+                        </div>
+                        <div class="ds-test-result" id="dsTestResult" style="display: none;"></div>
+                    </div>
+
+                    <!-- Connection Config -->
+                    <div class="ds-config-section">
+                        <div class="ds-config-section-header">Connection</div>
+                        <div class="metadata-field">
+                            <label>URL</label>
+                            <input type="text" id="dsConnectionUrl" placeholder="https://api.example.com/v1">
+                        </div>
+                        <div class="metadata-field-row">
+                            <div class="metadata-field" style="flex:1;">
+                                <label>Protocol</label>
+                                <select id="dsConnectionProtocol">
+                                    <option value="">Select...</option>
+                                    <option value="rest">REST</option>
+                                    <option value="graphql">GraphQL</option>
+                                    <option value="mcp-stdio">MCP (stdio)</option>
+                                    <option value="mcp-sse">MCP (SSE)</option>
+                                    <option value="mcp-http">MCP (HTTP)</option>
+                                    <option value="http-scrape">HTTP Scrape</option>
+                                </select>
+                            </div>
+                            <div class="metadata-field" style="flex:1;">
+                                <label>Method</label>
+                                <select id="dsConnectionMethod">
+                                    <option value="GET">GET</option>
+                                    <option value="POST">POST</option>
+                                    <option value="PUT">PUT</option>
+                                    <option value="PATCH">PATCH</option>
+                                    <option value="DELETE">DELETE</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="metadata-field">
+                            <label>Headers (JSON)</label>
+                            <textarea id="dsConnectionHeaders" rows="2" placeholder='{"Content-Type": "application/json"}'></textarea>
+                        </div>
+                        <div class="metadata-field">
+                            <label>Timeout (ms)</label>
+                            <input type="number" id="dsConnectionTimeout" value="30000" min="1000" max="120000">
+                        </div>
+                    </div>
+
+                    <!-- Auth Reference -->
+                    <div class="ds-config-section">
+                        <div class="ds-config-section-header">Authentication</div>
+                        <div class="metadata-field-row">
+                            <div class="metadata-field" style="flex:1;">
+                                <label>Auth Type</label>
+                                <select id="dsAuthType">
+                                    <option value="none">None</option>
+                                    <option value="api-key">API Key</option>
+                                    <option value="bearer">Bearer Token</option>
+                                    <option value="oauth2">OAuth2</option>
+                                    <option value="basic">Basic Auth</option>
+                                </select>
+                            </div>
+                            <div class="metadata-field" style="flex:1;">
+                                <label>Label</label>
+                                <input type="text" id="dsAuthLabel" placeholder="My API Key">
+                            </div>
+                        </div>
+                        <div class="metadata-field" id="dsAuthHeaderNameField" style="display:none;">
+                            <label>Header Name</label>
+                            <input type="text" id="dsAuthHeaderName" placeholder="X-API-Key">
+                        </div>
+                        <div class="metadata-field" id="dsAuthTokenUrlField" style="display:none;">
+                            <label>Token URL</label>
+                            <input type="text" id="dsAuthTokenUrl" placeholder="https://auth.example.com/oauth/token">
+                        </div>
+                        <div class="metadata-field" id="dsAuthScopesField" style="display:none;">
+                            <label>Scopes (comma-separated)</label>
+                            <input type="text" id="dsAuthScopes" placeholder="read,write">
+                        </div>
+                        <div class="metadata-field">
+                            <label>Notes (how to obtain credentials)</label>
+                            <textarea id="dsAuthNotes" rows="2" placeholder="Get an API key from https://..."></textarea>
+                        </div>
+                    </div>
+
+                    <!-- CRUD Operations -->
+                    <div class="ds-config-section">
+                        <div class="ds-config-section-header">Operations</div>
+                        <div class="ds-operations-grid" id="dsOperationsGrid">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+
+                    <!-- MCP-specific fields -->
+                    <div class="ds-config-section" id="dsMcpSection" style="display:none;">
+                        <div class="ds-config-section-header">MCP Configuration</div>
+                        <div class="metadata-field">
+                            <label>Server Name</label>
+                            <input type="text" id="dsMcpServerName" placeholder="my-mcp-server">
+                        </div>
+                        <div class="metadata-field">
+                            <label>Transport</label>
+                            <select id="dsMcpTransport">
+                                <option value="stdio">stdio</option>
+                                <option value="sse">SSE</option>
+                                <option value="streamable-http">Streamable HTTP</option>
+                            </select>
+                        </div>
+                        <div class="metadata-field" id="dsMcpCommandField">
+                            <label>Command</label>
+                            <input type="text" id="dsMcpCommand" placeholder="npx">
+                        </div>
+                        <div class="metadata-field" id="dsMcpArgsField">
+                            <label>Arguments (one per line)</label>
+                            <textarea id="dsMcpArgs" rows="3" placeholder="-y
+@modelcontextprotocol/server-sqlite
+/path/to/db.sqlite"></textarea>
+                        </div>
+                        <div class="metadata-field">
+                            <label>Environment Variables (JSON)</label>
+                            <textarea id="dsMcpEnv" rows="2" placeholder='{"NODE_ENV": "production"}'></textarea>
+                        </div>
+                        <div class="metadata-field">
+                            <label>Discovered Capabilities</label>
+                            <div id="dsMcpCapabilities" class="ds-capabilities-list">None discovered</div>
+                        </div>
+                    </div>
+
+                    <!-- Web Scraping-specific fields -->
+                    <div class="ds-config-section" id="dsScrapingSection" style="display:none;">
+                        <div class="ds-config-section-header">Web Scraping Configuration</div>
+                        <div class="metadata-field">
+                            <label>CSS Selectors (JSON: name -> selector)</label>
+                            <textarea id="dsScrapingSelectors" rows="3" placeholder='{"title": "h1.main-title", "price": ".product-price"}'></textarea>
+                        </div>
+                        <div class="metadata-field-row">
+                            <div class="metadata-field" style="flex:1;">
+                                <label>Schedule</label>
+                                <input type="text" id="dsScrapingSchedule" placeholder="*/30 * * * *">
+                            </div>
+                            <div class="metadata-field" style="flex:1;">
+                                <label>Rate Limit (req/min)</label>
+                                <input type="number" id="dsScrapingRateLimit" value="10" min="1" max="120">
+                            </div>
+                        </div>
+                        <div class="metadata-field">
+                            <label>User Agent</label>
+                            <input type="text" id="dsScrapingUserAgent" placeholder="Mozilla/5.0...">
+                        </div>
+                    </div>
+
+                    <!-- Description Document -->
+                    <div class="ds-config-section">
+                        <div class="ds-config-section-header">
+                            <span>Description Document</span>
+                            <div class="ds-doc-visibility-toggle">
+                                <label class="ds-toggle-label">
+                                    <select id="dsDocVisibility">
+                                        <option value="private">Private</option>
+                                        <option value="public">Public</option>
+                                    </select>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="ds-document-editor">
+                            <div class="ds-doc-tabs">
+                                <button class="ds-doc-tab active" data-mode="edit">Edit</button>
+                                <button class="ds-doc-tab" data-mode="preview">Preview</button>
+                            </div>
+                            <textarea id="dsDocContent" rows="8" placeholder="Describe this data source in Markdown...
+
+# My API
+This data source provides access to...
+
+## Authentication
+Obtain an API key from the developer portal at...
+
+## Rate Limits
+- 100 requests per minute
+- 10,000 requests per day"></textarea>
+                            <div id="dsDocPreview" class="ds-doc-preview" style="display:none;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Save Button -->
+                    <div class="ds-config-actions">
+                        <button class="btn btn-primary" id="dsSaveConfigBtn">Save Configuration</button>
                     </div>
                 </div>
 
@@ -5705,6 +6689,94 @@
                     </div>
                 </div>
 
+                <!-- GSX Tab -->
+                <div class="metadata-tab-panel" id="tabGsx">
+                    <div class="metadata-field-group">
+                        <div class="metadata-field-group-title">GSX Push Status</div>
+                        <div class="gsx-status-summary" id="gsxStatusSummary">
+                            <div class="gsx-status-indicator" id="gsxStatusIndicator">
+                                <span class="gsx-status-icon not-pushed"></span>
+                                <span class="gsx-status-text">Not pushed to GSX</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="metadata-field-group gsx-links-section" id="gsxLinksSection" style="display: none;">
+                        <div class="metadata-field-group-title">Links</div>
+                        <div class="gsx-links-panel">
+                            <div class="gsx-link-item" id="gsxLinkFile">
+                                <div class="gsx-link-label">File URL</div>
+                                <div class="gsx-link-row">
+                                    <input type="text" readonly id="gsxFileUrlInput" class="gsx-link-input">
+                                    <button class="gsx-link-copy-btn" data-link-type="file" title="Copy URL">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px;"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                                    </button>
+                                    <a class="gsx-link-open-btn" href="#" target="_blank" title="Open in browser">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                    </a>
+                                </div>
+                            </div>
+                            <div class="gsx-link-item" id="gsxLinkShare">
+                                <div class="gsx-link-label">Share Link</div>
+                                <div class="gsx-link-row">
+                                    <input type="text" readonly id="gsxShareLinkInput" class="gsx-link-input">
+                                    <button class="gsx-link-copy-btn" data-link-type="share" title="Copy Link">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px;"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                                    </button>
+                                    <a class="gsx-link-open-btn" href="#" target="_blank" title="Open in browser">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                    </a>
+                                </div>
+                            </div>
+                            <div class="gsx-link-item" id="gsxLinkGraph">
+                                <div class="gsx-link-label">Graph Node ID</div>
+                                <div class="gsx-link-row">
+                                    <input type="text" readonly id="gsxGraphNodeInput" class="gsx-link-input">
+                                    <button class="gsx-link-copy-btn" data-link-type="graph" title="Copy Node ID">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px;"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="metadata-field-group gsx-info-section" id="gsxInfoSection" style="display: none;">
+                        <div class="metadata-field-group-title">Push Information</div>
+                        <div class="metadata-info-grid">
+                            <div class="metadata-info-item">
+                                <div class="label">Version</div>
+                                <div class="value" id="gsxVersion">-</div>
+                            </div>
+                            <div class="metadata-info-item">
+                                <div class="label">Visibility</div>
+                                <div class="value" id="gsxVisibility">-</div>
+                            </div>
+                            <div class="metadata-info-item">
+                                <div class="label">Pushed At</div>
+                                <div class="value" id="gsxPushedAt">-</div>
+                            </div>
+                            <div class="metadata-info-item">
+                                <div class="label">Pushed By</div>
+                                <div class="value" id="gsxPushedBy">-</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="metadata-field-group gsx-actions-section">
+                        <div class="gsx-action-buttons">
+                            <button class="btn gsx-action-btn" id="gsxPushBtn" title="Push to GSX">
+                                <span class="gsx-icon">⬡</span> Push to GSX
+                            </button>
+                            <button class="btn gsx-action-btn gsx-visibility-btn" id="gsxVisibilityBtn" style="display: none;" title="Change visibility">
+                                Change Visibility
+                            </button>
+                            <button class="btn gsx-action-btn gsx-unpush-btn" id="gsxUnpushBtn" style="display: none;" title="Remove from GSX">
+                                Unpush
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- System Tab -->
                 <div class="metadata-tab-panel" id="tabSystem">
                     <div class="metadata-field-group">
@@ -5762,7 +6834,7 @@
     <div class="modal-overlay" id="previewModal">
         <div class="modal" style="width: 800px; max-width: 90vw; height: 80vh; display: flex; flex-direction: column; position: relative;">
             <!-- X Close button in top-right corner -->
-            <button id="previewCloseX" style="position: absolute; top: 12px; right: 12px; width: 32px; height: 32px; border: none; background: rgba(255, 255, 255, 0.1); color: white; font-size: 18px; border-radius: 50%; cursor: pointer; z-index: 100; display: flex; align-items: center; justify-content: center; transition: background 0.2s;" title="Close">×</button>
+            <button id="previewCloseX" style="position: absolute; top: 12px; right: 12px; width: 32px; height: 32px; border: none; background: rgba(255, 255, 255, 0.1); color: white; font-size: 18px; border-radius: 50%; cursor: pointer; z-index: 9999; display: flex; align-items: center; justify-content: center; transition: background 0.2s;" title="Close">×</button>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-right: 40px;">
                 <h2 class="modal-title" id="previewModalTitle" style="margin: 0;">Preview</h2>
                 <div style="display: flex; gap: 8px;">
@@ -6029,6 +7101,62 @@
                 <!-- HTML preview mode -->
                 <div id="previewHtmlMode" style="flex: 1; display: none; overflow: auto; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(20, 20, 20, 0.95); padding: 8px;">
                     <iframe id="previewHtmlFrame" style="width: 100%; height: 100%; border: none; background: white; border-radius: 4px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);"></iframe>
+                </div>
+                
+                <!-- PDF preview mode -->
+                <div id="previewPdfMode" style="flex: 1; display: none; flex-direction: column; overflow: hidden; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(20, 20, 20, 0.95);">
+                    <!-- PDF Header with file info -->
+                    <div id="pdfPreviewHeader" style="display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.1); background: rgba(30,30,30,0.95);">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="1.5" style="width: 24px; height: 24px; flex-shrink: 0;">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                        </svg>
+                        <div style="flex: 1; min-width: 0;">
+                            <div id="pdfFileName" style="font-size: 14px; font-weight: 500; color: rgba(255,255,255,0.9); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">PDF Document</div>
+                            <div id="pdfFileInfo" style="font-size: 11px; color: rgba(255,255,255,0.5);"></div>
+                        </div>
+                        <button id="pdfExtractText" style="padding: 6px 12px; background: rgba(99,102,241,0.15); border: 1px solid rgba(99,102,241,0.3); border-radius: 4px; color: rgba(255,255,255,0.9); cursor: pointer; font-size: 11px; white-space: nowrap;">Extract Text</button>
+                        <button id="pdfExtractImages" style="padding: 6px 12px; background: rgba(245,158,11,0.15); border: 1px solid rgba(245,158,11,0.3); border-radius: 4px; color: rgba(255,255,255,0.9); cursor: pointer; font-size: 11px; white-space: nowrap;">Extract Images</button>
+                        <button id="pdfOpenExternal" style="padding: 6px 12px; background: rgba(220,38,38,0.15); border: 1px solid rgba(220,38,38,0.3); border-radius: 4px; color: rgba(255,255,255,0.9); cursor: pointer; font-size: 11px; white-space: nowrap;">Open in Preview</button>
+                    </div>
+                    
+                    <!-- PDF Text Extraction Panel (hidden by default) -->
+                    <div id="pdfTextPanel" style="display: none; flex-direction: column; max-height: 50%; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                        <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; background: rgba(99,102,241,0.1); border-bottom: 1px solid rgba(99,102,241,0.2);">
+                            <span style="font-size: 12px; font-weight: 500; color: rgba(255,255,255,0.9);">Extracted Text</span>
+                            <div style="display: flex; gap: 8px;">
+                                <button id="pdfCopyText" style="padding: 4px 10px; background: rgba(99,102,241,0.2); border: 1px solid rgba(99,102,241,0.3); border-radius: 4px; color: rgba(255,255,255,0.9); cursor: pointer; font-size: 11px;">Copy All</button>
+                                <button id="pdfSaveAsAsset" style="padding: 4px 10px; background: rgba(34,197,94,0.2); border: 1px solid rgba(34,197,94,0.3); border-radius: 4px; color: rgba(255,255,255,0.9); cursor: pointer; font-size: 11px;">Save as Text</button>
+                                <button id="pdfSaveAsMarkdown" style="padding: 4px 10px; background: rgba(168,85,247,0.2); border: 1px solid rgba(168,85,247,0.3); border-radius: 4px; color: rgba(255,255,255,0.9); cursor: pointer; font-size: 11px;">Save as Markdown</button>
+                                <button id="pdfCloseText" style="padding: 4px 8px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: rgba(255,255,255,0.7); cursor: pointer; font-size: 11px;">Close</button>
+                            </div>
+                        </div>
+                        <div id="pdfExtractedText" style="flex: 1; overflow: auto; padding: 16px; background: rgba(20,20,20,0.95); font-family: system-ui, -apple-system, sans-serif; font-size: 13px; line-height: 1.6; color: rgba(255,255,255,0.85); white-space: pre-wrap; word-wrap: break-word;"></div>
+                    </div>
+                    
+                    <!-- PDF Images Extraction Panel (hidden by default) -->
+                    <div id="pdfImagesPanel" style="display: none; flex-direction: column; max-height: 50%; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                        <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; background: rgba(245,158,11,0.1); border-bottom: 1px solid rgba(245,158,11,0.2);">
+                            <span id="pdfImagesCount" style="font-size: 12px; font-weight: 500; color: rgba(255,255,255,0.9);">Extracted Images</span>
+                            <div style="display: flex; gap: 8px;">
+                                <button id="pdfSaveAllImages" style="padding: 4px 10px; background: rgba(34,197,94,0.2); border: 1px solid rgba(34,197,94,0.3); border-radius: 4px; color: rgba(255,255,255,0.9); cursor: pointer; font-size: 11px;">Save All as Assets</button>
+                                <button id="pdfCloseImages" style="padding: 4px 8px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: rgba(255,255,255,0.7); cursor: pointer; font-size: 11px;">Close</button>
+                            </div>
+                        </div>
+                        <div id="pdfExtractedImages" style="flex: 1; overflow: auto; padding: 12px; background: rgba(20,20,20,0.95); display: flex; flex-wrap: wrap; gap: 12px; align-content: flex-start;"></div>
+                    </div>
+                    
+                    <!-- PDF Canvas Container -->
+                    <div id="pdfCanvasContainer" style="flex: 1; overflow: auto; display: flex; justify-content: center; align-items: flex-start; padding: 16px; background: #1a1a1a;">
+                        <canvas id="pdfCanvas" style="max-width: 100%; box-shadow: 0 4px 20px rgba(0,0,0,0.4);"></canvas>
+                    </div>
+                    
+                    <!-- PDF Navigation -->
+                    <div id="pdfNavigation" style="display: flex; align-items: center; justify-content: center; gap: 16px; padding: 12px; border-top: 1px solid rgba(255,255,255,0.1); background: rgba(30,30,30,0.95);">
+                        <button id="pdfPrevPage" style="padding: 8px 16px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: rgba(255,255,255,0.9); cursor: pointer; font-size: 12px;" disabled>Previous</button>
+                        <span id="pdfPageInfo" style="font-size: 13px; color: rgba(255,255,255,0.7); min-width: 100px; text-align: center;">Page 1 of 1</span>
+                        <button id="pdfNextPage" style="padding: 8px 16px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: rgba(255,255,255,0.9); cursor: pointer; font-size: 12px;" disabled>Next</button>
+                    </div>
                 </div>
             </div>
             

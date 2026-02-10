@@ -3,6 +3,8 @@
  * @module src/agentic-player/services/BufferManager
  */
 
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 /**
  * Buffer manager class
  */
@@ -22,7 +24,7 @@ export class BufferManager {
 
     const videoUrl = clip.videoUrl || clip.videoSrc;
     if (!videoUrl) {
-      console.warn('[BufferManager] No video URL for clip');
+      log.warn('agent', '[BufferManager] No video URL for clip');
       return null;
     }
 
@@ -45,14 +47,14 @@ export class BufferManager {
 
     return new Promise((resolve, reject) => {
       preload.addEventListener('loadeddata', () => {
-        console.log(`[BufferManager] Preloaded: ${clip.name}`);
+        log.info('agent', '[BufferManager] Preloaded:', { v0: clip.name });
         this.preloadedVideo = preload;
         this.preloadedClip = clip;
         resolve(preload);
       }, { once: true });
 
       preload.addEventListener('error', (e) => {
-        console.error('[BufferManager] Preload error:', e);
+        log.error('agent', '[BufferManager] Preload error', { error: e });
         preload.remove();
         reject(e);
       }, { once: true });
@@ -89,10 +91,10 @@ export class BufferManager {
       mainVideo.muted = false;
       
       this.clearPreloaded();
-      console.log('[BufferManager] Transfer complete');
+      log.info('agent', '[BufferManager] Transfer complete');
       return true;
     } catch (error) {
-      console.error('[BufferManager] Transfer error:', error);
+      log.error('agent', '[BufferManager] Transfer error', { error: error });
       this.clearPreloaded();
       return false;
     }

@@ -18,6 +18,8 @@ const mediaAgent = require('./media-agent');
 const helpAgent = require('./help-agent');
 const smalltalkAgent = require('./smalltalk-agent');
 const searchAgent = require('./search-agent');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 
 const AGENT_IMPLEMENTATIONS = {
   'time-agent': timeAgent,
@@ -92,12 +94,12 @@ function getCustomAgents() {
     const agentStore = getAgentStore();
     if (agentStore && agentStore.initialized) {
       const customAgents = agentStore.getEnabledLocalAgents();
-      console.log(`[TaskQueueManager] Found ${customAgents.length} custom agents for bidding`);
+      log.info('agent', `Found ${customAgents.length} custom agents for bidding`);
       return customAgents;
     }
   } catch (e) {
     // Agent store may not be initialized yet
-    console.log('[TaskQueueManager] Agent store not available:', e.message);
+    log.info('agent', 'Agent store not available', { error: e.message });
   }
   return [];
 }
@@ -111,7 +113,7 @@ async function getBidsForTask(task) {
   const customAgents = getCustomAgents();
   const allAgents = [...builtinAgents, ...customAgents];
   
-  console.log(`[TaskQueueManager] Evaluating ${allAgents.length} agents (${builtinAgents.length} built-in, ${customAgents.length} custom)`);
+  log.info('agent', `Evaluating ${allAgents.length} agents (${builtinAgents.length} built-in, ${customAgents.length} custom)`);
   
   const bids = await getBidsFromAgents(allAgents, task);
   
@@ -140,13 +142,13 @@ async function processPhrase(phrase, history = [], callbacks = {}) {
     onProgress = () => {}  // New: progress updates during agent execution
   } = callbacks;
 
-  console.log('[TaskQueueManager] Processing phrase:', phrase);
+  log.info('agent', 'Processing phrase', { phrase });
 
   // Step 1: Decompose into tasks
   const decomposed = await decomposeTasks(phrase, history);
   const { tasks, acknowledgment, error } = decomposed;
   
-  console.log('[TaskQueueManager] Decomposed into', tasks.length, 'tasks');
+  log.info('agent', 'Decomposed into', { length: tasks.length, detail: 'tasks' });
   
   // Check for API key error
   if (error === 'API key required') {
@@ -213,7 +215,7 @@ async function processPhrase(phrase, history = [], callbacks = {}) {
     }
   }
 
-  console.log('[TaskQueueManager] Biddable:', taskBids.length, 'Unbiddable:', unbiddableTasks.length);
+  log.info('agent', 'Biddable', { length: taskBids.length, unbiddable: unbiddableTasks.length });
 
   // Step 3: Handle unbiddable tasks
   if (unbiddableTasks.length > 0 && taskBids.length === 0) {
@@ -257,7 +259,7 @@ async function processPhrase(phrase, history = [], callbacks = {}) {
         messages.push(result.message);
       }
     } catch (error) {
-      console.error('[TaskQueueManager] Task execution error:', error);
+      log.error('agent', 'Task execution error', { error });
       
       // Try backup agents
       let handled = false;
@@ -358,7 +360,7 @@ async function executeCustomAgent(agent, task, onProgress = () => {}) {
   const executionType = agent.executionType || 'llm';
   const content = task.content || '';
   
-  console.log(`[TaskQueueManager] Executing custom agent ${agent.name} (${executionType})`);
+  log.info('agent', `Executing custom agent ${agent.name} (${executionType})`);
   onProgress(`${agent.name} processing...`);
   
   try {
@@ -371,7 +373,7 @@ async function executeCustomAgent(agent, task, onProgress = () => {}) {
       return await executeLLMAgent(agent, content, onProgress);
     }
   } catch (error) {
-    console.error(`[TaskQueueManager] Custom agent ${agent.name} failed:`, error.message);
+    log.error('agent', `Custom agent ${agent.name} failed`, { error: error.message });
     return {
       success: false,
       message: `${agent.name} encountered an error: ${error.message}`

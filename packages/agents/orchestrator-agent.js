@@ -7,6 +7,8 @@
 
 const smalltalkAgent = require('./smalltalk-agent');
 const djAgent = require('./dj-agent');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 
 /**
  * Composite request patterns and which agents can help
@@ -88,6 +90,7 @@ This agent ONLY bids when a request clearly requires coordination between multip
     'celebrate', 'good news', 'party time',
     'wind down', 'end of day', 'time for bed'
   ],
+  executionType: 'system',  // Meta-coordination agent (being repurposed for task decomposition)
   
   // Acknowledgments
   acks: [
@@ -114,13 +117,8 @@ This agent ONLY bids when a request clearly requires coordination between multip
     return null;
   },
 
-  /**
-   * Bid on task - uses LLM-based unified bidder
-   */
-  bid(task) {
-    // No fast bidding - let the unified bidder handle all evaluation via LLM
-    return null;
-  },
+  // No bid() method. Routing is 100% LLM-based via unified-bidder.js.
+  // NEVER add keyword/regex bidding here. See .cursorrules.
 
   /**
    * Execute by coordinating multiple agents
@@ -132,8 +130,8 @@ This agent ONLY bids when a request clearly requires coordination between multip
       return { success: false, message: "I'm not sure how to help with that." };
     }
     
-    console.log(`[Orchestrator] Handling composite request: ${composite.name}`);
-    console.log(`[Orchestrator] Will coordinate: ${composite.agents.join(', ')}`);
+    log.info('agent', `Handling composite request: ${composite.name}`);
+    log.info('agent', `Will coordinate: ${composite.agents.join(', ')}`);
     
     const results = [];
     const messages = [];
@@ -181,7 +179,7 @@ This agent ONLY bids when a request clearly requires coordination between multip
           }
         }
       } catch (error) {
-        console.error(`[Orchestrator] Error executing ${agentName}:`, error.message);
+        log.error('agent', `Error executing ${agentName}`, { error: error.message });
       }
     }
     

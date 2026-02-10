@@ -17,6 +17,8 @@ const { getSharedStorage } = require('./clipboard-storage-v2');
 const { getContentIngestionService, VALID_TYPES } = require('./content-ingestion');
 const path = require('path');
 const fs = require('fs');
+const { getLogQueue } = require('./lib/log-event-queue');
+const log = getLogQueue();
 
 /**
  * Get the shared storage instance
@@ -30,10 +32,44 @@ function getStorage() {
 /**
  * SpacesAPI - Unified API for space and item management
  */
+/**
+ * Safe characters for space/item/folder IDs (alphanumeric, hyphen, underscore).
+ * Used to reject path traversal and injection.
+ */
+const SAFE_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
+
+/**
+ * Check that a relative filePath does not escape (no '..' or absolute segments).
+ * @param {string} filePath - Relative path segment(s)
+ * @returns {boolean} true if safe
+ */
+function isSafeRelativePath(filePath) {
+  if (!filePath || typeof filePath !== 'string') return true;
+  const normalized = path.normalize(filePath);
+  return normalized !== '..' && !normalized.startsWith('..' + path.sep) && !path.isAbsolute(normalized);
+}
+
 class SpacesAPI {
   constructor() {
     this.storage = getStorage();
     this._eventListeners = new Map();
+  }
+
+  /**
+   * Resolve a file path within a space and ensure it does not escape the space directory.
+   * @param {string} spaceId - The space ID
+   * @param {string} filePath - Relative path within the space
+   * @returns {string} Resolved absolute path
+   * @throws {Error} If path escapes the space directory (path traversal)
+   */
+  _resolveSpaceFilePath(spaceId, filePath) {
+    const spaceRoot = path.resolve(this.storage.spacesDir, spaceId);
+    const fullPath = path.resolve(spaceRoot, filePath || '.');
+    const normalizedRoot = path.resolve(spaceRoot);
+    if (fullPath !== normalizedRoot && !fullPath.startsWith(normalizedRoot + path.sep)) {
+      throw new Error('Path escapes space directory');
+    }
+    return fullPath;
   }
 
   // ============================================
@@ -66,7 +102,7 @@ class SpacesAPI {
         };
       });
     } catch (error) {
-      console.error('[SpacesAPI] Error listing spaces:', error);
+      log.error('spaces', 'Error listing spaces', { error: error.message || error });
       throw error;
     }
   }
@@ -98,7 +134,7 @@ class SpacesAPI {
         metadata: metadata || {}
       };
     } catch (error) {
-      console.error('[SpacesAPI] Error getting space:', error);
+      log.error('spaces', 'Error getting space', { error: error.message || error });
       throw error;
     }
   }
@@ -121,7 +157,7 @@ class SpacesAPI {
         notebook: options.notebook
       });
 
-      console.log('[SpacesAPI] Created space:', space.id, space.name);
+      log.info('spaces', 'Created space', { spaceId: space.id, name: space.name });
       
       // Emit event
       this._emit('space:created', { space });
@@ -135,7 +171,7 @@ class SpacesAPI {
         path: path.join(this.storage.spacesDir, space.id)
       };
     } catch (error) {
-      console.error('[SpacesAPI] Error creating space:', error);
+      log.error('spaces', 'Error creating space', { error: error.message || error });
       throw error;
     }
   }
@@ -159,7 +195,7 @@ class SpacesAPI {
       }
       
       // Space doesn't exist - create it
-      console.log('[SpacesAPI] Creating GSX Agent space...');
+      log.info('spaces', 'Creating GSX Agent space');
       
       const space = this.storage.createSpace({
         id: GSX_AGENT_SPACE_ID,
@@ -169,7 +205,7 @@ class SpacesAPI {
         isSystem: true
       });
       
-      console.log('[SpacesAPI] Created GSX Agent space:', space.id);
+      log.info('spaces', 'Created GSX Agent space', { spaceId: space.id });
       this._emit('space:created', { space });
       
       // Trigger default files creation
@@ -186,7 +222,7 @@ class SpacesAPI {
         path: path.join(this.storage.spacesDir, space.id)
       };
     } catch (error) {
-      console.error('[SpacesAPI] Error ensuring GSX Agent space:', error);
+      log.error('spaces', 'Error ensuring GSX Agent space', { error: error.message || error });
       throw error;
     }
   }
@@ -205,13 +241,13 @@ class SpacesAPI {
       const success = this.storage.updateSpace(spaceId, data);
       
       if (success) {
-        console.log('[SpacesAPI] Updated space:', spaceId);
+        log.info('spaces', 'Updated space', { spaceId });
         this._emit('space:updated', { spaceId, data });
       }
       
       return success;
     } catch (error) {
-      console.error('[SpacesAPI] Error updating space:', error);
+      log.error('spaces', 'Error updating space', { error: error.message || error });
       throw error;
     }
   }
@@ -234,13 +270,13 @@ class SpacesAPI {
       const success = this.storage.deleteSpace(spaceId);
       
       if (success) {
-        console.log('[SpacesAPI] Deleted space:', spaceId);
+        log.info('spaces', 'Deleted space', { spaceId });
         this._emit('space:deleted', { spaceId });
       }
       
       return success;
     } catch (error) {
-      console.error('[SpacesAPI] Error deleting space:', error);
+      log.error('spaces', 'Error deleting space', { error: error.message || error });
       throw error;
     }
   }
@@ -330,7 +366,7 @@ class SpacesAPI {
           
           return items;
         } catch (error) {
-          console.error('[SpacesAPI] Error listing items:', error);
+          log.error('spaces', 'Error listing items', { error: error.message || error });
           throw error;
         }
       },
@@ -345,11 +381,12 @@ class SpacesAPI {
         try {
           const item = this.storage.loadItem(itemId);
           if (item && item.spaceId !== spaceId) {
-            console.warn('[SpacesAPI] Item found but in different space');
+            log.warn('spaces', 'Item found but in different space', { itemId, spaceId });
           }
           if (item) {
-            // Ensure tags are at root level (from metadata or separate lookup)
-            const tagsFromMetadata = item.metadata?.tags;
+            // Ensure tags are at root level (v2.0: attributes.tags; v1.0: tags)
+            const meta = item.metadata || {};
+            const tagsFromMetadata = (meta.attributes && meta.attributes.tags) || meta.tags;
             const tagsFromFile = this._getItemTags(itemId);
             const finalTags = tagsFromMetadata || tagsFromFile;
             
@@ -360,7 +397,12 @@ class SpacesAPI {
           }
           return item;
         } catch (error) {
-          console.error('[SpacesAPI] Error getting item:', error);
+          const msg = error.message || String(error);
+          if (msg.includes('not found') || msg.includes('Not found') || msg.includes('ENOENT')) {
+            log.debug('spaces', 'Item not found', { error: msg });
+          } else {
+            log.error('spaces', 'Error getting item', { error: msg });
+          }
           return null;
         }
       },
@@ -417,7 +459,7 @@ class SpacesAPI {
             const newItem = global.clipboardManager.history?.[0];
             
             if (newItem) {
-              console.log('[SpacesAPI] Added item via clipboardManager:', spaceId, newItem.id);
+              log.info('spaces', 'Added item via clipboardManager', { spaceId, itemId: newItem.id });
               this._emit('item:added', { spaceId, item: newItem });
               
               // Auto-generate metadata if incomplete and enabled
@@ -430,7 +472,7 @@ class SpacesAPI {
           }
           
           // Fallback to direct storage (less ideal but still works)
-          console.warn('[SpacesAPI] clipboardManager not available, using direct storage (may cause sync issues)');
+          log.warn('spaces', 'clipboardManager not available, using direct storage (may cause sync issues)');
           
           // Generate thumbnail for images if not provided
           const itemWithThumbnail = { ...item };
@@ -439,7 +481,7 @@ class SpacesAPI {
             if (imageData && typeof imageData === 'string' && imageData.startsWith('data:image/')) {
               // For small images, use full image; for large, we'd need nativeImage (not available here)
               itemWithThumbnail.thumbnail = imageData;
-              console.log('[SpacesAPI] Using image content as thumbnail (fallback path)');
+              log.info('spaces', 'Using image content as thumbnail (fallback path)');
             }
           }
           
@@ -450,7 +492,7 @@ class SpacesAPI {
             timestamp: Date.now()
           });
           
-          console.log('[SpacesAPI] Added item to space:', spaceId, newItem.id);
+          log.info('spaces', 'Added item to space', { spaceId, itemId: newItem.id });
           this._emit('item:added', { spaceId, item: newItem });
           
           // Auto-generate metadata if incomplete and enabled
@@ -460,7 +502,15 @@ class SpacesAPI {
           
           return newItem;
         } catch (error) {
-          console.error('[SpacesAPI] Error adding item:', error);
+          // Validation errors (content type, missing fields) are client issues, not server errors
+          const msg = error.message || '';
+          if (msg.includes('Invalid content type') || msg.includes('Missing content') || msg.includes('Content is required')) {
+            log.debug('spaces', 'Item validation rejected', { error: msg });
+          } else if (msg.includes('not found') || msg.includes('Not found') || msg.includes('NOT_FOUND')) {
+            log.debug('spaces', 'Add item to missing space', { error: msg });
+          } else {
+            log.error('spaces', 'Error adding item', { error: msg });
+          }
           throw error;
         }
       },
@@ -477,13 +527,13 @@ class SpacesAPI {
           const success = this.storage.updateItemIndex(itemId, data);
           
           if (success) {
-            console.log('[SpacesAPI] Updated item:', itemId);
+            log.info('spaces', 'Updated item', { itemId });
             this._emit('item:updated', { spaceId, itemId, data });
           }
           
           return success;
         } catch (error) {
-          console.error('[SpacesAPI] Error updating item:', error);
+          log.error('spaces', 'Error updating item', { error: error.message || error });
           throw error;
         }
       },
@@ -499,13 +549,13 @@ class SpacesAPI {
           const success = this.storage.deleteItem(itemId);
           
           if (success) {
-            console.log('[SpacesAPI] Deleted item:', itemId);
+            log.info('spaces', 'Deleted item', { itemId });
             this._emit('item:deleted', { spaceId, itemId });
           }
           
           return success;
         } catch (error) {
-          console.error('[SpacesAPI] Error deleting item:', error);
+          log.error('spaces', 'Error deleting item', { error: error.message || error });
           throw error;
         }
       },
@@ -542,14 +592,14 @@ class SpacesAPI {
             } catch (error) {
               results.failed++;
               results.errors.push(`Error deleting ${itemId}: ${error.message}`);
-              console.error('[SpacesAPI] Error deleting item in bulk:', itemId, error);
+              log.error('spaces', 'Error deleting item in bulk', { itemId, error: error.message || error });
             }
           }
           
           // Consider overall success if at least one item was deleted
           results.success = results.deleted > 0;
           
-          console.log('[SpacesAPI] Bulk delete completed:', results);
+          log.info('spaces', 'Bulk delete completed', { deleted: results.deleted, failed: results.failed });
           this._emit('items:bulk-deleted', { 
             spaceId, 
             itemIds: itemIds.slice(0, results.deleted), // Only successfully deleted IDs
@@ -558,7 +608,7 @@ class SpacesAPI {
           
           return results;
         } catch (error) {
-          console.error('[SpacesAPI] Error in bulk delete:', error);
+          log.error('spaces', 'Error in bulk delete', { error: error.message || error });
           return { 
             success: false, 
             deleted: 0, 
@@ -580,13 +630,13 @@ class SpacesAPI {
           const success = this.storage.moveItem(itemId, toSpaceId);
           
           if (success) {
-            console.log('[SpacesAPI] Moved item:', itemId, 'from', fromSpaceId, 'to', toSpaceId);
+            log.info('spaces', 'Moved item', { itemId, fromSpaceId, toSpaceId });
             this._emit('item:moved', { itemId, fromSpaceId, toSpaceId });
           }
           
           return success;
         } catch (error) {
-          console.error('[SpacesAPI] Error moving item:', error);
+          log.error('spaces', 'Error moving item', { error: error.message || error });
           throw error;
         }
       },
@@ -636,14 +686,14 @@ class SpacesAPI {
             } catch (error) {
               results.failed++;
               results.errors.push(`Error moving ${itemId}: ${error.message}`);
-              console.error('[SpacesAPI] Error moving item in bulk:', itemId, error);
+              log.error('spaces', 'Error moving item in bulk', { itemId, error: error.message || error });
             }
           }
           
           // Consider overall success if at least one item was moved
           results.success = results.moved > 0;
           
-          console.log('[SpacesAPI] Bulk move completed:', results);
+          log.info('spaces', 'Bulk move completed', { moved: results.moved, failed: results.failed });
           this._emit('items:bulk-moved', { 
             itemIds: itemIds.slice(0, results.moved), // Only successfully moved IDs
             fromSpaceId,
@@ -653,7 +703,7 @@ class SpacesAPI {
           
           return results;
         } catch (error) {
-          console.error('[SpacesAPI] Error in bulk move:', error);
+          log.error('spaces', 'Error in bulk move', { error: error.message || error });
           return { 
             success: false, 
             moved: 0, 
@@ -675,7 +725,7 @@ class SpacesAPI {
           this._emit('item:updated', { spaceId, itemId, data: { pinned } });
           return pinned;
         } catch (error) {
-          console.error('[SpacesAPI] Error toggling pin:', error);
+          log.error('spaces', 'Error toggling pin', { error: error.message || error });
           throw error;
         }
       },
@@ -690,7 +740,7 @@ class SpacesAPI {
         try {
           return this._getItemTags(itemId);
         } catch (error) {
-          console.error('[SpacesAPI] Error getting tags:', error);
+          log.error('spaces', 'Error getting tags', { error: error.message || error });
           return [];
         }
       },
@@ -710,7 +760,7 @@ class SpacesAPI {
           }
           return success;
         } catch (error) {
-          console.error('[SpacesAPI] Error setting tags:', error);
+          log.error('spaces', 'Error setting tags', { error: error.message || error });
           return false;
         }
       },
@@ -737,7 +787,7 @@ class SpacesAPI {
           this._emit('item:tags:updated', { spaceId, itemId, tags: newTags });
           return newTags;
         } catch (error) {
-          console.error('[SpacesAPI] Error adding tag:', error);
+          log.error('spaces', 'Error adding tag', { error: error.message || error });
           return [];
         }
       },
@@ -759,7 +809,7 @@ class SpacesAPI {
           this._emit('item:tags:updated', { spaceId, itemId, tags: newTags });
           return newTags;
         } catch (error) {
-          console.error('[SpacesAPI] Error removing tag:', error);
+          log.error('spaces', 'Error removing tag', { error: error.message || error });
           return [];
         }
       },
@@ -777,7 +827,7 @@ class SpacesAPI {
         try {
           return await this.generateMetadataForItem(itemId, options);
         } catch (error) {
-          console.error('[SpacesAPI] Error generating metadata:', error);
+          log.error('spaces', 'Error generating metadata', { error: error.message || error });
           return { success: false, error: error.message };
         }
       }
@@ -819,7 +869,7 @@ class SpacesAPI {
             return a.tag.localeCompare(b.tag);
           });
         } catch (error) {
-          console.error('[SpacesAPI] Error listing tags:', error);
+          log.error('spaces', 'Error listing tags', { error: error.message || error });
           return [];
         }
       },
@@ -852,7 +902,7 @@ class SpacesAPI {
               return a.tag.localeCompare(b.tag);
             });
         } catch (error) {
-          console.error('[SpacesAPI] Error listing all tags:', error);
+          log.error('spaces', 'Error listing all tags', { error: error.message || error });
           return [];
         }
       },
@@ -898,7 +948,7 @@ class SpacesAPI {
           
           return items;
         } catch (error) {
-          console.error('[SpacesAPI] Error finding items by tags:', error);
+          log.error('spaces', 'Error finding items by tags', { error: error.message || error });
           return [];
         }
       },
@@ -933,7 +983,7 @@ class SpacesAPI {
           
           return updatedCount;
         } catch (error) {
-          console.error('[SpacesAPI] Error renaming tag:', error);
+          log.error('spaces', 'Error renaming tag', { error: error.message || error });
           return 0;
         }
       },
@@ -966,7 +1016,7 @@ class SpacesAPI {
           
           return updatedCount;
         } catch (error) {
-          console.error('[SpacesAPI] Error deleting tag:', error);
+          log.error('spaces', 'Error deleting tag', { error: error.message || error });
           return 0;
         }
       }
@@ -993,7 +1043,7 @@ class SpacesAPI {
           const data = this._loadSmartFolders();
           return data.folders || [];
         } catch (error) {
-          console.error('[SpacesAPI] Error listing smart folders:', error);
+          log.error('spaces', 'Error listing smart folders', { error: error.message || error });
           return [];
         }
       },
@@ -1006,9 +1056,9 @@ class SpacesAPI {
       get: async (folderId) => {
         try {
           const data = this._loadSmartFolders();
-          return data.folders.find(f => f.id === folderId) || null;
+          return (data.folders || []).find(f => f.id === folderId) || null;
         } catch (error) {
-          console.error('[SpacesAPI] Error getting smart folder:', error);
+          log.error('spaces', 'Error getting smart folder', { error: error.message || error });
           return null;
         }
       },
@@ -1029,6 +1079,7 @@ class SpacesAPI {
       create: async (name, criteria, options = {}) => {
         try {
           const data = this._loadSmartFolders();
+          if (!data.folders) data.folders = [];
           
           const folder = {
             id: 'sf-' + require('crypto').randomBytes(8).toString('hex'),
@@ -1048,12 +1099,12 @@ class SpacesAPI {
           data.folders.push(folder);
           this._saveSmartFolders(data);
           
-          console.log('[SpacesAPI] Created smart folder:', folder.id, folder.name);
+          log.info('spaces', 'Created smart folder', { folderId: folder.id, name: folder.name });
           this._emit('smartFolder:created', { folder });
           
           return folder;
         } catch (error) {
-          console.error('[SpacesAPI] Error creating smart folder:', error);
+          log.error('spaces', 'Error creating smart folder', { error: error.message || error });
           throw error;
         }
       },
@@ -1067,7 +1118,7 @@ class SpacesAPI {
       update: async (folderId, updates) => {
         try {
           const data = this._loadSmartFolders();
-          const index = data.folders.findIndex(f => f.id === folderId);
+          const index = (data.folders || []).findIndex(f => f.id === folderId);
           
           if (index === -1) {
             return null;
@@ -1090,12 +1141,12 @@ class SpacesAPI {
           data.folders[index] = folder;
           this._saveSmartFolders(data);
           
-          console.log('[SpacesAPI] Updated smart folder:', folderId);
+          log.info('spaces', 'Updated smart folder', { folderId });
           this._emit('smartFolder:updated', { folderId, updates });
           
           return folder;
         } catch (error) {
-          console.error('[SpacesAPI] Error updating smart folder:', error);
+          log.error('spaces', 'Error updating smart folder', { error: error.message || error });
           return null;
         }
       },
@@ -1108,7 +1159,7 @@ class SpacesAPI {
       delete: async (folderId) => {
         try {
           const data = this._loadSmartFolders();
-          const index = data.folders.findIndex(f => f.id === folderId);
+          const index = (data.folders || []).findIndex(f => f.id === folderId);
           
           if (index === -1) {
             return false;
@@ -1117,12 +1168,12 @@ class SpacesAPI {
           data.folders.splice(index, 1);
           this._saveSmartFolders(data);
           
-          console.log('[SpacesAPI] Deleted smart folder:', folderId);
+          log.info('spaces', 'Deleted smart folder', { folderId });
           this._emit('smartFolder:deleted', { folderId });
           
           return true;
         } catch (error) {
-          console.error('[SpacesAPI] Error deleting smart folder:', error);
+          log.error('spaces', 'Error deleting smart folder', { error: error.message || error });
           return false;
         }
       },
@@ -1147,7 +1198,7 @@ class SpacesAPI {
           
           return await this._executeSmartFolderQuery(folder.criteria, options);
         } catch (error) {
-          console.error('[SpacesAPI] Error getting smart folder items:', error);
+          log.error('spaces', 'Error getting smart folder items', { error: error.message || error });
           return [];
         }
       },
@@ -1162,7 +1213,7 @@ class SpacesAPI {
         try {
           return await this._executeSmartFolderQuery(criteria, options);
         } catch (error) {
-          console.error('[SpacesAPI] Error previewing smart folder:', error);
+          log.error('spaces', 'Error previewing smart folder', { error: error.message || error });
           return [];
         }
       }
@@ -1180,7 +1231,7 @@ class SpacesAPI {
       try {
         return JSON.parse(fs.readFileSync(filePath, 'utf8'));
       } catch (error) {
-        console.error('[SpacesAPI] Error loading smart folders:', error);
+        log.error('spaces', 'Error loading smart folders', { error: error.message || error });
       }
     }
     
@@ -1354,7 +1405,7 @@ class SpacesAPI {
       
       return scoredItems;
     } catch (error) {
-      console.error('[SpacesAPI] Error searching:', error);
+      log.error('spaces', 'Error searching', { error: error.message || error });
       throw error;
     }
   }
@@ -1451,19 +1502,37 @@ class SpacesAPI {
     // Preview
     totalScore += scoreField('preview', item.preview, WEIGHTS.preview);
     
-    // Metadata fields
+    // Metadata fields (works with both v1.0 flat and v2.0 SPACE-normalized metadata)
     if (options.searchMetadata) {
+      // A: Attributes
       totalScore += scoreField('description', metadata.description, WEIGHTS.description);
       totalScore += scoreField('notes', metadata.notes, WEIGHTS.notes);
       totalScore += scoreField('author', metadata.author, WEIGHTS.author);
+      
+      // S: System Insights
       totalScore += scoreField('source', metadata.source, WEIGHTS.source);
       
-      // Also search in youtubeDescription for videos
+      // P: Physical Locations
+      totalScore += scoreField('sourceUrl', metadata.sourceUrl, WEIGHTS.source);
+      totalScore += scoreField('sourceApp', metadata.sourceApp, WEIGHTS.source);
+      
+      // C: Communication Context
+      if (metadata.participants) {
+        totalScore += scoreField('participants', metadata.participants, WEIGHTS.author);
+      }
+      if (metadata.channel) {
+        totalScore += scoreField('channel', metadata.channel, WEIGHTS.source);
+      }
+      
+      // E: Event & Sequence Data
+      if (metadata.workflowStage) {
+        totalScore += scoreField('workflowStage', metadata.workflowStage, WEIGHTS.source);
+      }
+      
+      // Extensions: YouTube
       if (metadata.youtubeDescription) {
         totalScore += scoreField('youtubeDescription', metadata.youtubeDescription, WEIGHTS.description);
       }
-      
-      // Search uploader for videos
       if (metadata.uploader) {
         totalScore += scoreField('uploader', metadata.uploader, WEIGHTS.author);
       }
@@ -1492,19 +1561,77 @@ class SpacesAPI {
   }
 
   /**
-   * Get item metadata for search (lightweight version)
+   * Get item metadata for search (normalizes v1.0 and v2.0 SPACE schema
+   * into a flat structure the scoring engine can use consistently)
    * @private
    */
   _getItemMetadataForSearch(itemId) {
     try {
       const metaPath = path.join(this.storage.itemsDir, itemId, 'metadata.json');
       if (fs.existsSync(metaPath)) {
-        return JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+        const raw = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+        return this._normalizeMetadataForSearch(raw);
       }
     } catch (error) {
       // Silently fail
     }
     return {};
+  }
+
+  /**
+   * Normalize v1.0 or v2.0 SPACE metadata into a flat object for search scoring.
+   * Reads from SPACE namespaces (attributes, system, physical, communication,
+   * events, extensions) when present, falling back to flat v1.0 fields.
+   * @private
+   */
+  _normalizeMetadataForSearch(raw) {
+    if (!raw) return {};
+
+    const attr = raw.attributes || {};
+    const sys = raw.system || {};
+    const phys = raw.physical || {};
+    const comm = raw.communication || {};
+    const evt = raw.events || {};
+    const ext = raw.extensions || {};
+
+    return {
+      // A: Attributes
+      title:       attr.title       || raw.title       || null,
+      description: attr.description || raw.description || null,
+      notes:       attr.notes       || raw.notes       || null,
+      author:      attr.author      || raw.author      || null,
+      tags:        attr.tags        || raw.tags        || [],
+      language:    attr.language    || raw.language    || null,
+
+      // S: System Insights
+      source:      sys.source       || raw.source      || null,
+
+      // P: Physical Locations
+      sourceUrl:   phys.sourceUrl   || raw.sourceUrl   || null,
+      sourceApp:   phys.sourceApp   || raw.sourceApp   || null,
+
+      // C: Communication Context
+      channel:     comm.channel     || raw.channel     || null,
+      participants: (comm.participants && comm.participants.length > 0)
+                     ? comm.participants.join(' ')
+                     : null,
+
+      // E: Event & Sequence Data
+      workflowStage: evt.workflowStage || null,
+
+      // Extensions: YouTube
+      youtubeDescription: (ext.youtube && ext.youtube.description) || raw.youtubeDescription || null,
+      uploader:           (ext.youtube && ext.youtube.uploader)    || raw.uploader           || null,
+
+      // GSX Push metadata (needed by gsx.* methods that read via _getItemMetadataForSearch)
+      gsxPush: raw.gsxPush || null,
+
+      // Data Source metadata
+      dataSource: raw.dataSource || null,
+
+      // Pass-through for anything else the scorer might need
+      _raw: raw
+    };
   }
 
   /**
@@ -1698,7 +1825,7 @@ class SpacesAPI {
         .sort((a, b) => b.count - a.count)
         .slice(0, limit);
     } catch (error) {
-      console.error('[SpacesAPI] Error getting search suggestions:', error);
+      log.error('spaces', 'Error getting search suggestions', { error: error.message || error });
       return [];
     }
   }
@@ -1721,7 +1848,7 @@ class SpacesAPI {
         try {
           return this.storage.getSpaceMetadata(spaceId);
         } catch (error) {
-          console.error('[SpacesAPI] Error getting space metadata:', error);
+          log.error('spaces', 'Error getting space metadata', { error: error.message || error });
           return null;
         }
       },
@@ -1740,7 +1867,7 @@ class SpacesAPI {
           }
           return updated;
         } catch (error) {
-          console.error('[SpacesAPI] Error updating space metadata:', error);
+          log.error('spaces', 'Error updating space metadata', { error: error.message || error });
           return null;
         }
       },
@@ -1755,7 +1882,7 @@ class SpacesAPI {
         try {
           return this.storage.getFileMetadata(spaceId, filePath);
         } catch (error) {
-          console.error('[SpacesAPI] Error getting file metadata:', error);
+          log.error('spaces', 'Error getting file metadata', { error: error.message || error });
           return null;
         }
       },
@@ -1771,7 +1898,7 @@ class SpacesAPI {
         try {
           return this.storage.setFileMetadata(spaceId, filePath, data);
         } catch (error) {
-          console.error('[SpacesAPI] Error setting file metadata:', error);
+          log.error('spaces', 'Error setting file metadata', { error: error.message || error });
           return null;
         }
       },
@@ -1787,7 +1914,7 @@ class SpacesAPI {
         try {
           return this.storage.setAssetMetadata(spaceId, assetType, data);
         } catch (error) {
-          console.error('[SpacesAPI] Error setting asset metadata:', error);
+          log.error('spaces', 'Error setting asset metadata', { error: error.message || error });
           return null;
         }
       },
@@ -1804,7 +1931,7 @@ class SpacesAPI {
         try {
           return this.storage.setApproval(spaceId, itemType, itemId, approved);
         } catch (error) {
-          console.error('[SpacesAPI] Error setting approval:', error);
+          log.error('spaces', 'Error setting approval', { error: error.message || error });
           return null;
         }
       },
@@ -1817,9 +1944,9 @@ class SpacesAPI {
        */
       addVersion: async (spaceId, versionData) => {
         try {
-          return this.storage.addVersion(spaceId, versionData);
+          return await this.storage.addVersion(spaceId, versionData);
         } catch (error) {
-          console.error('[SpacesAPI] Error adding version:', error);
+          log.error('spaces', 'Error adding version', { error: error.message || error });
           return null;
         }
       },
@@ -1834,7 +1961,7 @@ class SpacesAPI {
         try {
           return this.storage.updateProjectConfig(spaceId, config);
         } catch (error) {
-          console.error('[SpacesAPI] Error updating project config:', error);
+          log.error('spaces', 'Error updating project config', { error: error.message || error });
           return null;
         }
       }
@@ -1867,7 +1994,7 @@ class SpacesAPI {
        */
       list: async (spaceId, subPath = '') => {
         try {
-          const spacePath = path.join(this.storage.spacesDir, spaceId, subPath);
+          const spacePath = this._resolveSpaceFilePath(spaceId, subPath);
           
           if (!fs.existsSync(spacePath)) {
             return [];
@@ -1882,7 +2009,8 @@ class SpacesAPI {
             relativePath: path.join(subPath, entry.name)
           }));
         } catch (error) {
-          console.error('[SpacesAPI] Error listing files:', error);
+          if (error.message === 'Path escapes space directory') throw error;
+          log.error('spaces', 'Error listing files', { error: error.message || error });
           return [];
         }
       },
@@ -1895,7 +2023,7 @@ class SpacesAPI {
        */
       read: async (spaceId, filePath) => {
         try {
-          const fullPath = path.join(this.storage.spacesDir, spaceId, filePath);
+          const fullPath = this._resolveSpaceFilePath(spaceId, filePath);
           
           if (!fs.existsSync(fullPath)) {
             return null;
@@ -1903,7 +2031,8 @@ class SpacesAPI {
           
           return fs.readFileSync(fullPath, 'utf8');
         } catch (error) {
-          console.error('[SpacesAPI] Error reading file:', error);
+          if (error.message === 'Path escapes space directory') throw error;
+          log.error('spaces', 'Error reading file', { error: error.message || error });
           return null;
         }
       },
@@ -1922,7 +2051,7 @@ class SpacesAPI {
             await this.ensureGSXAgentSpace();
           }
           
-          const fullPath = path.join(this.storage.spacesDir, spaceId, filePath);
+          const fullPath = this._resolveSpaceFilePath(spaceId, filePath);
           const dir = path.dirname(fullPath);
           
           // Ensure directory exists
@@ -1933,7 +2062,8 @@ class SpacesAPI {
           this._emit('file:written', { spaceId, filePath });
           return true;
         } catch (error) {
-          console.error('[SpacesAPI] Error writing file:', error);
+          if (error.message === 'Path escapes space directory') throw error;
+          log.error('spaces', 'Error writing file', { error: error.message || error });
           return false;
         }
       },
@@ -1951,12 +2081,12 @@ class SpacesAPI {
             const protectedFiles = ['main.md', 'agent-profile.md'];
             const fileName = filePath.split('/').pop();
             if (protectedFiles.includes(fileName)) {
-              console.warn('[SpacesAPI] Cannot delete protected file:', fileName);
+              log.warn('spaces', 'Cannot delete protected file', { fileName });
               throw new Error(`Cannot delete ${fileName} - this is a required system file`);
             }
           }
           
-          const fullPath = path.join(this.storage.spacesDir, spaceId, filePath);
+          const fullPath = this._resolveSpaceFilePath(spaceId, filePath);
           
           if (fs.existsSync(fullPath)) {
             fs.unlinkSync(fullPath);
@@ -1966,7 +2096,8 @@ class SpacesAPI {
           
           return false;
         } catch (error) {
-          console.error('[SpacesAPI] Error deleting file:', error);
+          if (error.message === 'Path escapes space directory') throw error;
+          log.error('spaces', 'Error deleting file', { error: error.message || error });
           return false;
         }
       }
@@ -2009,7 +2140,7 @@ class SpacesAPI {
         try {
           callback(data);
         } catch (error) {
-          console.error('[SpacesAPI] Error in event listener:', error);
+          log.error('spaces', 'Error in event listener', { error: error.message || error });
         }
       });
     }
@@ -2046,7 +2177,11 @@ class SpacesAPI {
       if (fileExists) {
         const metadata = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
         
-        return metadata.tags || [];
+        // SPACE schema (v2.0+): tags in attributes.tags; v1.0: tags at root
+        // Prefer non-empty attributes.tags, then root tags, then empty
+        const attrTags = metadata.attributes && Array.isArray(metadata.attributes.tags) ? metadata.attributes.tags : [];
+        const rootTags = Array.isArray(metadata.tags) ? metadata.tags : [];
+        return attrTags.length > 0 ? attrTags : (rootTags.length > 0 ? rootTags : []);
       }
     } catch (error) {
       // Silently fail - item may not have metadata
@@ -2055,7 +2190,9 @@ class SpacesAPI {
   }
 
   /**
-   * Update item metadata file
+   * Update item metadata file.
+   * Handles both v1.0 (flat) and v2.0 (SPACE-namespaced) metadata.
+   * For v2.0, known fields are routed into the correct SPACE namespace.
    * @private
    * @param {string} itemId - The item ID
    * @param {Object} updates - Properties to update
@@ -2070,14 +2207,66 @@ class SpacesAPI {
         metadata = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
       }
       
-      // Merge updates
-      Object.assign(metadata, updates);
-      metadata.updatedAt = new Date().toISOString();
+      // Accept any SPACE schema version (2.0, 3.0, etc.) -- not just 2.0
+      const isV2 = metadata._schema && parseFloat(metadata._schema.version) >= 2.0;
+      
+      if (isV2) {
+        // Route known flat fields into their SPACE namespaces
+        if (updates.tags !== undefined) {
+          metadata.attributes = metadata.attributes || {};
+          metadata.attributes.tags = updates.tags;
+        }
+        if (updates.title !== undefined) {
+          metadata.attributes = metadata.attributes || {};
+          metadata.attributes.title = updates.title;
+        }
+        if (updates.description !== undefined) {
+          metadata.attributes = metadata.attributes || {};
+          metadata.attributes.description = updates.description;
+        }
+        if (updates.notes !== undefined) {
+          metadata.attributes = metadata.attributes || {};
+          metadata.attributes.notes = updates.notes;
+        }
+        if (updates.pinned !== undefined) {
+          metadata.attributes = metadata.attributes || {};
+          metadata.attributes.pinned = updates.pinned;
+        }
+        if (updates.author !== undefined) {
+          metadata.attributes = metadata.attributes || {};
+          metadata.attributes.author = updates.author;
+        }
+        if (updates.source !== undefined) {
+          metadata.system = metadata.system || {};
+          metadata.system.source = updates.source;
+        }
+        // Merge any SPACE namespace objects passed directly
+        for (const ns of ['system', 'physical', 'attributes', 'communication', 'events', 'extensions']) {
+          if (updates[ns] && typeof updates[ns] === 'object') {
+            metadata[ns] = { ...(metadata[ns] || {}), ...updates[ns] };
+          }
+        }
+        // Pass through non-SPACE fields (scenes, etc.)
+        const handledKeys = new Set([
+          'tags', 'title', 'description', 'notes', 'pinned', 'author', 'source',
+          'system', 'physical', 'attributes', 'communication', 'events', 'extensions'
+        ]);
+        for (const key of Object.keys(updates)) {
+          if (!handledKeys.has(key)) {
+            metadata[key] = updates[key];
+          }
+        }
+        metadata.dateModified = new Date().toISOString();
+      } else {
+        // v1.0 flat metadata: simple merge
+        Object.assign(metadata, updates);
+        metadata.updatedAt = new Date().toISOString();
+      }
       
       fs.writeFileSync(metaPath, JSON.stringify(metadata, null, 2));
       return true;
     } catch (error) {
-      console.error('[SpacesAPI] Error updating item metadata:', error);
+      log.error('spaces', 'Error updating item metadata', { error: error.message || error });
       return false;
     }
   }
@@ -2092,7 +2281,7 @@ class SpacesAPI {
     try {
       // Check if settingsManager is available
       if (!global.settingsManager) {
-        console.log('[SpacesAPI] Settings manager not available, skipping auto-metadata');
+        log.debug('spaces', 'Settings manager not available, skipping auto-metadata');
         return false;
       }
 
@@ -2124,7 +2313,7 @@ class SpacesAPI {
       
       return needsMetadata;
     } catch (error) {
-      console.error('[SpacesAPI] Error checking auto-metadata settings:', error);
+      log.error('spaces', 'Error checking auto-metadata settings', { error: error.message || error });
       return false;
     }
   }
@@ -2140,11 +2329,11 @@ class SpacesAPI {
     // Run asynchronously to not block the add operation
     setImmediate(async () => {
       try {
-        console.log('[SpacesAPI] Starting background metadata generation for:', itemId);
+        log.info('spaces', 'Starting background metadata generation', { itemId });
         
         const apiKey = global.settingsManager?.get('openaiApiKey');
         if (!apiKey) {
-          console.log('[SpacesAPI] No API key, skipping metadata generation');
+          log.debug('spaces', 'No API key, skipping metadata generation');
           return;
         }
 
@@ -2160,29 +2349,49 @@ class SpacesAPI {
           async updateItemMetadata(itemId, metadata) {
             try {
               const item = storageRef.loadItem(itemId);
-              if (!item) return { success: false, error: 'Item not found' };
+              if (!item) {
+                // Item may have been deleted between creation and metadata generation
+                log.debug('spaces', 'Skipping metadata update for deleted item', { itemId });
+                return { success: false, error: 'Item not found' };
+              }
               
               const fs = require('fs');
               const path = require('path');
               const metadataPath = path.join(storageRef.storageRoot, 'items', itemId, 'metadata.json');
               
-              // Read existing metadata and merge
+              // Read existing metadata and deep-merge (preserves tags, etc. in namespace objects)
               let existingMetadata = {};
               if (fs.existsSync(metadataPath)) {
                 try {
                   existingMetadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
                 } catch (parseErr) {
-                  console.warn('[SpacesAPI] Could not parse existing metadata:', parseErr.message);
+                  log.warn('spaces', 'Could not parse existing metadata', { error: parseErr.message });
                 }
               }
               
-              const mergedMetadata = { ...existingMetadata, ...metadata };
+              // Deep merge for SPACE namespace objects (attributes, system, etc.)
+              // so auto-metadata doesn't overwrite user-set tags
+              const mergedMetadata = { ...existingMetadata };
+              for (const key of Object.keys(metadata)) {
+                if (metadata[key] && typeof metadata[key] === 'object' && !Array.isArray(metadata[key])
+                    && existingMetadata[key] && typeof existingMetadata[key] === 'object' && !Array.isArray(existingMetadata[key])) {
+                  mergedMetadata[key] = { ...existingMetadata[key], ...metadata[key] };
+                } else {
+                  mergedMetadata[key] = metadata[key];
+                }
+              }
               fs.writeFileSync(metadataPath, JSON.stringify(mergedMetadata, null, 2));
               
               return { success: true };
             } catch (err) {
-              console.error('[SpacesAPI] updateItemMetadata error:', err);
-              return { success: false, error: err.message };
+              // Downgrade "not found" errors to debug (item deleted before metadata generation)
+              const msg = err.message || '';
+              if (msg.includes('not found') || msg.includes('ENOENT')) {
+                log.debug('spaces', 'Auto-metadata skipped (item removed)', { itemId });
+              } else {
+                log.error('spaces', 'updateItemMetadata error', { error: msg });
+              }
+              return { success: false, error: msg };
             }
           }
         };
@@ -2191,7 +2400,7 @@ class SpacesAPI {
         const result = await generator.generateMetadataForItem(itemId, apiKey);
         
         if (result.success) {
-          console.log('[SpacesAPI] Auto-generated metadata for:', itemId);
+          log.info('spaces', 'Auto-generated metadata', { itemId });
           
           // Emit event for listeners
           this._emit('item:metadata:generated', {
@@ -2200,10 +2409,10 @@ class SpacesAPI {
             metadata: result.metadata || result
           });
         } else {
-          console.error('[SpacesAPI] Failed to generate metadata:', result.error);
+          log.warn('spaces', 'Auto-metadata generation failed (non-critical)', { error: result.error });
         }
       } catch (error) {
-        console.error('[SpacesAPI] Error in background metadata generation:', error);
+        log.warn('spaces', 'Background metadata generation error (non-critical)', { error: error.message || error });
       }
     });
   }
@@ -2254,20 +2463,20 @@ class SpacesAPI {
               try {
                 existingMetadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
               } catch (parseErr) {
-                console.warn('[SpacesAPI] Could not parse existing metadata:', parseErr.message);
+                  log.warn('spaces', 'Could not parse existing metadata', { error: parseErr.message });
+                }
               }
+              
+              const mergedMetadata = { ...existingMetadata, ...metadata };
+              fs.writeFileSync(metadataPath, JSON.stringify(mergedMetadata, null, 2));
+              
+              return { success: true };
+            } catch (err) {
+              log.error('spaces', 'updateItemMetadata error', { error: err.message || err });
+              return { success: false, error: err.message };
             }
-            
-            const mergedMetadata = { ...existingMetadata, ...metadata };
-            fs.writeFileSync(metadataPath, JSON.stringify(mergedMetadata, null, 2));
-            
-            return { success: true };
-          } catch (err) {
-            console.error('[SpacesAPI] updateItemMetadata error:', err);
-            return { success: false, error: err.message };
           }
-        }
-      };
+        };
       
       const generator = new MetadataGenerator(clipboardInterface);
       const result = await generator.generateMetadataForItem(itemId, apiKey, options.customPrompt || '');
@@ -2283,9 +2492,1218 @@ class SpacesAPI {
       
       return result;
     } catch (error) {
-      console.error('[SpacesAPI] Error generating metadata:', error);
+      log.error('spaces', 'Error generating metadata', { error: error.message || error });
       return { success: false, error: error.message };
     }
+  }
+
+  // ============================================
+  // GSX PUSH API
+  // ============================================
+
+  /**
+   * GSX Push API namespace for pushing assets and spaces to GSX ecosystem
+   * All push operations go through here for consistency across all sources.
+   */
+  get gsx() {
+    // Lazy load dependencies
+    const { getOmniGraphClient, computeContentHash, computeVersionNumber } = require('./omnigraph-client');
+    const crypto = require('crypto');
+    
+    /**
+     * Verify a file URL is accessible
+     * @param {string} fileUrl - URL to verify
+     * @param {number} timeout - Timeout in ms (default 10s)
+     * @returns {Promise<Object>} { verified, statusCode, reason }
+     */
+    const verifyFileUrl = async (fileUrl, timeout = 10000) => {
+      if (!fileUrl) {
+        return { verified: false, reason: 'No file URL provided' };
+      }
+      
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeout);
+        
+        const response = await fetch(fileUrl, { 
+          method: 'HEAD',
+          signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        return { 
+          verified: response.ok,
+          statusCode: response.status,
+          reason: response.ok ? null : `HTTP ${response.status}`
+        };
+      } catch (error) {
+        if (error.name === 'AbortError') {
+          return { verified: false, reason: 'File verification timed out' };
+        }
+        return { verified: false, reason: error.message };
+      }
+    };
+    
+    return {
+      /**
+       * Get the OmniGraph client instance
+       * @returns {OmniGraphClient}
+       */
+      getClient: () => {
+        return getOmniGraphClient();
+      },
+
+      /**
+       * Initialize GSX push with endpoint, auth, and user context
+       * @param {string} endpoint - OmniGraph endpoint URL
+       * @param {Function} getAuthToken - Function that returns auth token (optional, will use settings if not provided)
+       * @param {string} currentUser - Current user email for provenance tracking
+       */
+      initialize: (endpoint, getAuthToken, currentUser) => {
+        const client = getOmniGraphClient();
+        client.setEndpoint(endpoint);
+        
+        // Set up auth token getter - use provided function or default to settings
+        if (getAuthToken) {
+          client.setAuthTokenGetter(getAuthToken);
+        } else {
+          // Default: get token from settings manager
+          const { getSettingsManager } = require('./settings-manager');
+          client.setAuthTokenGetter(() => {
+            const settings = getSettingsManager();
+            return settings.get('gsxToken') || null;
+          });
+        }
+        
+        if (currentUser) {
+          client.setCurrentUser(currentUser);
+        }
+        log.info('spaces', 'GSX Push initialized', { endpoint, user: currentUser || 'system' });
+      },
+      
+      /**
+       * Set the current user for provenance tracking
+       * @param {string} user - User email
+       */
+      setCurrentUser: (user) => {
+        const client = getOmniGraphClient();
+        client.setCurrentUser(user);
+      },
+
+      /**
+       * Push a single asset to GSX (Files + Graph)
+       * @param {string} itemId - Item ID to push
+       * @param {Object} options - Push options
+       * @param {boolean} options.isPublic - Public or private visibility
+       * @param {boolean} options.force - Force push even if already synced
+       * @returns {Promise<Object>} { success, fileUrl, graphNodeId, version, contentHash }
+       */
+      pushAsset: async (itemId, options = { isPublic: false }) => {
+        try {
+          // 1. Load item
+          const item = this.storage.loadItem(itemId);
+          if (!item) {
+            return { success: false, error: 'ITEM_NOT_FOUND', message: 'Item not found' };
+          }
+
+          // 2. Get existing GSX metadata
+          const metadata = this._getItemMetadataForSearch(itemId);
+          const gsxPush = metadata.gsxPush || {};
+          const history = gsxPush.history || [];
+
+          // 3. Compute content hash
+          let localHash;
+          try {
+            const contentPath = path.join(this.storage.storageRoot, item.contentPath);
+            localHash = computeContentHash(contentPath);
+          } catch (hashError) {
+            log.error('spaces', 'Failed to compute content hash', { error: hashError.message || hashError });
+            return { success: false, error: 'HASH_ERROR', message: 'Failed to read file content' };
+          }
+
+          // 4. Check if already synced (skip if no changes)
+          if (localHash === gsxPush.pushedHash && !options.force) {
+            return { success: true, skipped: true, message: 'Already synced', version: gsxPush.version };
+          }
+
+          // 5. Compute version number
+          const version = computeVersionNumber(history, localHash);
+
+          // 6. Push file to GSX Files API (via gsx-file-sync if available)
+          let fileUrl = gsxPush.fileUrl || null;
+          try {
+            if (global.gsxFileSync && typeof global.gsxFileSync.pushFile === 'function') {
+              const contentPath = path.join(this.storage.storageRoot, item.contentPath);
+              const remotePath = `spaces/${item.spaceId}/assets/${itemId}/${item.fileName || 'content'}`;
+              const result = await global.gsxFileSync.pushFile(contentPath, remotePath, { isPublic: options.isPublic });
+              fileUrl = result.url || result.fileUrl || fileUrl;
+            } else {
+              // Fallback: construct expected URL format
+              log.warn('spaces', 'gsxFileSync not available, using existing fileUrl');
+            }
+          } catch (fileError) {
+            if (fileError.message?.includes('413') || fileError.message?.includes('too large')) {
+              return { success: false, error: 'FILE_TOO_LARGE', message: 'File exceeds size limit (500MB)' };
+            }
+            log.warn('spaces', 'File push error (non-critical)', { error: fileError.message });
+            // Continue - we can still update graph even if file push fails
+          }
+
+          // 7. Push to Graph (ALL metadata goes to graph - two-layer architecture)
+          let graphNodeId = gsxPush.graphNodeId || null;
+          let graphPushSucceeded = false;
+          try {
+            const client = getOmniGraphClient();
+            if (client.isReady()) {
+              const assetType = item.fileCategory || item.type || 'file';
+              
+              // Get file stats for size
+              let fileSize = 0;
+              try {
+                const contentPath = path.join(this.storage.storageRoot, item.contentPath);
+                const stats = fs.statSync(contentPath);
+                fileSize = stats.size;
+              } catch (e) {
+                fileSize = item.size || 0;
+              }
+
+              // Load full space metadata so the space is created properly in the graph
+              let spaceData = null;
+              try {
+                const space = this.storage.index.spaces.find(s => s.id === item.spaceId);
+                if (space) {
+                  const spaceMetadata = this.storage.getSpaceMetadata(item.spaceId);
+                  spaceData = {
+                    id: space.id,
+                    name: space.name || space.id,
+                    description: spaceMetadata?.description || '',
+                    icon: space.icon || '',
+                    color: space.color || '#64c8ff',
+                    visibility: options.isPublic ? 'public' : 'private'
+                  };
+                }
+              } catch (spaceError) {
+                log.warn('spaces', 'Could not load space metadata', { error: spaceError.message });
+              }
+
+              // Build full asset object with all metadata
+              const assetData = {
+                id: itemId,
+                title: metadata.title || item.fileName || item.name || 'Untitled',
+                description: metadata.description || '',
+                fileName: item.fileName || '',
+                fileType: item.fileType || '',
+                fileSize: fileSize,
+                fileUrl: fileUrl || '',
+                visibility: options.isPublic ? 'public' : 'private',
+                version,
+                contentHash: localHash,
+                tags: metadata.tags || [],
+                source: metadata.source || item.source || '',
+                author: metadata.author || '',
+                notes: metadata.notes || ''
+              };
+              
+              // Add data-source-specific fields to graph node (no secrets)
+              if (item.type === 'data-source') {
+                const ds = item.dataSource || {};
+                assetData.sourceType = ds.sourceType || item.sourceType || '';
+                assetData.protocol = (ds.connection || {}).protocol || '';
+                assetData.dataSourceUrl = (ds.connection || {}).url || '';
+                assetData.authType = (ds.auth || {}).type || 'none';
+                assetData.operationsEnabled = ['create','read','update','delete','list']
+                  .filter(op => ds.operations && ds.operations[op] && ds.operations[op].enabled)
+                  .join(',');
+                assetData.dataSourceStatus = ds.status || 'inactive';
+                assetData.documentVisibility = (ds.document || {}).visibility || 'private';
+                // Use document content as description if no description set
+                if (!assetData.description && ds.document && ds.document.content) {
+                  assetData.description = ds.document.content.substring(0, 500);
+                }
+              }
+
+              // Pass full space data so the space is created with proper metadata
+              await client.upsertAsset(assetData, item.spaceId, assetType, spaceData);
+              graphNodeId = `asset_${itemId}`;
+              graphPushSucceeded = true;
+              
+              // 8. VERIFY graph write succeeded with checksum match
+              log.info('spaces', 'Verifying graph write');
+              const graphVerification = await client.verifyAsset(itemId, localHash);
+              
+              if (!graphVerification.verified) {
+                log.error('spaces', 'Graph verification failed', { reason: graphVerification.reason });
+                return {
+                  success: false,
+                  error: 'GRAPH_VERIFICATION_FAILED',
+                  message: graphVerification.reason,
+                  details: graphVerification
+                };
+              }
+              
+              log.info('spaces', 'Graph verification passed', { title: graphVerification.title });
+              
+              // Use verified fileUrl from graph if available
+              if (graphVerification.fileUrl) {
+                fileUrl = graphVerification.fileUrl;
+              }
+            } else {
+              log.warn('spaces', 'OmniGraph client not ready - skipping graph push');
+            }
+          } catch (graphError) {
+            log.error('spaces', 'Graph push error', { error: graphError.message });
+            if (graphError.message.includes('timeout')) {
+              return {
+                success: false,
+                error: 'GRAPH_TIMEOUT',
+                partial: true,
+                fileUrl,
+                graphNodeId: null,
+                version,
+                message: 'Graph update timed out. Please retry.',
+                retryable: true
+              };
+            }
+            return {
+              success: false,
+              error: 'GRAPH_ERROR',
+              message: graphError.message,
+              retryable: true
+            };
+          }
+
+          // 9. Optionally verify file URL is accessible (non-blocking)
+          let fileVerification = { verified: false, reason: 'Not checked' };
+          if (fileUrl) {
+            try {
+              fileVerification = await verifyFileUrl(fileUrl);
+              if (fileVerification.verified) {
+                log.info('spaces', 'File URL verification passed');
+              } else {
+                // File verification failure is non-fatal (might be auth required)
+                log.warn('spaces', 'File URL verification failed', { reason: fileVerification.reason });
+              }
+            } catch (e) {
+              log.warn('spaces', 'File verification skipped', { error: e.message });
+            }
+          }
+
+          // 10. Update local metadata (only after graph verification passed)
+          const newHistory = [...history];
+          if (!history.some(h => h.contentHash === localHash)) {
+            newHistory.push({
+              version,
+              contentHash: localHash,
+              pushedAt: new Date().toISOString(),
+              visibility: options.isPublic ? 'public' : 'private'
+            });
+          }
+
+          const newGsxPush = {
+            status: 'pushed',
+            fileUrl: fileUrl || null,
+            graphNodeId: graphNodeId || null,
+            visibility: options.isPublic ? 'public' : 'private',
+            version,
+            pushedHash: localHash,
+            localHash,
+            pushedAt: new Date().toISOString(),
+            pushedBy: 'desktop-app',
+            unpushedAt: null,
+            history: newHistory,
+            verification: {
+              graph: graphPushSucceeded,
+              file: fileVerification.verified,
+              verifiedAt: new Date().toISOString()
+            }
+          };
+
+          this._updateItemMetadata(itemId, { gsxPush: newGsxPush });
+
+          log.info('spaces', 'Pushed and verified asset', { itemId, version });
+          this._emit('gsx:asset:pushed', { itemId, spaceId: item.spaceId, version, fileUrl, verified: true });
+
+          return {
+            success: true,
+            verified: graphPushSucceeded,
+            fileUrl: fileUrl || null,
+            fileLink: fileUrl || null, // Alias for convenience
+            graphNodeId: graphNodeId || null,
+            version,
+            contentHash: localHash,
+            verification: {
+              graph: graphPushSucceeded,
+              graphDetails: graphPushSucceeded ? {
+                spaceId: item.spaceId,
+                assetType: item.fileCategory || item.type || 'file'
+              } : null,
+              file: fileVerification.verified,
+              fileDetails: fileVerification,
+              timestamp: new Date().toISOString()
+            }
+          };
+        } catch (error) {
+          log.error('spaces', 'Push asset error', { error: error.message || error });
+          
+          if (error.message?.includes('ENOTFOUND') || error.message?.includes('network')) {
+            return { success: false, error: 'NETWORK_ERROR', message: 'No internet connection', retryable: true };
+          }
+          
+          return { success: false, error: 'UNKNOWN', message: error.message, retryable: false };
+        }
+      },
+
+      /**
+       * Push multiple assets to GSX (bulk operation)
+       * @param {string[]} itemIds - Array of item IDs
+       * @param {Object} options - Push options
+       * @param {boolean} options.isPublic - Public or private visibility
+       * @param {Function} options.onProgress - Progress callback (current, total, item)
+       * @returns {Promise<Object>} { success, pushed: [], skipped: [], failed: [] }
+       */
+      pushAssets: async (itemIds, options = { isPublic: false, onProgress: null }) => {
+        const results = {
+          success: true,
+          pushed: [],
+          skipped: [],
+          failed: []
+        };
+
+        for (let i = 0; i < itemIds.length; i++) {
+          const itemId = itemIds[i];
+          
+          if (options.onProgress) {
+            options.onProgress(i + 1, itemIds.length, itemId);
+          }
+
+          try {
+            const result = await this.gsx.pushAsset(itemId, { isPublic: options.isPublic });
+            
+            if (result.success) {
+              if (result.skipped) {
+                results.skipped.push({ itemId, ...result });
+              } else {
+                results.pushed.push({ itemId, ...result });
+              }
+            } else {
+              results.failed.push({ itemId, ...result });
+            }
+          } catch (error) {
+            results.failed.push({ itemId, error: error.message });
+          }
+        }
+
+        results.success = results.pushed.length > 0 || results.skipped.length > 0;
+        
+        log.info('spaces', 'Bulk push completed', {
+          pushed: results.pushed.length,
+          skipped: results.skipped.length,
+          failed: results.failed.length
+        });
+
+        return results;
+      },
+
+      /**
+       * Push a space to GSX (as a Note in the graph)
+       * @param {string} spaceId - Space ID
+       * @param {Object} options - Push options
+       * @param {boolean} options.isPublic - Public or private visibility
+       * @param {boolean} options.includeAssets - Also push all assets in space
+       * @param {Function} options.onProgress - Progress callback
+       * @returns {Promise<Object>} { success, graphNodeId, assetsPushed }
+       */
+      pushSpace: async (spaceId, options = { isPublic: false, includeAssets: false, onProgress: null }) => {
+        try {
+          // 1. Get space data
+          const space = await this.get(spaceId);
+          if (!space) {
+            return { success: false, error: 'SPACE_NOT_FOUND', message: 'Space not found' };
+          }
+
+          // 2. Push space to graph
+          let graphNodeId;
+          try {
+            const client = getOmniGraphClient();
+            if (client.isReady()) {
+              await client.upsertSpace({
+                id: spaceId,
+                name: space.name,
+                color: space.color,
+                visibility: options.isPublic ? 'public' : 'private'
+              });
+              graphNodeId = `space_${spaceId}`;
+            }
+          } catch (graphError) {
+            log.error('spaces', 'Space graph push error', { error: graphError.message });
+          }
+
+          // 3. Optionally push all assets
+          let assetResults = { pushed: [], skipped: [], failed: [] };
+          if (options.includeAssets) {
+            const items = await this.items.list(spaceId);
+            const itemIds = items.map(i => i.id);
+            
+            assetResults = await this.gsx.pushAssets(itemIds, {
+              isPublic: options.isPublic,
+              onProgress: options.onProgress
+            });
+          }
+
+          // 4. Update space metadata
+          const spaceGsxPush = {
+            status: 'pushed',
+            graphNodeId,
+            visibility: options.isPublic ? 'public' : 'private',
+            pushedAt: new Date().toISOString(),
+            assetsPushed: assetResults.pushed.length,
+            assetsTotal: options.includeAssets ? 
+              (assetResults.pushed.length + assetResults.skipped.length + assetResults.failed.length) : 0
+          };
+
+          await this.metadata.updateSpace(spaceId, { gsxPush: spaceGsxPush });
+
+          log.info('spaces', 'Pushed space', { spaceId });
+          this._emit('gsx:space:pushed', { spaceId, assetsPushed: assetResults.pushed.length });
+
+          return {
+            success: true,
+            graphNodeId,
+            assetsPushed: assetResults.pushed.length,
+            assetsSkipped: assetResults.skipped.length,
+            assetsFailed: assetResults.failed.length
+          };
+        } catch (error) {
+          log.error('spaces', 'Push space error', { error: error.message || error });
+          return { success: false, error: 'UNKNOWN', message: error.message };
+        }
+      },
+
+      /**
+       * Unpush an asset - marks as unpublished in graph, keeps file
+       * @param {string} itemId - Item ID to unpush
+       * @returns {Promise<Object>} { success, message }
+       */
+      unpushAsset: async (itemId) => {
+        try {
+          const item = this.storage.loadItem(itemId);
+          if (!item) {
+            return { success: false, error: 'ITEM_NOT_FOUND', message: 'Item not found' };
+          }
+
+          const metadata = this._getItemMetadataForSearch(itemId);
+          const gsxPush = metadata.gsxPush;
+          
+          if (!gsxPush || gsxPush.status === 'not_pushed') {
+            return { success: false, error: 'NOT_PUSHED', message: 'Item is not pushed to GSX' };
+          }
+
+          // Soft-delete in graph
+          try {
+            const client = getOmniGraphClient();
+            if (client.isReady()) {
+              await client.softDeleteAsset(itemId);
+            }
+          } catch (graphError) {
+            log.error('spaces', 'Graph soft-delete error', { error: graphError.message });
+          }
+
+          // Update local metadata
+          const newGsxPush = {
+            ...gsxPush,
+            status: 'unpushed',
+            unpushedAt: new Date().toISOString()
+          };
+
+          this._updateItemMetadata(itemId, { gsxPush: newGsxPush });
+
+          log.info('spaces', 'Unpushed asset', { itemId });
+          this._emit('gsx:asset:unpushed', { itemId, spaceId: item.spaceId });
+
+          return { success: true, message: 'Asset unpushed from GSX' };
+        } catch (error) {
+          log.error('spaces', 'Unpush asset error', { error: error.message || error });
+          return { success: false, error: 'UNKNOWN', message: error.message };
+        }
+      },
+
+      /**
+       * Unpush multiple assets
+       * @param {string[]} itemIds - Item IDs to unpush
+       * @returns {Promise<Object>} { success, unpushed: [], failed: [] }
+       */
+      unpushAssets: async (itemIds) => {
+        const results = { success: true, unpushed: [], failed: [] };
+
+        for (const itemId of itemIds) {
+          const result = await this.gsx.unpushAsset(itemId);
+          if (result.success) {
+            results.unpushed.push(itemId);
+          } else {
+            results.failed.push({ itemId, ...result });
+          }
+        }
+
+        results.success = results.unpushed.length > 0;
+        return results;
+      },
+
+      /**
+       * Unpush a space - marks as unpublished, optionally unpush assets
+       * @param {string} spaceId - Space ID
+       * @param {Object} options
+       * @param {boolean} options.includeAssets - Also unpush all assets
+       */
+      unpushSpace: async (spaceId, options = { includeAssets: false }) => {
+        try {
+          // Soft-delete space in graph
+          try {
+            const client = getOmniGraphClient();
+            if (client.isReady()) {
+              await client.softDeleteSpace(spaceId, options.includeAssets);
+            }
+          } catch (graphError) {
+            log.error('spaces', 'Space soft-delete error', { error: graphError.message });
+          }
+
+          // Optionally unpush all assets
+          if (options.includeAssets) {
+            const items = await this.items.list(spaceId);
+            for (const item of items) {
+              await this.gsx.unpushAsset(item.id);
+            }
+          }
+
+          // Update space metadata
+          const spaceMetadata = await this.metadata.getSpace(spaceId);
+          await this.metadata.updateSpace(spaceId, {
+            gsxPush: {
+              ...(spaceMetadata?.gsxPush || {}),
+              status: 'unpushed',
+              unpushedAt: new Date().toISOString()
+            }
+          });
+
+          log.info('spaces', 'Unpushed space', { spaceId });
+          this._emit('gsx:space:unpushed', { spaceId });
+
+          return { success: true };
+        } catch (error) {
+          log.error('spaces', 'Unpush space error', { error: error.message || error });
+          return { success: false, error: 'UNKNOWN', message: error.message };
+        }
+      },
+
+      /**
+       * Change visibility of a pushed asset (public <-> private)
+       * @param {string} itemId - Item ID
+       * @param {boolean} isPublic - New visibility
+       * @returns {Promise<Object>} { success, newVisibility, fileUrl }
+       */
+      changeVisibility: async (itemId, isPublic) => {
+        try {
+          const item = this.storage.loadItem(itemId);
+          if (!item) {
+            return { success: false, error: 'ITEM_NOT_FOUND', message: 'Item not found' };
+          }
+
+          const metadata = this._getItemMetadataForSearch(itemId);
+          const gsxPush = metadata.gsxPush;
+
+          if (!gsxPush || gsxPush.status !== 'pushed') {
+            return { success: false, error: 'NOT_PUSHED', message: 'Item must be pushed first' };
+          }
+
+          // Update in graph
+          try {
+            const client = getOmniGraphClient();
+            if (client.isReady()) {
+              await client.changeAssetVisibility(itemId, isPublic ? 'public' : 'private');
+            }
+          } catch (graphError) {
+            log.error('spaces', 'Visibility change graph error', { error: graphError.message });
+          }
+
+          // Update local metadata
+          const newGsxPush = {
+            ...gsxPush,
+            visibility: isPublic ? 'public' : 'private'
+          };
+
+          this._updateItemMetadata(itemId, { gsxPush: newGsxPush });
+
+          this._emit('gsx:asset:visibility:changed', { itemId, visibility: newGsxPush.visibility });
+
+          return {
+            success: true,
+            newVisibility: newGsxPush.visibility,
+            fileUrl: gsxPush.fileUrl
+          };
+        } catch (error) {
+          log.error('spaces', 'Change visibility error', { error: error.message || error });
+          return { success: false, error: 'UNKNOWN', message: error.message };
+        }
+      },
+
+      /**
+       * Change visibility for multiple assets
+       * @param {string[]} itemIds - Item IDs
+       * @param {boolean} isPublic - New visibility
+       */
+      changeVisibilityBulk: async (itemIds, isPublic) => {
+        const results = { success: true, changed: [], failed: [] };
+
+        for (const itemId of itemIds) {
+          const result = await this.gsx.changeVisibility(itemId, isPublic);
+          if (result.success) {
+            results.changed.push(itemId);
+          } else {
+            results.failed.push({ itemId, ...result });
+          }
+        }
+
+        results.success = results.changed.length > 0;
+        return results;
+      },
+
+      /**
+       * Get push status for an item
+       * @param {string} itemId - Item ID
+       * @returns {Promise<Object>} { status, fileUrl, graphNodeId, version, pushedAt, hasLocalChanges }
+       */
+      getPushStatus: async (itemId) => {
+        try {
+          const item = this.storage.loadItem(itemId);
+          if (!item) {
+            return { status: 'not_found', hasLocalChanges: false };
+          }
+
+          const metadata = this._getItemMetadataForSearch(itemId);
+          const gsxPush = metadata.gsxPush || {};
+
+          // Compute current local hash
+          let localHash;
+          try {
+            const contentPath = path.join(this.storage.storageRoot, item.contentPath);
+            localHash = computeContentHash(contentPath);
+          } catch (e) {
+            localHash = gsxPush.localHash;
+          }
+
+          // Determine status
+          let status = 'not_pushed';
+          let hasLocalChanges = false;
+
+          if (gsxPush.unpushedAt) {
+            status = 'unpushed';
+          } else if (gsxPush.pushedHash) {
+            if (gsxPush.pushedHash === localHash) {
+              status = 'pushed';
+            } else {
+              status = 'changed_locally';
+              hasLocalChanges = true;
+            }
+          }
+
+          return {
+            status,
+            fileUrl: gsxPush.fileUrl,
+            shareLink: gsxPush.shareLink || gsxPush.fileUrl,
+            graphNodeId: gsxPush.graphNodeId,
+            version: gsxPush.version,
+            visibility: gsxPush.visibility,
+            pushedAt: gsxPush.pushedAt,
+            pushedHash: gsxPush.pushedHash,
+            localHash,
+            hasLocalChanges,
+            history: gsxPush.history || []
+          };
+        } catch (error) {
+          log.error('spaces', 'Get push status error', { error: error.message || error });
+          return { status: 'error', error: error.message };
+        }
+      },
+
+      /**
+       * Get push statuses for multiple items (efficient bulk query)
+       * @param {string[]} itemIds - Array of item IDs
+       * @returns {Promise<Object>} Map of itemId -> pushStatus
+       */
+      getPushStatuses: async (itemIds) => {
+        const statuses = {};
+        for (const itemId of itemIds) {
+          statuses[itemId] = await this.gsx.getPushStatus(itemId);
+        }
+        return statuses;
+      },
+
+      /**
+       * Update push status (for external sources that pushed directly)
+       * @param {string} itemId - Item ID
+       * @param {Object} pushData - Push metadata to store
+       */
+      updatePushStatus: async (itemId, pushData) => {
+        const metadata = this._getItemMetadataForSearch(itemId);
+        const existingGsxPush = metadata.gsxPush || {};
+
+        const newGsxPush = {
+          ...existingGsxPush,
+          ...pushData,
+          updatedAt: new Date().toISOString()
+        };
+
+        this._updateItemMetadata(itemId, { gsxPush: newGsxPush });
+        this._emit('gsx:status:updated', { itemId, status: newGsxPush.status });
+
+        return { success: true };
+      },
+
+      /**
+       * Check which items have local changes since last push
+       * @param {string[]} itemIds - Item IDs to check
+       * @returns {Promise<Object>} { changed: [], unchanged: [], notPushed: [] }
+       */
+      checkLocalChanges: async (itemIds) => {
+        const result = { changed: [], unchanged: [], notPushed: [] };
+
+        for (const itemId of itemIds) {
+          const status = await this.gsx.getPushStatus(itemId);
+          
+          if (status.status === 'not_pushed') {
+            result.notPushed.push(itemId);
+          } else if (status.hasLocalChanges) {
+            result.changed.push(itemId);
+          } else {
+            result.unchanged.push(itemId);
+          }
+        }
+
+        return result;
+      },
+
+      /**
+       * Get all links for a pushed asset
+       * @param {string} itemId - Item ID
+       * @returns {Promise<Object>} { fileUrl, graphNodeId, shareLink }
+       */
+      getLinks: async (itemId) => {
+        const status = await this.gsx.getPushStatus(itemId);
+        
+        if (status.status === 'not_pushed' || status.status === 'not_found') {
+          return { error: 'Item not pushed to GSX' };
+        }
+
+        return {
+          fileUrl: status.fileUrl,
+          graphNodeId: status.graphNodeId,
+          shareLink: status.shareLink || status.fileUrl
+        };
+      },
+
+      /**
+       * Generate a formatted share link for an asset
+       * @param {string} itemId - Item ID
+       * @returns {Promise<Object>} Share link info
+       */
+      getShareLink: async (itemId) => {
+        const status = await this.gsx.getPushStatus(itemId);
+        
+        if (!status.fileUrl) {
+          return { error: 'Item not pushed to GSX' };
+        }
+
+        if (status.visibility === 'public') {
+          return { url: status.fileUrl, requiresAuth: false };
+        }
+
+        return {
+          url: status.fileUrl,
+          requiresAuth: true,
+          message: 'This file is private. Recipient needs GSX access.'
+        };
+      },
+
+      /**
+       * Copy link to clipboard (utility - returns link for UI to copy)
+       * @param {string} itemId - Item ID
+       * @param {string} linkType - 'file' | 'graph' | 'share'
+       * @returns {Promise<Object>} { link, copied: false }
+       */
+      getLink: async (itemId, linkType = 'file') => {
+        const links = await this.gsx.getLinks(itemId);
+        
+        if (links.error) {
+          return { error: links.error };
+        }
+
+        let link;
+        switch (linkType) {
+          case 'graph':
+            link = links.graphNodeId;
+            break;
+          case 'share':
+            link = links.shareLink;
+            break;
+          case 'file':
+          default:
+            link = links.fileUrl;
+        }
+
+        return { link, type: linkType };
+      }
+    };
+  }
+
+  // ============================================
+  // SHARING (Graph-based permission layer)
+  // ============================================
+
+  /**
+   * Sharing namespace -- manages SHARED_WITH relationships in the graph
+   * and syncs sharing state to local space metadata.
+   * Part of the v3 Space API.
+   */
+  get sharing() {
+    // Lazy load the same way as the gsx getter
+    const { getOmniGraphClient } = require('./omnigraph-client');
+
+    return {
+      /**
+       * Share a space with a user
+       * @param {string} spaceId - Space ID
+       * @param {string} email - Email of the person to share with
+       * @param {string} permission - 'read', 'write', or 'admin'
+       * @param {Object} [options] - { expiresIn (seconds), note }
+       * @returns {Promise<Object>} Share result
+       */
+      shareSpace: async (spaceId, email, permission, options = {}) => {
+        try {
+          // Validate space exists
+          const space = this.storage.index.spaces.find(s => s.id === spaceId);
+          if (!space) {
+            return { success: false, error: 'SPACE_NOT_FOUND', message: 'Space not found' };
+          }
+
+          // Validate inputs
+          if (!['read', 'write', 'admin'].includes(permission)) {
+            return { success: false, error: 'INVALID_PERMISSION', message: 'Permission must be read, write, or admin' };
+          }
+          if (!email || !email.includes('@')) {
+            return { success: false, error: 'INVALID_EMAIL', message: 'Valid email address required' };
+          }
+
+          // Calculate TTL
+          const expiresAt = options.expiresIn ? Date.now() + (options.expiresIn * 1000) : null;
+
+          // Write to graph
+          let graphResult = null;
+          try {
+            const client = getOmniGraphClient();
+            if (client.isReady()) {
+              // Ensure space node exists in graph
+              const spaceMetadata = this.storage.getSpaceMetadata(spaceId);
+              await client.upsertSpace({
+                id: spaceId,
+                name: space.name || spaceId,
+                description: spaceMetadata?.attributes?.description || '',
+                icon: space.icon || '',
+                color: space.color || '#64c8ff',
+                visibility: spaceMetadata?.attributes?.visibility || 'private'
+              });
+
+              graphResult = await client.shareWith('Space', spaceId, email, permission, {
+                expiresAt,
+                note: options.note || '',
+                grantedBy: client.currentUser
+              });
+            }
+          } catch (graphError) {
+            log.error('spaces', 'Sharing graph error', { error: graphError.message, stack: graphError.stack });
+            // Store error for diagnostics but continue -- local metadata still gets updated
+            graphError._shareGraphError = graphError.message;
+          }
+
+          // Update local metadata
+          const shareEntry = {
+            email,
+            name: email.split('@')[0],
+            permission,
+            grantedAt: new Date().toISOString(),
+            expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
+            grantedBy: graphResult?.grantedBy || 'system'
+          };
+
+          const spaceMetadata = this.storage.getSpaceMetadata(spaceId);
+          const sharedWith = (spaceMetadata?.communication?.sharedWith || [])
+            .filter(s => s.email !== email); // Remove existing entry for this email
+          sharedWith.push(shareEntry);
+
+          this.storage.updateSpaceMetadata(spaceId, {
+            communication: { ...spaceMetadata?.communication, sharedWith }
+          });
+
+          this._emit('sharing:space:shared', { spaceId, email, permission });
+
+          // Include graph diagnostics
+          const client = getOmniGraphClient();
+          return {
+            success: true,
+            share: shareEntry,
+            graphSynced: graphResult !== null,
+            _debug: {
+              clientReady: client.isReady(),
+              schemaError: client._permissionSchemaError || null,
+              schemaEnsured: !!client._permissionSchemaEnsured
+            }
+          };
+        } catch (error) {
+          log.error('spaces', 'Share space error', { error: error.message || error });
+          return { success: false, error: 'UNKNOWN', message: error.message };
+        }
+      },
+
+      /**
+       * Revoke a user's access to a space
+       * @param {string} spaceId - Space ID
+       * @param {string} email - Email of the person to unshare from
+       * @returns {Promise<Object>} Unshare result
+       */
+      unshareSpace: async (spaceId, email) => {
+        try {
+          // Remove from graph
+          let graphResult = null;
+          try {
+            const client = getOmniGraphClient();
+            if (client.isReady()) {
+              graphResult = await client.unshare('Space', spaceId, email);
+            }
+          } catch (graphError) {
+            log.error('spaces', 'Unshare graph error', { error: graphError.message });
+          }
+
+          // Update local metadata
+          const spaceMetadata = this.storage.getSpaceMetadata(spaceId);
+          if (spaceMetadata) {
+            const sharedWith = (spaceMetadata?.communication?.sharedWith || [])
+              .filter(s => s.email !== email);
+            this.storage.updateSpaceMetadata(spaceId, {
+              communication: { ...spaceMetadata?.communication, sharedWith }
+            });
+          }
+
+          this._emit('sharing:space:unshared', { spaceId, email });
+
+          return { success: true, graphSynced: graphResult !== null };
+        } catch (error) {
+          log.error('spaces', 'Unshare space error', { error: error.message || error });
+          return { success: false, error: 'UNKNOWN', message: error.message };
+        }
+      },
+
+      /**
+       * List who a space is shared with (active, non-expired)
+       * @param {string} spaceId - Space ID
+       * @returns {Promise<Object>} { shares: [...] }
+       */
+      getSpaceSharedWith: async (spaceId) => {
+        try {
+          // Try graph first for authoritative data
+          let shares = null;
+          try {
+            const client = getOmniGraphClient();
+            if (client.isReady()) {
+              shares = await client.getSharedWith('Space', spaceId);
+            }
+          } catch (graphError) {
+            log.warn('spaces', 'Could not read shares from graph', { error: graphError.message });
+          }
+
+          // Fallback to local metadata
+          if (!shares) {
+            const spaceMetadata = this.storage.getSpaceMetadata(spaceId);
+            const now = Date.now();
+            shares = (spaceMetadata?.communication?.sharedWith || [])
+              .filter(s => !s.expiresAt || new Date(s.expiresAt).getTime() > now);
+          }
+
+          // Prune expired entries from local metadata
+          const spaceMetadata = this.storage.getSpaceMetadata(spaceId);
+          if (spaceMetadata?.communication?.sharedWith?.length) {
+            const now = Date.now();
+            const active = spaceMetadata.communication.sharedWith
+              .filter(s => !s.expiresAt || new Date(s.expiresAt).getTime() > now);
+            if (active.length !== spaceMetadata.communication.sharedWith.length) {
+              this.storage.updateSpaceMetadata(spaceId, {
+                communication: { ...spaceMetadata.communication, sharedWith: active }
+              });
+            }
+          }
+
+          return { shares: shares || [] };
+        } catch (error) {
+          log.error('spaces', 'Get space shared with error', { error: error.message || error });
+          return { shares: [], error: error.message };
+        }
+      },
+
+      /**
+       * Share an item/asset with a user
+       * @param {string} itemId - Item ID
+       * @param {string} email - Email of the person to share with
+       * @param {string} permission - 'read', 'write', or 'admin'
+       * @param {Object} [options] - { expiresIn (seconds), note }
+       * @returns {Promise<Object>} Share result
+       */
+      shareAsset: async (itemId, email, permission, options = {}) => {
+        try {
+          // Validate item exists
+          const item = this.storage.loadItem(itemId);
+          if (!item) {
+            return { success: false, error: 'ITEM_NOT_FOUND', message: 'Item not found' };
+          }
+
+          if (!['read', 'write', 'admin'].includes(permission)) {
+            return { success: false, error: 'INVALID_PERMISSION', message: 'Permission must be read, write, or admin' };
+          }
+          if (!email || !email.includes('@')) {
+            return { success: false, error: 'INVALID_EMAIL', message: 'Valid email address required' };
+          }
+
+          const expiresAt = options.expiresIn ? Date.now() + (options.expiresIn * 1000) : null;
+
+          // Write to graph
+          let graphResult = null;
+          try {
+            const client = getOmniGraphClient();
+            if (client.isReady()) {
+              graphResult = await client.shareWith('Asset', itemId, email, permission, {
+                expiresAt,
+                note: options.note || '',
+                grantedBy: client.currentUser
+              });
+            }
+          } catch (graphError) {
+            log.error('spaces', 'Share asset graph error', { error: graphError.message });
+          }
+
+          const shareEntry = {
+            email,
+            name: email.split('@')[0],
+            permission,
+            grantedAt: new Date().toISOString(),
+            expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
+            grantedBy: graphResult?.grantedBy || 'system'
+          };
+
+          // Update item metadata with share info
+          const metadata = this._getItemMetadataForSearch(itemId);
+          const shares = (metadata?.shares || []).filter(s => s.email !== email);
+          shares.push(shareEntry);
+          this._updateItemMetadata(itemId, { shares });
+
+          this._emit('sharing:asset:shared', { itemId, email, permission });
+
+          return {
+            success: true,
+            share: shareEntry,
+            graphSynced: graphResult !== null
+          };
+        } catch (error) {
+          log.error('spaces', 'Share asset error', { error: error.message || error });
+          return { success: false, error: 'UNKNOWN', message: error.message };
+        }
+      },
+
+      /**
+       * Revoke a user's access to an item/asset
+       * @param {string} itemId - Item ID
+       * @param {string} email - Email of the person to unshare from
+       * @returns {Promise<Object>} Unshare result
+       */
+      unshareAsset: async (itemId, email) => {
+        try {
+          let graphResult = null;
+          try {
+            const client = getOmniGraphClient();
+            if (client.isReady()) {
+              graphResult = await client.unshare('Asset', itemId, email);
+            }
+          } catch (graphError) {
+            log.error('spaces', 'Unshare asset graph error', { error: graphError.message });
+          }
+
+          // Update item metadata
+          const metadata = this._getItemMetadataForSearch(itemId);
+          if (metadata) {
+            const shares = (metadata?.shares || []).filter(s => s.email !== email);
+            this._updateItemMetadata(itemId, { shares });
+          }
+
+          this._emit('sharing:asset:unshared', { itemId, email });
+
+          return { success: true, graphSynced: graphResult !== null };
+        } catch (error) {
+          log.error('spaces', 'Unshare asset error', { error: error.message || error });
+          return { success: false, error: 'UNKNOWN', message: error.message };
+        }
+      },
+
+      /**
+       * List who an item/asset is shared with (active, non-expired)
+       * @param {string} itemId - Item ID
+       * @returns {Promise<Object>} { shares: [...] }
+       */
+      getAssetSharedWith: async (itemId) => {
+        try {
+          let shares = null;
+          try {
+            const client = getOmniGraphClient();
+            if (client.isReady()) {
+              shares = await client.getSharedWith('Asset', itemId);
+            }
+          } catch (graphError) {
+            log.warn('spaces', 'Could not read asset shares from graph', { error: graphError.message });
+          }
+
+          if (!shares) {
+            const metadata = this._getItemMetadataForSearch(itemId);
+            const now = Date.now();
+            shares = (metadata?.shares || [])
+              .filter(s => !s.expiresAt || new Date(s.expiresAt).getTime() > now);
+          }
+
+          return { shares: shares || [] };
+        } catch (error) {
+          log.error('spaces', 'Get asset shared with error', { error: error.message || error });
+          return { shares: [], error: error.message };
+        }
+      },
+
+      /**
+       * Get all spaces and assets shared with the current user
+       * @returns {Promise<Object>} { shares: [...] }
+       */
+      getSharedWithMe: async () => {
+        try {
+          const client = getOmniGraphClient();
+          if (!client.isReady()) {
+            return { shares: [], error: 'Graph not connected' };
+          }
+
+          const email = client.currentUser;
+          if (!email || !email.includes('@')) {
+            return { shares: [], error: 'No valid user email configured' };
+          }
+
+          const shares = await client.getSharedWithMe(email);
+          return { shares: shares || [] };
+        } catch (error) {
+          log.error('spaces', 'Get shared with me error', { error: error.message || error });
+          return { shares: [], error: error.message };
+        }
+      }
+    };
   }
 
   // ============================================
@@ -2320,7 +3738,7 @@ class SpacesAPI {
    */
   reload() {
     this.storage.reloadIndex();
-    console.log('[SpacesAPI] Index reloaded from disk');
+    log.info('spaces', 'Index reloaded from disk');
   }
   
   // ============================================

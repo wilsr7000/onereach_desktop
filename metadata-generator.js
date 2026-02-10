@@ -8,23 +8,18 @@
  * - GPT-5.2: Large context text tasks (code, text, data, HTML, URLs, audio transcripts)
  */
 
-const ClaudeAPI = require('./claude-api');
-const { getOpenAIAPI } = require('./openai-api');
-const { getUnifiedClaudeService } = require('./unified-claude');
+const ai = require('./lib/ai-service');
 const fs = require('fs');
 const path = require('path');
 
 class MetadataGenerator {
   constructor(clipboardManager) {
     this.clipboardManager = clipboardManager;
-    this.claudeAPI = new ClaudeAPI();
-    this.openaiAPI = getOpenAIAPI();
     
-    // Model configuration
-    // Note: Vision/voice tasks can use specialized models, but GSX Create only uses Claude 4.5 Opus/Sonnet
+    // Model profiles (using ai-service profile names)
     this.models = {
-      vision: 'claude-sonnet-4-5-20250929',  // Claude Sonnet 4.5 for vision tasks
-      text: 'gpt-5.2'                         // GPT-5.2 for large context text (allowed for non-GSX tasks)
+      vision: 'vision',    // Vision tasks use 'vision' profile
+      text: 'large'        // Large context text tasks use 'large' profile
     };
   }
   
@@ -98,22 +93,26 @@ class MetadataGenerator {
   async generateImageMetadata(item, imageData, apiKey, spaceContext) {
     const prompt = this.buildImagePrompt(item, spaceContext);
     
-    const messageContent = [
-      {
-        type: 'text',
-        text: prompt
-      },
-      {
-        type: 'image',
-        source: {
-          type: 'base64',
-          media_type: this.extractMediaType(imageData),
-          data: this.extractBase64(imageData)
-        }
-      }
-    ];
+    const base64Data = this.extractBase64(imageData);
+    const mediaType = this.extractMediaType(imageData);
 
-    return await this.callClaude(messageContent, apiKey);
+    const result = await ai.vision(base64Data, prompt, {
+      profile: 'vision',
+      maxTokens: 1024,
+      feature: 'metadata-generation',
+    });
+
+    // Parse JSON from response
+    const jsonMatch = result.content.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const metadata = JSON.parse(jsonMatch[0]);
+      metadata._model_used = result.model;
+      metadata._method = 'ai-service-vision';
+      metadata._cost = result.cost || 0;
+      return metadata;
+    } else {
+      throw new Error('No valid JSON in vision response');
+    }
   }
 
   buildImagePrompt(item, spaceContext) {
@@ -178,27 +177,45 @@ Respond with JSON only:
   async generateVideoMetadata(item, thumbnail, apiKey, spaceContext) {
     const prompt = this.buildVideoPrompt(item, spaceContext);
     
-    const messageContent = thumbnail ? [
-      {
-        type: 'text',
-        text: prompt
-      },
-      {
-        type: 'image',
-        source: {
-          type: 'base64',
-          media_type: 'image/jpeg',
-          data: this.extractBase64(thumbnail)
-        }
-      }
-    ] : [
-      {
-        type: 'text',
-        text: prompt
-      }
-    ];
+    if (thumbnail) {
+      // Use vision API if thumbnail available
+      const base64Data = this.extractBase64(thumbnail);
+      const result = await ai.vision(base64Data, prompt, {
+        profile: 'vision',
+        maxTokens: 1024,
+        feature: 'metadata-generation',
+      });
 
-    return await this.callClaude(messageContent, apiKey);
+      const jsonMatch = result.content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const metadata = JSON.parse(jsonMatch[0]);
+        metadata._model_used = result.model;
+        metadata._method = 'ai-service-vision';
+        metadata._cost = result.cost || 0;
+        return metadata;
+      } else {
+        throw new Error('No valid JSON in vision response');
+      }
+    } else {
+      // Text-only, use chat
+      const result = await ai.chat({
+        profile: 'standard',
+        messages: [{ role: 'user', content: prompt }],
+        maxTokens: 1024,
+        feature: 'metadata-generation',
+      });
+
+      const jsonMatch = result.content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const metadata = JSON.parse(jsonMatch[0]);
+        metadata._model_used = result.model;
+        metadata._method = 'ai-service-chat';
+        metadata._cost = result.cost || 0;
+        return metadata;
+      } else {
+        throw new Error('No valid JSON in chat response');
+      }
+    }
   }
 
   buildVideoPrompt(item, spaceContext) {
@@ -272,71 +289,35 @@ Respond with JSON only:
 
   /**
    * AUDIO METADATA - Specialized for audio files, podcasts, music
-   * Priority: 1) Headless Claude (free), 2) OpenAI API, 3) Claude API
+   * Uses ai-service with 'large' profile for better context handling
    */
   async generateAudioMetadata(item, apiKey, spaceContext) {
     // Build the prompt for audio analysis
     const prompt = this.buildAudioPrompt(item, spaceContext);
     
-    // Priority 1: Try headless Claude first (FREE)
     try {
-      console.log('[MetadataGen] Trying headless Claude for audio (free)...');
-      const unifiedClaude = getUnifiedClaudeService();
-      const result = await unifiedClaude.complete(prompt, {
-        operation: 'metadata-generation',
-        saveToSpaces: false,
-        forceHeadless: true
+      console.log('[MetadataGen] Generating audio metadata with ai-service...');
+      const result = await ai.chat({
+        profile: 'large',
+        messages: [{ role: 'user', content: prompt }],
+        maxTokens: 1024,
+        feature: 'metadata-generation',
       });
-      
-      if (result.success && result.response) {
-        console.log('[MetadataGen] ✅ Headless Claude succeeded for audio (FREE)');
-        const jsonMatch = result.response.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          const metadata = JSON.parse(jsonMatch[0]);
-          metadata._model_used = 'claude-headless';
-          metadata._method = 'headless';
-          metadata._cost = 0;
-          return metadata;
-        }
-      }
-    } catch (headlessError) {
-      console.log('[MetadataGen] Headless Claude failed for audio:', headlessError.message);
-    }
-    
-    // Priority 2: Try OpenAI API (if key available)
-    const settingsManager = global.settingsManager;
-    const openaiKey = settingsManager?.get('openaiApiKey') || process.env.OPENAI_API_KEY;
-    
-    if (openaiKey) {
-      console.log('[MetadataGen] Trying GPT-5.2 for audio (OpenAI API)...');
-      try {
-        const content = [
-          `Audio file: ${item.fileName || 'Unknown'}`,
-          `Duration: ${item.metadata?.duration || 'Unknown'}`,
-          item.metadata?.transcript ? `\nTranscript:\n${item.metadata.transcript}` : ''
-        ].join('\n');
-        
-        const metadata = await this.openaiAPI.generateMetadata(content, 'audio', openaiKey, {
-          fileName: item.fileName,
-          duration: item.metadata?.duration,
-          transcript: item.metadata?.transcript,
-          spaceContext
-        });
-        metadata._model_used = 'gpt-5.2';
-        metadata._method = 'openai-api';
+
+      const jsonMatch = result.content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const metadata = JSON.parse(jsonMatch[0]);
+        metadata._model_used = result.model;
+        metadata._method = 'ai-service-chat';
+        metadata._cost = result.cost || 0;
         return metadata;
-      } catch (error) {
-        console.warn('[MetadataGen] GPT-5.2 failed for audio:', error.message);
+      } else {
+        throw new Error('No valid JSON in response');
       }
+    } catch (error) {
+      console.error('[MetadataGen] Audio metadata generation failed:', error.message);
+      throw error;
     }
-    
-    // Priority 3: Fallback to Claude API
-    console.log('[MetadataGen] Falling back to Claude API for audio...');
-    const messageContent = [{ type: 'text', text: prompt }];
-    const metadata = await this.callClaudeDirectAPI(messageContent, apiKey);
-    metadata._model_used = 'claude-sonnet-4-5-20250929';
-    metadata._method = 'claude-api';
-    return metadata;
   }
 
   buildAudioPrompt(item, spaceContext) {
@@ -406,7 +387,7 @@ Respond with JSON only:
 
   /**
    * TEXT/CODE METADATA - Specialized for text documents and code
-   * Priority: 1) Headless Claude (free), 2) OpenAI API, 3) Claude API
+   * Uses ai-service with 'large' profile for better context handling
    */
   async generateTextMetadata(item, apiKey, spaceContext) {
     const content = item.content || item.text || item.preview || '';
@@ -415,58 +396,29 @@ Respond with JSON only:
     // Build the prompt for text/code analysis
     const prompt = this.buildTextPrompt(item, spaceContext);
     
-    // Priority 1: Try headless Claude first (FREE)
     try {
-      console.log('[MetadataGen] Trying headless Claude first (free)...');
-      const unifiedClaude = getUnifiedClaudeService();
-      const result = await unifiedClaude.complete(prompt, {
-        operation: 'metadata-generation',
-        saveToSpaces: false,
-        forceHeadless: true // Only try headless, don't fall back to API yet
+      console.log('[MetadataGen] Generating text/code metadata with ai-service...');
+      const result = await ai.chat({
+        profile: 'large',
+        messages: [{ role: 'user', content: prompt }],
+        maxTokens: 1024,
+        feature: 'metadata-generation',
       });
-      
-      if (result.success && result.response) {
-        console.log('[MetadataGen] ✅ Headless Claude succeeded (FREE)');
-        const jsonMatch = result.response.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          const metadata = JSON.parse(jsonMatch[0]);
-          metadata._model_used = 'claude-headless';
-          metadata._method = 'headless';
-          metadata._cost = 0;
-          return metadata;
-        }
-      }
-    } catch (headlessError) {
-      console.log('[MetadataGen] Headless Claude failed:', headlessError.message);
-    }
-    
-    // Priority 2: Try OpenAI API (if key available)
-    const settingsManager = global.settingsManager;
-    const openaiKey = settingsManager?.get('openaiApiKey') || process.env.OPENAI_API_KEY;
-    
-    if (openaiKey) {
-      console.log('[MetadataGen] Trying GPT-5.2 (OpenAI API)...');
-      try {
-        const metadata = await this.openaiAPI.generateMetadata(content, isCode ? 'code' : 'text', openaiKey, {
-          fileName: item.fileName,
-          fileExt: item.fileExt,
-          spaceContext
-        });
-        metadata._model_used = 'gpt-5.2';
-        metadata._method = 'openai-api';
+
+      const jsonMatch = result.content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const metadata = JSON.parse(jsonMatch[0]);
+        metadata._model_used = result.model;
+        metadata._method = 'ai-service-chat';
+        metadata._cost = result.cost || 0;
         return metadata;
-      } catch (error) {
-        console.warn('[MetadataGen] GPT-5.2 failed:', error.message);
+      } else {
+        throw new Error('No valid JSON in response');
       }
+    } catch (error) {
+      console.error('[MetadataGen] Text/code metadata generation failed:', error.message);
+      throw error;
     }
-    
-    // Priority 3: Fallback to Claude API
-    console.log('[MetadataGen] Falling back to Claude API...');
-    const messageContent = [{ type: 'text', text: prompt }];
-    const metadata = await this.callClaudeDirectAPI(messageContent, apiKey);
-    metadata._model_used = 'claude-sonnet-4-5-20250929';
-    metadata._method = 'claude-api';
-    return metadata;
   }
 
   buildTextPrompt(item, spaceContext) {
@@ -572,62 +524,35 @@ Respond with JSON only:
 
   /**
    * HTML/RICH CONTENT METADATA - Specialized for web pages, documents
-   * Priority: 1) Headless Claude (free), 2) OpenAI API, 3) Claude API
+   * Uses ai-service with 'large' profile for better context handling
    */
   async generateHtmlMetadata(item, apiKey, spaceContext) {
     const plainText = item.plainText || this.stripHtml(item.content || item.html || '');
     const prompt = this.buildHtmlPrompt(item, spaceContext);
     
-    // Priority 1: Try headless Claude first (FREE)
     try {
-      console.log('[MetadataGen] Trying headless Claude for HTML (free)...');
-      const unifiedClaude = getUnifiedClaudeService();
-      const result = await unifiedClaude.complete(prompt, {
-        operation: 'metadata-generation',
-        saveToSpaces: false,
-        forceHeadless: true
+      console.log('[MetadataGen] Generating HTML metadata with ai-service...');
+      const result = await ai.chat({
+        profile: 'large',
+        messages: [{ role: 'user', content: prompt }],
+        maxTokens: 1024,
+        feature: 'metadata-generation',
       });
-      
-      if (result.success && result.response) {
-        console.log('[MetadataGen] ✅ Headless Claude succeeded for HTML (FREE)');
-        const jsonMatch = result.response.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          const metadata = JSON.parse(jsonMatch[0]);
-          metadata._model_used = 'claude-headless';
-          metadata._method = 'headless';
-          metadata._cost = 0;
-          return metadata;
-        }
-      }
-    } catch (headlessError) {
-      console.log('[MetadataGen] Headless Claude failed for HTML:', headlessError.message);
-    }
-    
-    // Priority 2: Try OpenAI API (if key available)
-    const settingsManager = global.settingsManager;
-    const openaiKey = settingsManager?.get('openaiApiKey') || process.env.OPENAI_API_KEY;
-    
-    if (openaiKey) {
-      console.log('[MetadataGen] Trying GPT-5.2 for HTML (OpenAI API)...');
-      try {
-        const metadata = await this.openaiAPI.generateMetadata(plainText, 'html', openaiKey, {
-          spaceContext
-        });
-        metadata._model_used = 'gpt-5.2';
-        metadata._method = 'openai-api';
+
+      const jsonMatch = result.content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const metadata = JSON.parse(jsonMatch[0]);
+        metadata._model_used = result.model;
+        metadata._method = 'ai-service-chat';
+        metadata._cost = result.cost || 0;
         return metadata;
-      } catch (error) {
-        console.warn('[MetadataGen] GPT-5.2 failed for HTML:', error.message);
+      } else {
+        throw new Error('No valid JSON in response');
       }
+    } catch (error) {
+      console.error('[MetadataGen] HTML metadata generation failed:', error.message);
+      throw error;
     }
-    
-    // Priority 3: Fallback to Claude API
-    console.log('[MetadataGen] Falling back to Claude API for HTML...');
-    const messageContent = [{ type: 'text', text: prompt }];
-    const metadata = await this.callClaudeDirectAPI(messageContent, apiKey);
-    metadata._model_used = 'claude-sonnet-4-5-20250929';
-    metadata._method = 'claude-api';
-    return metadata;
   }
 
   buildHtmlPrompt(item, spaceContext) {
@@ -692,27 +617,45 @@ Respond with JSON only:
   async generatePdfMetadata(item, thumbnail, apiKey, spaceContext) {
     const prompt = this.buildPdfPrompt(item, spaceContext, !!thumbnail);
     
-    const messageContent = thumbnail ? [
-      {
-        type: 'text',
-        text: prompt
-      },
-      {
-        type: 'image',
-        source: {
-          type: 'base64',
-          media_type: 'image/jpeg',
-          data: this.extractBase64(thumbnail)
-        }
-      }
-    ] : [
-      {
-        type: 'text',
-        text: prompt
-      }
-    ];
+    if (thumbnail) {
+      // Use vision API if thumbnail available
+      const base64Data = this.extractBase64(thumbnail);
+      const result = await ai.vision(base64Data, prompt, {
+        profile: 'vision',
+        maxTokens: 1024,
+        feature: 'metadata-generation',
+      });
 
-    return await this.callClaude(messageContent, apiKey);
+      const jsonMatch = result.content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const metadata = JSON.parse(jsonMatch[0]);
+        metadata._model_used = result.model;
+        metadata._method = 'ai-service-vision';
+        metadata._cost = result.cost || 0;
+        return metadata;
+      } else {
+        throw new Error('No valid JSON in vision response');
+      }
+    } else {
+      // Text-only, use chat
+      const result = await ai.chat({
+        profile: 'standard',
+        messages: [{ role: 'user', content: prompt }],
+        maxTokens: 1024,
+        feature: 'metadata-generation',
+      });
+
+      const jsonMatch = result.content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const metadata = JSON.parse(jsonMatch[0]);
+        metadata._model_used = result.model;
+        metadata._method = 'ai-service-chat';
+        metadata._cost = result.cost || 0;
+        return metadata;
+      } else {
+        throw new Error('No valid JSON in chat response');
+      }
+    }
   }
 
   buildPdfPrompt(item, spaceContext, hasThumbnail) {
@@ -772,65 +715,35 @@ Respond with JSON only:
 
   /**
    * DATA FILE METADATA - Specialized for JSON, CSV, YAML, etc.
-   * Priority: 1) Headless Claude (free), 2) OpenAI API, 3) Claude API
+   * Uses ai-service with 'large' profile for better context handling
    */
   async generateDataMetadata(item, apiKey, spaceContext) {
     const content = item.content || item.text || item.preview || '';
     const prompt = this.buildDataPrompt(item, spaceContext);
     
-    // Priority 1: Try headless Claude first (FREE)
     try {
-      console.log('[MetadataGen] Trying headless Claude for data (free)...');
-      const unifiedClaude = getUnifiedClaudeService();
-      const result = await unifiedClaude.complete(prompt, {
-        operation: 'metadata-generation',
-        saveToSpaces: false,
-        forceHeadless: true
+      console.log('[MetadataGen] Generating data metadata with ai-service...');
+      const result = await ai.chat({
+        profile: 'large',
+        messages: [{ role: 'user', content: prompt }],
+        maxTokens: 1024,
+        feature: 'metadata-generation',
       });
-      
-      if (result.success && result.response) {
-        console.log('[MetadataGen] ✅ Headless Claude succeeded for data (FREE)');
-        const jsonMatch = result.response.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          const metadata = JSON.parse(jsonMatch[0]);
-          metadata._model_used = 'claude-headless';
-          metadata._method = 'headless';
-          metadata._cost = 0;
-          return metadata;
-        }
-      }
-    } catch (headlessError) {
-      console.log('[MetadataGen] Headless Claude failed for data:', headlessError.message);
-    }
-    
-    // Priority 2: Try OpenAI API (if key available)
-    const settingsManager = global.settingsManager;
-    const openaiKey = settingsManager?.get('openaiApiKey') || process.env.OPENAI_API_KEY;
-    
-    if (openaiKey) {
-      console.log('[MetadataGen] Trying GPT-5.2 for data (OpenAI API)...');
-      try {
-        const metadata = await this.openaiAPI.generateMetadata(content, 'data', openaiKey, {
-          fileName: item.fileName,
-          fileExt: item.fileExt,
-          fileSize: item.fileSize,
-          spaceContext
-        });
-        metadata._model_used = 'gpt-5.2';
-        metadata._method = 'openai-api';
+
+      const jsonMatch = result.content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const metadata = JSON.parse(jsonMatch[0]);
+        metadata._model_used = result.model;
+        metadata._method = 'ai-service-chat';
+        metadata._cost = result.cost || 0;
         return metadata;
-      } catch (error) {
-        console.warn('[MetadataGen] GPT-5.2 failed for data:', error.message);
+      } else {
+        throw new Error('No valid JSON in response');
       }
+    } catch (error) {
+      console.error('[MetadataGen] Data metadata generation failed:', error.message);
+      throw error;
     }
-    
-    // Priority 3: Fallback to Claude API
-    console.log('[MetadataGen] Falling back to Claude API for data...');
-    const messageContent = [{ type: 'text', text: prompt }];
-    const metadata = await this.callClaudeDirectAPI(messageContent, apiKey);
-    metadata._model_used = 'claude-sonnet-4-5-20250929';
-    metadata._method = 'claude-api';
-    return metadata;
   }
 
   buildDataPrompt(item, spaceContext) {
@@ -897,10 +810,6 @@ Respond with JSON only:
   async generateStyleGuideMetadata(item, apiKey, spaceContext) {
     const content = item.content || item.text || item.preview || '';
     
-    // Get API keys from settings
-    const settingsManager = global.settingsManager;
-    const openaiKey = settingsManager?.get('openaiApiKey') || process.env.OPENAI_API_KEY;
-    
     // Parse JSON to extract key information
     let styleGuideInfo = '';
     try {
@@ -920,23 +829,30 @@ Components: ${data.components?.length || 0} defined`;
     
     const prompt = this.buildStyleGuidePrompt(item, styleGuideInfo, spaceContext);
     
-    if (openaiKey) {
-      console.log('[MetadataGen] Using GPT-5.2 for Style Guide analysis');
-      try {
-        const metadata = await this.openaiAPI.generateMetadata(prompt, 'style-guide', openaiKey);
-        metadata._model_used = 'gpt-5.2-128k';
+    try {
+      console.log('[MetadataGen] Generating style guide metadata with ai-service...');
+      const result = await ai.chat({
+        profile: 'large',
+        messages: [{ role: 'user', content: prompt }],
+        maxTokens: 1024,
+        feature: 'metadata-generation',
+      });
+
+      const jsonMatch = result.content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const metadata = JSON.parse(jsonMatch[0]);
+        metadata._model_used = result.model;
+        metadata._method = 'ai-service-chat';
+        metadata._cost = result.cost || 0;
         metadata.assetType = 'style-guide';
         return metadata;
-      } catch (error) {
-        console.warn('[MetadataGen] GPT-5.2 failed for style guide, falling back to Claude:', error.message);
+      } else {
+        throw new Error('No valid JSON in response');
       }
+    } catch (error) {
+      console.error('[MetadataGen] Style guide metadata generation failed:', error.message);
+      throw error;
     }
-    
-    // Fallback to Claude
-    const metadata = await this.claudeAPI.generateMetadata(prompt, 'style-guide', apiKey);
-    metadata._model_used = 'claude-sonnet-4-5-20250929';
-    metadata.assetType = 'style-guide';
-    return metadata;
   }
 
   buildStyleGuidePrompt(item, styleGuideInfo, spaceContext) {
@@ -993,10 +909,6 @@ Respond with JSON only:
   async generateJourneyMapMetadata(item, apiKey, spaceContext) {
     const content = item.content || item.text || item.preview || '';
     
-    // Get API keys from settings
-    const settingsManager = global.settingsManager;
-    const openaiKey = settingsManager?.get('openaiApiKey') || process.env.OPENAI_API_KEY;
-    
     // Parse JSON to extract key information
     let journeyInfo = '';
     try {
@@ -1017,23 +929,30 @@ Has Triggers: ${journeyData.persona?.journeys?.[0]?.triggers ? 'Yes' : 'No'}`;
     
     const prompt = this.buildJourneyMapPrompt(item, journeyInfo, spaceContext);
     
-    if (openaiKey) {
-      console.log('[MetadataGen] Using GPT-5.2 for Journey Map analysis');
-      try {
-        const metadata = await this.openaiAPI.generateMetadata(prompt, 'journey-map', openaiKey);
-        metadata._model_used = 'gpt-5.2-128k';
+    try {
+      console.log('[MetadataGen] Generating journey map metadata with ai-service...');
+      const result = await ai.chat({
+        profile: 'large',
+        messages: [{ role: 'user', content: prompt }],
+        maxTokens: 1024,
+        feature: 'metadata-generation',
+      });
+
+      const jsonMatch = result.content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const metadata = JSON.parse(jsonMatch[0]);
+        metadata._model_used = result.model;
+        metadata._method = 'ai-service-chat';
+        metadata._cost = result.cost || 0;
         metadata.assetType = 'journey-map';
         return metadata;
-      } catch (error) {
-        console.warn('[MetadataGen] GPT-5.2 failed for journey map, falling back to Claude:', error.message);
+      } else {
+        throw new Error('No valid JSON in response');
       }
+    } catch (error) {
+      console.error('[MetadataGen] Journey map metadata generation failed:', error.message);
+      throw error;
     }
-    
-    // Fallback to Claude
-    const metadata = await this.claudeAPI.generateMetadata(prompt, 'journey-map', apiKey);
-    metadata._model_used = 'claude-sonnet-4-5-20250929';
-    metadata.assetType = 'journey-map';
-    return metadata;
   }
 
   buildJourneyMapPrompt(item, journeyInfo, spaceContext) {
@@ -1086,64 +1005,35 @@ Respond with JSON only:
 
   /**
    * URL/WEB LINK METADATA - Specialized for web URLs
-   * Priority: 1) Headless Claude (free), 2) OpenAI API, 3) Claude API
+   * Uses ai-service with 'large' profile for better context handling
    */
   async generateUrlMetadata(item, apiKey, spaceContext) {
     const url = item.content || item.text || item.url || '';
     const prompt = this.buildUrlPrompt(item, spaceContext);
     
-    // Priority 1: Try headless Claude first (FREE)
     try {
-      console.log('[MetadataGen] Trying headless Claude for URL (free)...');
-      const unifiedClaude = getUnifiedClaudeService();
-      const result = await unifiedClaude.complete(prompt, {
-        operation: 'metadata-generation',
-        saveToSpaces: false,
-        forceHeadless: true
+      console.log('[MetadataGen] Generating URL metadata with ai-service...');
+      const result = await ai.chat({
+        profile: 'large',
+        messages: [{ role: 'user', content: prompt }],
+        maxTokens: 1024,
+        feature: 'metadata-generation',
       });
-      
-      if (result.success && result.response) {
-        console.log('[MetadataGen] ✅ Headless Claude succeeded for URL (FREE)');
-        const jsonMatch = result.response.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          const metadata = JSON.parse(jsonMatch[0]);
-          metadata._model_used = 'claude-headless';
-          metadata._method = 'headless';
-          metadata._cost = 0;
-          return metadata;
-        }
-      }
-    } catch (headlessError) {
-      console.log('[MetadataGen] Headless Claude failed for URL:', headlessError.message);
-    }
-    
-    // Priority 2: Try OpenAI API (if key available)
-    const settingsManager = global.settingsManager;
-    const openaiKey = settingsManager?.get('openaiApiKey') || process.env.OPENAI_API_KEY;
-    
-    if (openaiKey) {
-      console.log('[MetadataGen] Trying GPT-5.2 for URL (OpenAI API)...');
-      try {
-        const metadata = await this.openaiAPI.generateMetadata(url, 'url', openaiKey, {
-          pageTitle: item.pageTitle,
-          pageDescription: item.pageDescription,
-          spaceContext
-        });
-        metadata._model_used = 'gpt-5.2';
-        metadata._method = 'openai-api';
+
+      const jsonMatch = result.content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const metadata = JSON.parse(jsonMatch[0]);
+        metadata._model_used = result.model;
+        metadata._method = 'ai-service-chat';
+        metadata._cost = result.cost || 0;
         return metadata;
-      } catch (error) {
-        console.warn('[MetadataGen] GPT-5.2 failed for URL:', error.message);
+      } else {
+        throw new Error('No valid JSON in response');
       }
+    } catch (error) {
+      console.error('[MetadataGen] URL metadata generation failed:', error.message);
+      throw error;
     }
-    
-    // Priority 3: Fallback to Claude API
-    console.log('[MetadataGen] Falling back to Claude API for URL...');
-    const messageContent = [{ type: 'text', text: prompt }];
-    const metadata = await this.callClaudeDirectAPI(messageContent, apiKey);
-    metadata._model_used = 'claude-sonnet-4-5-20250929';
-    metadata._method = 'claude-api';
-    return metadata;
   }
 
   buildUrlPrompt(item, spaceContext) {
@@ -1214,66 +1104,105 @@ Respond with JSON only:
   }
 
   /**
+   * DATA SOURCE METADATA - Generates description from connection config
+   * Uses ai-service with 'fast' profile
+   */
+  async generateDataSourceMetadata(item, apiKey, spaceContext) {
+    const ds = item.dataSource || {};
+    const conn = ds.connection || {};
+    const auth = ds.auth || {};
+    const ops = ds.operations || {};
+    
+    const enabledOps = ['create', 'read', 'update', 'delete', 'list']
+      .filter(op => ops[op] && ops[op].enabled)
+      .map(op => `${op.toUpperCase()}: ${ops[op].method || 'GET'} ${ops[op].endpoint || ''}`)
+      .join('\n');
+    
+    const subtypeLabels = { mcp: 'MCP (Model Context Protocol)', api: 'REST/API', 'web-scraping': 'Web Scraping' };
+    
+    const prompt = `Analyze this data source configuration and generate descriptive metadata.
+
+Data Source:
+- Name: ${item.name || 'Unnamed'}
+- Type: ${subtypeLabels[ds.sourceType] || ds.sourceType || 'Unknown'}
+- URL: ${conn.url || 'Not configured'}
+- Protocol: ${conn.protocol || 'Unknown'}
+- Auth: ${auth.type || 'none'}${auth.label ? ` (${auth.label})` : ''}
+${enabledOps ? `- Operations:\n${enabledOps}` : '- No operations configured'}
+${ds.mcp && ds.mcp.serverName ? `- MCP Server: ${ds.mcp.serverName} (${ds.mcp.transport})` : ''}
+${ds.document && ds.document.content ? `- Existing description: ${ds.document.content.substring(0, 200)}` : ''}
+${spaceContext ? `\nSpace context: ${spaceContext.name || ''} - ${spaceContext.description || ''}` : ''}
+
+Return a JSON object with these fields:
+{
+  "title": "Human-friendly name for this data source",
+  "description": "1-2 sentence description of what this data source provides",
+  "category": "One of: database, api, scraping, messaging, analytics, storage, ai-service, other",
+  "tags": ["tag1", "tag2"],
+  "notes": "Any additional useful context about this data source"
+}`;
+
+    try {
+      console.log('[MetadataGen] Generating data source metadata with ai-service...');
+      const result = await ai.chat({
+        profile: 'fast',
+        system: 'You are a data source documentation assistant. Return valid JSON only.',
+        messages: [{ role: 'user', content: prompt }],
+        jsonMode: true,
+        maxTokens: 300,
+        feature: 'metadata-gen-datasource'
+      });
+
+      const parsed = typeof result.content === 'string' ? JSON.parse(result.content) : result.content;
+      return {
+        title: parsed.title || item.name || 'Data Source',
+        description: parsed.description || '',
+        category: parsed.category || 'other',
+        tags: parsed.tags || [],
+        notes: parsed.notes || ''
+      };
+    } catch (error) {
+      console.error('[MetadataGen] Data source metadata generation failed:', error.message);
+      return {
+        title: item.name || 'Data Source',
+        description: `${subtypeLabels[ds.sourceType] || 'Data source'} at ${conn.url || 'unknown URL'}`,
+        category: ds.sourceType === 'web-scraping' ? 'scraping' : ds.sourceType === 'mcp' ? 'ai-service' : 'api',
+        tags: [ds.sourceType || 'data-source'],
+        notes: ''
+      };
+    }
+  }
+
+  /**
    * FILE METADATA - Generic file handler with Space context
-   * Priority: 1) Headless Claude (free), 2) OpenAI API, 3) Claude API
+   * Uses ai-service with 'standard' profile
    */
   async generateFileMetadata(item, apiKey, spaceContext) {
     const prompt = this.buildFilePrompt(item, spaceContext);
     
-    // Priority 1: Try headless Claude first (FREE)
     try {
-      console.log('[MetadataGen] Trying headless Claude for file (free)...');
-      const unifiedClaude = getUnifiedClaudeService();
-      const result = await unifiedClaude.complete(prompt, {
-        operation: 'metadata-generation',
-        saveToSpaces: false,
-        forceHeadless: true
+      console.log('[MetadataGen] Generating file metadata with ai-service...');
+      const result = await ai.chat({
+        profile: 'standard',
+        messages: [{ role: 'user', content: prompt }],
+        maxTokens: 1024,
+        feature: 'metadata-generation',
       });
-      
-      if (result.success && result.response) {
-        console.log('[MetadataGen] ✅ Headless Claude succeeded for file (FREE)');
-        const jsonMatch = result.response.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          const metadata = JSON.parse(jsonMatch[0]);
-          metadata._model_used = 'claude-headless';
-          metadata._method = 'headless';
-          metadata._cost = 0;
-          return metadata;
-        }
-      }
-    } catch (headlessError) {
-      console.log('[MetadataGen] Headless Claude failed for file:', headlessError.message);
-    }
-    
-    // Priority 2: Try OpenAI API (if key available)
-    const settingsManager = global.settingsManager;
-    const openaiKey = settingsManager?.get('openaiApiKey') || process.env.OPENAI_API_KEY;
-    
-    if (openaiKey) {
-      console.log('[MetadataGen] Trying GPT-5.2 for file (OpenAI API)...');
-      try {
-        const content = `File: ${item.fileName || 'Unknown'}`;
-        const metadata = await this.openaiAPI.generateMetadata(content, 'file', openaiKey, {
-          fileName: item.fileName,
-          fileExt: item.fileExt,
-          fileSize: item.fileSize,
-          spaceContext
-        });
-        metadata._model_used = 'gpt-5.2';
-        metadata._method = 'openai-api';
+
+      const jsonMatch = result.content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const metadata = JSON.parse(jsonMatch[0]);
+        metadata._model_used = result.model;
+        metadata._method = 'ai-service-chat';
+        metadata._cost = result.cost || 0;
         return metadata;
-      } catch (error) {
-        console.warn('[MetadataGen] GPT-5.2 failed for file:', error.message);
+      } else {
+        throw new Error('No valid JSON in response');
       }
+    } catch (error) {
+      console.error('[MetadataGen] File metadata generation failed:', error.message);
+      throw error;
     }
-    
-    // Priority 3: Fallback to Claude API
-    console.log('[MetadataGen] Falling back to Claude API for file...');
-    const messageContent = [{ type: 'text', text: prompt }];
-    const metadata = await this.callClaudeDirectAPI(messageContent, apiKey);
-    metadata._model_used = 'claude-sonnet-4-5-20250929';
-    metadata._method = 'claude-api';
-    return metadata;
   }
 
   buildFilePrompt(item, spaceContext) {
@@ -1395,6 +1324,10 @@ Respond with JSON only:
       else if (item.type === 'text' || item.fileCategory === 'code') {
         // TEXT/CODE
         metadata = await this.generateTextMetadata(item, apiKey, spaceContext);
+      }
+      else if (item.type === 'data-source') {
+        // DATA SOURCE
+        metadata = await this.generateDataSourceMetadata(item, apiKey, spaceContext);
       }
       else if (item.type === 'file') {
         // GENERIC FILE
@@ -1574,115 +1507,6 @@ Respond with JSON only:
     return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${sizes[i]}`;
   }
 
-  /**
-   * Helper: Call Claude API
-   * Uses Unified Claude Service for text-only prompts (headless first, then API)
-   * Falls back to direct API for vision requests (which have image content)
-   */
-  async callClaude(messageContent, apiKey) {
-    // Check if this is a text-only prompt (string) vs vision prompt (array with image)
-    const isVisionRequest = Array.isArray(messageContent);
-    
-    // For text-only prompts, try the unified service (headless first, API fallback)
-    if (!isVisionRequest) {
-      try {
-        console.log('[MetadataGen] Using Unified Claude Service for text prompt');
-        const unifiedClaude = getUnifiedClaudeService();
-        const result = await unifiedClaude.complete(messageContent, {
-          operation: 'metadata-generation',
-          saveToSpaces: false // Don't save metadata generation prompts to Spaces
-        });
-        
-        if (result.success && result.response) {
-          console.log('[MetadataGen] Unified Claude succeeded via', result.method);
-          const jsonMatch = result.response.match(/\{[\s\S]*\}/);
-          if (jsonMatch) {
-            const metadata = JSON.parse(jsonMatch[0]);
-            metadata._method = result.method;
-            metadata._cost = result.cost || 0;
-            return metadata;
-          }
-        }
-      } catch (unifiedError) {
-        console.log('[MetadataGen] Unified Claude failed, using direct API:', unifiedError.message);
-      }
-    }
-    
-    // For vision requests or if unified service fails, use direct API
-    return this.callClaudeDirectAPI(messageContent, apiKey);
-  }
-  
-  /**
-   * Helper: Direct Claude API call (for vision requests or fallback)
-   */
-  async callClaudeDirectAPI(messageContent, apiKey) {
-    const https = require('https');
-    
-    const postData = JSON.stringify({
-      model: 'claude-sonnet-4-5-20250929',
-      max_tokens: 1024,
-      messages: [
-        {
-          role: 'user',
-          content: messageContent
-        }
-      ]
-    });
-
-    return new Promise((resolve, reject) => {
-      const options = {
-        hostname: 'api.anthropic.com',
-        port: 443,
-        path: '/v1/messages',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          'Content-Length': Buffer.byteLength(postData)
-        }
-      };
-
-      const req = https.request(options, (res) => {
-        let data = '';
-
-        res.on('data', (chunk) => {
-          data += chunk;
-        });
-
-        res.on('end', () => {
-          try {
-            const response = JSON.parse(data);
-            
-            if (res.statusCode !== 200) {
-              reject(new Error(response.error?.message || `API error: ${res.statusCode}`));
-              return;
-            }
-
-            const text = response.content[0].text;
-            const jsonMatch = text.match(/\{[\s\S]*\}/);
-            
-            if (jsonMatch) {
-              const metadata = JSON.parse(jsonMatch[0]);
-              metadata._method = 'direct-api';
-              resolve(metadata);
-            } else {
-              reject(new Error('No valid JSON in response'));
-            }
-          } catch (error) {
-            reject(new Error('Failed to parse API response: ' + error.message));
-          }
-        });
-      });
-
-      req.on('error', (error) => {
-        reject(error);
-      });
-
-      req.write(postData);
-      req.end();
-    });
-  }
 }
 
 module.exports = MetadataGenerator;

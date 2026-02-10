@@ -5,6 +5,8 @@
  * Enables natural followup interactions like "play it" or "what about that one".
  */
 
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 // Pronouns that typically refer to recent context
 const PRONOUNS = ['it', 'that', 'this', 'that one', 'this one', 'the same', 'them', 'those'];
 
@@ -79,7 +81,7 @@ const pronounResolver = {
     const wasResolved = resolved !== transcript;
     
     if (wasResolved) {
-      console.log(`[PronounResolver] Resolved: "${transcript}" → "${resolved}"`);
+      log.info('voice', '[PronounResolver] Resolved: "" → ""', { v0: transcript, v1: resolved });
     }
     
     return {

@@ -10,6 +10,8 @@
  */
 
 const EventEmitter = require('events');
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 class ProgressReporter extends EventEmitter {
   constructor() {
@@ -32,7 +34,7 @@ class ProgressReporter extends EventEmitter {
 
     // Throttle unless forced
     if (!options.force && (now - lastReport) < this.minInterval) {
-      console.log(`[ProgressReporter] Throttled: ${agentId} - ${message}`);
+      log.info('voice', '[ProgressReporter] Throttled: -', { v0: agentId, v1: message });
       return false;
     }
 
@@ -45,7 +47,7 @@ class ProgressReporter extends EventEmitter {
       timestamp: now
     };
 
-    console.log(`[ProgressReporter] ${agentId}: ${message}`);
+    log.info('voice', '[ProgressReporter] :', { v0: agentId, v1: message });
     this.emit('progress', event);
     
     return true;

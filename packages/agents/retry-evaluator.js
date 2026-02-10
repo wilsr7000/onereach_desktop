@@ -6,6 +6,9 @@
  */
 
 const { getCircuit } = require('./circuit-breaker');
+const ai = require('../../lib/ai-service');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 
 // Circuit breaker for OpenAI API calls
 const openaiCircuit = getCircuit('openai-retry-eval', {
@@ -13,17 +16,6 @@ const openaiCircuit = getCircuit('openai-retry-eval', {
   resetTimeout: 30000,
   windowMs: 60000
 });
-
-function getOpenAIApiKey() {
-  if (global.settingsManager) {
-    const openaiKey = global.settingsManager.get('openaiApiKey');
-    if (openaiKey) return openaiKey;
-    const provider = global.settingsManager.get('llmProvider');
-    const llmKey = global.settingsManager.get('llmApiKey');
-    if (provider === 'openai' && llmKey) return llmKey;
-  }
-  return process.env.OPENAI_API_KEY;
-}
 
 /**
  * Evaluate a failure and decide what to do next
@@ -37,17 +29,6 @@ async function evaluateFailure(context) {
     availableActions,  // What actions are possible
     maxAttempts        // How many total attempts allowed
   } = context;
-
-  const apiKey = getOpenAIApiKey();
-  if (!apiKey) {
-    // No API key - can't reason, just stop
-    return {
-      action: 'stop',
-      params: {},
-      reasoning: 'No API key available for reasoning',
-      shouldStop: true
-    };
-  }
 
   const systemPrompt = `You are a retry strategist. Analyze what failed and decide the best next action.
 
@@ -85,40 +66,27 @@ What should I try next?`;
 
   try {
     // Use circuit breaker to protect against cascading failures
-    const data = await openaiCircuit.execute(async () => {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt }
-          ],
-          temperature: 0.3, // Some creativity but not random
-          max_tokens: 300,
-          response_format: { type: 'json_object' }
-        })
+    const result = await openaiCircuit.execute(async () => {
+      const data = await ai.chat({
+        profile: 'fast',
+        system: systemPrompt,
+        messages: [
+          { role: 'user', content: userPrompt }
+        ],
+        temperature: 0.3,
+        maxTokens: 300,
+        jsonMode: true,
+        feature: 'retry-evaluator',
       });
-
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status}`);
-      }
-
-      return response.json();
+      return JSON.parse(data.content || '{}');
     });
-
-    const result = JSON.parse(data.choices?.[0]?.message?.content || '{}');
     
-    console.log(`[RetryEvaluator] Decision: ${result.action} - ${result.reasoning}`);
+    log.info('agent', `Decision: ${result.action} - ${result.reasoning}`);
     
     return result;
 
   } catch (error) {
-    console.error('[RetryEvaluator] Error:', error.message);
+    log.error('agent', 'Error', { error: error.message });
     return {
       action: 'stop',
       params: {},
@@ -134,35 +102,12 @@ What should I try next?`;
  * @returns {Promise<{intent: string, searchTerm: string|null, genre: string|null, artist: string|null}>}
  */
 async function extractIntent(request) {
-  const apiKey = getOpenAIApiKey();
-  
-  if (!apiKey) {
-    // Fallback: simple extraction
-    const words = request.toLowerCase().replace(/play\s+/i, '').split(/\s+/);
-    const fillers = ['some', 'a', 'the', 'any', 'my', 'music', 'songs', 'please'];
-    const meaningful = words.filter(w => !fillers.includes(w) && w.length > 2);
-    return {
-      intent: request,
-      searchTerm: meaningful.join(' ') || null,
-      genre: null,
-      artist: null
-    };
-  }
-
   try {
     // Use circuit breaker to protect against cascading failures
-    const data = await openaiCircuit.execute(async () => {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [{
-            role: 'system',
-            content: `Extract music search intent from the user's request. Return JSON:
+    const parsed = await openaiCircuit.execute(async () => {
+      const data = await ai.chat({
+        profile: 'fast',
+        system: `Extract music search intent from the user's request. Return JSON:
 {
   "intent": "what the user wants (play music, search for X, switch output, etc)",
   "searchTerm": "the best search term to use, or null",
@@ -182,33 +127,29 @@ Examples:
 - "play music for 5 minutes" → {"intent": "play music", "searchTerm": null, "genre": null, "artist": null, "durationSeconds": 300, "outputDevice": null}
 - "play jazz on living room" → {"intent": "play on device", "searchTerm": "jazz", "genre": "jazz", "artist": null, "durationSeconds": null, "outputDevice": "Living Room"}
 - "switch to kitchen speaker" → {"intent": "switch output", "searchTerm": null, "genre": null, "artist": null, "durationSeconds": null, "outputDevice": "Kitchen"}
-- "play on HomePod" → {"intent": "switch output", "searchTerm": null, "genre": null, "artist": null, "durationSeconds": null, "outputDevice": "HomePod"}`
-          }, {
-            role: 'user',
-            content: request
-          }],
-          temperature: 0,
-          max_tokens: 200,
-          response_format: { type: 'json_object' }
-        })
+- "play on HomePod" → {"intent": "switch output", "searchTerm": null, "genre": null, "artist": null, "durationSeconds": null, "outputDevice": "HomePod"}`,
+        messages: [
+          { role: 'user', content: request }
+        ],
+        temperature: 0,
+        maxTokens: 200,
+        jsonMode: true,
+        feature: 'retry-evaluator',
       });
-
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status}`);
-      }
-
-      return response.json();
+      return JSON.parse(data.content || '{}');
     });
-
-    const parsed = JSON.parse(data.choices?.[0]?.message?.content || '{}');
     
     return parsed;
 
   } catch (error) {
-    console.error('[RetryEvaluator] Extract intent error:', error.message);
+    log.error('agent', 'Extract intent error', { error: error.message });
+    // Fallback: simple extraction
+    const words = request.toLowerCase().replace(/play\s+/i, '').split(/\s+/);
+    const fillers = ['some', 'a', 'the', 'any', 'my', 'music', 'songs', 'please'];
+    const meaningful = words.filter(w => !fillers.includes(w) && w.length > 2);
     return {
       intent: request,
-      searchTerm: null,
+      searchTerm: meaningful.join(' ') || null,
       genre: null,
       artist: null
     };

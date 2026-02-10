@@ -3,7 +3,7 @@ const dialog = require('./wrapped-dialog'); // Use wrapped dialog for Spaces int
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
-const { setApplicationMenu, registerTestMenuShortcut, refreshGSXLinks, closeAllGSXWindows } = require('./menu');
+const { registerTestMenuShortcut, closeAllGSXWindows } = require('./menu');
 const { shell } = require('electron');
 const browserWindow = require('./browserWindow');
 const log = require('electron-log');
@@ -13,6 +13,8 @@ const { SnapshotStorage } = require('./src/state-manager/SnapshotStorage');
 const ModuleManager = require('./module-manager');
 const getLogger = require('./event-logger');
 let logger = getLogger(); // This might be a stub initially
+const { getLogQueue } = require('./lib/log-event-queue');
+const { getLogServer } = require('./lib/log-server');
 const { createConsoleInterceptor } = require('./console-interceptor');
 const { getGSXFileSync } = require('./gsx-file-sync');
 const { AiderBridgeClient } = require('./aider-bridge-client');
@@ -45,6 +47,19 @@ let introWizardWindow = null;
 // These must be set before app.whenReady()
 app.commandLine.appendSwitch('enable-speech-dispatcher');
 app.commandLine.appendSwitch('enable-experimental-web-platform-features');
+
+// Enable native system audio loopback capture (macOS 12.3+, Windows, Linux)
+// Uses ScreenCaptureKit on macOS 13+ — no virtual audio drivers needed
+// #region agent log
+try {
+  const { initMain: initAudioLoopback } = require('electron-audio-loopback');
+  fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:51',message:'initMain imported successfully',data:{type:typeof initAudioLoopback},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+  initAudioLoopback();
+  fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:53',message:'initAudioLoopback() completed',data:{success:true},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+} catch(e) {
+  fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:55',message:'initAudioLoopback FAILED',data:{error:e.message},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+}
+// #endregion
 
 // Global Aider Bridge instance (main/shared)
 let aiderBridge = null;
@@ -505,9 +520,13 @@ function updateApplicationMenu(environments = []) {
     }
   }
   
-  // Call the menu module to update the application menu
-  const { setApplicationMenu } = require('./menu');
-  setApplicationMenu(idwEnvironments);
+  // Update the application menu via MenuDataManager
+  if (global.menuDataManager) {
+    global.menuDataManager.rebuild(idwEnvironments);
+  } else {
+    const { setApplicationMenu } = require('./menu');
+    setApplicationMenu(idwEnvironments);
+  }
 }
 
 // Function to create a window for external content with proper security
@@ -752,9 +771,63 @@ app.whenReady().then(() => {
   // Re-initialize logger now that app is ready
   logger = getLogger();
   
+  // Initialize central logging event queue + REST/WebSocket server
+  const logQueue = getLogQueue();
+  const logServer = getLogServer(logQueue);
+
+  // Apply persisted diagnostic logging level
+  const diagnosticLevel = global.settingsManager
+    ? global.settingsManager.get('diagnosticLogging') || 'info'
+    : 'info';
+
+  if (diagnosticLevel === 'off') {
+    logQueue.setMinLevel('error'); // Still capture crashes internally
+    console.log('[Startup] Diagnostic logging is OFF (errors still captured)');
+  } else {
+    logQueue.setMinLevel(diagnosticLevel);
+    logServer.start().catch(err => {
+      console.error('[LogServer] Failed to start:', err.message);
+    });
+    console.log(`[Startup] Diagnostic logging at level "${diagnosticLevel}", log server starting`);
+  }
+
+  // IPC handler: change logging level at runtime (from Settings UI or external tools like Cursor)
+  const { ipcMain } = require('electron');
+  if (!ipcMain._loggingSetLevelRegistered) {
+    ipcMain.handle('logging:set-level', async (_event, level) => {
+      const validLevels = ['off', 'error', 'warn', 'info', 'debug'];
+      if (!validLevels.includes(level)) {
+        return { success: false, error: `Invalid level "${level}". Valid: ${validLevels.join(', ')}` };
+      }
+      // Persist
+      if (global.settingsManager) {
+        global.settingsManager.set('diagnosticLogging', level);
+      }
+      // Apply
+      if (level === 'off') {
+        logQueue.setMinLevel('error');
+      } else {
+        logQueue.setMinLevel(level);
+        // Start log server if it wasn't running
+        if (!logServer._started) {
+          logServer.start().catch(err => console.error('[LogServer] Failed to start:', err.message));
+        }
+      }
+      logQueue.info('settings', `Diagnostic logging level changed to "${level}"`, { level });
+      return { success: true, level };
+    });
+    ipcMain.handle('logging:get-level', async () => {
+      const persisted = global.settingsManager
+        ? global.settingsManager.get('diagnosticLogging') || 'info'
+        : 'info';
+      return { level: logQueue._minLevel, persisted };
+    });
+    ipcMain._loggingSetLevelRegistered = true;
+  }
+
   // Log app ready
   logger.logAppReady();
-  console.log('App is ready, re-initialized logger. Is stub?', logger._isStub);
+  logQueue.info('app', 'App is ready', { loggerIsStub: logger._isStub, diagnosticLevel });
   
   // STARTUP RECOVERY: Check for and restore any missing config files from backups
   const userDataPath = app.getPath('userData');
@@ -846,6 +919,14 @@ app.whenReady().then(() => {
   // Register Claude Terminal IPC handlers
   registerClaudeTerminalHandlers();
   
+  // Initialize test audit orchestrator IPC bridge
+  try {
+    const { registerAuditIPC } = require('./test/audit/ipc-bridge');
+    registerAuditIPC();
+  } catch (e) {
+    console.warn('[Audit] Failed to register audit IPC handlers:', e.message);
+  }
+
   // Initialize test context manager
   const testContextManager = require('./test-context-manager');
   
@@ -941,6 +1022,30 @@ app.whenReady().then(() => {
   global.menuDataManager.initialize();
   console.log('Menu Data Manager initialized');
   
+  // Ensure dock is visible before setting menu (macOS requires dock for menu bar)
+  if (process.platform === 'darwin' && app.dock) {
+    app.dock.show().catch(err => {
+      console.log('[Dock] Could not show dock:', err.message);
+    });
+  }
+  
+  // Early menu initialization - runs immediately after MDM, before heavyweight deferred init.
+  // This ensures the menu appears even if clipboard/video/recorder init stalls.
+  // moduleManager isn't ready yet so Tools menu will be empty until the deferred rebuild.
+  try {
+    console.log('[Startup] Setting up application menu (early)...');
+    const idwEnvironments = global.settingsManager ? global.settingsManager.get('idwEnvironments') || [] : [];
+    if (global.menuDataManager) {
+      global.menuDataManager.rebuild(idwEnvironments);
+    } else {
+      const { setApplicationMenu } = require('./menu');
+      setApplicationMenu(idwEnvironments);
+    }
+    console.log('[Startup] Application menu initialized with', idwEnvironments.length, 'IDW environments');
+  } catch (menuError) {
+    console.error('[Startup] Error initializing application menu:', menuError);
+  }
+  
   // Initialize Spaces API Server for browser extension communication
   const { getSpacesAPIServer } = require('./spaces-api-server');
   global.spacesAPIServer = getSpacesAPIServer();
@@ -951,26 +1056,30 @@ app.whenReady().then(() => {
   });
   
   // Initialize clipboard manager after app is ready (from Josh)
-  clipboardManager = new ClipboardManager();
-  // clipboardManager.registerShortcut(); // DISABLED: Cmd+Shift+V conflicts with system shortcuts
-  global.clipboardManager = clipboardManager;
-  console.log('Clipboard manager initialized (shortcut disabled)');
-  logger.logFeatureUsed('clipboard-manager', {
-    status: 'initialized',
-    shortcutRegistered: false
-  });
+  try {
+    clipboardManager = new ClipboardManager();
+    // clipboardManager.registerShortcut(); // DISABLED: Cmd+Shift+V conflicts with system shortcuts
+    global.clipboardManager = clipboardManager;
+    console.log('Clipboard manager initialized (shortcut disabled)');
+    logger.logFeatureUsed('clipboard-manager', {
+      status: 'initialized',
+      shortcutRegistered: false
+    });
+  } catch (clipErr) {
+    console.error('[Startup] Clipboard manager init error:', clipErr.message);
+  }
   
   // Set up Tab Picker IPC handlers
-  setupTabPickerIPC();
+  try { setupTabPickerIPC(); } catch (e) { console.error('[Startup] TabPicker IPC error:', e.message); }
   
   // Set up Intro Wizard IPC handlers
-  setupIntroWizardIPC();
+  try { setupIntroWizardIPC(); } catch (e) { console.error('[Startup] IntroWizard IPC error:', e.message); }
   
   // Set up Agent Manager IPC handlers
-  setupAgentManagerIPC();
+  try { setupAgentManagerIPC(); } catch (e) { console.error('[Startup] AgentManager IPC error:', e.message); }
   
   // Set up Claude Code IPC handlers
-  setupClaudeCodeIPC();
+  try { setupClaudeCodeIPC(); } catch (e) { console.error('[Startup] ClaudeCode IPC error:', e.message); }
   
   // Add keyboard shortcuts to open dev tools (enabled in both dev and production)
   const openDevTools = () => {
@@ -991,9 +1100,12 @@ app.whenReady().then(() => {
   console.log('Registered Cmd+Shift+I and F12 shortcuts for Developer Tools');
   
   // PERFORMANCE: Defer heavyweight manager initializations until after window shows
-  // This makes the app feel snappier by showing the UI first
-  setImmediate(() => {
+  // Uses setTimeout(0) instead of setImmediate because Electron's event loop
+  // does not reliably fire setImmediate callbacks in the main process.
+  setTimeout(async () => {
     console.log('[Startup] Initializing deferred managers...');
+    // Diagnostic marker to verify this callback fires
+    try { require('fs').writeFileSync('/tmp/gsx-deferred-init-ran.txt', new Date().toISOString()); } catch (_) {}
     
     // Note: Clipboard manager is already initialized earlier (around line 954)
     // Just initialize App Health Dashboard components here
@@ -1125,14 +1237,16 @@ app.whenReady().then(() => {
       console.log('[Startup] Ensured dock visibility on macOS');
     }
     
-    // Initialize the application menu
+    // Rebuild menu now that moduleManager is ready (populates Tools menu with installed modules)
     try {
-      console.log('[Startup] Setting up application menu...');
-      const idwEnvironments = global.settingsManager ? global.settingsManager.get('idwEnvironments') || [] : [];
-      setApplicationMenu(idwEnvironments);
-      console.log('[Startup] Application menu initialized with', idwEnvironments.length, 'IDW environments');
-    } catch (error) {
-      console.error('[Startup] Error initializing application menu:', error);
+      if (global.menuDataManager) {
+        console.log('[Startup] Rebuilding menu with moduleManager ready...');
+        const idwEnvs = global.settingsManager ? global.settingsManager.get('idwEnvironments') || [] : [];
+        global.menuDataManager.rebuild(idwEnvs);
+        console.log('[Startup] Menu rebuilt with Tools populated');
+      }
+    } catch (menuRebuildError) {
+      console.error('[Startup] Error rebuilding menu after moduleManager:', menuRebuildError);
     }
     
     // Initialize Speech Recognition Bridge (Whisper-based, for web apps)
@@ -1235,6 +1349,45 @@ app.whenReady().then(() => {
     console.error('[Main] Error setting up Evaluation IPC:', error);
   }
   
+  // --- Conversion API IPC Handlers ---
+  try {
+    const conversionService = require('./lib/conversion-service');
+    
+    ipcMain.handle('convert:run', async (event, params) => {
+      return conversionService.convert(params);
+    });
+    
+    ipcMain.handle('convert:capabilities', async () => {
+      return conversionService.capabilities();
+    });
+    
+    ipcMain.handle('convert:pipeline', async (event, params) => {
+      return conversionService.pipeline(params);
+    });
+    
+    ipcMain.handle('convert:graph', async () => {
+      return conversionService.graph();
+    });
+    
+    ipcMain.handle('convert:status', async (event, jobId) => {
+      return conversionService.jobStatus(jobId);
+    });
+    
+    ipcMain.handle('convert:validate-playbook', async (event, data) => {
+      const validator = require('./lib/converters/playbook-validator');
+      return validator.validate ? validator.validate(data) : { error: 'Validator not available' };
+    });
+    
+    ipcMain.handle('convert:diagnose-playbook', async (event, data) => {
+      const diagnostics = require('./lib/converters/playbook-diagnostics');
+      return diagnostics.diagnose ? diagnostics.diagnose(data) : { error: 'Diagnostics not available' };
+    });
+    
+    console.log('[Main] Conversion API IPC handlers registered');
+  } catch (err) {
+    console.warn('[Main] Failed to register conversion IPC handlers:', err.message);
+  }
+
   // Register test menu shortcut
   console.log('[Main] Registering test menu shortcut');
   registerTestMenuShortcut();
@@ -1257,122 +1410,169 @@ app.whenReady().then(() => {
 // ============================================
 
 // Handle app quit - coordinate window closing
-app.on('before-quit', async (event) => {
+// IMPORTANT: This handler takes full control of the quit process to avoid
+// zombie Electron processes on macOS.  All cleanup runs inside a hard timeout
+// and the process is force-exited when done (or when the timeout fires).
+let _shutdownInProgress = false;
+
+app.on('before-quit', (event) => {
   console.log('[App] before-quit event - coordinating shutdown');
-  
+  global.isQuitting = true; // Signal all close handlers to allow immediate close
+
+  // Close audit orchestrator session gracefully
+  try {
+    const { closeAuditOrchestrator } = require('./test/audit/ipc-bridge');
+    closeAuditOrchestrator().catch(() => {});
+  } catch (_) {}
+
   // Skip cleanup if we're installing an update - let the updater handle everything
   if (global.isUpdatingApp) {
     console.log('[App] Skipping cleanup - app is updating');
     return;
   }
-  
-  // Save browser tab state before quitting
-  try {
-    const mainWindow = browserWindow.getMainWindow();
-    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
-      console.log('[App] Sending save-tabs-state to main window');
-      mainWindow.webContents.send('save-tabs-state');
-      // Give renderer a moment to save
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-  } catch (error) {
-    console.error('[App] Error saving tab state:', error);
+
+  // Prevent re-entrant shutdown (app.quit() may be called again by window-all-closed)
+  if (_shutdownInProgress) {
+    console.log('[App] Shutdown already in progress, skipping');
+    event.preventDefault();
+    return;
   }
-  
-  // Save voice orb position before quitting
-  if (typeof saveOrbPosition === 'function') {
+  _shutdownInProgress = true;
+
+  // Take control: prevent Electron's default quit so we can do async cleanup
+  // then force-exit when done.
+  event.preventDefault();
+
+  // Hard safety timeout -- no matter what, exit after 8 seconds.
+  const SHUTDOWN_TIMEOUT_MS = 8000;
+  const forceExitTimer = setTimeout(() => {
+    console.warn('[App] Shutdown timeout reached -- force exiting');
+    app.exit(0);
+  }, SHUTDOWN_TIMEOUT_MS);
+
+  // Run all cleanup inside an async IIFE with its own catch-all
+  (async () => {
     try {
-      saveOrbPosition();
-    } catch (error) {
-      console.error('[App] Error saving orb position:', error);
-    }
-  }
-  
-  // Stop built-in agents
-  if (typeof stopBuiltInAgents === 'function') {
-    try {
-      await stopBuiltInAgents();
-    } catch (error) {
-      console.error('[App] Error stopping built-in agents:', error);
-    }
-  }
-  
-  // Stop app manager agent (background scanner)
-  try {
-    if (global.appManagerAgent) {
-      console.log('[App] Stopping app manager agent...');
-      global.appManagerAgent.stop();
-      global.appManagerAgent = null;
-    }
-  } catch (error) {
-    console.error('[App] Error stopping app manager agent:', error);
-  }
-  
-  // Shutdown exchange bridge
-  try {
-    const { shutdown } = require('./src/voice-task-sdk/exchange-bridge');
-    await shutdown();
-  } catch (error) {
-    // Exchange may not be initialized
-  }
-  
-  // Close all GSX windows first (they have forced destroy logic)
-  try {
-    closeAllGSXWindows();
-  } catch (error) {
-    console.error('[App] Error closing GSX windows:', error);
-  }
-  
-  // Get all windows
-  const allWindows = BrowserWindow.getAllWindows();
-  console.log(`[App] Found ${allWindows.length} windows to close`);
-  
-  // Close clipboard manager first
-  if (clipboardManager) {
-    try {
-      clipboardManager.destroy();
-      console.log('[App] Clipboard manager destroyed');
-    } catch (error) {
-      console.error('[App] Error destroying clipboard manager:', error);
-    }
-  }
-  
-  // Force close all remaining windows with timeout
-  allWindows.forEach((win, index) => {
-    if (!win.isDestroyed()) {
-      const title = win.getTitle();
-      console.log(`[App] Force closing window ${index + 1}/${allWindows.length}: ${title}`);
-      
+      // Save browser tab state before quitting
       try {
-        // Try graceful close first
-        win.close();
-        
-        // Force destroy after 1 second if still alive
-        setTimeout(() => {
-          if (!win.isDestroyed()) {
-            console.log(`[App] Force destroying stubborn window: ${title}`);
-            win.destroy();
-          }
-        }, 1000);
+        const mainWindow = browserWindow.getMainWindow();
+        if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+          console.log('[App] Sending save-tabs-state to main window');
+          mainWindow.webContents.send('save-tabs-state');
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
       } catch (error) {
-        console.error(`[App] Error closing window ${title}:`, error);
-        // Try to destroy anyway
+        console.error('[App] Error saving tab state:', error);
+      }
+
+      // Save voice orb position before quitting
+      if (typeof saveOrbPosition === 'function') {
         try {
-          win.destroy();
-        } catch (e) {
-          console.error(`[App] Error destroying window ${title}:`, e);
+          saveOrbPosition();
+        } catch (error) {
+          console.error('[App] Error saving orb position:', error);
         }
       }
+
+      // Save conversation state for session persistence across restarts
+      try {
+        const { saveConversationState } = require('./src/voice-task-sdk/exchange-bridge');
+        await Promise.race([
+          saveConversationState(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000))
+        ]);
+      } catch (error) {
+        console.warn('[App] Error saving conversation state:', error.message);
+      }
+
+      // Stop built-in agents
+      if (typeof stopBuiltInAgents === 'function') {
+        try {
+          await Promise.race([
+            stopBuiltInAgents(),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000))
+          ]);
+        } catch (error) {
+          console.error('[App] Error stopping built-in agents:', error);
+        }
+      }
+
+      // Stop app manager agent (background scanner)
+      try {
+        if (global.appManagerAgent) {
+          console.log('[App] Stopping app manager agent...');
+          global.appManagerAgent.stop();
+          global.appManagerAgent = null;
+        }
+      } catch (error) {
+        console.error('[App] Error stopping app manager agent:', error);
+      }
+
+      // Shutdown exchange bridge
+      try {
+        const { shutdown } = require('./src/voice-task-sdk/exchange-bridge');
+        await Promise.race([
+          shutdown(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000))
+        ]);
+      } catch (error) {
+        // Exchange may not be initialized
+      }
+
+      // Close all GSX windows first (they have forced destroy logic)
+      try {
+        closeAllGSXWindows();
+      } catch (error) {
+        console.error('[App] Error closing GSX windows:', error);
+      }
+
+      // Get all windows
+      const allWindows = BrowserWindow.getAllWindows();
+      console.log(`[App] Found ${allWindows.length} windows to close`);
+
+      // Close clipboard manager first
+      if (clipboardManager) {
+        try {
+          clipboardManager.destroy();
+          console.log('[App] Clipboard manager destroyed');
+        } catch (error) {
+          console.error('[App] Error destroying clipboard manager:', error);
+        }
+      }
+
+      // Force-destroy all remaining windows immediately (no grace period needed
+      // since we already saved state above)
+      allWindows.forEach((win, index) => {
+        if (!win.isDestroyed()) {
+          const title = win.getTitle();
+          console.log(`[App] Force closing window ${index + 1}/${allWindows.length}: ${title}`);
+          try {
+            win.destroy();
+          } catch (error) {
+            console.error(`[App] Error destroying window ${title}:`, error);
+          }
+        }
+      });
+
+    } catch (error) {
+      console.error('[App] Unexpected error during shutdown:', error);
+    } finally {
+      // Cleanup complete -- exit now
+      clearTimeout(forceExitTimer);
+      console.log('[App] Shutdown cleanup complete -- exiting');
+      app.exit(0);
     }
-  });
+  })();
 });
 
 // Quit when all windows are closed (except on macOS)
 app.on('window-all-closed', () => {
   console.log('[App] All windows closed');
+  const isTestMode = process.env.TEST_MODE === 'true' || process.env.NODE_ENV === 'test';
   // On macOS, apps typically stay open until explicitly quit
-  if (process.platform !== 'darwin') {
-    console.log('[App] Quitting app (non-macOS)');
+  // BUT if app.quit() was called (global.isQuitting) or we're in test mode, always exit
+  if (process.platform !== 'darwin' || global.isQuitting || isTestMode) {
+    console.log('[App] Quitting app');
     app.quit();
   } else {
     console.log('[App] Staying open (macOS - waiting for Cmd+Q)');
@@ -2058,7 +2258,192 @@ function setupSpacesAPI() {
     }
   });
   
-  console.log('[SpacesAPI] ✅ All IPC handlers registered (including tags and smart folders)');
+  // ---- GSX PUSH API ----
+  
+  // Initialize GSX Push with endpoint, auth, and current user
+  ipcMain.handle('spaces:gsx:initialize', async (event, endpoint, currentUser) => {
+    try {
+      spacesAPI.gsx.initialize(endpoint, null, currentUser);
+      return { success: true };
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:gsx:initialize:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Set current user for provenance tracking (Temporal Graph Honor System)
+  ipcMain.handle('spaces:gsx:setCurrentUser', async (event, user) => {
+    try {
+      spacesAPI.gsx.setCurrentUser(user);
+      return { success: true };
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:gsx:setCurrentUser:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Get the GSX auth token from settings
+  ipcMain.handle('spaces:gsx:getToken', async () => {
+    try {
+      const settingsManager = getSettingsManager();
+      return settingsManager.get('gsxToken') || null;
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:gsx:getToken:', error);
+      return null;
+    }
+  });
+  
+  // Push a single asset to GSX
+  ipcMain.handle('spaces:gsx:pushAsset', async (event, itemId, options = {}) => {
+    try {
+      return await spacesAPI.gsx.pushAsset(itemId, options);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:gsx:pushAsset:', error);
+      return { success: false, error: 'UNKNOWN', message: error.message };
+    }
+  });
+  
+  // Push multiple assets to GSX
+  ipcMain.handle('spaces:gsx:pushAssets', async (event, itemIds, options = {}) => {
+    try {
+      return await spacesAPI.gsx.pushAssets(itemIds, options);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:gsx:pushAssets:', error);
+      return { success: false, pushed: [], skipped: [], failed: [{ error: error.message }] };
+    }
+  });
+  
+  // Push a space to GSX
+  ipcMain.handle('spaces:gsx:pushSpace', async (event, spaceId, options = {}) => {
+    try {
+      return await spacesAPI.gsx.pushSpace(spaceId, options);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:gsx:pushSpace:', error);
+      return { success: false, error: 'UNKNOWN', message: error.message };
+    }
+  });
+  
+  // Unpush an asset
+  ipcMain.handle('spaces:gsx:unpushAsset', async (event, itemId) => {
+    try {
+      return await spacesAPI.gsx.unpushAsset(itemId);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:gsx:unpushAsset:', error);
+      return { success: false, error: 'UNKNOWN', message: error.message };
+    }
+  });
+  
+  // Unpush multiple assets
+  ipcMain.handle('spaces:gsx:unpushAssets', async (event, itemIds) => {
+    try {
+      return await spacesAPI.gsx.unpushAssets(itemIds);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:gsx:unpushAssets:', error);
+      return { success: false, unpushed: [], failed: [{ error: error.message }] };
+    }
+  });
+  
+  // Unpush a space
+  ipcMain.handle('spaces:gsx:unpushSpace', async (event, spaceId, options = {}) => {
+    try {
+      return await spacesAPI.gsx.unpushSpace(spaceId, options);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:gsx:unpushSpace:', error);
+      return { success: false, error: 'UNKNOWN', message: error.message };
+    }
+  });
+  
+  // Change visibility of an asset
+  ipcMain.handle('spaces:gsx:changeVisibility', async (event, itemId, isPublic) => {
+    try {
+      return await spacesAPI.gsx.changeVisibility(itemId, isPublic);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:gsx:changeVisibility:', error);
+      return { success: false, error: 'UNKNOWN', message: error.message };
+    }
+  });
+  
+  // Change visibility for multiple assets
+  ipcMain.handle('spaces:gsx:changeVisibilityBulk', async (event, itemIds, isPublic) => {
+    try {
+      return await spacesAPI.gsx.changeVisibilityBulk(itemIds, isPublic);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:gsx:changeVisibilityBulk:', error);
+      return { success: false, changed: [], failed: [{ error: error.message }] };
+    }
+  });
+  
+  // Get push status for an item
+  ipcMain.handle('spaces:gsx:getPushStatus', async (event, itemId) => {
+    try {
+      return await spacesAPI.gsx.getPushStatus(itemId);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:gsx:getPushStatus:', error);
+      return { status: 'error', error: error.message };
+    }
+  });
+  
+  // Get push statuses for multiple items
+  ipcMain.handle('spaces:gsx:getPushStatuses', async (event, itemIds) => {
+    try {
+      return await spacesAPI.gsx.getPushStatuses(itemIds);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:gsx:getPushStatuses:', error);
+      return {};
+    }
+  });
+  
+  // Update push status (for external sources)
+  ipcMain.handle('spaces:gsx:updatePushStatus', async (event, itemId, pushData) => {
+    try {
+      return await spacesAPI.gsx.updatePushStatus(itemId, pushData);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:gsx:updatePushStatus:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Check which items have local changes
+  ipcMain.handle('spaces:gsx:checkLocalChanges', async (event, itemIds) => {
+    try {
+      return await spacesAPI.gsx.checkLocalChanges(itemIds);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:gsx:checkLocalChanges:', error);
+      return { changed: [], unchanged: [], notPushed: [] };
+    }
+  });
+  
+  // Get all links for an item
+  ipcMain.handle('spaces:gsx:getLinks', async (event, itemId) => {
+    try {
+      return await spacesAPI.gsx.getLinks(itemId);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:gsx:getLinks:', error);
+      return { error: error.message };
+    }
+  });
+  
+  // Get share link for an item
+  ipcMain.handle('spaces:gsx:getShareLink', async (event, itemId) => {
+    try {
+      return await spacesAPI.gsx.getShareLink(itemId);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:gsx:getShareLink:', error);
+      return { error: error.message };
+    }
+  });
+  
+  // Get specific link type for an item
+  ipcMain.handle('spaces:gsx:getLink', async (event, itemId, linkType) => {
+    try {
+      return await spacesAPI.gsx.getLink(itemId, linkType);
+    } catch (error) {
+      console.error('[SpacesAPI] Error in spaces:gsx:getLink:', error);
+      return { error: error.message };
+    }
+  });
+  
+  console.log('[SpacesAPI] ✅ All IPC handlers registered (including tags, smart folders, and GSX push)');
   
   // ---- MULTI-TENANT TOKEN IPC HANDLERS ----
   const { session } = require('electron');
@@ -2165,9 +2550,31 @@ function setupSpacesAPI() {
         path: c.path
       })));
       
-      // Also set on original domain for API calls (if different)
+      // CRITICAL: Also set on API domain (e.g., .edison.api.onereach.ai)
+      // The UI domain (.edison.onereach.ai) doesn't cover the API domain tree
+      const apiDomain = multiTenantStore.getApiDomain(environment);
+      if (apiDomain && apiDomain !== broaderDomain) {
+        try {
+          await ses.cookies.set({
+            url: `https://api${apiDomain}`,
+            name: 'mult',
+            value: token.value,
+            domain: apiDomain,
+            path: '/',
+            secure: true,
+            httpOnly: true,
+            sameSite: 'no_restriction',
+            expirationDate: token.expiresAt
+          });
+          console.log(`[MultiTenant] Also set API domain cookie: ${apiDomain}`);
+        } catch (e) {
+          console.log(`[MultiTenant] Could not set API domain cookie: ${e.message}`);
+        }
+      }
+      
+      // Also set on original domain if different from both (for legacy compatibility)
       const originalDomain = token.domain;
-      if (originalDomain && originalDomain !== broaderDomain) {
+      if (originalDomain && originalDomain !== broaderDomain && originalDomain !== apiDomain) {
         try {
           await ses.cookies.set({
             url: `https://${originalDomain.replace(/^\./, '')}`,
@@ -2262,6 +2669,13 @@ function setupSpacesAPI() {
     return multiTenantStore.getEnvironmentsWithTokens();
   });
   
+  // Get full diagnostic info about tokens (for debugging)
+  ipcMain.handle('multi-tenant:get-diagnostics', async () => {
+    const diagnostics = multiTenantStore.getDiagnostics();
+    console.log('[MultiTenant] Diagnostics requested:', JSON.stringify(diagnostics, null, 2));
+    return diagnostics;
+  });
+  
   // Get user data for localStorage injection (enables SSO) - async version
   ipcMain.handle('multi-tenant:get-user-data', async (event, environment) => {
     const userData = multiTenantStore.getOrTokenUserData(environment);
@@ -2285,10 +2699,11 @@ function setupSpacesAPI() {
   ipcMain.handle('onereach:get-credentials', async () => {
     try {
       const creds = await credentialManager.getOneReachCredentials();
-      console.log('[OneReach] Get credentials result:', creds ? { email: creds.email, has2FA: creds.has2FA } : null);
+      const summary = creds ? { email: creds.email, has2FA: creds.has2FA } : null;
+      logger.info('[Auth] Credentials requested', { event: 'auth:credentials-fetch', found: !!creds, ...summary, feature: 'auto-login' });
       return creds;
     } catch (error) {
-      console.error('[OneReach] Failed to get credentials:', error);
+      logger.error('[Auth] Credential fetch failed', { event: 'auth:credentials-error', error: error.message, feature: 'auto-login' });
       return null;
     }
   });
@@ -2296,12 +2711,11 @@ function setupSpacesAPI() {
   // Save OneReach credentials
   ipcMain.handle('onereach:save-credentials', async (event, { email, password }) => {
     try {
-      console.log('[OneReach] Saving credentials for:', email);
       const success = await credentialManager.saveOneReachCredentials(email, password);
-      console.log('[OneReach] Credentials save result:', success);
+      logger.info('[Auth] Credentials saved', { event: 'auth:credentials-saved', email, success, feature: 'auto-login' });
       return { success };
     } catch (error) {
-      console.error('[OneReach] Failed to save credentials:', error);
+      logger.error('[Auth] Credential save failed', { event: 'auth:credentials-save-error', error: error.message, feature: 'auto-login' });
       return { success: false, error: error.message };
     }
   });
@@ -2310,9 +2724,10 @@ function setupSpacesAPI() {
   ipcMain.handle('onereach:delete-credentials', async () => {
     try {
       const success = await credentialManager.deleteOneReachCredentials();
+      logger.info('[Auth] Credentials deleted', { event: 'auth:credentials-deleted', success, feature: 'auto-login' });
       return { success };
     } catch (error) {
-      console.error('[OneReach] Failed to delete credentials:', error);
+      logger.error('[Auth] Credential delete failed', { event: 'auth:credentials-delete-error', error: error.message, feature: 'auto-login' });
       return { success: false, error: error.message };
     }
   });
@@ -2324,13 +2739,15 @@ function setupSpacesAPI() {
       
       // Validate the secret by trying to generate a code
       if (!totpManager.isValidSecret(secret)) {
+        logger.warn('[Auth] Invalid TOTP secret rejected', { event: 'auth:totp-invalid-secret', feature: 'auto-login' });
         return { success: false, error: 'Invalid TOTP secret' };
       }
       
       const success = await credentialManager.saveTOTPSecret(secret);
+      logger.info('[Auth] TOTP secret saved', { event: 'auth:totp-saved', success, feature: 'auto-login' });
       return { success };
     } catch (error) {
-      console.error('[OneReach] Failed to save TOTP:', error);
+      logger.error('[Auth] TOTP save failed', { event: 'auth:totp-save-error', error: error.message, feature: 'auto-login' });
       return { success: false, error: error.message };
     }
   });
@@ -2382,11 +2799,14 @@ function setupSpacesAPI() {
       const totpSecret = await credentialManager.getTOTPSecret();
       
       if (!totpSecret) {
+        logger.warn('[Auth] TOTP code requested but no secret configured', { event: 'auth:totp-no-secret', feature: 'auto-login' });
         return { success: false, error: 'No TOTP secret configured' };
       }
       
       const totpManager = getTOTPManager();
       const codeInfo = totpManager.getCurrentCodeInfo(totpSecret);
+      
+      logger.info('[Auth] TOTP code generated', { event: 'auth:totp-generated', timeRemaining: codeInfo.timeRemaining, feature: 'auto-login' });
       
       return {
         success: true,
@@ -2395,7 +2815,7 @@ function setupSpacesAPI() {
         timeRemaining: codeInfo.timeRemaining
       };
     } catch (error) {
-      console.error('[TOTP] Failed to get code:', error);
+      logger.error('[Auth] TOTP code generation failed', { event: 'auth:totp-error', error: error.message, feature: 'auto-login' });
       return { success: false, error: error.message };
     }
   });
@@ -2422,43 +2842,38 @@ function setupSpacesAPI() {
       // Get the webContents by ID
       const wc = webContents.fromId(webContentsId);
       if (!wc) {
-        console.error('[OneReach] WebContents not found:', webContentsId);
+        logger.warn('[Auth] Frame execute: WebContents not found', { event: 'auth:frame-missing', webContentsId, feature: 'auto-login' });
         return { success: false, error: 'WebContents not found' };
       }
-      
-      console.log(`[OneReach] Looking for frame matching: ${urlPattern}`);
       
       // Get all frames in the webContents
       const mainFrame = wc.mainFrame;
       const allFrames = [mainFrame, ...mainFrame.framesInSubtree];
       
-      console.log(`[OneReach] Found ${allFrames.length} frames total`);
+      logger.debug('[Auth] Searching frames for auth iframe', { event: 'auth:frame-search', urlPattern, frameCount: allFrames.length, feature: 'auto-login' });
       
       // Find frame matching the URL pattern
       let targetFrame = null;
       for (const frame of allFrames) {
         const frameUrl = frame.url;
-        console.log(`[OneReach] Frame: ${frameUrl}`);
         if (frameUrl && frameUrl.includes(urlPattern)) {
           targetFrame = frame;
-          console.log(`[OneReach] Found matching frame: ${frameUrl}`);
           break;
         }
       }
       
       if (!targetFrame) {
-        console.log('[OneReach] No matching frame found');
+        logger.info('[Auth] No matching auth frame found', { event: 'auth:frame-not-found', urlPattern, frameCount: allFrames.length, feature: 'auto-login' });
         return { success: false, error: 'No matching frame found' };
       }
       
       // Execute script in the frame
-      console.log('[OneReach] Executing script in frame...');
       const result = await targetFrame.executeJavaScript(script);
-      console.log('[OneReach] Script execution result:', result);
+      logger.debug('[Auth] Frame script executed', { event: 'auth:frame-executed', urlPattern, success: true, feature: 'auto-login' });
       
       return { success: true, result };
     } catch (error) {
-      console.error('[OneReach] Execute in frame error:', error);
+      logger.error('[Auth] Frame script execution failed', { event: 'auth:frame-error', urlPattern, error: error.message, feature: 'auto-login' });
       return { success: false, error: error.message };
     }
   });
@@ -2660,13 +3075,18 @@ function setupSpacesAPI() {
     }
   });
   
-  // Unified Claude Service - Headless first, API fallback
+  // Legacy Unified Claude handlers — redirected through centralized ai-service
   ipcMain.handle('claude:unified-complete', async (event, prompt, options = {}) => {
     try {
-      console.log('[IPC] claude:unified-complete called');
-      const { getUnifiedClaudeService } = require('./unified-claude');
-      const unifiedClaude = getUnifiedClaudeService();
-      return await unifiedClaude.complete(prompt, options);
+      console.log('[IPC] claude:unified-complete -> ai-service');
+      const { getAIService } = require('./lib/ai-service');
+      const result = await getAIService().complete(prompt, {
+        profile: options.model?.includes('opus') ? 'powerful' : 'standard',
+        maxTokens: options.maxTokens || options.max_tokens || 4096,
+        temperature: options.temperature,
+        feature: 'unified-claude-legacy',
+      });
+      return { success: true, text: result.content, source: 'ai-service' };
     } catch (error) {
       console.error('[IPC] Error in unified Claude complete:', error);
       return { success: false, error: error.message };
@@ -2675,9 +3095,9 @@ function setupSpacesAPI() {
   
   ipcMain.handle('claude:unified-status', async (event) => {
     try {
-      const { getUnifiedClaudeService } = require('./unified-claude');
-      const unifiedClaude = getUnifiedClaudeService();
-      return await unifiedClaude.getStatus();
+      const { getAIService } = require('./lib/ai-service');
+      const status = getAIService().getStatus();
+      return { available: true, mode: 'ai-service', ...status };
     } catch (error) {
       console.error('[IPC] Error getting Claude status:', error);
       return { error: error.message };
@@ -2686,16 +3106,172 @@ function setupSpacesAPI() {
   
   ipcMain.handle('claude:unified-update-settings', async (event, settings) => {
     try {
-      const { getUnifiedClaudeService } = require('./unified-claude');
-      const unifiedClaude = getUnifiedClaudeService();
-      unifiedClaude.updateSettings(settings);
-      return { success: true };
+      // Settings are now managed through ai-service model profiles
+      console.log('[IPC] claude:unified-update-settings is a no-op — use ai:setProfile instead');
+      return { success: true, note: 'Use ai:setProfile for model configuration' };
     } catch (error) {
       console.error('[IPC] Error updating Claude settings:', error);
       return { success: false, error: error.message };
     }
   });
   
+  // =========================================================================
+  // Centralized AI Service IPC Handlers
+  // All renderer processes use these instead of direct API calls.
+  // =========================================================================
+
+  ipcMain.handle('ai:chat', async (event, opts) => {
+    try {
+      const ai = require('./lib/ai-service');
+      return await ai.chat(opts);
+    } catch (error) {
+      return { error: error.message, code: error.code || 'AI_ERROR' };
+    }
+  });
+
+  ipcMain.handle('ai:complete', async (event, prompt, opts = {}) => {
+    try {
+      const ai = require('./lib/ai-service');
+      const text = await ai.complete(prompt, opts);
+      return { content: text };
+    } catch (error) {
+      return { error: error.message, code: error.code || 'AI_ERROR' };
+    }
+  });
+
+  ipcMain.handle('ai:json', async (event, prompt, opts = {}) => {
+    try {
+      const ai = require('./lib/ai-service');
+      const data = await ai.json(prompt, opts);
+      return { data };
+    } catch (error) {
+      return { error: error.message, code: error.code || 'AI_ERROR' };
+    }
+  });
+
+  ipcMain.handle('ai:vision', async (event, imageData, prompt, opts = {}) => {
+    try {
+      const ai = require('./lib/ai-service');
+      return await ai.vision(imageData, prompt, opts);
+    } catch (error) {
+      return { error: error.message, code: error.code || 'AI_ERROR' };
+    }
+  });
+
+  ipcMain.handle('ai:embed', async (event, input, opts = {}) => {
+    try {
+      const ai = require('./lib/ai-service');
+      return await ai.embed(input, opts);
+    } catch (error) {
+      return { error: error.message, code: error.code || 'AI_ERROR' };
+    }
+  });
+
+  ipcMain.handle('ai:transcribe', async (event, audioBufferArray, opts = {}) => {
+    try {
+      const ai = require('./lib/ai-service');
+      // audioBufferArray comes from renderer as an ArrayBuffer - convert to Node Buffer
+      const audioBuffer = Buffer.from(audioBufferArray);
+      return await ai.transcribe(audioBuffer, opts);
+    } catch (error) {
+      return { error: error.message, code: error.code || 'AI_ERROR' };
+    }
+  });
+
+  // Streaming chat via IPC event channels
+  ipcMain.handle('ai:chatStream', async (event, opts) => {
+    const requestId = `stream-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    
+    try {
+      const ai = require('./lib/ai-service');
+      const stream = ai.chatStream(opts);
+
+      // Stream chunks to renderer via event channel
+      (async () => {
+        try {
+          for await (const chunk of stream) {
+            if (!event.sender.isDestroyed()) {
+              event.sender.send(`ai:stream:${requestId}`, chunk);
+            }
+          }
+        } catch (err) {
+          if (!event.sender.isDestroyed()) {
+            event.sender.send(`ai:stream:${requestId}`, { error: err.message, done: true });
+          }
+        }
+      })();
+
+      return { requestId };
+    } catch (error) {
+      return { error: error.message, code: error.code || 'AI_ERROR' };
+    }
+  });
+
+  // Cost and status
+  ipcMain.handle('ai:getCostSummary', async () => {
+    try {
+      const ai = require('./lib/ai-service');
+      return ai.getCostSummary();
+    } catch (error) {
+      return { error: error.message };
+    }
+  });
+
+  ipcMain.handle('ai:getStatus', async () => {
+    try {
+      const ai = require('./lib/ai-service');
+      return ai.getStatus();
+    } catch (error) {
+      return { error: error.message };
+    }
+  });
+
+  ipcMain.handle('ai:getProfiles', async () => {
+    try {
+      const ai = require('./lib/ai-service');
+      return ai.getProfiles();
+    } catch (error) {
+      return { error: error.message };
+    }
+  });
+
+  ipcMain.handle('ai:setProfile', async (event, name, config) => {
+    try {
+      const ai = require('./lib/ai-service');
+      return ai.setProfile(name, config);
+    } catch (error) {
+      return { error: error.message };
+    }
+  });
+
+  ipcMain.handle('ai:testConnection', async (event, provider) => {
+    try {
+      const ai = require('./lib/ai-service');
+      return await ai.testConnection(provider);
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('ai:resetCircuit', async (event, provider) => {
+    try {
+      const ai = require('./lib/ai-service');
+      return { success: ai.resetCircuit(provider) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('ai:imageGenerate', async (event, prompt, options = {}) => {
+    try {
+      const ai = require('./lib/ai-service');
+      return await ai.imageGenerate(prompt, options);
+    } catch (error) {
+      console.error('[AI IPC] imageGenerate error:', error.message);
+      throw error;
+    }
+  });
+
   // Test support - Only available in test mode
   if (process.env.NODE_ENV === 'test' || process.env.TEST_MODE === 'true') {
     console.log('[ConversationCapture] Registering test-only IPC handlers');
@@ -3274,9 +3850,9 @@ function setupModuleManagerIPC() {
         console.log('[IDW Store] ✅ Synced to idw-entries.json');
         
         // Refresh menu
-        const { refreshApplicationMenu } = require('./menu');
-        refreshApplicationMenu();
-        console.log('[IDW Store] ✅ Menu refreshed');
+        if (global.menuDataManager) { global.menuDataManager.refresh(); }
+        else { const { refreshApplicationMenu } = require('./menu'); refreshApplicationMenu(); }
+        console.log('[IDW Store] Menu refreshed');
         
         return { success: true, updated: true };
       }
@@ -3309,9 +3885,9 @@ function setupModuleManagerIPC() {
       console.log('[IDW Store] ✅ Synced to idw-entries.json');
       
       // Refresh menu
-      const { refreshApplicationMenu } = require('./menu');
-      refreshApplicationMenu();
-      console.log('[IDW Store] ✅ Menu refreshed');
+      if (global.menuDataManager) { global.menuDataManager.refresh(); }
+      else { const { refreshApplicationMenu } = require('./menu'); refreshApplicationMenu(); }
+      console.log('[IDW Store] Menu refreshed');
       
       return { success: true, updated: false };
     } catch (error) {
@@ -3744,30 +4320,16 @@ function setupAiderIPC() {
     return result.filePaths[0];
   });
   
-  // Create a new space
+  // Create a new space (via centralized Spaces API)
   ipcMain.handle('aider:create-space', async (event, name) => {
     try {
-      const spacesDir = path.join(app.getPath('userData'), 'spaces');
-      const spaceId = `space-${Date.now()}`;
-      const spacePath = path.join(spacesDir, spaceId);
+      const { getSpacesAPI } = require('./spaces-api');
+      const spacesAPI = getSpacesAPI();
       
-      fs.mkdirSync(spacePath, { recursive: true });
+      const space = await spacesAPI.create(name || 'New Space');
       
-      // Create initial metadata
-      const metadata = {
-        id: spaceId,
-        name: name || 'New Space',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-      
-      fs.writeFileSync(
-        path.join(spacePath, 'space-metadata.json'),
-        JSON.stringify(metadata, null, 2)
-      );
-      
-      console.log('[Aider] Created space:', spaceId);
-      return { success: true, spaceId, spacePath };
+      console.log('[Aider] Created space:', space.id);
+      return { success: true, spaceId: space.id, spacePath: space.path };
     } catch (error) {
       console.error('[Aider] Create space failed:', error);
       return { success: false, error: error.message };
@@ -4036,201 +4598,73 @@ function setupAiderIPC() {
     
     console.log('[GSX Create] Evaluation request received, model:', modelName, 'hasImage:', !!imageBase64);
     try {
-      const { getSettingsManager } = require('./settings-manager');
-      const settings = getSettingsManager();
+      const ai = require('./lib/ai-service');
       
-      const apiKey = settings.getLLMApiKey();
-      
-      if (!apiKey) {
-        throw new Error('No API key configured. Please add your API key in Settings.');
-      }
-      
-      // Determine provider from model name
+      // Determine provider from model name to select appropriate profile
       const isOpenAI = modelName && (modelName.startsWith('gpt-') || modelName.startsWith('o1') || modelName.startsWith('o3'));
       const isAnthropic = modelName && modelName.startsWith('claude');
       
-      // Use the passed model, or fall back to settings - GSX Create only uses Claude 4.5 models
-      const provider = isOpenAI ? 'openai' : (isAnthropic ? 'anthropic' : (settings.getLLMProvider() || 'anthropic'));
+      // Use the passed model, or fall back to Claude 4.5 - GSX Create prefers Claude 4.5 models
       let model = modelName || 'claude-opus-4-5-20251101';
       
-      console.log('[GSX Create] Using provider:', provider, 'model:', model);
-      
-      let response;
-      
-      if (provider === 'openai') {
-        // OpenAI API call
-        response = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`
-          },
-          body: JSON.stringify({
-            model: model,
-            messages: [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: userPrompt }
-            ],
-            temperature: 0.7,
-            max_tokens: 4000
-          })
-        });
-        
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
-        }
-        
-        const data = await response.json();
-        return { success: true, content: data.choices[0].message.content };
-        
-      } else {
-        // ============================================================
-        // ANTHROPIC API CALL - CLAUDE 4.5 MODELS ONLY
-        // ============================================================
-        // IMPORTANT: Only use Claude 4.5 models (Opus 4.5 or Sonnet 4.5)
-        // NO FALLBACK to older models - if 4.5 not available, wait and retry
-        // Allowed models:
-        //   - claude-opus-4-5-20251101   (for complex analysis, coding)
-        //   - claude-sonnet-4-5-20250929 (for general tasks)
-        // DO NOT USE older models like claude-3-opus, claude-3-5-sonnet, etc.
-        // Exception: Image/voice tasks may use specialized models
-        // ============================================================
-        
-        console.log('[GSX Create] Making API request with Claude 4.5 model:', model);
-        
-        // Validate model is Claude 4.5
-        // Correct model names (as of Dec 2025):
-        //   - claude-sonnet-4-5-20250929  (Sonnet 4.5, released Sept 29, 2025)
-        //   - claude-opus-4-5-20251101    (Opus 4.5, released Nov 1, 2025)
-        if (!model.includes('4-5') && !model.includes('4.5')) {
-          console.warn('[GSX Create] WARNING: Non-4.5 model requested:', model);
-          console.warn('[GSX Create] Forcing to claude-opus-4-5-20251101');
-          model = 'claude-opus-4-5-20251101';
-        }
-        
-        // Build the user message content - support both text-only and image+text
-        let userContent;
-        if (imageBase64) {
-          // Vision request with image
-          // Remove data URL prefix if present (e.g., "data:image/png;base64,")
-          let imageData = imageBase64;
-          if (imageBase64.includes(',')) {
-            imageData = imageBase64.split(',')[1];
-          }
-          
-          userContent = [
-            {
-              type: 'image',
-              source: {
-                type: 'base64',
-                media_type: 'image/png',
-                data: imageData
-              }
-            },
-            {
-              type: 'text',
-              text: userPrompt || 'Analyze this image.'
-            }
-          ];
-          console.log('[GSX Create] Including image in request (vision mode)');
-        } else {
-          // Text-only request
-          userContent = userPrompt;
-        }
-        
-        const requestBody = {
-          model: model,
-          max_tokens: maxTokens || 4096,
-          system: systemPrompt || 'You are a helpful assistant.',
-          messages: [
-            { role: 'user', content: userContent }
-          ]
-        };
-        
-        // Retry logic with exponential backoff for Claude 4.5 models
-        // If model not available, wait and retry (do NOT fallback to older models)
-        const maxRetries = 10;
-        const maxWaitSeconds = 30;
-        let waitSeconds = 1;
-        let lastError = null;
-        
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-          console.log(`[GSX Create] Attempt ${attempt}/${maxRetries} with model: ${model}`);
-          
-          try {
-            response = await fetch('https://api.anthropic.com/v1/messages', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': apiKey,
-                'anthropic-version': '2023-06-01'
-              },
-              body: JSON.stringify(requestBody)
-            });
-            
-            if (!response.ok) {
-              const errorText = await response.text();
-              console.error('[GSX Create] API error:', response.status, errorText);
-              
-              try {
-                const errorJson = JSON.parse(errorText);
-                lastError = errorJson.error?.message || errorText;
-                
-                // If model not found (404), wait and retry - DO NOT fallback
-                if (response.status === 404 || errorJson.error?.type === 'not_found_error') {
-                  if (attempt < maxRetries) {
-                    console.log(`[GSX Create] Model ${model} not available yet, waiting ${waitSeconds}s before retry...`);
-                    await new Promise(resolve => setTimeout(resolve, waitSeconds * 1000));
-                    waitSeconds = Math.min(waitSeconds * 2, maxWaitSeconds);
-                    continue;
-                  }
-                }
-              } catch (e) {
-                lastError = errorText;
-              }
-              
-              throw new Error(`Anthropic API error: ${response.status} - ${lastError}`);
-            }
-            
-            // Success!
-            const data = await response.json();
-            
-            let responseText = '';
-            if (data.content) {
-              for (const block of data.content) {
-                if (block.type === 'text') {
-                  responseText += block.text;
-                }
-              }
-            }
-            
-            console.log('[GSX Create] Claude 4.5 API success, response length:', responseText.length);
-            return { 
-              success: true, 
-              content: responseText || data.content?.[0]?.text,
-              model: model,
-              usage: data.usage
-            };
-            
-          } catch (fetchError) {
-            lastError = fetchError.message;
-            
-            // Network errors - retry
-            if (attempt < maxRetries && (fetchError.message.includes('fetch') || fetchError.message.includes('network'))) {
-              console.log(`[GSX Create] Network error, waiting ${waitSeconds}s before retry...`);
-              await new Promise(resolve => setTimeout(resolve, waitSeconds * 1000));
-              waitSeconds = Math.min(waitSeconds * 2, maxWaitSeconds);
-              continue;
-            }
-            
-            throw fetchError;
-          }
-        }
-        
-        // All retries exhausted - no fallback, just fail
-        throw new Error(`Claude 4.5 model ${model} not available after ${maxRetries} retries. Last error: ${lastError}`);
+      // Validate Claude model is 4.5 (if Anthropic)
+      if (isAnthropic && !model.includes('4-5') && !model.includes('4.5')) {
+        console.warn('[GSX Create] WARNING: Non-4.5 model requested:', model);
+        console.warn('[GSX Create] Forcing to claude-opus-4-5-20251101');
+        model = 'claude-opus-4-5-20251101';
       }
+      
+      // Select profile based on provider and capabilities
+      // For OpenAI: use 'fast' profile (gpt-4o-mini) or 'standard' for more capable models
+      // For Anthropic: use 'standard' (Sonnet 4.5) or 'powerful' (Opus 4.5) based on model
+      let profile = 'standard'; // Default to standard
+      if (isOpenAI) {
+        profile = model.includes('gpt-4o-mini') ? 'fast' : 'standard';
+      } else if (isAnthropic) {
+        profile = model.includes('opus') ? 'powerful' : 'standard';
+      }
+      
+      console.log('[GSX Create] Using profile:', profile, 'model:', model);
+      
+      let result;
+      
+      if (imageBase64) {
+        // Vision request - use ai.vision()
+        console.log('[GSX Create] Including image in request (vision mode)');
+        
+        // Prepare image data (ai-service handles data URL parsing)
+        let imageData = imageBase64;
+        if (!imageBase64.startsWith('data:')) {
+          // If raw base64, wrap in data URL
+          imageData = `data:image/png;base64,${imageBase64}`;
+        }
+        
+        result = await ai.vision(imageData, userPrompt || 'Analyze this image.', {
+          profile: 'vision', // Use vision profile
+          system: systemPrompt || 'You are a helpful assistant.',
+          maxTokens: maxTokens || 4096,
+          temperature: 0.7,
+          feature: 'gsx-create',
+        });
+      } else {
+        // Text-only request - use ai.chat()
+        result = await ai.chat({
+          profile: profile,
+          system: systemPrompt || 'You are a helpful assistant.',
+          messages: [{ role: 'user', content: userPrompt }],
+          maxTokens: maxTokens || 4096,
+          temperature: 0.7,
+          feature: 'gsx-create',
+        });
+      }
+      
+      console.log('[GSX Create] API success, response length:', result.content?.length || 0);
+      return { 
+        success: true, 
+        content: result.content,
+        model: result.model || model,
+        usage: result.usage
+      };
       
     } catch (error) {
       console.error('[GSX Create] Evaluation error:', error);
@@ -4242,183 +4676,76 @@ function setupAiderIPC() {
   // DESIGN-FIRST WORKFLOW - UI Mockup Generation
   // ============================================
 
-  // Generate 4 design mockup choices using DALL-E 3
+  // Generate 4 design mockup choices using DALL-E 3 (via centralized ai-service)
   ipcMain.handle('design:generate-choices', async (event, { objective, approaches }) => {
-    console.log('[Design] Generating 4 design choices for:', objective?.substring(0, 50));
+    console.log('[Design] Generating design choices for:', objective?.substring(0, 50));
     
     try {
-      const { getSettingsManager } = require('./settings-manager');
-      const settings = getSettingsManager();
-      const openaiKey = settings.get('openaiApiKey');
+      const ai = require('./lib/ai-service');
       
-      if (!openaiKey) {
-        throw new Error('OpenAI API key required for design generation. Please add it in Settings.');
-      }
-      
-      const https = require('https');
-      
-      // Generate image with better error handling
-      const generateImage = async (approach, attemptNum = 1) => {
-        const maxRetries = 2;
-        
-        return new Promise((resolve, reject) => {
-          const requestBody = JSON.stringify({
-            model: 'dall-e-3',
-            prompt: approach.prompt,
-            n: 1,
-            size: '1024x1024',
-            quality: 'standard', // standard for faster generation, hd for final
-            response_format: 'b64_json'
-          });
-          
-          console.log(`[Design] Starting image generation for ${approach.id} (attempt ${attemptNum})`);
-          
-          const req = https.request({
-            hostname: 'api.openai.com',
-            path: '/v1/images/generations',
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${openaiKey}`,
-              'Content-Length': Buffer.byteLength(requestBody)
-            },
-            timeout: 120000 // 2 minute timeout for image generation
-          }, (res) => {
-            let data = '';
-            res.on('data', chunk => data += chunk);
-            res.on('end', () => {
-              try {
-                const response = JSON.parse(data);
-                
-                // Log response status
-                console.log(`[Design] Response for ${approach.id}: status=${res.statusCode}`);
-                
-                if (response.error) {
-                  const errorMsg = response.error.message || JSON.stringify(response.error);
-                  console.error(`[Design] OpenAI API error for ${approach.id}:`, errorMsg);
-                  
-                  // Rate limit handling - retry after delay
-                  if (res.statusCode === 429 && attemptNum < maxRetries) {
-                    console.log(`[Design] Rate limited, will retry ${approach.id} after delay...`);
-                    setTimeout(() => {
-                      generateImage(approach, attemptNum + 1).then(resolve).catch(reject);
-                    }, 10000); // Wait 10 seconds before retry
-                    return;
-                  }
-                  
-                  reject(new Error(errorMsg));
-                  return;
-                }
-                
-                if (response.data && response.data[0]) {
-                  console.log(`[Design] Successfully generated image for ${approach.id}`);
-                  
-                  // Track DALL-E usage for cost monitoring
-                  // DALL-E 3 1024x1024 standard = $0.04 per image
-                  try {
-                    if (budgetManager) {
-                      budgetManager.trackUsage({
-                        provider: 'openai',
-                        model: 'dall-e-3',
-                        inputTokens: 0,
-                        outputTokens: 0,
-                        feature: 'design-generation',
-                        operation: 'generate-image',
-                        projectId: null,
-                        // DALL-E pricing is per-image, not per-token
-                        metadata: {
-                          imageCount: 1,
-                          size: '1024x1024',
-                          quality: 'standard',
-                          costPerImage: 0.04
-                        }
-                      });
-                    }
-                  } catch (trackError) {
-                    console.warn('[Design] Failed to track usage:', trackError.message);
-                  }
-                  
-                  resolve({
-                    id: approach.id,
-                    name: approach.name,
-                    icon: approach.icon,
-                    description: approach.description,
-                    imageData: `data:image/png;base64,${response.data[0].b64_json}`,
-                    prompt: approach.prompt,
-                    revisedPrompt: response.data[0].revised_prompt // DALL-E 3 sometimes modifies prompts
-                  });
-                } else {
-                  console.error(`[Design] No image data in response for ${approach.id}:`, JSON.stringify(response).substring(0, 200));
-                  reject(new Error('No image data in response'));
-                }
-              } catch (e) {
-                console.error(`[Design] Parse error for ${approach.id}:`, e.message);
-                reject(new Error('Failed to parse response: ' + e.message));
-              }
-            });
-          });
-          
-          req.on('timeout', () => {
-            req.destroy();
-            console.error(`[Design] Request timeout for ${approach.id}`);
-            reject(new Error('Request timeout - image generation took too long'));
-          });
-          
-          req.on('error', (err) => {
-            console.error(`[Design] Network error for ${approach.id}:`, err.message);
-            reject(new Error('Network error: ' + err.message));
-          });
-          
-          req.write(requestBody);
-          req.end();
-        });
-      };
-      
-      // Generate images - stagger requests to avoid rate limits
-      console.log('[Design] Generating 4 design images with DALL-E 3...');
+      // Generate images with staggered requests to avoid rate limits
+      console.log(`[Design] Generating ${approaches.length} design images with DALL-E 3 via ai-service...`);
       const startTime = Date.now();
       
-      // Generate with staggered start times to reduce rate limit issues
-      const staggeredGenerate = async () => {
-        const results = [];
-        for (let i = 0; i < approaches.length; i++) {
-          // Small delay between requests to avoid rate limits
-          if (i > 0) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
-          }
-          
-          const approach = approaches[i];
-          console.log(`[Design] Generating design ${i + 1}/4: ${approach.id}`);
-          
-          try {
-            const result = await generateImage(approach);
-            results.push({ status: 'fulfilled', value: result });
-          } catch (error) {
-            results.push({ status: 'rejected', reason: error });
-          }
+      const results = [];
+      for (let i = 0; i < approaches.length; i++) {
+        // Stagger requests to reduce rate limit issues
+        if (i > 0) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
         }
-        return results;
-      };
-      
-      const results = await staggeredGenerate();
+        
+        const approach = approaches[i];
+        console.log(`[Design] Generating design ${i + 1}/${approaches.length}: ${approach.id}`);
+        
+        try {
+          const genResult = await ai.imageGenerate(approach.prompt, {
+            model: 'dall-e-3',
+            size: '1024x1024',
+            quality: 'standard',
+            responseFormat: 'b64_json',
+            feature: 'design-generation',
+          });
+          
+          const img = genResult.images?.[0];
+          if (img?.b64_json) {
+            console.log(`[Design] Successfully generated image for ${approach.id}`);
+            results.push({
+              status: 'fulfilled',
+              value: {
+                id: approach.id,
+                name: approach.name,
+                icon: approach.icon,
+                description: approach.description,
+                imageData: `data:image/png;base64,${img.b64_json}`,
+                prompt: approach.prompt,
+                revisedPrompt: img.revised_prompt,
+              },
+            });
+          } else {
+            throw new Error('No image data in response');
+          }
+        } catch (error) {
+          console.error(`[Design] Failed to generate ${approach.id}:`, error.message);
+          results.push({ status: 'rejected', reason: error });
+        }
+      }
       
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       const successCount = results.filter(r => r.status === 'fulfilled').length;
-      console.log(`[Design] Generated ${successCount}/4 images in ${elapsed}s`);
+      console.log(`[Design] Generated ${successCount}/${approaches.length} images in ${elapsed}s`);
       
       // Return successful generations, with placeholders for failures
       const designs = results.map((result, index) => {
         if (result.status === 'fulfilled') {
           return result.value;
         } else {
-          console.error('[Design] Failed to generate', approaches[index].id, ':', result.reason);
           return {
             id: approaches[index].id,
             name: approaches[index].name,
             icon: approaches[index].icon,
             description: approaches[index].description,
             error: result.reason.message,
-            imageData: null
+            imageData: null,
           };
         }
       });
@@ -4431,97 +4758,37 @@ function setupAiderIPC() {
     }
   });
 
-  // Regenerate a single design mockup
+  // Regenerate a single design mockup (via centralized ai-service)
   ipcMain.handle('design:regenerate-single', async (event, { approach }) => {
     console.log('[Design] Regenerating single design:', approach.id);
     
     try {
-      const { getSettingsManager } = require('./settings-manager');
-      const settings = getSettingsManager();
-      const openaiKey = settings.get('openaiApiKey');
+      const ai = require('./lib/ai-service');
       
-      if (!openaiKey) {
-        throw new Error('OpenAI API key required');
-      }
-      
-      const https = require('https');
-      
-      const requestBody = JSON.stringify({
+      const genResult = await ai.imageGenerate(approach.prompt, {
         model: 'dall-e-3',
-        prompt: approach.prompt,
-        n: 1,
         size: '1024x1024',
         quality: 'standard',
-        response_format: 'b64_json'
+        responseFormat: 'b64_json',
+        feature: 'design-generation',
       });
       
-      const result = await new Promise((resolve, reject) => {
-        const req = https.request({
-          hostname: 'api.openai.com',
-          path: '/v1/images/generations',
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${openaiKey}`,
-            'Content-Length': Buffer.byteLength(requestBody)
-          }
-        }, (res) => {
-          let data = '';
-          res.on('data', chunk => data += chunk);
-          res.on('end', () => {
-            try {
-              const response = JSON.parse(data);
-              if (response.error) {
-                reject(new Error(response.error.message));
-                return;
-              }
-              if (response.data && response.data[0]) {
-                // Track DALL-E usage for cost monitoring
-                try {
-                  if (budgetManager) {
-                    budgetManager.trackUsage({
-                      provider: 'openai',
-                      model: 'dall-e-3',
-                      inputTokens: 0,
-                      outputTokens: 0,
-                      feature: 'design-generation',
-                      operation: 'regenerate-image',
-                      projectId: null,
-                      metadata: {
-                        imageCount: 1,
-                        size: '1024x1024',
-                        quality: 'standard',
-                        costPerImage: 0.04
-                      }
-                    });
-                  }
-                } catch (trackError) {
-                  console.warn('[Design] Failed to track usage:', trackError.message);
-                }
-                
-                resolve({
-                  id: approach.id,
-                  name: approach.name,
-                  icon: approach.icon,
-                  description: approach.description,
-                  imageData: `data:image/png;base64,${response.data[0].b64_json}`,
-                  prompt: approach.prompt
-                });
-              } else {
-                reject(new Error('No image data in response'));
-              }
-            } catch (e) {
-              reject(new Error('Failed to parse response'));
-            }
-          });
-        });
-        
-        req.on('error', reject);
-        req.write(requestBody);
-        req.end();
-      });
+      const img = genResult.images?.[0];
+      if (!img?.b64_json) {
+        throw new Error('No image data in response');
+      }
       
-      return { success: true, design: result };
+      const design = {
+        id: approach.id,
+        name: approach.name,
+        icon: approach.icon,
+        description: approach.description,
+        imageData: `data:image/png;base64,${img.b64_json}`,
+        prompt: approach.prompt,
+        revisedPrompt: img.revised_prompt,
+      };
+      
+      return { success: true, design };
       
     } catch (error) {
       console.error('[Design] Regeneration failed:', error);
@@ -4534,88 +4801,21 @@ function setupAiderIPC() {
     console.log('[Design] Extracting design tokens from mockup...');
     
     try {
-      const { getSettingsManager } = require('./settings-manager');
-      const settings = getSettingsManager();
-      const apiKey = settings.getLLMApiKey();
-      
-      if (!apiKey) {
-        throw new Error('Anthropic API key required for design analysis');
-      }
-      
-      const https = require('https');
+      const { getAIService } = require('./lib/ai-service');
+      const aiService = getAIService();
       const { getStylePromptGenerator } = require('./style-prompt-generator');
       const styleGen = getStylePromptGenerator();
       
       // Get the extraction prompt
       const extractionPrompt = styleGen.getDesignTokenExtractionPrompt();
       
-      // Extract base64 from data URL
-      let base64Data = imageData;
-      let mediaType = 'image/png';
-      if (imageData.startsWith('data:')) {
-        const matches = imageData.match(/^data:([^;]+);base64,(.+)$/);
-        if (matches) {
-          mediaType = matches[1];
-          base64Data = matches[2];
-        }
-      }
-      
-      const requestBody = JSON.stringify({
-        model: 'claude-sonnet-4-5-20250929',
-        max_tokens: 2000,
-        messages: [{
-          role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: {
-                type: 'base64',
-                media_type: mediaType,
-                data: base64Data
-              }
-            },
-            {
-              type: 'text',
-              text: extractionPrompt
-            }
-          ]
-        }]
+      const result = await aiService.vision(imageData, extractionPrompt, {
+        profile: 'vision',
+        maxTokens: 2000,
+        feature: 'design-token-extraction',
       });
       
-      const response = await new Promise((resolve, reject) => {
-        const req = https.request({
-          hostname: 'api.anthropic.com',
-          path: '/v1/messages',
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-API-Key': apiKey,
-            'anthropic-version': '2023-06-01',
-            'Content-Length': Buffer.byteLength(requestBody)
-          }
-        }, (res) => {
-          let data = '';
-          res.on('data', chunk => data += chunk);
-          res.on('end', () => {
-            try {
-              resolve(JSON.parse(data));
-            } catch (e) {
-              reject(new Error('Failed to parse response'));
-            }
-          });
-        });
-        
-        req.on('error', reject);
-        req.write(requestBody);
-        req.end();
-      });
-      
-      if (response.error) {
-        throw new Error(response.error.message);
-      }
-      
-      // Extract JSON from Claude's response
-      const content = response.content?.[0]?.text;
+      const content = result.content;
       if (!content) {
         throw new Error('No content in response');
       }
@@ -4642,89 +4842,23 @@ function setupAiderIPC() {
     console.log('[Design] Generating code from design mockup...');
     
     try {
-      const { getSettingsManager } = require('./settings-manager');
-      const settings = getSettingsManager();
-      const apiKey = settings.getLLMApiKey();
-      
-      if (!apiKey) {
-        throw new Error('Anthropic API key required');
-      }
-      
-      const https = require('https');
+      const { getAIService } = require('./lib/ai-service');
+      const aiService = getAIService();
       const { getStylePromptGenerator } = require('./style-prompt-generator');
       const styleGen = getStylePromptGenerator();
       
       // Get the code generation prompt with tokens
       const codePrompt = styleGen.getCodeFromDesignPrompt(objective, tokens, options);
       
-      // Extract base64 from data URL
-      let base64Data = imageData;
-      let mediaType = 'image/png';
-      if (imageData.startsWith('data:')) {
-        const matches = imageData.match(/^data:([^;]+);base64,(.+)$/);
-        if (matches) {
-          mediaType = matches[1];
-          base64Data = matches[2];
-        }
-      }
+      console.log('[Design] Calling ai-service for code generation...');
       
-      const requestBody = JSON.stringify({
-        model: 'claude-opus-4-5-20251101', // Use Opus for code generation
-        max_tokens: 8000,
-        messages: [{
-          role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: {
-                type: 'base64',
-                media_type: mediaType,
-                data: base64Data
-              }
-            },
-            {
-              type: 'text',
-              text: codePrompt
-            }
-          ]
-        }]
+      const result = await aiService.vision(imageData, codePrompt, {
+        profile: 'powerful',
+        maxTokens: 8000,
+        feature: 'design-code-generation',
       });
       
-      console.log('[Design] Calling Claude Opus for code generation...');
-      
-      const response = await new Promise((resolve, reject) => {
-        const req = https.request({
-          hostname: 'api.anthropic.com',
-          path: '/v1/messages',
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-API-Key': apiKey,
-            'anthropic-version': '2023-06-01',
-            'Content-Length': Buffer.byteLength(requestBody)
-          }
-        }, (res) => {
-          let data = '';
-          res.on('data', chunk => data += chunk);
-          res.on('end', () => {
-            try {
-              resolve(JSON.parse(data));
-            } catch (e) {
-              reject(new Error('Failed to parse response'));
-            }
-          });
-        });
-        
-        req.on('error', reject);
-        req.write(requestBody);
-        req.end();
-      });
-      
-      if (response.error) {
-        throw new Error(response.error.message);
-      }
-      
-      const content = response.content?.[0]?.text;
+      const content = result.content;
       if (!content) {
         throw new Error('No content in response');
       }
@@ -4768,146 +4902,43 @@ function setupAiderIPC() {
   });
   
   // ========== MULTI-AGENT DIRECT API CALL ==========
-  // Direct AI call for parallel Q&A and agent operations (bypasses Aider bridge)
+  // Direct AI call for parallel Q&A and agent operations — routed through ai-service
   ipcMain.handle('ai:direct-call', async (event, { model, messages, max_tokens, response_format }) => {
-    console.log('[MultiAgent] Direct API call:', model, 'messages:', messages?.length);
+    console.log('[MultiAgent] Direct API call via ai-service:', model, 'messages:', messages?.length);
     
     try {
-      const { getSettingsManager } = require('./settings-manager');
-      const settings = getSettingsManager();
-      const https = require('https');
+      const { getAIService } = require('./lib/ai-service');
+      const aiService = getAIService();
       
-      // Determine which API to use based on model
-      const isOpenAI = model.startsWith('gpt-') || model.includes('o1') || model.includes('o3');
-      const isClaude = model.startsWith('claude');
+      // Determine profile from model name
+      let profile = 'fast';
+      if (model?.startsWith('claude-') && model.includes('opus')) profile = 'powerful';
+      else if (model?.startsWith('claude-')) profile = 'standard';
+      else if (model?.includes('gpt-5')) profile = 'large';
       
-      if (isOpenAI) {
-        const openaiKey = settings.get('openaiApiKey');
-        if (!openaiKey) {
-          throw new Error('OpenAI API key required. Please add it in Settings.');
-        }
-        
-        const requestBody = {
-          model: model,
-          messages: messages,
-          max_tokens: max_tokens || 2000
-        };
-        
-        if (response_format) {
-          requestBody.response_format = response_format;
-        }
-        
-        const result = await new Promise((resolve, reject) => {
-          const req = https.request({
-            hostname: 'api.openai.com',
-            path: '/v1/chat/completions',
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${openaiKey}`
-            }
-          }, (res) => {
-            let data = '';
-            res.on('data', chunk => data += chunk);
-            res.on('end', () => {
-              try {
-                const parsed = JSON.parse(data);
-                if (parsed.error) {
-                  reject(new Error(parsed.error.message || 'OpenAI API error'));
-                } else {
-                  resolve(parsed);
-                }
-              } catch (e) {
-                reject(new Error('Failed to parse OpenAI response'));
-              }
-            });
-          });
-          
-          req.on('error', reject);
-          req.setTimeout(120000, () => {
-            req.destroy();
-            reject(new Error('Request timeout'));
-          });
-          
-          req.write(JSON.stringify(requestBody));
-          req.end();
-        });
-        
-        return {
-          success: true,
-          content: result.choices[0].message.content,
-          usage: result.usage,
-          model: result.model
-        };
-        
-      } else if (isClaude) {
-        const anthropicKey = settings.getLLMApiKey();
-        if (!anthropicKey) {
-          throw new Error('Anthropic API key required. Please add it in Settings.');
-        }
-        
-        const requestBody = {
-          model: model,
-          max_tokens: max_tokens || 2000,
-          messages: messages.filter(m => m.role !== 'system').map(m => ({
-            role: m.role === 'assistant' ? 'assistant' : 'user',
-            content: m.content
-          }))
-        };
-        
-        // Add system prompt if present
-        const systemMsg = messages.find(m => m.role === 'system');
-        if (systemMsg) {
-          requestBody.system = systemMsg.content;
-        }
-        
-        const result = await new Promise((resolve, reject) => {
-          const req = https.request({
-            hostname: 'api.anthropic.com',
-            path: '/v1/messages',
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-api-key': anthropicKey,
-              'anthropic-version': '2023-06-01'
-            }
-          }, (res) => {
-            let data = '';
-            res.on('data', chunk => data += chunk);
-            res.on('end', () => {
-              try {
-                const parsed = JSON.parse(data);
-                if (parsed.error) {
-                  reject(new Error(parsed.error.message || 'Anthropic API error'));
-                } else {
-                  resolve(parsed);
-                }
-              } catch (e) {
-                reject(new Error('Failed to parse Anthropic response'));
-              }
-            });
-          });
-          
-          req.on('error', reject);
-          req.setTimeout(120000, () => {
-            req.destroy();
-            reject(new Error('Request timeout'));
-          });
-          
-          req.write(JSON.stringify(requestBody));
-          req.end();
-        });
-        
-        return {
-          success: true,
-          content: result.content[0].text,
-          usage: result.usage,
-          model: result.model
-        };
-        
-      } else {
-        throw new Error(`Unsupported model: ${model}. Use gpt-* or claude-* models.`);
-      }
+      // Extract system message
+      const systemMsg = messages?.find(m => m.role === 'system');
+      const chatMessages = messages?.filter(m => m.role !== 'system') || [];
+      
+      const isJson = response_format?.type === 'json_object';
+      
+      const result = await aiService.chat({
+        profile,
+        provider: model?.startsWith('gpt-') ? 'openai' : model?.startsWith('claude') ? 'anthropic' : undefined,
+        model: model || undefined,
+        system: systemMsg?.content,
+        messages: chatMessages,
+        maxTokens: max_tokens || 2000,
+        jsonMode: isJson,
+        feature: 'multi-agent-direct',
+      });
+      
+      return {
+        success: true,
+        content: result.content,
+        usage: result.usage,
+        model: result.model
+      };
       
     } catch (error) {
       console.error('[MultiAgent] Direct API call error:', error);
@@ -5026,7 +5057,7 @@ function setupAiderIPC() {
     try {
       const ClipboardStorage = require('./clipboard-storage-v2');
       const storage = new ClipboardStorage();
-      const metadata = storage.addVersion(spaceId, versionData);
+      const metadata = await storage.addVersion(spaceId, versionData);
       return { success: true, metadata };
     } catch (error) {
       console.error('[GSX Create] Failed to add version:', error);
@@ -5207,8 +5238,9 @@ function setupAiderIPC() {
       const fs = require('fs');
       const path = require('path');
       
-      // Security check - only allow deletion within spaces directory
-      const spacesRoot = path.join(require('os').homedir(), 'Documents', 'OR-Spaces', 'spaces');
+      // Security check - only allow deletion within spaces directory (via Spaces API)
+      const { getSpacesAPI } = require('./spaces-api');
+      const spacesRoot = getSpacesAPI().storage.spacesDir;
       const resolvedPath = path.resolve(filePath);
       
       if (!resolvedPath.startsWith(spacesRoot)) {
@@ -6120,7 +6152,8 @@ function setupAiderIPC() {
   ipcMain.handle('eventdb:cost-by-model', async (event, spaceId) => {
     try {
       const { getEventDB } = require('./event-db');
-      const spacesPath = path.join(require('os').homedir(), 'Documents', 'OR-Spaces', 'spaces');
+      const { getSpacesAPI } = require('./spaces-api');
+      const spacesPath = getSpacesAPI().storage.spacesDir;
       const eventDb = getEventDB(app.getPath('userData'), spacesPath);
       const data = await eventDb.getCostByModel(spaceId);
       return { success: true, data };
@@ -6134,7 +6167,8 @@ function setupAiderIPC() {
   ipcMain.handle('eventdb:daily-costs', async (event, spaceId, days = 30) => {
     try {
       const { getEventDB } = require('./event-db');
-      const spacesPath = path.join(require('os').homedir(), 'Documents', 'OR-Spaces', 'spaces');
+      const { getSpacesAPI } = require('./spaces-api');
+      const spacesPath = getSpacesAPI().storage.spacesDir;
       const eventDb = getEventDB(app.getPath('userData'), spacesPath);
       const data = await eventDb.getDailyCosts(spaceId, days);
       return { success: true, data };
@@ -6148,7 +6182,8 @@ function setupAiderIPC() {
   ipcMain.handle('eventdb:query-spaces', async (event, whereClause) => {
     try {
       const { getEventDB } = require('./event-db');
-      const spacesPath = path.join(require('os').homedir(), 'Documents', 'OR-Spaces', 'spaces');
+      const { getSpacesAPI } = require('./spaces-api');
+      const spacesPath = getSpacesAPI().storage.spacesDir;
       const eventDb = getEventDB(app.getPath('userData'), spacesPath);
       const data = await eventDb.querySpaceMetadata(whereClause);
       return { success: true, data };
@@ -6162,7 +6197,8 @@ function setupAiderIPC() {
   ipcMain.handle('eventdb:search-spaces', async (event, searchTerm) => {
     try {
       const { getEventDB } = require('./event-db');
-      const spacesPath = path.join(require('os').homedir(), 'Documents', 'OR-Spaces', 'spaces');
+      const { getSpacesAPI } = require('./spaces-api');
+      const spacesPath = getSpacesAPI().storage.spacesDir;
       const eventDb = getEventDB(app.getPath('userData'), spacesPath);
       const data = await eventDb.searchAcrossSpaces(searchTerm);
       return { success: true, data };
@@ -6338,67 +6374,42 @@ function setupAiderIPC() {
     }
   });
   
-  // Update an existing file's metadata in the Space after edits
+  // Update an existing file's metadata in the Space after edits (via Spaces API)
   ipcMain.handle('aider:update-file-metadata', async (event, { spaceId, filePath, description }) => {
     try {
       const fs = require('fs');
-      const ClipboardStorage = require('./clipboard-storage-v2');
-      const storage = new ClipboardStorage();
+      const { getSpacesAPI } = require('./spaces-api');
+      const spacesAPI = getSpacesAPI();
       
       const fileName = path.basename(filePath);
       const stat = fs.statSync(filePath);
       const content = fs.readFileSync(filePath, 'utf-8');
       
-      // Find existing item by filePath in metadata
+      // Find existing item by filePath via Spaces API
       let existingItem = null;
-      for (const item of storage.index.items) {
-        try {
-          const metadataPath = path.join(storage.itemsDir, item.id, 'metadata.json');
-          if (fs.existsSync(metadataPath)) {
-            const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf-8'));
-            if (metadata.filePath === filePath) {
-              existingItem = item;
-              break;
-            }
+      if (spaceId) {
+        const items = await spacesAPI.items.list(spaceId);
+        for (const item of (items || [])) {
+          const fullItem = await spacesAPI.items.get(spaceId, item.id);
+          if (fullItem?.metadata?.filePath === filePath) {
+            existingItem = fullItem;
+            break;
           }
-        } catch (e) {
-          // Skip items with invalid metadata
         }
       }
       
       if (existingItem) {
-        // Update the existing item's content and metadata
-        const itemDir = path.join(storage.itemsDir, existingItem.id);
-        const metadataPath = path.join(itemDir, 'metadata.json');
-        
-        if (fs.existsSync(metadataPath)) {
-          const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf-8'));
-          metadata.lastModified = stat.mtime.toISOString();
-          metadata.description = description || metadata.description;
-          metadata.editCount = (metadata.editCount || 0) + 1;
-          fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
-        }
-        
-        // Update content file
-        const contentFiles = fs.readdirSync(itemDir).filter(f => f.startsWith('content.'));
-        if (contentFiles.length > 0) {
-          fs.writeFileSync(path.join(itemDir, contentFiles[0]), content);
-        }
-        
-        // Update preview in index
-        existingItem.preview = content.substring(0, 100);
-        existingItem.timestamp = Date.now();
-        storage.saveIndex();
-        
-        // Also update in-memory history if clipboard manager is available
-        if (global.clipboardManager) {
-          const historyItem = global.clipboardManager.history.find(h => h.id === existingItem.id);
-          if (historyItem) {
-            historyItem.preview = existingItem.preview;
-            historyItem.timestamp = existingItem.timestamp;
-            historyItem.content = content;
+        // Update the existing item via Spaces API
+        await spacesAPI.items.update(spaceId, existingItem.id, {
+          content,
+          preview: content.substring(0, 100),
+          metadata: {
+            ...(existingItem.metadata || {}),
+            lastModified: stat.mtime.toISOString(),
+            description: description || existingItem.metadata?.description,
+            editCount: ((existingItem.metadata?.editCount) || 0) + 1
           }
-        }
+        });
         
         console.log(`[GSX Create] Updated file metadata: ${fileName}`);
         return { success: true, updated: true, fileName };
@@ -6538,17 +6549,11 @@ function setupAiderIPC() {
     try {
       console.log('[Analyze] Analyzing with AI...');
       
-      const settingsManager = require('./settings-manager').getSettingsManager();
-      const settings = settingsManager.settings;
+      const { getAIService } = require('./lib/ai-service');
+      const ai = getAIService();
       
-      if (!settings.llmApiKey) {
-        return { success: false, error: 'No API key configured' };
-      }
-      
-      const Anthropic = require('@anthropic-ai/sdk');
-      const client = new Anthropic({ apiKey: settings.llmApiKey });
-      
-      let messageContent;
+      let analysis;
+      let usedProfile;
       
       // Check if we have valid screenshot data
       if (screenshotBase64 && typeof screenshotBase64 === 'string' && screenshotBase64.length > 100) {
@@ -6560,21 +6565,14 @@ function setupAiderIPC() {
         
         console.log('[Analyze] With image, data length:', base64Data.length);
         
-        // Image + text analysis
-        messageContent = [
-          {
-            type: 'image',
-            source: {
-              type: 'base64',
-              media_type: 'image/png',
-              data: base64Data
-            }
-          },
-          {
-            type: 'text',
-            text: prompt || 'Analyze this screenshot and describe what you see. Identify any UI issues, bugs, or improvements that could be made.'
-          }
-        ];
+        // Image + text analysis via centralized AI service
+        const result = await ai.vision(
+          base64Data,
+          prompt || 'Analyze this screenshot and describe what you see. Identify any UI issues, bugs, or improvements that could be made.',
+          { maxTokens: 4096, feature: 'aider-analyze-screenshot' }
+        );
+        analysis = result.content;
+        usedProfile = 'vision';
       } else {
         // Text-only analysis (no image)
         console.log('[Analyze] Text-only analysis (no image)');
@@ -6583,30 +6581,21 @@ function setupAiderIPC() {
           return { success: false, error: 'No prompt provided for text-only analysis' };
         }
         
-        messageContent = [
-          {
-            type: 'text',
-            text: prompt
-          }
-        ];
+        // Text-only via centralized AI service
+        analysis = await ai.complete(prompt, {
+          profile: 'standard',
+          maxTokens: 4096,
+          feature: 'aider-analyze-screenshot'
+        });
+        usedProfile = 'standard';
       }
       
-      const response = await client.messages.create({
-        model: settings.llmModel || 'claude-opus-4-5-20251101',
-        max_tokens: 4096,
-        messages: [{
-          role: 'user',
-          content: messageContent
-        }]
-      });
-      
-      const analysis = response.content[0]?.text || 'No analysis available';
       console.log('[Analyze] Analysis complete');
       
       return { 
         success: true, 
-        analysis,
-        model: settings.llmModel || 'claude-opus-4-5-20251101',
+        analysis: analysis || 'No analysis available',
+        model: usedProfile,
         usage: response.usage
       };
     } catch (error) {
@@ -6633,6 +6622,8 @@ function setupIPC() {
   try {
     const gsxFileSync = getGSXFileSync();
     gsxFileSync.setupIPC();
+    // Make gsxFileSync globally available for spaces-api.js to use for file uploads
+    global.gsxFileSync = gsxFileSync;
     console.log('[setupIPC] GSX File Sync IPC handlers registered');
   } catch (error) {
     console.error('[setupIPC] Failed to setup GSX File Sync:', error);
@@ -6897,9 +6888,9 @@ function setupIPC() {
         console.log('[Settings] ✅ Synced', settings.idwEnvironments.length, 'IDW environments to file');
         
         // Refresh menu with new data
-        const { refreshApplicationMenu } = require('./menu');
-        refreshApplicationMenu();
-        console.log('[Settings] ✅ Menu refreshed');
+        if (global.menuDataManager) { global.menuDataManager.refresh(); }
+        else { const { refreshApplicationMenu } = require('./menu'); refreshApplicationMenu(); }
+        console.log('[Settings] Menu refreshed');
       } catch (error) {
         console.error('[Settings] Error syncing idwEnvironments to file:', error);
       }
@@ -8042,151 +8033,127 @@ function setupIPC() {
     }
   });
 
-  // Logger IPC handlers
-  ipcMain.handle('logger:get-recent-logs', async (event, count) => {
-    try {
-      console.log('IPC: logger:get-recent-logs called with count:', count);
-      
-      // Get fresh logger instance
-      const getLogger = require('./event-logger');
-      const currentLogger = getLogger();
-      
-      // Check if logger exists
-      if (!currentLogger) {
-        console.error('Logger not initialized!');
-        throw new Error('Logger not initialized');
-      }
-      
-      // Check if logger is a stub
-      if (currentLogger._isStub) {
-        console.log('Logger is still a stub, app might not be ready');
-        return [];
-      }
-      
-      currentLogger.info('Fetching recent logs', { count });
-      const logs = currentLogger.getRecentLogs(count);
-      console.log('Retrieved', logs.length, 'log entries');
-      return logs;
-    } catch (error) {
-      console.error('Error in logger:get-recent-logs:', error);
-      if (logger && !logger._isStub) {
-        logger.error('Error getting recent logs', { error: error.message });
-      }
-      throw error;
-    }
+  // =========================================================================
+  // CENTRALIZED LOGGING IPC HANDLERS
+  // All logging flows through the central LogEventQueue
+  // =========================================================================
+  const _logQueue = getLogQueue();
+
+  // --- New logging:* handlers (primary API) ---
+
+  // Producer: renderer pushes events onto the queue
+  ipcMain.on('logging:enqueue', (event, logEvent) => {
+    _logQueue.enqueue({ ...logEvent, source: 'renderer' });
   });
 
-  // Logger IPC for renderer processes
+  // Consumer: query the ring buffer
+  ipcMain.handle('logging:query', (event, opts) => _logQueue.query(opts));
+
+  // Consumer: get aggregated stats
+  ipcMain.handle('logging:get-stats', () => _logQueue.getStats());
+
+  // Consumer: export logs
+  ipcMain.handle('logging:export', async (event, opts) => {
+    return await _logQueue.export(opts);
+  });
+
+  // Consumer: subscribe to real-time stream (sends events to renderer)
+  ipcMain.handle('logging:subscribe', (event, filter) => {
+    const webContents = event.sender;
+    const handler = (entry) => {
+      if (!webContents.isDestroyed()) {
+        webContents.send('logging:stream', entry);
+      }
+    };
+    const unsubscribe = _logQueue.subscribe(filter || {}, handler);
+    webContents.once('destroyed', () => unsubscribe());
+    return { subscribed: true, filter: filter || {} };
+  });
+
+  // Get log files from file writer
+  ipcMain.handle('logging:get-files', () => _logQueue.getLogFiles());
+
+  // Get recent logs (convenience)
+  ipcMain.handle('logging:get-recent-logs', (event, count) => {
+    return _logQueue.getRecentLogs(count || 100);
+  });
+
+  // --- Backward-compatible logger:* handlers (route through queue) ---
+
+  ipcMain.handle('logger:get-recent-logs', async (event, count) => {
+    return _logQueue.getRecentLogs(count || 100);
+  });
+
   ipcMain.on('logger:info', (event, { message, data }) => {
-    logger.info(message, { ...data, source: 'renderer' });
+    _logQueue.enqueue({ level: 'info', category: 'app', message, data: { ...data, source: 'renderer' }, source: 'renderer' });
   });
 
   ipcMain.on('logger:warn', (event, { message, data }) => {
-    logger.warn(message, { ...data, source: 'renderer' });
+    _logQueue.enqueue({ level: 'warn', category: 'app', message, data: { ...data, source: 'renderer' }, source: 'renderer' });
   });
 
   ipcMain.on('logger:error', (event, { message, data }) => {
-    logger.error(message, { ...data, source: 'renderer' });
+    _logQueue.enqueue({ level: 'error', category: 'app', message, data: { ...data, source: 'renderer' }, source: 'renderer' });
   });
 
   ipcMain.on('logger:debug', (event, { message, data }) => {
-    logger.debug(message, { ...data, source: 'renderer' });
+    _logQueue.enqueue({ level: 'debug', category: 'app', message, data: { ...data, source: 'renderer' }, source: 'renderer' });
   });
 
   ipcMain.on('logger:event', (event, { eventType, eventData }) => {
-    logger.logEvent(eventType, { ...eventData, source: 'renderer' });
+    _logQueue.enqueue({ level: 'info', category: 'app', message: `Event: ${eventType}`, data: { ...eventData, source: 'renderer' }, source: 'renderer' });
   });
 
   ipcMain.on('logger:user-action', (event, { action, details }) => {
-    logger.logUserAction(action, { ...details, source: 'renderer' });
+    _logQueue.enqueue({ level: 'info', category: 'user-action', message: action, data: { ...details, source: 'renderer' }, source: 'renderer' });
   });
 
-  // PERFORMANCE: Handle batched logs from renderer processes
+  // Batched logs from renderer console interceptor
   ipcMain.on('logger:batch', (event, logEntries) => {
     if (!Array.isArray(logEntries)) return;
-    
     for (const entry of logEntries) {
-      const { level, message, data } = entry;
-      switch (level) {
-        case 'info':
-          logger.info(message, { ...data, source: 'renderer' });
-          break;
-        case 'warn':
-          logger.warn(message, { ...data, source: 'renderer' });
-          break;
-        case 'error':
-          logger.error(message, { ...data, source: 'renderer' });
-          break;
-        case 'debug':
-          logger.debug(message, { ...data, source: 'renderer' });
-          break;
-        default:
-          logger.info(message, { ...data, source: 'renderer' });
-      }
+      _logQueue.enqueue({
+        level: entry.level || 'info',
+        category: 'app',
+        message: entry.message || '',
+        data: { ...entry.data, source: 'renderer' },
+        source: 'renderer'
+      });
     }
   });
 
   ipcMain.handle('logger:get-stats', async () => {
-    try {
-      // Get fresh logger instance
-      const getLogger = require('./event-logger');
-      const currentLogger = getLogger();
-      
-      // Check if logger exists
-      if (!currentLogger || currentLogger._isStub) {
-        console.error('Logger not initialized or is stub!');
-        return {
-          currentFile: null,
-          fileSize: 0,
-          totalFiles: 0
-        };
-      }
-      
-      const files = currentLogger.getLogFiles();
-      const currentFile = files[0];
-      return {
-        currentFile: currentFile?.name,
-        fileSize: currentFile?.size || 0,
-        totalFiles: files.length
-      };
-    } catch (error) {
-      console.error('Error getting log stats:', error);
-      throw error;
-    }
+    const stats = _logQueue.getStats();
+    const files = _logQueue.getLogFiles();
+    const currentFile = files[0];
+    return {
+      ...stats,
+      currentFile: currentFile?.name,
+      fileSize: currentFile?.size || 0,
+      totalFiles: files.length
+    };
   });
 
   ipcMain.handle('logger:export', async (event, options) => {
     try {
-      // Get fresh logger instance
-      const getLogger = require('./event-logger');
-      const currentLogger = getLogger();
-      
-      if (!currentLogger || currentLogger._isStub) {
-        console.error('Logger not initialized or is stub!');
-        throw new Error('Logger not available');
-      }
-      
-      currentLogger.info('Exporting logs', { options });
-      
+      _logQueue.info('app', 'Exporting logs', { options });
+
       let startDate, endDate;
-      
-      // Parse time range
       if (options.timeRange === 'all') {
-        startDate = new Date(0);
-        endDate = new Date();
+        startDate = new Date(0).toISOString();
+        endDate = new Date().toISOString();
       } else {
         const hours = parseInt(options.timeRange);
-        endDate = new Date();
-        startDate = new Date(Date.now() - hours * 60 * 60 * 1000);
+        endDate = new Date().toISOString();
+        startDate = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
       }
-      
-      const logs = await currentLogger.exportLogs({
-        startDate,
-        endDate,
-        includeDebug: options.includeDebug,
-        format: options.format
+
+      const logs = await _logQueue.export({
+        since: startDate,
+        until: endDate,
+        format: options.format || 'json'
       });
-      
+
       // Save to file
       const { dialog } = require('electron');
       const extension = options.format === 'json' ? 'json' : 'txt';
@@ -8198,36 +8165,22 @@ function setupIPC() {
           { name: 'All Files', extensions: ['*'] }
         ]
       });
-      
+
       if (!result.canceled) {
         const content = options.format === 'json' ? JSON.stringify(logs, null, 2) : logs;
         fs.writeFileSync(result.filePath, content, 'utf8');
         shell.showItemInFolder(result.filePath);
       }
-      
+
       return { success: true };
     } catch (error) {
-      console.error('Error exporting logs:', error);
+      _logQueue.error('app', 'Error exporting logs', { error: error.message });
       throw error;
     }
   });
 
   ipcMain.handle('logger:get-files', async () => {
-    try {
-      // Get fresh logger instance
-      const getLogger = require('./event-logger');
-      const currentLogger = getLogger();
-      
-      if (!currentLogger || currentLogger._isStub) {
-        console.error('Logger not initialized or is stub!');
-        return [];
-      }
-      
-      return currentLogger.getLogFiles();
-    } catch (error) {
-      console.error('Error getting log files:', error);
-      throw error;
-    }
+    return _logQueue.getLogFiles();
   });
 
   // Add handler for IDW environments request
@@ -8269,8 +8222,8 @@ function setupIPC() {
     // Handle IDW menu update
     if (data && data.action === 'update-idw-menu' && data.environments) {
       console.log(`Updating IDW menu with environments: ${data.environments.length}`);
-      const { setApplicationMenu } = require('./menu');
-      setApplicationMenu(data.environments);
+      if (global.menuDataManager) { global.menuDataManager.rebuild(data.environments); }
+      else { const { setApplicationMenu } = require('./menu'); setApplicationMenu(data.environments); }
       console.log('IDW menu updated with ' + data.environments.length + ' environments');
     }
     
@@ -8278,11 +8231,15 @@ function setupIPC() {
     if (data && data.action === 'refresh-gsx-links') {
       console.log('Refreshing GSX links in menu by request from renderer process');
       try {
-        // Import the refreshGSXLinks function if not already available
-        const { refreshGSXLinks } = require('./menu');
-        
-        // Force GSX links refresh
-        const success = refreshGSXLinks();
+        // Refresh GSX links via MenuDataManager
+        let success;
+        if (global.menuDataManager) {
+          global.menuDataManager.refreshGSXLinks();
+          success = true;
+        } else {
+          const { refreshGSXLinks } = require('./menu');
+          success = refreshGSXLinks();
+        }
         console.log(`GSX links refresh: ${success ? 'succeeded' : 'failed'}`);
         
         // Also set the application menu again with the current environments
@@ -8298,8 +8255,8 @@ function setupIPC() {
             console.log(`Loaded ${idwEnvironments.length} IDW environments for menu refresh`);
             
             // Set the menu again with the loaded environments
-            const { setApplicationMenu } = require('./menu');
-            setApplicationMenu(idwEnvironments);
+            if (global.menuDataManager) { global.menuDataManager.rebuild(idwEnvironments); }
+            else { const { setApplicationMenu } = require('./menu'); setApplicationMenu(idwEnvironments); }
           }
         } catch (error) {
           console.error('Error loading IDW environments for menu refresh:', error);
@@ -9845,28 +9802,39 @@ function setupIPC() {
   });
 
   // Direct handler for GSX links
-  ipcMain.on('open-gsx-link', (event, data) => {
-    console.log('Received direct request to open GSX link:', data);
+  ipcMain.on('open-gsx-link', async (event, data) => {
+    const multiTenantStore = require('./multi-tenant-store');
+    
+    console.log('[GSX IPC] Received direct request to open GSX link:', data);
     if (data && data.url) {
-      console.log(`Opening GSX link directly: ${data.url}`);
+      console.log(`[GSX IPC] Opening GSX link directly: ${data.url}`);
       
-      // Extract environment from URL if not provided in the data
+      // Extract environment from URL using multi-tenant store for consistency
       let environment = data.environment;
       if (!environment) {
         try {
-          const urlObj = new URL(data.url);
-          // Extract from hostname - e.g., studio.edison.onereach.ai -> edison
-          const hostParts = urlObj.hostname.split('.');
-          environment = hostParts.find(part => 
-            ['staging', 'edison', 'production'].includes(part)
-          ) || 'unknown';
+          environment = multiTenantStore.extractEnvironmentFromUrl(data.url);
+          console.log(`[GSX IPC] Extracted environment '${environment}' from URL`);
         } catch (err) {
-          console.error('Error parsing GSX URL to extract environment:', err);
-          environment = 'unknown';
+          console.error('[GSX IPC] Error parsing GSX URL to extract environment:', err);
+          environment = 'production';
         }
       }
       
-      browserWindow.openGSXWindow(data.url, data.title || 'GSX', environment);
+      // Log token status before opening window
+      const hasToken = multiTenantStore.hasValidToken(environment);
+      console.log(`[GSX IPC] Token status for ${environment}: hasValidToken=${hasToken}`);
+      
+      if (!hasToken) {
+        console.warn(`[GSX IPC] No valid token for ${environment} - user will need to login`);
+      }
+      
+      try {
+        await browserWindow.openGSXWindow(data.url, data.title || 'GSX', environment);
+        console.log('[GSX IPC] GSX window opened successfully');
+      } catch (err) {
+        console.error('[GSX IPC] Error opening GSX window:', err);
+      }
     }
   });
 
@@ -9896,8 +9864,8 @@ function setupIPC() {
       console.log('GSX links saved to file');
       
       // After saving, refresh the menu
-      const { refreshGSXLinks } = require('./menu');
-      refreshGSXLinks();
+      if (global.menuDataManager) { global.menuDataManager.refreshGSXLinks(); }
+      else { const { refreshGSXLinks } = require('./menu'); refreshGSXLinks(); }
       console.log('Menu refreshed after saving GSX links');
     } catch (error) {
       console.error('Error saving GSX links:', error);
@@ -10433,12 +10401,16 @@ function setupIPC() {
     }
   });
 
-  // Handle saving external bots
+  // Handle saving external bots. Use MenuDataManager when available so cache stays in sync.
   ipcMain.on('save-external-bots', async (event, bots) => {
     console.log(`Saving ${bots.length} external bots`);
     try {
-      const botsPath = path.join(app.getPath('userData'), 'external-bots.json');
-      fs.writeFileSync(botsPath, JSON.stringify(bots, null, 2));
+      if (global.menuDataManager) {
+        await global.menuDataManager.setExternalBots(bots);
+      } else {
+        const botsPath = path.join(app.getPath('userData'), 'external-bots.json');
+        fs.writeFileSync(botsPath, JSON.stringify(bots, null, 2));
+      }
       console.log('External bots saved successfully');
       
       // Create Conversations spaces for known AI services
@@ -10482,8 +10454,8 @@ function setupIPC() {
       }
       
       // Refresh the menu to show new bots
-      const { refreshGSXLinks } = require('./menu');
-      refreshGSXLinks();
+      if (global.menuDataManager) { global.menuDataManager.refreshGSXLinks(); }
+      else { const { refreshGSXLinks } = require('./menu'); refreshGSXLinks(); }
       
       // Re-register global shortcuts
       registerGlobalShortcuts();
@@ -10504,8 +10476,8 @@ function setupIPC() {
       console.log('Image creators saved successfully');
       
       // Refresh the menu to show new image creators
-      const { refreshGSXLinks } = require('./menu');
-      refreshGSXLinks();
+      if (global.menuDataManager) { global.menuDataManager.refreshGSXLinks(); }
+      else { const { refreshGSXLinks } = require('./menu'); refreshGSXLinks(); }
       
       event.reply('image-creators-saved', true);
     } catch (error) {
@@ -10523,8 +10495,8 @@ function setupIPC() {
       console.log('Video creators saved successfully');
       
       // Refresh the menu to show new video creators
-      const { refreshGSXLinks } = require('./menu');
-      refreshGSXLinks();
+      if (global.menuDataManager) { global.menuDataManager.refreshGSXLinks(); }
+      else { const { refreshGSXLinks } = require('./menu'); refreshGSXLinks(); }
       
       event.reply('video-creators-saved', true);
     } catch (error) {
@@ -10542,8 +10514,8 @@ function setupIPC() {
       console.log('Audio generators saved successfully');
       
       // Refresh the menu to show new audio generators
-      const { refreshGSXLinks } = require('./menu');
-      refreshGSXLinks();
+      if (global.menuDataManager) { global.menuDataManager.refreshGSXLinks(); }
+      else { const { refreshGSXLinks } = require('./menu'); refreshGSXLinks(); }
       
       event.reply('audio-generators-saved', true);
     } catch (error) {
@@ -10561,8 +10533,8 @@ function setupIPC() {
       console.log('UI design tools saved successfully');
       
       // Refresh the menu to show new UI design tools
-      const { refreshGSXLinks } = require('./menu');
-      refreshGSXLinks();
+      if (global.menuDataManager) { global.menuDataManager.refreshGSXLinks(); }
+      else { const { refreshGSXLinks } = require('./menu'); refreshGSXLinks(); }
       
       event.reply('ui-design-tools-saved', true);
     } catch (error) {
@@ -10589,8 +10561,8 @@ function setupIPC() {
       console.log('[IDW] IDW entries saved successfully to:', idwConfigPath);
       
       // Refresh the menu to show new IDW entries
-      const { setApplicationMenu } = require('./menu');
-      setApplicationMenu(entries);
+      if (global.menuDataManager) { global.menuDataManager.rebuild(entries); }
+      else { const { setApplicationMenu } = require('./menu'); setApplicationMenu(entries); }
       
       event.reply('idw-entries-saved', true);
     } catch (error) {
@@ -10631,9 +10603,9 @@ function setupIPC() {
       console.log('[WIZARD SAVE] ✅ Settings manager updated');
       
       // Update menu
-      const { setApplicationMenu } = require('./menu');
-      setApplicationMenu(environments);
-      console.log('[WIZARD SAVE] ✅ Menu updated');
+      if (global.menuDataManager) { global.menuDataManager.rebuild(environments); }
+      else { const { setApplicationMenu } = require('./menu'); setApplicationMenu(environments); }
+      console.log('[WIZARD SAVE] Menu updated');
       
       // Re-register shortcuts
       registerGlobalShortcuts();
@@ -10649,53 +10621,36 @@ function setupIPC() {
     }
   });
   
-  // OLD: Handle saving IDW environments (from setup wizard) - kept for compatibility
-  ipcMain.on('save-idw-environments', (event, environments) => {
+  // Handle saving IDW environments (from setup wizard). Use MenuDataManager when available so cache stays in sync.
+  ipcMain.on('save-idw-environments', async (event, environments) => {
     console.log('='.repeat(60));
-    console.log('[IDW SAVE] 🔵 IPC Handler called!');
+    console.log('[IDW SAVE] IPC Handler called');
     console.log(`[IDW SAVE] Saving ${environments.length} IDW environments from setup wizard`);
-    console.log('[IDW SAVE] Environment IDs:', environments.map(e => e.id).join(', '));
     
     try {
-      const idwConfigPath = path.join(app.getPath('userData'), 'idw-entries.json');
-      console.log('[IDW SAVE] File path:', idwConfigPath);
-      
-      // Create backup of existing file
-      if (fs.existsSync(idwConfigPath)) {
-        const backupPath = idwConfigPath + '.backup';
-        fs.copyFileSync(idwConfigPath, backupPath);
-        console.log('[IDW SAVE] ✅ Created backup');
+      if (global.menuDataManager) {
+        await global.menuDataManager.setIDWEnvironments(environments, { source: 'setup-wizard' });
+        registerGlobalShortcuts();
+        event.reply('idw-environments-saved', true);
+        console.log('[IDW SAVE] Done via MenuDataManager');
+      } else {
+        const idwConfigPath = path.join(app.getPath('userData'), 'idw-entries.json');
+        if (fs.existsSync(idwConfigPath)) {
+          fs.copyFileSync(idwConfigPath, idwConfigPath + '.backup');
+        }
+        fs.writeFileSync(idwConfigPath, JSON.stringify(environments, null, 2));
+        if (global.settingsManager) {
+          global.settingsManager.set('idwEnvironments', environments);
+        }
+        if (global.menuDataManager) { global.menuDataManager.rebuild(environments); }
+        else { const { setApplicationMenu } = require('./menu'); setApplicationMenu(environments); }
+        registerGlobalShortcuts();
+        event.reply('idw-environments-saved', true);
+        console.log('[IDW SAVE] Done via legacy path');
       }
-      
-      // Save the new environments
-      fs.writeFileSync(idwConfigPath, JSON.stringify(environments, null, 2));
-      console.log('[IDW SAVE] ✅ File written successfully');
-      
-      // Verify file was written
-      const savedData = JSON.parse(fs.readFileSync(idwConfigPath, 'utf8'));
-      console.log('[IDW SAVE] ✅ Verified:', savedData.length, 'environments in file');
-      
-      // Update the settings manager with the new environments
-      console.log('[IDW SAVE] Updating settings manager...');
-      global.settingsManager.set('idwEnvironments', environments);
-      console.log('[IDW SAVE] ✅ Settings manager updated');
-      
-      // Update the application menu with the new environments
-      console.log('[IDW SAVE] Updating menu...');
-      const { setApplicationMenu } = require('./menu');
-      setApplicationMenu(environments);
-      console.log('[IDW SAVE] ✅ Menu updated');
-      
-      // Re-register global shortcuts
-      registerGlobalShortcuts();
-      console.log('[IDW SAVE] ✅ Shortcuts registered');
-      
-      event.reply('idw-environments-saved', true);
-      console.log('[IDW SAVE] ✅ COMPLETE - All done!');
       console.log('='.repeat(60));
     } catch (error) {
-      console.error('[IDW SAVE] ❌ ERROR:', error);
-      console.error('[IDW SAVE] Stack:', error.stack);
+      console.error('[IDW SAVE] ERROR:', error);
       event.reply('idw-environments-saved', false);
     }
   });
@@ -12488,8 +12443,8 @@ function setupIPC() {
       fs.writeFileSync(toolsPath, JSON.stringify(tools, null, 2));
       event.reply('ui-design-tools-saved', true);
       // Refresh full application menu so IDW section picks up the new tools
-      const { refreshApplicationMenu } = require('./menu');
-      refreshApplicationMenu();
+      if (global.menuDataManager) { global.menuDataManager.refresh(); }
+      else { const { refreshApplicationMenu } = require('./menu'); refreshApplicationMenu(); }
     } catch (err) {
       console.error('[UI Design] Failed to save ui-design-tools.json:', err);
       event.reply('ui-design-tools-saved', false);
@@ -12739,33 +12694,18 @@ function setupIPC() {
 
   ipcMain.handle('test-claude-connection', async (event) => {
     try {
-      const settings = await settingsManager.getAll();
-      if (!settings.claudeApiKey) {
-        return { error: 'Claude API key not configured' };
-      }
+      const ai = require('./lib/ai-service');
       
       // Test the connection with a simple request
       // Using Claude 4.5 Sonnet for consistency - only 4.5 models allowed
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': settings.claudeApiKey,
-          'anthropic-version': '2023-06-01'
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-5-20250929',  // Claude 4.5 only - no older models
-          messages: [{ role: 'user', content: 'Hello' }],
-          max_tokens: 10
-        })
+      const result = await ai.chat({
+        profile: 'standard', // Uses claude-sonnet-4-5-20250929 by default
+        messages: [{ role: 'user', content: 'Hello' }],
+        maxTokens: 10,
+        feature: 'connection-test',
       });
       
-      if (response.ok) {
-        return { success: true };
-      } else {
-        const error = await response.text();
-        return { error: `API returned ${response.status}: ${error}` };
-      }
+      return { success: true };
     } catch (error) {
       return { error: error.message };
     }
@@ -12773,25 +12713,18 @@ function setupIPC() {
 
   ipcMain.handle('test-openai-connection', async (event) => {
     try {
-      const settings = await settingsManager.getAll();
-      if (!settings.openaiApiKey) {
-        return { error: 'OpenAI API key not configured' };
-      }
+      const ai = require('./lib/ai-service');
       
-      // Test the connection with a simple request
-      const response = await fetch('https://api.openai.com/v1/models', {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${settings.openaiApiKey}`
-        }
+      // Test the connection with a minimal chat request via ai-service
+      const result = await ai.chat({
+        profile: 'fast', // Uses gpt-4o-mini by default
+        messages: [{ role: 'user', content: 'Hello' }],
+        maxTokens: 10,
+        feature: 'connection-test',
+        noFallback: true, // Don't fall back to Anthropic -- we're testing OpenAI specifically
       });
       
-      if (response.ok) {
-        return { success: true };
-      } else {
-        const error = await response.text();
-        return { error: `API returned ${response.status}: ${error}` };
-      }
+      return { success: true };
     } catch (error) {
       return { error: error.message };
     }
@@ -12995,6 +12928,9 @@ function openSettingsWindow() {
     }
   });
   
+  // Attach structured log forwarding
+  browserWindow.attachLogForwarder(settingsWindow, 'settings');
+
   // Clear the reference when the window is closed
   settingsWindow.on('closed', () => {
     console.log('Settings window closed');
@@ -13053,6 +12989,9 @@ function openDashboardWindow() {
     }
   });
   
+  // Attach structured log forwarding
+  browserWindow.attachLogForwarder(dashboardWindow, 'app');
+
   // Clear the reference when the window is closed
   dashboardWindow.on('closed', () => {
     console.log('[Dashboard] Window closed');
@@ -13426,11 +13365,10 @@ function updateIDWMenu(environments) {
   if (!Array.isArray(environments) || environments.length === 0) return;
   
   // FIXED: Use the proper menu system from menu.js which includes the Share menu
-  // The old implementation was directly calling Menu.setApplicationMenu() which
-  // was overriding the Share menu. Now we use setApplicationMenu from menu.js
-  const { setApplicationMenu } = require('./menu');
-  setApplicationMenu(environments);
-  console.log(`IDW menu updated with ${environments.length} environments using proper menu system`);
+  // Route through MenuDataManager for consistent menu updates
+  if (global.menuDataManager) { global.menuDataManager.rebuild(environments); }
+  else { const { setApplicationMenu } = require('./menu'); setApplicationMenu(environments); }
+  console.log(`IDW menu updated with ${environments.length} environments`);
 }
 
 // Function to update the GSX menu dynamically
@@ -13438,11 +13376,10 @@ function updateGSXMenu(links) {
   if (!Array.isArray(links) || links.length === 0) return;
   
   // FIXED: Use the proper menu system from menu.js which includes the Share menu
-  // The old implementation was directly calling Menu.setApplicationMenu() which
-  // was overriding the Share menu. Now we use refreshGSXLinks from menu.js
-  const { refreshGSXLinks } = require('./menu');
-  refreshGSXLinks();
-  console.log(`GSX menu updated with ${links.length} links using proper menu system`);
+  // Route through MenuDataManager for consistent menu updates
+  if (global.menuDataManager) { global.menuDataManager.refreshGSXLinks(); }
+  else { const { refreshGSXLinks } = require('./menu'); refreshGSXLinks(); }
+  console.log(`GSX menu updated with ${links.length} links`);
 }
 
 // Function to open an IDW environment in a new browser window or tab
@@ -13947,23 +13884,17 @@ ipcMain.handle('test-agent:generate-plan', async (event, htmlFilePath, useAI = f
     let aiAnalyzer = null;
     
     if (useAI) {
-      // Use the vision API to analyze
-      const apiKey = settings.getLLMApiKey();
-      const provider = settings.getLLMProvider();
+      // Use centralized AI service for analysis
+      const { getAIService } = require('./lib/ai-service');
+      const ai = getAIService();
       
-      if (apiKey && provider === 'anthropic') {
-        const Anthropic = require('@anthropic-ai/sdk');
-        const client = new Anthropic({ apiKey });
-        
-        aiAnalyzer = async (prompt) => {
-          const response = await client.messages.create({
-            model: 'claude-sonnet-4-5-20250929',
-            max_tokens: 2000,
-            messages: [{ role: 'user', content: prompt }]
-          });
-          return response.content[0].text;
-        };
-      }
+      aiAnalyzer = async (prompt) => {
+        return await ai.complete(prompt, {
+          profile: 'standard',
+          maxTokens: 2000,
+          feature: 'test-agent-plan'
+        });
+      };
     }
     
     const plan = await testAgent.generateTestPlan(htmlFilePath, aiAnalyzer);
@@ -14121,34 +14052,12 @@ ipcMain.handle('test-agent:visual', async (event, htmlFilePath, baseline = null)
 ipcMain.handle('test-agent:interactive', async (event, htmlFilePath) => {
   console.log('[TestAgent] Running interactive test for:', htmlFilePath);
   try {
-    const { getSettingsManager } = require('./settings-manager');
-    const settingsManager = getSettingsManager();
-    const apiKey = settingsManager.get('llmApiKey');
-    const provider = settingsManager.get('llmProvider') || 'anthropic';
+    const { getAIService } = require('./lib/ai-service');
+    const ai = getAIService();
     
     let aiAnalyzer = null;
-    if (apiKey && provider === 'anthropic') {
-      const Anthropic = require('@anthropic-ai/sdk');
-      const client = new Anthropic({ apiKey });
-      
-      aiAnalyzer = async (data) => {
-        const response = await client.messages.create({
-          model: 'claude-sonnet-4-5-20250929', // Vision model for screenshot analysis
-          max_tokens: 2000,
-          messages: [{
-            role: 'user',
-            content: [
-              {
-                type: 'image',
-                source: {
-                  type: 'base64',
-                  media_type: 'image/png',
-                  data: data.screenshot
-                }
-              },
-              {
-                type: 'text',
-                text: `Analyze this UI screenshot and the following data:
+    aiAnalyzer = async (data) => {
+      const prompt = `Analyze this UI screenshot and the following data:
                 
 Console Errors: ${JSON.stringify(data.consoleErrors)}
 JS Errors: ${JSON.stringify(data.jsErrors)}
@@ -14157,14 +14066,14 @@ Please identify:
 1. Any visual bugs or issues
 2. UX problems
 3. Suggested fixes
-4. Test cases that should be added`
-              }
-            ]
-          }]
-        });
-        return response.content[0].text;
-      };
-    }
+4. Test cases that should be added`;
+
+      const result = await ai.vision(data.screenshot, prompt, {
+        maxTokens: 2000,
+        feature: 'test-agent-interactive'
+      });
+      return result.content;
+    };
     
     const results = await testAgent.interactiveTest(htmlFilePath, aiAnalyzer);
     return results;
@@ -14283,7 +14192,7 @@ ipcMain.handle('budget:trackUsage', async (event, provider, projectId, usage) =>
       });
     } else if (provider === 'openai') {
       result = llmTracker.trackOpenAICall({
-        model: usage.model || 'gpt-5.2',
+        model: usage.model || 'gpt-4o',
         inputTokens: usage.inputTokens || 0,
         outputTokens: usage.outputTokens || 0,
         feature,
@@ -14744,15 +14653,10 @@ async function initializeVoiceOrb() {
       }
     }
     
-    // Only auto-show orb at startup if enabled in settings
-    const voiceOrbEnabled = global.settingsManager?.get('voiceOrbEnabled');
-    
-    if (!voiceOrbEnabled) {
-      console.log('[VoiceOrb] Voice Orb disabled in settings (use menu or Cmd+Shift+O to show)');
-      return;
-    }
-    
-    console.log('[VoiceOrb] Initializing Voice Orb...');
+    // ==================== EXCHANGE BRIDGE (always initialize) ====================
+    // The exchange + agents must be available for ANY tool using the HUD API,
+    // not just when the voice orb UI is visible.
+    console.log('[VoiceOrb] Initializing Exchange Bridge and agents...');
     
     // Initialize Voice Task SDK for classification
     try {
@@ -14761,7 +14665,19 @@ async function initializeVoiceOrb() {
       console.log('[VoiceOrb] Voice Task SDK initialized');
     } catch (sdkError) {
       console.error('[VoiceOrb] Voice Task SDK init error:', sdkError.message);
-      // Continue anyway - orb will work for transcription
+      // Register stub handlers so polling from Command HUD doesn't spam errors
+      const { ipcMain } = require('electron');
+      const stubHandlers = [
+        'voice-task-sdk:queue-stats',
+        'voice-task-sdk:status',
+        'voice-task-sdk:list-queues',
+        'voice-task-sdk:pending-tasks',
+        'voice-task-sdk:list-tasks',
+        'voice-task-sdk:list-agents',
+      ];
+      for (const channel of stubHandlers) {
+        try { ipcMain.handle(channel, () => null); } catch (_) { /* already registered */ }
+      }
     }
     
     // Initialize Exchange Bridge for auction-based task routing
@@ -14771,17 +14687,22 @@ async function initializeVoiceOrb() {
       if (exchangeReady) {
         const url = getExchangeUrl();
         console.log('[VoiceOrb] Exchange Bridge initialized at', url);
-        // Wait a moment for WebSocket server to be fully ready
         await new Promise(resolve => setTimeout(resolve, 500));
-        // Start built-in agents (spelling, etc.)
         await startBuiltInAgents(url);
       } else {
-        console.warn('[VoiceOrb] Exchange Bridge not available - using local classification');
+        console.warn('[VoiceOrb] Exchange Bridge not available');
       }
     } catch (exchangeError) {
       console.error('[VoiceOrb] Exchange Bridge init error:', exchangeError.message);
       console.error('[VoiceOrb] Full error:', exchangeError.stack);
-      // Continue anyway - will fall back to local classification
+    }
+    
+    // Only auto-show orb UI at startup if enabled in settings
+    const voiceOrbEnabled = global.settingsManager?.get('voiceOrbEnabled');
+    
+    if (!voiceOrbEnabled) {
+      console.log('[VoiceOrb] Orb UI disabled in settings (exchange + agents still active)');
+      return;
     }
     
     // Create the orb window
@@ -14886,6 +14807,17 @@ function setupOrbIPC() {
     }
   });
   
+  // Toggle click-through for transparent areas (used by orb renderer mouseenter/mouseleave)
+  ipcMain.handle('orb:set-click-through', (event, clickThrough) => {
+    if (orbWindow && !orbWindow.isDestroyed()) {
+      if (clickThrough) {
+        orbWindow.setIgnoreMouseEvents(true, { forward: true });
+      } else {
+        orbWindow.setIgnoreMouseEvents(false);
+      }
+    }
+  });
+  
   console.log('[VoiceOrb] IPC handlers registered');
 }
 
@@ -14987,9 +14919,13 @@ function createOrbWindow() {
       preload: path.join(__dirname, 'preload-orb.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: false  // Required for preload-hud-api.js require()
     },
   });
   
+  // Attach structured log forwarding
+  browserWindow.attachLogForwarder(orbWindow, 'voice');
+
   // Now move to saved position (setPosition allows negative values, unlike constructor)
   if (x !== defaultX || y !== defaultY) {
     orbWindow.setPosition(x, y);
@@ -15005,6 +14941,12 @@ function createOrbWindow() {
     app.dock.show().catch(() => {});
   }
   
+  // Make transparent areas click-through at the OS level.
+  // The { forward: true } option tracks mouse position so CSS :hover and
+  // mouseenter/mouseleave still fire on visible elements. The orb renderer
+  // toggles this off when the cursor enters interactive elements.
+  orbWindow.setIgnoreMouseEvents(true, { forward: true });
+  
   // Load the orb UI
   orbWindow.loadFile(path.join(__dirname, 'orb.html'));
   
@@ -15016,7 +14958,11 @@ function createOrbWindow() {
   // Handle window close
   orbWindow.on('closed', () => {
     orbWindow = null;
+    global.orbWindow = null;
   });
+  
+  // Make orbWindow globally accessible for testing and external access
+  global.orbWindow = orbWindow;
   
   console.log('[VoiceOrb] Orb window created');
   return orbWindow;
@@ -15046,6 +14992,10 @@ function showOrbWindow() {
     orbWindow.show();
   }
 }
+
+// Make orb functions globally accessible (consistent with settings/dashboard pattern)
+global.toggleOrbWindow = toggleOrbWindow;
+global.showOrbWindow = showOrbWindow;
 
 /**
  * Hide the orb window (for menu/external access)
@@ -15132,6 +15082,9 @@ function createCommandHUDWindow() {
     }
   });
   
+  // Attach structured log forwarding
+  browserWindow.attachLogForwarder(commandHUDWindow, 'app');
+
   // Set window level to float above everything
   commandHUDWindow.setAlwaysOnTop(true, 'floating');
   commandHUDWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
@@ -15276,6 +15229,20 @@ function setupCommandHUDIPC() {
   ipcMain.handle('hud:position', (event, x, y) => {
     if (commandHUDWindow && !commandHUDWindow.isDestroyed()) {
       commandHUDWindow.setPosition(Math.round(x), Math.round(y));
+    }
+  });
+  
+  // Resize HUD window (grows upward to keep bottom edge anchored)
+  ipcMain.handle('command-hud:resize', (event, width, height) => {
+    if (commandHUDWindow && !commandHUDWindow.isDestroyed()) {
+      const currentBounds = commandHUDWindow.getBounds();
+      const dy = currentBounds.height - height;
+      commandHUDWindow.setBounds({
+        x: currentBounds.x,
+        y: currentBounds.y + dy,
+        width,
+        height,
+      }, true);
     }
   });
   
@@ -15503,6 +15470,9 @@ function createAgentManagerWindow() {
     }
   });
   
+  // Attach structured log forwarding
+  browserWindow.attachLogForwarder(agentManagerWindow, 'agent');
+
   // Clear the reference when closed
   agentManagerWindow.on('closed', () => {
     console.log('[AgentManager] Window closed');
@@ -16243,11 +16213,10 @@ function setupClaudeCodeIPC() {
         console.log('[AgentComposer] Plan created via CLI:', result.plan.executionType, '-', result.plan.suggestedName);
       } else {
         console.error('[AgentComposer] CLI plan failed:', result.error);
-        // Fallback to direct API if CLI fails
-        console.log('[AgentComposer] Falling back to direct API...');
-        const ClaudeAPI = require('./claude-api');
-        const claudeAPI = new ClaudeAPI();
-        const fallbackResult = await claudeAPI.planAgent(description, templateInfo);
+        // Fallback to ai-service if CLI fails
+        console.log('[AgentComposer] Falling back to ai-service...');
+        const ai = require('./lib/ai-service');
+        const fallbackResult = await ai.planAgent(description, templateInfo, { feature: 'agent-composer' });
         if (fallbackResult.success) {
           console.log('[AgentComposer] Fallback plan created:', fallbackResult.plan.executionType, '-', fallbackResult.plan.suggestedName);
         }
@@ -17445,4 +17414,4 @@ module.exports = {
   createClaudeTerminalWindow,
   broadcastPlanSummary,
   relayVoiceToComposer,
-}; 
+};

@@ -7,6 +7,8 @@
  * - Progress tracking across projects
  */
 
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 /**
  * Storage keys
  */
@@ -51,7 +53,7 @@ export class RatingStorage {
         this.trendsCache = this.initializeTrends();
       }
     } catch (e) {
-      console.warn('[RatingStorage] Failed to load from storage:', e);
+      log.warn('video', '[RatingStorage] Failed to load from storage', { data: e });
       this.trendsCache = this.initializeTrends();
     }
   }
@@ -357,7 +359,7 @@ export class RatingStorage {
       const ratings = Array.from(this.ratingsCache.values());
       localStorage.setItem(STORAGE_KEYS.RATINGS, JSON.stringify(ratings));
     } catch (e) {
-      console.error('[RatingStorage] Failed to persist ratings:', e);
+      log.error('video', '[RatingStorage] Failed to persist ratings', { error: e });
     }
   }
 
@@ -368,7 +370,7 @@ export class RatingStorage {
     try {
       localStorage.setItem(STORAGE_KEYS.TRENDS, JSON.stringify(this.trendsCache));
     } catch (e) {
-      console.error('[RatingStorage] Failed to persist trends:', e);
+      log.error('video', '[RatingStorage] Failed to persist trends', { error: e });
     }
   }
 }

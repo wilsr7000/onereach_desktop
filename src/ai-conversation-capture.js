@@ -14,6 +14,8 @@
 const path = require('path');
 const fs = require('fs');
 const { app } = require('electron');
+const { getLogQueue } = require('../lib/log-event-queue');
+const log = getLogQueue();
 
 // AI service configurations
 const AI_SERVICE_CONFIG = {
@@ -86,7 +88,7 @@ class ConversationCapture {
    */
   setPaused(paused) {
     this.paused = paused;
-    console.log(`[ConversationCapture] Capture ${paused ? 'paused' : 'resumed'}`);
+    log.info('app', '[ConversationCapture] Capture', { v0: paused ? 'paused' : 'resumed' });
   }
 
   /**
@@ -113,12 +115,12 @@ class ConversationCapture {
   async capturePrompt(serviceId, requestData) {
     // Validation
     if (!serviceId || typeof serviceId !== 'string') {
-      console.error('[ConversationCapture] Invalid serviceId:', serviceId);
+      log.error('app', '[ConversationCapture] Invalid serviceId', { error: serviceId });
       return;
     }
     
     if (!requestData) {
-      console.warn('[ConversationCapture] No request data provided');
+      log.warn('app', '[ConversationCapture] No request data provided');
       return;
     }
     
@@ -137,10 +139,10 @@ class ConversationCapture {
         // Generate temporary ID for new conversations
         const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         conversationKey = `${serviceId}:${tempId}`;
-        console.log(`[ConversationCapture] No external ID provided, using temporary: ${tempId}`);
+        log.info('app', '[ConversationCapture] No external ID provided, using temporary:', { v0: tempId });
       }
       
-      console.log(`[ConversationCapture] Capturing prompt for key: ${conversationKey}`);
+      log.info('app', '[ConversationCapture] Capturing prompt for key:', { v0: conversationKey });
       
       // Get or create active conversation
       let conversation = this.activeConversations.get(conversationKey);
@@ -150,7 +152,7 @@ class ConversationCapture {
         conversation.externalConversationId = requestData.externalConversationId;
         conversation.tempConversationKey = conversationKey; // Store temp key for later update
         this.activeConversations.set(conversationKey, conversation);
-        console.log(`[ConversationCapture] Created new conversation for ${conversationKey}`);
+        log.info('app', '[ConversationCapture] Created new conversation for', { v0: conversationKey });
       }
 
       // Add prompt to conversation
@@ -158,20 +160,20 @@ class ConversationCapture {
       
       // Skip only if explicitly empty or a placeholder
       if (extractedText === '' || extractedText === '[Message captured]') {
-        console.log(`[ConversationCapture] Skipping empty/placeholder prompt (extractedText: "${extractedText}")`);
+        log.info('app', '[ConversationCapture] Skipping empty/placeholder prompt (extractedText: "")', { v0: extractedText });
         return;
       }
       
       // Skip if no real content
       if (!extractedText || extractedText.trim().length === 0) {
-        console.log(`[ConversationCapture] Skipping whitespace-only prompt`);
+        log.info('app', '[ConversationCapture] Skipping whitespace-only prompt');
         return;
       }
       
       // Check for duplicate - don't add if last user message is identical
       const lastMessage = conversation.messages[conversation.messages.length - 1];
       if (lastMessage && lastMessage.role === 'user' && lastMessage.content === extractedText) {
-        console.log(`[ConversationCapture] Skipping duplicate prompt`);
+        log.info('app', '[ConversationCapture] Skipping duplicate prompt');
         return;
       }
       
@@ -185,9 +187,9 @@ class ConversationCapture {
       conversation.messages.push(prompt);
       conversation.lastActivity = Date.now();
       
-      console.log(`[ConversationCapture] Captured prompt for ${conversationKey}`);
+      log.info('app', '[ConversationCapture] Captured prompt for', { v0: conversationKey });
     } catch (error) {
-      console.error(`[ConversationCapture] Error in capturePrompt:`, error);
+      log.error('app', '[ConversationCapture] Error in capturePrompt:', { arg0: error });
     }
   }
 
@@ -195,24 +197,24 @@ class ConversationCapture {
    * Capture AI response (from streaming complete)
    */
   async captureResponse(serviceId, responseData) {
-    console.log(`[ConversationCapture] ======== captureResponse START ========`);
-    console.log(`[ConversationCapture]   Service: ${serviceId}`);
-    console.log(`[ConversationCapture]   Message length: ${responseData?.message?.length || 0}`);
-    console.log(`[ConversationCapture]   Artifacts count: ${responseData?.artifacts?.length || 0}`);
-    console.log(`[ConversationCapture]   External conv ID: ${responseData?.externalConversationId || 'none'}`);
+    log.info('app', '[ConversationCapture] ======== captureResponse START ========');
+    log.info('app', '[ConversationCapture] Service:', { v0: serviceId });
+    log.info('app', '[ConversationCapture] Message length:', { v0: responseData?.message?.length || 0 });
+    log.info('app', '[ConversationCapture] Artifacts count:', { v0: responseData?.artifacts?.length || 0 });
+    log.info('app', '[ConversationCapture] External conv ID:', { v0: responseData?.externalConversationId || 'none' });
     
     if (responseData?.artifacts && responseData.artifacts.length > 0) {
-      console.log(`[ConversationCapture]   📄 Artifacts:`, JSON.stringify(responseData.artifacts, null, 2).substring(0, 800));
+      log.info('app', 'ConversationCapture artifacts', { artifacts: JSON.stringify(responseData.artifacts, null, 2).substring(0, 800) });
     }
     
     // Validation
     if (!serviceId || typeof serviceId !== 'string') {
-      console.error('[ConversationCapture] Invalid serviceId:', serviceId);
+      log.error('app', '[ConversationCapture] Invalid serviceId', { error: serviceId });
       return;
     }
     
     if (!responseData || !responseData.message) {
-      console.warn('[ConversationCapture] No response message provided');
+      log.warn('app', '[ConversationCapture] No response message provided');
       return;
     }
     
@@ -227,18 +229,18 @@ class ConversationCapture {
         ? `${serviceId}:${responseData.externalConversationId}`
         : serviceId;
       
-      console.log(`[ConversationCapture] Capturing response for key: ${conversationKey}`);
+      log.info('app', '[ConversationCapture] Capturing response for key:', { v0: conversationKey });
       
       // Get or create conversation (create if missing - prompt may have been missed)
       let conversation = this.activeConversations.get(conversationKey);
       
       // If not found and we have an externalConversationId, check if there's a temp conversation to upgrade
       if (!conversation && responseData.externalConversationId) {
-        console.log(`[ConversationCapture] Searching for temporary conversation to upgrade...`);
+        log.info('app', '[ConversationCapture] Searching for temporary conversation to upgrade...');
         // Find conversation with temp key for this service
         for (const [key, conv] of this.activeConversations.entries()) {
           if (key.startsWith(`${serviceId}:temp-`) && !conv.externalConversationId) {
-            console.log(`[ConversationCapture] Found temp conversation: ${key}, upgrading to ${conversationKey}`);
+            log.info('app', '[ConversationCapture] Found temp conversation: , upgrading to', { v0: key, v1: conversationKey });
             // Upgrade temporary conversation to real one
             conversation = conv;
             conversation.externalConversationId = responseData.externalConversationId;
@@ -251,7 +253,7 @@ class ConversationCapture {
       }
       
       if (!conversation) {
-        console.warn(`[ConversationCapture] No active conversation for ${conversationKey}, creating one`);
+        log.warn('app', '[ConversationCapture] No active conversation for , creating one', { v0: conversationKey });
         conversation = this._createNewConversation(serviceId, responseData);
         conversation.externalConversationId = responseData.externalConversationId;
         this.activeConversations.set(conversationKey, conversation);
@@ -270,7 +272,7 @@ class ConversationCapture {
       if (serviceId === 'ChatGPT' && (!responseData.artifacts || responseData.artifacts.length === 0)) {
         const extractedCodeBlocks = this._extractCodeBlocksAsArtifacts(responseData.message || '');
         if (extractedCodeBlocks.length > 0) {
-          console.log(`[ConversationCapture] Extracted ${extractedCodeBlocks.length} code blocks from ChatGPT response`);
+          log.info('app', '[ConversationCapture] Extracted code blocks from ChatGPT response', { v0: extractedCodeBlocks.length });
           response.artifacts = extractedCodeBlocks;
         }
       }
@@ -281,17 +283,17 @@ class ConversationCapture {
       
       // Log artifacts if present
       if (responseData.artifacts && responseData.artifacts.length > 0) {
-        console.log(`[ConversationCapture] Captured ${responseData.artifacts.length} artifacts for ${conversationKey}`);
-        console.log(`[ConversationCapture] Artifact details:`, JSON.stringify(responseData.artifacts, null, 2));
+        log.info('app', '[ConversationCapture] Captured artifacts for', { v0: responseData.artifacts.length, v1: conversationKey });
+        log.info('app', 'ConversationCapture artifact details', { artifacts: responseData.artifacts });
         conversation.hasArtifacts = true;
       }
 
-      console.log(`[ConversationCapture] Captured response for ${conversationKey}, exchanges: ${conversation.exchangeCount}`);
+      log.info('app', '[ConversationCapture] Captured response for , exchanges:', { v0: conversationKey, v1: conversation.exchangeCount });
 
       // Save conversation after each exchange
       await this._saveConversation(conversationKey, conversation);
     } catch (error) {
-      console.error(`[ConversationCapture] Error in captureResponse:`, error);
+      log.error('app', '[ConversationCapture] Error in captureResponse:', { arg0: error });
     }
   }
 
@@ -316,7 +318,7 @@ class ConversationCapture {
     conversation.hasImages = conversation.hasImages || files.some(f => f.type?.includes('image'));
     conversation.hasFiles = conversation.hasFiles || files.some(f => !f.type?.includes('image'));
     
-    console.log(`[ConversationCapture] Captured ${files.length} media files for ${conversationKey}`);
+    log.info('app', '[ConversationCapture] Captured media files for', { v0: files.length, v1: conversationKey });
   }
 
   /**
@@ -325,7 +327,7 @@ class ConversationCapture {
    * @param {Object} fileInfo - Download information
    */
   async captureDownloadedArtifact(serviceId, fileInfo) {
-    console.log(`[ConversationCapture] captureDownloadedArtifact called for ${serviceId}:`, fileInfo.filename);
+    log.info('app', '[ConversationCapture] captureDownloadedArtifact called for :', { v0: serviceId, arg0: fileInfo.filename });
     
     // Find the active conversation for this service
     let conversationKey = null;
@@ -347,18 +349,18 @@ class ConversationCapture {
     }
     
     if (!conversation) {
-      console.warn('[ConversationCapture] No active conversation for downloaded artifact');
+      log.warn('app', '[ConversationCapture] No active conversation for downloaded artifact');
       return;
     }
     
-    console.log(`[ConversationCapture] Found conversation: ${conversationKey}`);
+    log.info('app', '[ConversationCapture] Found conversation:', { v0: conversationKey });
     
     // Read file content as base64
     const fs = require('fs');
     const fileContent = fs.readFileSync(fileInfo.path);
     const base64Content = fileContent.toString('base64');
     
-    console.log(`[ConversationCapture] Read file: ${fileInfo.size} bytes`);
+    log.info('app', '[ConversationCapture] Read file: bytes', { v0: fileInfo.size });
     
     // Create artifact in compatible format
     const artifact = {
@@ -383,17 +385,17 @@ class ConversationCapture {
       }
       lastMessage.artifacts.push(artifact);
       
-      console.log(`[ConversationCapture] ✅ Captured downloaded artifact: ${fileInfo.filename} (${fileInfo.size} bytes)`);
+      log.info('app', '[ConversationCapture] ✅ Captured downloaded artifact: ( bytes)', { v0: fileInfo.filename, v1: fileInfo.size });
       
       // Trigger save
       await this._saveConversation(conversationKey, conversation);
     } else {
-      console.warn('[ConversationCapture] No messages in conversation to attach artifact to');
+      log.warn('app', '[ConversationCapture] No messages in conversation to attach artifact to');
     }
     
     // DO NOT clean up temp file - the download handler will do that
     // The file is shared between our capture logic and the Space save logic
-    console.log(`[ConversationCapture] ✅ Artifact captured, file will be cleaned up by download handler`);
+    log.info('app', '[ConversationCapture] ✅ Artifact captured, file will be cleaned up by download handler');
   }
 
   /**
@@ -410,7 +412,7 @@ class ConversationCapture {
     const conversation = this.activeConversations.get(serviceId);
     if (conversation) {
       conversation.doNotSave = true;
-      console.log(`[ConversationCapture] Marked ${serviceId} conversation as do not save`);
+      log.info('app', '[ConversationCapture] Marked conversation as do not save', { v0: serviceId });
     }
   }
 
@@ -426,32 +428,32 @@ class ConversationCapture {
    * Save conversation to Space
    */
   async _saveConversation(conversationKey, conversation) {
-    console.log(`[ConversationCapture] ===== _saveConversation called for ${conversationKey} =====`);
+    log.info('app', '[ConversationCapture] ===== _saveConversation called for =====', { v0: conversationKey });
     
     // Extract serviceId from conversationKey (format: "ServiceId" or "ServiceId:externalId")
     const serviceId = conversationKey.split(':')[0];
     
     // Check do not save flag
     if (conversation.doNotSave) {
-      console.log(`[ConversationCapture] Skipping save for ${conversationKey} (marked do not save)`);
+      log.info('app', '[ConversationCapture] Skipping save for (marked do not save)', { v0: conversationKey });
       return;
     }
 
-    console.log('[ConversationCapture] Getting or creating service space...');
+    log.info('app', '[ConversationCapture] Getting or creating service space...');
     // Get or create service space
     const spaceId = await this._getOrCreateServiceSpace(serviceId);
     if (!spaceId) {
-      console.error(`[ConversationCapture] ❌ Failed to get/create space for ${serviceId}`);
+      log.error('app', '[ConversationCapture] ❌ Failed to get/create space for', { v0: serviceId });
       return;
     }
     
-    console.log(`[ConversationCapture] Space ID obtained: ${spaceId}`);
+    log.info('app', '[ConversationCapture] Space ID obtained:', { v0: spaceId });
 
     try {
       // Format conversation as markdown
-      console.log('[ConversationCapture] Formatting conversation as markdown...');
+      log.info('app', '[ConversationCapture] Formatting conversation as markdown...');
       const markdown = this._formatConversationMarkdown(serviceId, conversation, spaceId);
-      console.log('[ConversationCapture] Markdown length:', markdown.length);
+      log.info('app', '[ConversationCapture] Markdown length', { data: markdown.length });
       
       // Prepare metadata
       const metadata = {
@@ -484,26 +486,26 @@ class ConversationCapture {
         }
       };
       
-      console.log('[ConversationCapture] Metadata prepared:', JSON.stringify(metadata, null, 2));
+      log.info('app', 'ConversationCapture metadata prepared', { metadata });
 
       // Check if conversation already saved (update mode)
       if (conversation.savedItemId) {
-        console.log('[ConversationCapture] Updating existing item:', conversation.savedItemId);
+        log.info('app', '[ConversationCapture] Updating existing item', { data: conversation.savedItemId });
         // Update existing item
         try {
           await this.spacesAPI.items.update(spaceId, conversation.savedItemId, {
             content: markdown,
             metadata
           });
-          console.log(`[ConversationCapture] ✅ Updated conversation ${conversation.id} in Space`);
+          log.info('app', '[ConversationCapture] ✅ Updated conversation in Space', { v0: conversation.id });
         } catch (updateError) {
-          console.error(`[ConversationCapture] Failed to update conversation:`, updateError);
+          log.error('app', '[ConversationCapture] Failed to update conversation:', { arg0: updateError });
           // If update fails, try creating a new item instead
           conversation.savedItemId = null;
           return await this._saveConversation(conversationKey, conversation);
         }
       } else {
-        console.log('[ConversationCapture] Creating NEW item in space');
+        log.info('app', '[ConversationCapture] Creating NEW item in space');
         // Save as new item with retry logic
         let retries = 3;
         let lastError = null;
@@ -511,17 +513,17 @@ class ConversationCapture {
         
         while (retries > 0) {
           try {
-            console.log(`[ConversationCapture] Attempt ${4-retries}/3: Calling spacesAPI.items.add...`);
+            log.info('app', '[ConversationCapture] Attempt /3: Calling spacesAPI.items.add...', { v0: 4-retries });
             const item = await this.spacesAPI.items.add(spaceId, {
               type: 'text',  // Use 'text' type (markdown will be detected by metadata)
               content: markdown,
               metadata
             });
             
-            console.log(`[ConversationCapture] items.add returned:`, item);
+            log.info('app', '[ConversationCapture] items.add returned:', { arg0: item });
             
             conversation.savedItemId = item.id;
-            console.log(`[ConversationCapture] ✅✅✅ Saved new conversation ${conversation.id} to Space with item ID ${item.id}`);
+            log.info('app', '[ConversationCapture] ✅✅✅ Saved new conversation to Space with item ID', { v0: conversation.id, v1: item.id });
 
             // Save structured JSON version for asset type detection
             const jsonData = {
@@ -541,12 +543,12 @@ class ConversationCapture {
             
             // Store JSON data as item metadata for asset type detection
             conversation.savedItemMetadata = jsonData;
-            console.log('[ConversationCapture] Structured JSON metadata prepared for asset type detection');
+            log.info('app', '[ConversationCapture] Structured JSON metadata prepared for asset type detection');
 
             // Save artifacts as separate items
             const artifactItemIds = await this._saveArtifacts(spaceId, conversation, item.id);
             if (artifactItemIds.length > 0) {
-              console.log(`[ConversationCapture] Saved ${artifactItemIds.length} artifacts as separate items`);
+              log.info('app', '[ConversationCapture] Saved artifacts as separate items', { v0: artifactItemIds.length });
               
               // Re-format markdown with artifact links
               const updatedMarkdown = this._formatConversationMarkdown(serviceId, conversation, spaceId, artifactItemIds);
@@ -560,20 +562,20 @@ class ConversationCapture {
                     artifactItemIds: artifactItemIds
                   }
                 });
-                console.log('[ConversationCapture] Updated conversation with artifact references');
+                log.info('app', '[ConversationCapture] Updated conversation with artifact references');
               } catch (updateError) {
-                console.warn('[ConversationCapture] Failed to update conversation with artifact refs:', updateError);
+                log.warn('app', '[ConversationCapture] Failed to update conversation with artifact refs', { data: updateError });
               }
             }
 
             // Save media files
             if (conversation.media && conversation.media.length > 0) {
-              console.log('[ConversationCapture] Saving media files...');
+              log.info('app', '[ConversationCapture] Saving media files...');
               await this._saveMediaFiles(spaceId, conversation);
             }
 
             // Show undo toast
-            console.log('[ConversationCapture] Showing undo toast...');
+            log.info('app', '[ConversationCapture] Showing undo toast...');
             this._showUndoToast(item.id, serviceId);
             
             // Register as Space asset
@@ -586,32 +588,32 @@ class ConversationCapture {
                 attachmentCount: conversation.media?.length || 0,
                 lastUpdated: new Date().toISOString()
               });
-              console.log('[ConversationCapture] Registered as Space asset');
+              log.info('app', '[ConversationCapture] Registered as Space asset');
             } catch (assetError) {
-              console.warn('[ConversationCapture] Failed to register asset metadata:', assetError);
+              log.warn('app', '[ConversationCapture] Failed to register asset metadata', { data: assetError });
               // Non-critical, continue anyway
             }
             
-            console.log('[ConversationCapture] ===== SAVE COMPLETE =====');
+            log.info('app', '[ConversationCapture] ===== SAVE COMPLETE =====');
             return; // Success!
           } catch (error) {
             lastError = error;
             retries--;
             
-            console.error(`[ConversationCapture] ❌ Save attempt failed:`, error);
+            log.error('app', '[ConversationCapture] ❌ Save attempt failed:', { arg0: error });
             
             if (retries > 0) {
-              console.warn(`[ConversationCapture] Retrying... (${retries} left)`);
+              log.warn('app', '[ConversationCapture] Retrying... ( left)', { v0: retries });
               await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1s before retry
             }
           }
         }
         
         // All retries exhausted
-        console.error(`[ConversationCapture] ❌❌❌ Failed to save conversation after all retries:`, lastError);
+        log.error('app', '[ConversationCapture] ❌❌❌ Failed to save conversation after all retries:', { arg0: lastError });
       }
     } catch (error) {
-      console.error(`[ConversationCapture] ❌ Error in _saveConversation:`, error);
+      log.error('app', '[ConversationCapture] ❌ Error in _saveConversation:', { arg0: error });
     }
   }
 
@@ -664,7 +666,7 @@ class ConversationCapture {
       blockIndex++;
     }
     
-    console.log(`[ConversationCapture] Extracted ${artifacts.length} code blocks from message`);
+    log.info('app', '[ConversationCapture] Extracted code blocks from message', { v0: artifacts.length });
     return artifacts;
   }
 
@@ -686,7 +688,7 @@ class ConversationCapture {
       return artifactItemIds;
     }
     
-    console.log(`[ConversationCapture] Saving ${artifacts.length} artifacts as separate items...`);
+    log.info('app', '[ConversationCapture] Saving artifacts as separate items...', { v0: artifacts.length });
     
     for (const artifact of artifacts) {
       try {
@@ -699,7 +701,7 @@ class ConversationCapture {
         const isDownloadedFile = artifact.type === 'downloaded_file';
         
         if (!isClaudeArtifact && !isChatGPTCodeBlock && !isDownloadedFile) {
-          console.log(`[ConversationCapture] Skipping unsupported artifact type: ${artifact.type}`);
+          log.info('app', '[ConversationCapture] Skipping unsupported artifact type:', { v0: artifact.type });
           continue;
         }
         
@@ -716,16 +718,16 @@ class ConversationCapture {
           fileName = artifact.input.filename;
           
           if (!artifactContent) {
-            console.log(`[ConversationCapture] Skipping downloaded file (no data): ${fileName}`);
+            log.info('app', '[ConversationCapture] Skipping downloaded file (no data):', { v0: fileName });
             continue;
           }
           
-          console.log(`[ConversationCapture] Processing downloaded file: ${fileName} (${artifact.input.size} bytes)`);
+          log.info('app', '[ConversationCapture] Processing downloaded file: ( bytes)', { v0: fileName, v1: artifact.input.size });
         } else {
           // Text-based artifact (code, SVG, etc.)
           artifactContent = artifact.input.file_text || artifact.input.content || artifact.input.code;
           if (!artifactContent) {
-            console.log(`[ConversationCapture] Skipping artifact ${artifact.name} (no content)`);
+            log.info('app', '[ConversationCapture] Skipping artifact (no content)', { v0: artifact.name });
             continue;
           }
         }
@@ -769,7 +771,7 @@ class ConversationCapture {
             fileType = 'text';
           }
           
-          console.log(`[ConversationCapture] Downloaded file type: ${fileExtension}, category: ${fileCategory}`);
+          log.info('app', '[ConversationCapture] Downloaded file type: , category:', { v0: fileExtension, v1: fileCategory });
         }
         // Check for SVG content (text-based)
         else if (artifact.name === 'create_file' || (artifactContent && artifactContent.trim().startsWith('<svg'))) {
@@ -840,7 +842,7 @@ class ConversationCapture {
           artifactMetadata.tags.push('example');
         }
         
-        console.log(`[ConversationCapture] Saving artifact: ${fileName}`);
+        log.info('app', '[ConversationCapture] Saving artifact:', { v0: fileName });
         
         // Save artifact as separate item
         // For binary files, use fileData; for text, use content
@@ -856,7 +858,7 @@ class ConversationCapture {
         if (isBinaryFile) {
           itemData.fileData = artifactContent;  // Base64 for binary files
           itemData.fileSize = artifact.input.size;
-          console.log(`[ConversationCapture] Saving binary file: ${fileName} (${artifact.input.size} bytes)`);
+          log.info('app', '[ConversationCapture] Saving binary file: ( bytes)', { v0: fileName, v1: artifact.input.size });
         } else {
           itemData.content = artifactContent;  // Text content
         }
@@ -864,10 +866,10 @@ class ConversationCapture {
         const artifactItem = await this.spacesAPI.items.add(spaceId, itemData);
         
         artifactItemIds.push(artifactItem.id);
-        console.log(`[ConversationCapture] ✅ Saved artifact as item ${artifactItem.id}`);
+        log.info('app', '[ConversationCapture] ✅ Saved artifact as item', { v0: artifactItem.id });
         
       } catch (error) {
-        console.error(`[ConversationCapture] Failed to save artifact ${artifact.name}:`, error);
+        log.error('app', '[ConversationCapture] Failed to save artifact :', { v0: artifact.name, arg0: error });
         // Continue with other artifacts
       }
     }
@@ -901,7 +903,7 @@ class ConversationCapture {
         }
 
         if (!fileData) {
-          console.warn('[ConversationCapture] Could not extract media data');
+          log.warn('app', '[ConversationCapture] Could not extract media data');
           continue;
         }
 
@@ -935,9 +937,9 @@ class ConversationCapture {
         // Store item ID back in media for reference
         media.itemId = savedItem.id;
 
-        console.log(`[ConversationCapture] Saved media file: ${fileName} with comprehensive metadata`);
+        log.info('app', '[ConversationCapture] Saved media file: with comprehensive metadata', { v0: fileName });
       } catch (error) {
-        console.error('[ConversationCapture] Error saving media file:', error);
+        log.error('app', '[ConversationCapture] Error saving media file', { error: error });
       }
     }
   }
@@ -1100,52 +1102,52 @@ class ConversationCapture {
    * Get or create service-specific Space
    */
   async _getOrCreateServiceSpace(serviceId) {
-    console.log(`[ConversationCapture] _getOrCreateServiceSpace for ${serviceId}`);
+    log.info('app', '[ConversationCapture] _getOrCreateServiceSpace for', { v0: serviceId });
     
     // Check cache
     if (this.serviceSpaces.has(serviceId)) {
       const cachedId = this.serviceSpaces.get(serviceId);
-      console.log(`  ✅ Found in cache: ${cachedId}`);
+      log.info('app', 'Found in cache:', { v0: cachedId });
       return cachedId;
     }
 
     const config = AI_SERVICE_CONFIG[serviceId];
     if (!config) {
-      console.error(`[ConversationCapture] ❌ Unknown service: ${serviceId}`);
+      log.error('app', '[ConversationCapture] ❌ Unknown service:', { v0: serviceId });
       return null;
     }
     
-    console.log(`  Config found:`, config);
+    log.info('app', 'Config found', { config });
 
     try {
       // Check if space already exists
-      console.log(`  Fetching existing spaces...`);
+      log.info('app', 'Fetching existing spaces...');
       const spaces = await this.spacesAPI.list();
-      console.log(`  Total spaces found: ${spaces.length}`);
+      log.info('app', 'Total spaces found:', { v0: spaces.length });
       
       const existingSpace = spaces.find(s => s.name === config.spaceName);
 
       if (existingSpace) {
-        console.log(`  ✅ Found existing space: ${existingSpace.id}`);
+        log.info('app', 'Found existing space:', { v0: existingSpace.id });
         this.serviceSpaces.set(serviceId, existingSpace.id);
         return existingSpace.id;
       }
 
       // Create new space
-      console.log(`  Creating NEW space: ${config.spaceName}`);
+      log.info('app', 'Creating NEW space:', { v0: config.spaceName });
       const newSpace = await this.spacesAPI.create(config.spaceName, {
         icon: config.icon,
         color: config.color
       });
       
-      console.log(`  Space created:`, newSpace);
+      log.info('app', 'Space created', { newSpace });
 
       this.serviceSpaces.set(serviceId, newSpace.id);
-      console.log(`[ConversationCapture] ✅ Created Space: ${config.spaceName} with ID ${newSpace.id}`);
+      log.info('app', '[ConversationCapture] ✅ Created Space: with ID', { v0: config.spaceName, v1: newSpace.id });
       
       return newSpace.id;
     } catch (error) {
-      console.error(`[ConversationCapture] ❌ Error creating space for ${serviceId}:`, error);
+      log.error('app', '[ConversationCapture] ❌ Error creating space for :', { v0: serviceId, arg0: error });
       return null;
     }
   }
@@ -1155,7 +1157,7 @@ class ConversationCapture {
    */
   async copyConversationToSpace(conversationId, targetSpaceId) {
     // Implementation for manual space assignment
-    console.log(`[ConversationCapture] Copying conversation ${conversationId} to Space ${targetSpaceId}`);
+    log.info('app', '[ConversationCapture] Copying conversation to Space', { v0: conversationId, v1: targetSpaceId });
     // TODO: Implement full copy logic with media
   }
   
@@ -1172,10 +1174,10 @@ class ConversationCapture {
         item.metadata?.linkedToConversation === conversationId
       );
       
-      console.log(`[ConversationCapture] Found ${mediaItems.length} media items for conversation ${conversationId}`);
+      log.info('app', '[ConversationCapture] Found media items for conversation', { v0: mediaItems.length, v1: conversationId });
       return mediaItems;
     } catch (error) {
-      console.error('[ConversationCapture] Error getting conversation media:', error);
+      log.error('app', '[ConversationCapture] Error getting conversation media', { error: error });
       return [];
     }
   }
@@ -1227,10 +1229,10 @@ class ConversationCapture {
       clearTimeout(pending.timeout);
       this.pendingUndos.delete(itemId);
 
-      console.log(`[ConversationCapture] Undid save for item ${itemId}`);
+      log.info('app', '[ConversationCapture] Undid save for item', { v0: itemId });
       return { success: true };
     } catch (error) {
-      console.error('[ConversationCapture] Error undoing save:', error);
+      log.error('app', '[ConversationCapture] Error undoing save', { error: error });
       return { success: false, error: error.message };
     }
   }
@@ -1239,33 +1241,33 @@ class ConversationCapture {
    * Check if conversation should be captured
    */
   _shouldCapture(serviceId) {
-    console.log(`[ConversationCapture] _shouldCapture check for ${serviceId}:`);
+    log.info('app', '[ConversationCapture] _shouldCapture check for :', { v0: serviceId });
     
     // Check if enabled
     const enabled = this.isEnabled();
-    console.log(`  - isEnabled(): ${enabled}`);
+    log.info('app', '- isEnabled():', { v0: enabled });
     if (!enabled) {
-      console.log(`  ❌ BLOCKED: Not enabled`);
+      log.info('app', 'BLOCKED: Not enabled');
       return false;
     }
 
     // Check if paused
-    console.log(`  - paused: ${this.paused}`);
+    log.info('app', '- paused:', { v0: this.paused });
     if (this.paused) {
-      console.log(`  ❌ BLOCKED: Paused`);
+      log.info('app', 'BLOCKED: Paused');
       return false;
     }
 
     // Check if conversation marked do not save
     const conversation = this.activeConversations.get(serviceId);
     const doNotSave = conversation?.doNotSave || false;
-    console.log(`  - doNotSave flag: ${doNotSave}`);
+    log.info('app', '- doNotSave flag:', { v0: doNotSave });
     if (doNotSave) {
-      console.log(`  ❌ BLOCKED: Marked do not save`);
+      log.info('app', 'BLOCKED: Marked do not save');
       return false;
     }
 
-    console.log(`  ✅ ALLOWED: All checks passed`);
+    log.info('app', 'ALLOWED: All checks passed');
     return true;
   }
 
@@ -1294,17 +1296,17 @@ class ConversationCapture {
    * Extract prompt text from request data
    */
   _extractPromptText(requestData) {
-    console.log('[ConversationCapture] _extractPromptText called with keys:', Object.keys(requestData || {}));
-    console.log('[ConversationCapture] message type:', typeof requestData.message);
-    console.log('[ConversationCapture] message value:', JSON.stringify(requestData.message)?.substring(0, 200));
+    log.info('app', 'ConversationCapture _extractPromptText called', { keys: Object.keys(requestData || {}) });
+    log.info('app', '[ConversationCapture] message type', { data: typeof requestData.message });
+    log.info('app', 'ConversationCapture message value', { messagePreview: JSON.stringify(requestData.message)?.substring(0, 200) });
     
     if (typeof requestData.message === 'string') {
-      console.log('[ConversationCapture] Found string message:', requestData.message.substring(0, 100));
+      log.info('app', 'ConversationCapture found string message', { messagePreview: requestData.message.substring(0, 100) });
       return requestData.message;
     }
 
     if (Array.isArray(requestData.message)) {
-      console.log('[ConversationCapture] Found message array with', requestData.message.length, 'messages');
+      log.info('app', '[ConversationCapture] Found message array with', { arg0: requestData.message.length, arg1: 'messages' });
       
       // ChatGPT format: Look for user messages in the array
       // Format: { author: { role: 'user' }, content: { content_type: 'text', parts: ['...'] } }
@@ -1325,14 +1327,14 @@ class ConversationCapture {
             .filter(part => typeof part === 'string')
             .join('\n');
           if (text) {
-            console.log('[ConversationCapture] Extracted from content.parts:', text.substring(0, 100));
+            log.info('app', 'ConversationCapture extracted from content.parts', { textPreview: text.substring(0, 100) });
             return text;
           }
         }
         
         // Handle content as string
         if (typeof msg.content === 'string') {
-          console.log('[ConversationCapture] Extracted from content string:', msg.content.substring(0, 100));
+          log.info('app', 'ConversationCapture extracted from content string', { textPreview: msg.content.substring(0, 100) });
           return msg.content;
         }
         
@@ -1343,52 +1345,52 @@ class ConversationCapture {
             .map(block => block.text || '')
             .join('\n');
           if (textBlocks) {
-            console.log('[ConversationCapture] Extracted from content blocks:', textBlocks.substring(0, 100));
+            log.info('app', 'ConversationCapture extracted from content blocks', { textPreview: textBlocks.substring(0, 100) });
             return textBlocks;
           }
         }
         
         // Fallback to text field
         if (msg.text) {
-          console.log('[ConversationCapture] Extracted from text field:', msg.text.substring(0, 100));
+          log.info('app', 'ConversationCapture extracted from text field', { textPreview: msg.text.substring(0, 100) });
           return msg.text;
         }
       }
       
-      console.log('[ConversationCapture] No user message found in array');
+      log.info('app', '[ConversationCapture] No user message found in array');
       return '';
     }
 
     if (requestData.prompt) {
-      console.log('[ConversationCapture] Found prompt field');
+      log.info('app', '[ConversationCapture] Found prompt field');
       return requestData.prompt;
     }
 
     // Grok format: may have different field names
     // Check for common Grok field names
     if (requestData.query) {
-      console.log('[ConversationCapture] Found query field (Grok)');
+      log.info('app', '[ConversationCapture] Found query field (Grok)');
       return requestData.query;
     }
     
     if (requestData.input) {
-      console.log('[ConversationCapture] Found input field');
+      log.info('app', '[ConversationCapture] Found input field');
       return requestData.input;
     }
     
     if (requestData.text) {
-      console.log('[ConversationCapture] Found text field');
+      log.info('app', '[ConversationCapture] Found text field');
       return requestData.text;
     }
     
     if (requestData.content) {
-      console.log('[ConversationCapture] Found content field');
+      log.info('app', '[ConversationCapture] Found content field');
       return typeof requestData.content === 'string' ? requestData.content : JSON.stringify(requestData.content);
     }
     
     // Grok specific: messages array with different structure
     if (requestData.messages && Array.isArray(requestData.messages)) {
-      console.log('[ConversationCapture] Found messages array with', requestData.messages.length, 'items');
+      log.info('app', '[ConversationCapture] Found messages array with', { arg0: requestData.messages.length, arg1: 'items' });
       // Get last user message
       for (let i = requestData.messages.length - 1; i >= 0; i--) {
         const msg = requestData.messages[i];
@@ -1411,8 +1413,8 @@ class ConversationCapture {
     }
 
     // Log all top-level keys for debugging unknown formats
-    console.log('[ConversationCapture] Unknown format. All keys:', Object.keys(requestData).join(', '));
-    console.log('[ConversationCapture] No message found, returning empty');
+    log.info('app', 'ConversationCapture unknown format', { keys: Object.keys(requestData) });
+    log.info('app', '[ConversationCapture] No message found, returning empty');
     return '';
   }
 
@@ -1426,7 +1428,7 @@ class ConversationCapture {
 
     for (const [serviceId, conversation] of this.activeConversations.entries()) {
       if (now - conversation.lastActivity > timeoutMs) {
-        console.log(`[ConversationCapture] Conversation timeout for ${serviceId}, finalizing...`);
+        log.info('app', '[ConversationCapture] Conversation timeout for , finalizing...', { v0: serviceId });
         await this._saveConversation(serviceId, conversation);
         this.activeConversations.delete(serviceId);
       }
@@ -1450,10 +1452,10 @@ class ConversationCapture {
           this.paused = data.paused || false;
         }
 
-        console.log('[ConversationCapture] State loaded from disk');
+        log.info('app', '[ConversationCapture] State loaded from disk');
       }
     } catch (error) {
-      console.error('[ConversationCapture] Error loading state:', error);
+      log.error('app', '[ConversationCapture] Error loading state', { error: error });
     }
   }
 
@@ -1469,7 +1471,7 @@ class ConversationCapture {
       };
       fs.writeFileSync(statePath, JSON.stringify(data, null, 2));
     } catch (error) {
-      console.error('[ConversationCapture] Error saving state:', error);
+      log.error('app', '[ConversationCapture] Error saving state', { error: error });
     }
   }
 }
@@ -1478,11 +1480,11 @@ class ConversationCapture {
 let instance = null;
 
 function getConversationCapture(spacesAPI, settingsManager) {
-  console.log('[ConversationCapture] getConversationCapture called, instance exists:', !!instance);
+  log.info('app', '[ConversationCapture] getConversationCapture called, instance exists', { data: !!instance });
   if (!instance) {
-    console.log('[ConversationCapture] Creating NEW instance...');
+    log.info('app', '[ConversationCapture] Creating NEW instance...');
     instance = new ConversationCapture(spacesAPI, settingsManager);
-    console.log('[ConversationCapture] Instance created successfully');
+    log.info('app', '[ConversationCapture] Instance created successfully');
     
     // Set up periodic timeout checks
     setInterval(() => {

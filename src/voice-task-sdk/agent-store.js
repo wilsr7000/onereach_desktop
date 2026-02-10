@@ -9,6 +9,8 @@ const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs').promises;
 const { app } = require('electron');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 
 // Agent type constants
 const AGENT_TYPE = {
@@ -89,7 +91,7 @@ class AgentStore {
     await this.loadVersions();
 
     this.initialized = true;
-    console.log('[AgentStore] Initialized with', this.agents.size, 'local agents,', this.gsxConnections.size, 'GSX connections, and version history');
+    log.info('voice', '[AgentStore] Initialized with', { arg0: this.agents.size, arg1: 'local agents, arg2: ', arg3: this.gsxConnections.size, arg4: 'GSX connections, arg5: and version history' });
   }
 
   /**
@@ -106,7 +108,7 @@ class AgentStore {
       }
     } catch (e) {
       // File may not exist yet
-      console.log('[AgentStore] No existing local agents found');
+      log.info('voice', '[AgentStore] No existing local agents found');
     }
   }
 
@@ -124,7 +126,7 @@ class AgentStore {
       }
     } catch (e) {
       // File may not exist yet
-      console.log('[AgentStore] No existing GSX connections found');
+      log.info('voice', '[AgentStore] No existing GSX connections found');
     }
   }
 
@@ -198,7 +200,7 @@ class AgentStore {
     this.agentVersions.set(agentId, versions);
     await this.saveVersions(agentId);
     
-    console.log(`[AgentStore] Version ${version.versionNumber} saved for agent ${agentId}: ${reason}`);
+    log.info('voice', '[AgentStore] Version saved for agent :', { v0: version.versionNumber, v1: agentId, v2: reason });
     return version;
   }
 
@@ -231,7 +233,7 @@ class AgentStore {
     // Save initial version
     await this.addVersion(agent.id, agent, VERSION_REASONS.CREATE, 'Initial creation');
 
-    console.log('[AgentStore] Created local agent:', agent.name);
+    log.info('voice', '[AgentStore] Created local agent', { data: agent.name });
     
     // Hot-connect the new agent to the running exchange
     try {
@@ -240,7 +242,7 @@ class AgentStore {
         await hotConnectAgent(agent);
       }
     } catch (e) {
-      console.log('[AgentStore] Could not hot-connect agent (exchange may not be running):', e.message);
+      log.info('voice', '[AgentStore] Could not hot-connect agent (exchange may not be running)', { data: e.message });
     }
     
     return agent;
@@ -283,22 +285,22 @@ class AgentStore {
       if (wasEnabled && !willBeEnabled) {
         // Agent was disabled - disconnect
         disconnectAgent(id);
-        console.log('[AgentStore] Disconnected disabled agent:', updated.name);
+        log.info('voice', '[AgentStore] Disconnected disabled agent', { data: updated.name });
       } else if (!wasEnabled && willBeEnabled) {
         // Agent was enabled - connect
         await hotConnectAgent(updated);
-        console.log('[AgentStore] Reconnected enabled agent:', updated.name);
+        log.info('voice', '[AgentStore] Reconnected enabled agent', { data: updated.name });
       } else if (willBeEnabled) {
         // Agent is still enabled but may have changed keywords/etc - reconnect
         disconnectAgent(id);
         await hotConnectAgent(updated);
-        console.log('[AgentStore] Reconnected updated agent:', updated.name);
+        log.info('voice', '[AgentStore] Reconnected updated agent', { data: updated.name });
       }
     } catch (e) {
-      console.log('[AgentStore] Could not update agent connection:', e.message);
+      log.info('voice', '[AgentStore] Could not update agent connection', { data: e.message });
     }
 
-    console.log('[AgentStore] Updated local agent:', updated.name, '-> version', updated.version);
+    log.info('voice', '[AgentStore] Updated local agent', { arg0: updated.name, arg1: '-> version', arg2: updated.version });
     return updated;
   }
 
@@ -320,7 +322,7 @@ class AgentStore {
     this.agents.delete(id);
     await this.saveAgents();
 
-    console.log('[AgentStore] Deleted local agent:', agent.name);
+    log.info('voice', '[AgentStore] Deleted local agent', { data: agent.name });
     return true;
   }
 
@@ -367,7 +369,7 @@ class AgentStore {
     this.gsxConnections.set(connection.id, connection);
     await this.saveGSXConnections();
 
-    console.log('[AgentStore] Added GSX connection:', connection.name);
+    log.info('voice', '[AgentStore] Added GSX connection', { data: connection.name });
     return connection;
   }
 
@@ -389,7 +391,7 @@ class AgentStore {
     this.gsxConnections.set(id, updated);
     await this.saveGSXConnections();
 
-    console.log('[AgentStore] Updated GSX connection:', updated.name);
+    log.info('voice', '[AgentStore] Updated GSX connection', { data: updated.name });
     return updated;
   }
 
@@ -403,7 +405,7 @@ class AgentStore {
     this.gsxConnections.delete(id);
     await this.saveGSXConnections();
 
-    console.log('[AgentStore] Deleted GSX connection:', connection.name);
+    log.info('voice', '[AgentStore] Deleted GSX connection', { data: connection.name });
     return true;
   }
 
@@ -441,7 +443,7 @@ class AgentStore {
     this.gsxConnections.set(connectionId, connection);
     await this.saveGSXConnections();
 
-    console.log('[AgentStore] Updated GSX agents for', connection.name, ':', agents.length, 'agents');
+    log.info('voice', '[AgentStore] Updated GSX agents for', { arg0: connection.name, arg1: ':', arg2: agents.length, arg3: 'agents' });
     return connection;
   }
 
@@ -548,7 +550,7 @@ class AgentStore {
     // Add an "undo" entry to version history
     await this.addVersion(agentId, restored, 'undo', `Reverted to version ${previousVersion.versionNumber}`);
 
-    console.log('[AgentStore] Undid agent:', restored.name, '-> restored from version', previousVersion.versionNumber);
+    log.info('voice', '[AgentStore] Undid agent', { arg0: restored.name, arg1: '-> restored from version', arg2: previousVersion.versionNumber });
     return restored;
   }
 
@@ -576,7 +578,7 @@ class AgentStore {
     // Add a "revert" entry to version history
     await this.addVersion(agentId, restored, 'revert', `Reverted to version ${versionNumber}`);
 
-    console.log('[AgentStore] Reverted agent:', restored.name, 'to version', versionNumber);
+    log.info('voice', '[AgentStore] Reverted agent', { arg0: restored.name, arg1: 'to version', arg2: versionNumber });
     return restored;
   }
 
@@ -622,7 +624,7 @@ class AgentStore {
     } catch (e) {
       // File may not exist
     }
-    console.log('[AgentStore] Cleared version history for agent:', agentId);
+    log.info('voice', '[AgentStore] Cleared version history for agent', { data: agentId });
   }
 }
 

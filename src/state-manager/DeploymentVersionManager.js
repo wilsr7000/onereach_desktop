@@ -29,6 +29,8 @@
  * ```
  */
 
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 class DeploymentVersionManager {
   /**
    * Built-in version templates
@@ -173,7 +175,7 @@ class DeploymentVersionManager {
     this.versions.set(id, version);
     this._notifyChange('create', version);
 
-    console.log(`[DeploymentVersionManager] Created version: ${version.name} (${id})`);
+    log.info('app', '[DeploymentVersionManager] Created version: ()', { v0: version.name, v1: id });
     return version;
   }
 
@@ -184,7 +186,7 @@ class DeploymentVersionManager {
    */
   deleteVersion(versionId) {
     if (versionId === 'full') {
-      console.warn('[DeploymentVersionManager] Cannot delete Full version');
+      log.warn('app', '[DeploymentVersionManager] Cannot delete Full version');
       return false;
     }
 
@@ -274,7 +276,7 @@ class DeploymentVersionManager {
 
     this._notifyChange('addRegion', { versionId, region });
 
-    console.log(`[DeploymentVersionManager] Added region to ${versionId}: ${start.toFixed(2)}-${end.toFixed(2)}`);
+    log.info('app', '[DeploymentVersionManager] Added region to : -', { v0: versionId, v1: start.toFixed(2), v2: end.toFixed(2) });
     return region;
   }
 
@@ -414,7 +416,7 @@ class DeploymentVersionManager {
       version.regions.push({ ...region, id: `region_${Date.now()}_${Math.random().toString(36).substr(2, 5)}` });
     }
 
-    console.log(`[DeploymentVersionManager] Created localized version: ${newName}`);
+    log.info('app', '[DeploymentVersionManager] Created localized version:', { v0: newName });
     return version;
   }
 

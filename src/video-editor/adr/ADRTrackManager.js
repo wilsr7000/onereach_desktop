@@ -5,6 +5,8 @@
  * Part of the non-destructive multi-track audio workflow.
  */
 
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 export class ADRTrackManager {
   constructor(appContext) {
     this.app = appContext;
@@ -76,7 +78,7 @@ export class ADRTrackManager {
   duplicateTrack(trackId, options = {}) {
     const sourceTrack = this.findTrack(trackId);
     if (!sourceTrack) {
-      console.error('[ADRTrackManager] Cannot duplicate: track not found', trackId);
+      log.error('video', '[ADRTrackManager] Cannot duplicate: track not found', trackId);
       this.app.showToast?.('error', 'Track not found');
       return null;
     }
@@ -108,12 +110,9 @@ export class ADRTrackManager {
     // Render the new track in UI
     this.app.renderAudioTrack?.(newTrack);
 
-    console.log('[ADRTrackManager] Duplicated track', {
-      sourceId: trackId,
-      newId: newTrackId,
-      type: type,
-      name: name
-    });
+    log.info('video', '[ADRTrackManager] Duplicated track', { arg0: {
+      sourceId: trackId, arg1: newId: newTrackId, arg2: type: type, arg3: name: name
+    } });
 
     this.app.showToast?.('success', `Created ${name}`);
     
@@ -130,7 +129,7 @@ export class ADRTrackManager {
     if (!workingTrack) {
       const guideTrack = this.getGuideTrack();
       if (!guideTrack) {
-        console.error('[ADRTrackManager] No guide track found');
+        log.error('video', '[ADRTrackManager] No guide track found');
         return null;
       }
 
@@ -166,7 +165,7 @@ export class ADRTrackManager {
       this.app.audioTracks.push(adrTrack);
       this.app.renderAudioTrack?.(adrTrack);
       
-      console.log('[ADRTrackManager] Created ADR track', newTrackId);
+      log.info('video', '[ADRTrackManager] Created ADR track', { arg0: newTrackId });
     }
 
     return adrTrack;
@@ -239,7 +238,7 @@ export class ADRTrackManager {
     // Emit event
     this.app.emit?.('trackVolumeChanged', { trackId, volume: track.volume });
     
-    console.log('[ADRTrackManager] Set volume', trackId, track.volume);
+    log.info('video', '[ADRTrackManager] Set volume', { arg0: trackId, arg1: track.volume });
   }
 
   /**
@@ -267,7 +266,7 @@ export class ADRTrackManager {
     // Emit event
     this.app.emit?.('trackPanChanged', { trackId, pan: track.pan });
     
-    console.log('[ADRTrackManager] Set pan', trackId, track.pan);
+    log.info('video', '[ADRTrackManager] Set pan', { arg0: trackId, arg1: track.pan });
   }
 
   /**

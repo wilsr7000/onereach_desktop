@@ -8,6 +8,8 @@
  * - Historical comparison across projects
  */
 
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 export class RatingDashboard {
   constructor(appContext) {
     this.app = appContext;
@@ -507,7 +509,7 @@ export class RatingDashboard {
       const templateId = this.currentRating?.templateId || 'generic';
       this.history = await this.app.projectRating?.getProjectHistory?.(templateId) || [];
     } catch (error) {
-      console.error('[RatingDashboard] Failed to load history:', error);
+      log.error('video', '[RatingDashboard] Failed to load history', { error: error });
       this.history = [];
     }
   }

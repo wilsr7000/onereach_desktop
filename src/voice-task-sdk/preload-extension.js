@@ -167,4 +167,4 @@ contextBridge.exposeInMainWorld('voiceTaskSDK', {
   }
 })
 
-console.log('[VoiceTaskSDK] Preload extension loaded - window.voiceTaskSDK available')
+log.info('voice', '[VoiceTaskSDK] Preload extension loaded - window.voiceTaskSDK available')

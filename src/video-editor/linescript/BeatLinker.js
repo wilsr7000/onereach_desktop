@@ -8,6 +8,8 @@
  * - Import/export beat links
  */
 
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 // Cross-platform helper to convert file path to file:// URL
 function pathToFileUrl(filePath) {
   if (!filePath) return '';
@@ -88,9 +90,9 @@ export class BeatLinker {
         this.links.set(sourceId, linkData);
       });
       
-      console.log('[BeatLinker] Loaded links:', this.links.size);
+      log.info('video', '[BeatLinker] Loaded links', { data: this.links.size });
     } catch (error) {
-      console.error('[BeatLinker] Failed to load links:', error);
+      log.error('video', '[BeatLinker] Failed to load links', { error: error });
     }
   }
 
@@ -102,7 +104,7 @@ export class BeatLinker {
       const linksObj = Object.fromEntries(this.links);
       await window.videoEditor?.saveProjectLinks?.(linksObj);
     } catch (error) {
-      console.error('[BeatLinker] Failed to save links:', error);
+      log.error('video', '[BeatLinker] Failed to save links', { error: error });
     }
   }
 
@@ -115,7 +117,7 @@ export class BeatLinker {
    */
   createLink(source, target, linkType, metadata = {}) {
     if (!source?.beatId || !target?.beatId) {
-      console.error('[BeatLinker] Invalid source or target');
+      log.error('video', '[BeatLinker] Invalid source or target');
       return null;
     }
 
@@ -150,7 +152,7 @@ export class BeatLinker {
     // Save to storage
     this._saveLinks();
 
-    console.log('[BeatLinker] Created link:', link);
+    log.info('video', '[BeatLinker] Created link', { data: link });
     
     // Emit event
     this.app.emit?.('beatLinkCreated', link);
@@ -330,7 +332,7 @@ export class BeatLinker {
         });
 
       } catch (error) {
-        console.error('[BeatLinker] Failed to load beats:', error);
+        log.error('video', '[BeatLinker] Failed to load beats', { error: error });
         beatsList.innerHTML = '<div class="browser-error">Failed to load beats</div>';
       }
     });
@@ -366,7 +368,7 @@ export class BeatLinker {
         type: m.type
       }));
     } catch (error) {
-      console.error('[BeatLinker] Failed to load markers:', error);
+      log.error('video', '[BeatLinker] Failed to load markers', { error: error });
       return [];
     }
   }
@@ -438,7 +440,7 @@ export class BeatLinker {
       });
 
     } catch (error) {
-      console.error('[BeatLinker] Preview error:', error);
+      log.error('video', '[BeatLinker] Preview error', { error: error });
       this.app.showToast?.('error', 'Could not preview linked beat');
     }
   }

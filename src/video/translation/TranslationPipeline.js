@@ -10,6 +10,9 @@ import path from 'path';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { app } = require('electron');
+const ai = require('../../../lib/ai-service');
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 /**
  * Service for multi-LLM translation with quality loop
@@ -66,7 +69,7 @@ export class TranslationPipeline {
     let currentEvaluation = null;
 
     for (let i = 1; i <= maxIterations; i++) {
-      console.log(`[TranslationPipeline] Iteration ${i}/${maxIterations}`);
+      log.info('video', '[TranslationPipeline] Iteration /', { v0: i, v1: maxIterations });
 
       // Step 1: Translate (or refine)
       if (i === 1) {
@@ -104,7 +107,7 @@ export class TranslationPipeline {
 
       // Check if we've reached quality threshold
       if (currentEvaluation.composite >= qualityThreshold) {
-        console.log(`[TranslationPipeline] Quality threshold met at iteration ${i}: ${currentEvaluation.composite}`);
+        log.info('video', '[TranslationPipeline] Quality threshold met at iteration :', { v0: i, v1: currentEvaluation.composite });
         return {
           success: true,
           translation: currentTranslation,
@@ -116,7 +119,7 @@ export class TranslationPipeline {
 
       // If we've exhausted iterations
       if (i === maxIterations) {
-        console.log(`[TranslationPipeline] Max iterations reached. Final score: ${currentEvaluation.composite}`);
+        log.info('video', '[TranslationPipeline] Max iterations reached. Final score:', { v0: currentEvaluation.composite });
         return {
           success: false,
           translation: currentTranslation,
@@ -161,50 +164,22 @@ TEXT TO TRANSLATE:
 
 TRANSLATION:`;
 
-    return new Promise((resolve, reject) => {
-      const postData = JSON.stringify({
-        model: 'gpt-4o',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
+    try {
+      const result = await ai.chat({
+        profile: 'fast',
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
         temperature: 0.3,
-        max_tokens: 2000
+        maxTokens: 2000,
+        feature: 'translation-pipeline'
       });
-
-      const req = https.request({
-        hostname: 'api.openai.com',
-        path: '/v1/chat/completions',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        }
-      }, (res) => {
-        let data = '';
-        res.on('data', chunk => data += chunk);
-        res.on('end', () => {
-          if (res.statusCode !== 200) {
-            try {
-              const errorJson = JSON.parse(data);
-              reject(new Error(errorJson.error?.message || `HTTP ${res.statusCode}`));
-            } catch {
-              reject(new Error(`HTTP ${res.statusCode}: ${data}`));
-            }
-            return;
-          }
-          
-          const response = JSON.parse(data);
-          const translation = response.choices[0].message.content.trim();
-          // Remove quotes if the model added them
-          resolve(translation.replace(/^["']|["']$/g, ''));
-        });
-      });
-
-      req.on('error', reject);
-      req.write(postData);
-      req.end();
-    });
+      
+      const translation = result.content.trim();
+      // Remove quotes if the model added them
+      return translation.replace(/^["']|["']$/g, '');
+    } catch (err) {
+      throw new Error(err.message || 'Translation failed');
+    }
   }
 
   /**
@@ -242,45 +217,22 @@ ${sourceDuration ? `Note: Translation should be speakable in ~${sourceDuration} 
 
 IMPROVED TRANSLATION:`;
 
-    return new Promise((resolve, reject) => {
-      const postData = JSON.stringify({
-        model: 'gpt-4o',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
+    try {
+      const result = await ai.chat({
+        profile: 'fast',
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
         temperature: 0.3,
-        max_tokens: 2000
+        maxTokens: 2000,
+        feature: 'translation-pipeline'
       });
-
-      const req = https.request({
-        hostname: 'api.openai.com',
-        path: '/v1/chat/completions',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        }
-      }, (res) => {
-        let data = '';
-        res.on('data', chunk => data += chunk);
-        res.on('end', () => {
-          if (res.statusCode !== 200) {
-            // Return current translation if refinement fails
-            resolve(currentTranslation);
-            return;
-          }
-          
-          const response = JSON.parse(data);
-          const refined = response.choices[0].message.content.trim();
-          resolve(refined.replace(/^["']|["']$/g, ''));
-        });
-      });
-
-      req.on('error', () => resolve(currentTranslation));
-      req.write(postData);
-      req.end();
-    });
+      
+      const refined = result.content.trim();
+      return refined.replace(/^["']|["']$/g, '');
+    } catch (err) {
+      // Return current translation if refinement fails
+      return currentTranslation;
+    }
   }
 }
 

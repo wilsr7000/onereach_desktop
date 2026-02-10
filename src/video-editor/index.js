@@ -158,18 +158,18 @@ export function initVideoEditorModules(appContext) {
  */
 function addClipToTrack(appContext, trackId, asset) {
   if (!trackId || !asset) {
-    console.error('[VideoEditor] addClipToTrack: Missing trackId or asset');
+    window.logging.error('video', 'VideoEditor addClipToTrack: Missing trackId or asset');
     return;
   }
   
-  console.log('[VideoEditor] Adding clip to track:', trackId, asset);
+  window.logging.info('video', 'VideoEditor Adding clip to track', { data: trackId, asset });
   
   // Get track from ADR manager or audioTracks
   const track = appContext.adrManager?.findTrack(trackId) ||
                 appContext.audioTracks?.find(t => t.id === trackId);
   
   if (!track) {
-    console.error('[VideoEditor] Track not found:', trackId);
+    window.logging.error('video', 'VideoEditor Track not found', { error: trackId });
     appContext.showToast?.('error', 'Track not found');
     return;
   }

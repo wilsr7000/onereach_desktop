@@ -4281,24 +4281,23 @@
         function selectAgent(agent) {
             console.log('[AgentExplorer] Selected agent:', agent);
             
-            // Fill in the form fields based on agent type
-            if (agent.type === 'external') {
-                // External agent - populate external form
-                document.getElementById('bot-name').value = agent.name;
-                document.getElementById('bot-chat-url').value = agent.url || agent.chatUrl || '';
-            } else {
-                // IDW - populate IDW form
-                document.getElementById('idw-home-url').value = agent.homeUrl || '';
-                document.getElementById('idw-chat-url').value = agent.chatUrl || '';
-            }
-            
-            // Close the modal
+            // Close the modal first
             closeAgentExplorer();
             
-            // Trigger validation
             if (agent.type === 'external') {
+                // External agent: switch to external step then populate form
+                document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+                document.getElementById('step-external').classList.add('active');
+                addType = 'external';
+                updateProgressBar();
+                document.getElementById('bot-name').value = agent.name || '';
+                document.getElementById('bot-chat-url').value = agent.url || agent.chatUrl || '';
+                document.getElementById('bot-api-url').value = agent.apiUrl || '';
                 validateExternalBot();
             } else {
+                // IDW - populate IDW form (already on step1)
+                document.getElementById('idw-home-url').value = agent.homeUrl || '';
+                document.getElementById('idw-chat-url').value = agent.chatUrl || '';
                 validateIDWUrls();
             }
         }

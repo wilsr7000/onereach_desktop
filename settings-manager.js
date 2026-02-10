@@ -1,6 +1,8 @@
 const { app, safeStorage } = require('electron');
 const fs = require('fs');
 const path = require('path');
+const { getLogQueue } = require('./lib/log-event-queue');
+const log = getLogQueue();
 
 // Skip Keychain encryption in dev mode to avoid password prompts
 // Use function to defer check until app is ready
@@ -53,7 +55,7 @@ class SettingsManager {
         try {
           encryptedData = JSON.parse(fs.readFileSync(this.encryptedSettingsPath, 'utf8'));
         } catch (parseError) {
-          console.error('[Settings] Settings file corrupted, trying backup...');
+          log.error('settings', 'Settings file corrupted, trying backup...')
           // Try to restore from backup
           const backupPath = this.encryptedSettingsPath + '.backup';
           if (fs.existsSync(backupPath)) {
@@ -61,13 +63,13 @@ class SettingsManager {
               encryptedData = JSON.parse(fs.readFileSync(backupPath, 'utf8'));
               // Restore the backup
               fs.copyFileSync(backupPath, this.encryptedSettingsPath);
-              console.log('[Settings] Restored settings from backup');
+              log.info('settings', 'Restored settings from backup')
             } catch (backupError) {
-              console.error('[Settings] Backup also corrupted:', backupError.message);
+              log.error('settings', 'Backup also corrupted', { error: backupError.message })
               return {};
             }
           } else {
-            console.error('[Settings] No backup available');
+            log.error('settings', 'No backup available')
             return {};
           }
         }
@@ -82,16 +84,16 @@ class SettingsManager {
               try {
                 const decrypted = safeStorage.decryptString(Buffer.from(value.data, 'base64'));
                 settings[key] = decrypted;
-                console.log(`[Settings] Successfully decrypted ${key} (${decrypted.length} chars)`);
+                log.info('settings', 'Successfully decrypted ... (... chars)', { key, decryptedCount: decrypted.length })
               } catch (error) {
-                console.error(`[Settings] Error decrypting ${key}:`, error);
+                log.error('settings', 'Error decrypting ...', { key })
                 // Fallback: check if there's a plain value in the regular settings file
                 try {
                   if (fs.existsSync(this.settingsPath)) {
                     const plainSettings = JSON.parse(fs.readFileSync(this.settingsPath, 'utf8'));
                     if (plainSettings[key]) {
                       settings[key] = plainSettings[key];
-                      console.log(`[Settings] Using fallback plain value for ${key}`);
+                      log.info('settings', 'Using fallback plain value for ...', { key })
                     } else {
                       settings[key] = '';
                     }
@@ -104,13 +106,13 @@ class SettingsManager {
               }
             } else if (value && value.encrypted) {
               // Encryption not available but value is encrypted - try plain fallback
-              console.warn(`[Settings] Encryption not available for ${key}, trying fallback`);
+              log.warn('settings', 'Encryption not available for ..., trying fallback', { key })
               try {
                 if (fs.existsSync(this.settingsPath)) {
                   const plainSettings = JSON.parse(fs.readFileSync(this.settingsPath, 'utf8'));
                   if (plainSettings[key]) {
                     settings[key] = plainSettings[key];
-                    console.log(`[Settings] Using fallback plain value for ${key}`);
+                    log.info('settings', 'Using fallback plain value for ...', { key })
                   } else {
                     settings[key] = '';
                   }
@@ -134,7 +136,7 @@ class SettingsManager {
         return JSON.parse(fs.readFileSync(this.settingsPath, 'utf8'));
       }
     } catch (error) {
-      console.error('Error loading settings:', error);
+      log.error('settings', 'Error loading settings', { error: error.message || error })
     }
     
     // Return default settings
@@ -179,7 +181,7 @@ class SettingsManager {
         enableUndoWindow: true,
         undoWindowMinutes: 5,
         clearPauseOnRestart: true,
-        privateModeBySefault: false
+        privateModeByDefault: false
       },
       // Unified Claude Service settings (headless-first, API-fallback)
       claudePreferHeadless: true,      // Try headless Claude first (uses web login, free)
@@ -205,9 +207,9 @@ class SettingsManager {
           } else {
             // In dev mode or if encryption not available, store as plain text
             if (isDev()) {
-              console.log('[Settings] Dev mode: storing API key without encryption');
+              log.info('settings', 'Dev mode: storing API key without encryption')
             } else {
-              console.warn('Encryption not available, storing API key in plain text');
+              log.warn('settings', 'Encryption not available, storing API key in plain text')
             }
             dataToSave[key] = value;
           }
@@ -222,7 +224,7 @@ class SettingsManager {
         try {
           fs.copyFileSync(this.encryptedSettingsPath, backupPath);
         } catch (backupError) {
-          console.warn('[Settings] Could not create backup:', backupError.message);
+          log.warn('settings', 'Could not create backup', { error: backupError.message })
         }
       }
       
@@ -236,7 +238,7 @@ class SettingsManager {
         JSON.parse(fs.readFileSync(tempPath, 'utf8'));
         fs.renameSync(tempPath, this.encryptedSettingsPath);
       } catch (verifyError) {
-        console.error('[Settings] Verification failed, keeping original file:', verifyError.message);
+        log.error('settings', 'Verification failed, keeping original file', { error: verifyError.message })
         fs.unlinkSync(tempPath);
         return false;
       }
@@ -248,7 +250,7 @@ class SettingsManager {
       
       return true;
     } catch (error) {
-      console.error('Error saving settings:', error);
+      log.error('settings', 'Error saving settings', { error: error.message || error })
       return false;
     }
   }
@@ -300,12 +302,19 @@ class SettingsManager {
         enableUndoWindow: true,
         undoWindowMinutes: 5,
         clearPauseOnRestart: true,
-        privateModeBySefault: false
+        privateModeByDefault: false
       },
       // Unified Claude Service settings
       claudePreferHeadless: true,
       claudeHeadlessTimeout: 60000,
-      claudeApiFallback: true
+      claudeApiFallback: true,
+      // AI Service Model Profiles
+      // Each profile maps a capability tier to a provider/model pair.
+      // Change these to swap models across the entire app in one place.
+      aiModelProfiles: null,  // null = use defaults from ai-service.js
+      // Diagnostic logging level: 'off', 'error', 'warn', 'info', 'debug'
+      // Controls log queue min level, log server, and renderer console capture
+      diagnosticLogging: 'info'
     };
     
     return defaults[key];
@@ -459,6 +468,26 @@ class SettingsManager {
     return this.set('budgetConfirmThreshold', threshold);
   }
   
+  // AI Service Model Profiles
+  getAIModelProfiles() {
+    return this.get('aiModelProfiles') || null;
+  }
+
+  setAIModelProfiles(profiles) {
+    return this.set('aiModelProfiles', profiles);
+  }
+
+  /**
+   * Update a single AI model profile.
+   * @param {string} profileName - e.g. 'fast', 'standard', 'powerful'
+   * @param {Object} config - { provider, model, fallback? }
+   */
+  setAIModelProfile(profileName, config) {
+    const profiles = this.get('aiModelProfiles') || {};
+    profiles[profileName] = config;
+    return this.set('aiModelProfiles', profiles);
+  }
+
   // Spaces upload integration methods
   getSpacesUploadEnabled() {
     return this.get('spacesUploadIntegration') !== false; // Default true

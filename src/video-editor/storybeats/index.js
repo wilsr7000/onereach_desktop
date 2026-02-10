@@ -27,7 +27,7 @@ export function initStoryBeats(appContext) {
   appContext.videoSyncEngine = new VideoSyncEngine(appContext);
   appContext.storyBeatsMiniTimeline = new MiniTimeline(appContext);
   
-  console.log('[StoryBeats] Module initialized');
+  window.logging.info('video', 'StoryBeats Module initialized');
   
   return {
     editor: appContext.storyBeatsEditor,

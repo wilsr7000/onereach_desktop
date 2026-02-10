@@ -922,6 +922,25 @@
                 iconClass: 'spelling',
                 examples: ['"How do you spell necessary?"', '"Spell onomatopoeia"'],
             },
+            // Meeting agents (meeting-agents space)
+            'action-item-agent': {
+                icon: '&#9745;',
+                iconClass: 'meeting',
+                examples: ['"Action: John sends proposal"', '"Add todo: review budget"', '"Follow up with Sarah"'],
+                space: 'meeting-agents',
+            },
+            'decision-agent': {
+                icon: '&#9878;',
+                iconClass: 'meeting',
+                examples: ['"Decision: use React"', '"We agreed on Q3 launch"', '"Approved the budget"'],
+                space: 'meeting-agents',
+            },
+            'meeting-notes-agent': {
+                icon: '&#9998;',
+                iconClass: 'meeting',
+                examples: ['"Note: discussed timeline"', '"Key point: 3 sprints needed"', '"Bookmark this moment"'],
+                space: 'meeting-agents',
+            },
         };
         
         // Built-in agents catalog (loaded from backend)
@@ -1013,6 +1032,7 @@
                             <div class="store-card-header">
                                 <span class="store-card-name">${escapeHtml(agent.name)}</span>
                                 <span class="store-card-badge builtin">Built-in</span>
+                                ${agent.space ? `<span class="store-card-badge" style="background:rgba(167,139,250,0.15);color:#a78bfa;">${escapeHtml(agent.space)}</span>` : ''}
                             </div>
                             <div class="store-card-description">${escapeHtml(agent.description)}</div>
                             <div class="store-card-capabilities">
@@ -1066,6 +1086,7 @@
                         iconClass: ui.iconClass || 'default',
                         examples: ui.examples || [],
                         requiresApiKey: ui.requiresApiKey || false,
+                        space: ui.space || null,
                         builtin: true,
                     };
                 });
@@ -1635,45 +1656,38 @@
         let autoTestResults = [];
         
         async function generateTestPhrases(prompt, count) {
-            const apiKey = await window.agentManagerAPI.getApiKey?.() || null;
-            
-            // If no API key, use fallback phrases
-            if (!apiKey) {
+            // Check if AI bridge is available
+            if (!window.ai || !window.ai.chat) {
+                console.log('[AgentManager] AI bridge not available, using fallback phrases');
                 return getFallbackPhrases(prompt, count);
             }
             
             try {
-                const response = await fetch('https://api.openai.com/v1/chat/completions', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${apiKey}`
-                    },
-                    body: JSON.stringify({
-                        model: 'gpt-4o-mini',
-                        messages: [{
-                            role: 'user',
-                            content: `Generate ${count} diverse test phrases for a voice assistant. Theme: "${prompt}"
+                const result = await window.ai.chat({
+                    profile: 'fast',
+                    messages: [{
+                        role: 'user',
+                        content: `Generate ${count} diverse test phrases for a voice assistant. Theme: "${prompt}"
 
 Return ONLY a JSON array of strings, no explanation:
 ["phrase 1", "phrase 2", ...]
 
 Make them natural, varied, and realistic. Include edge cases and different phrasings.`
-                        }],
-                        temperature: 0.8,
-                        max_tokens: 500
-                    })
+                    }],
+                    maxTokens: 500,
+                    temperature: 0.8,
+                    jsonMode: true,
+                    feature: 'agent-manager'
                 });
                 
-                const data = await response.json();
-                let content = data.choices?.[0]?.message?.content?.trim();
+                let content = result.content?.trim();
                 
                 // Parse JSON array
-                if (content.startsWith('```')) {
+                if (content && content.startsWith('```')) {
                     content = content.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
                 }
                 
-                return JSON.parse(content);
+                return JSON.parse(content || '[]');
             } catch (error) {
                 console.error('Error generating phrases:', error);
                 return getFallbackPhrases(prompt, count);

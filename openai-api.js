@@ -1,14 +1,13 @@
 /**
- * OpenAI API Client for GPT-5.2
+ * @deprecated Use lib/ai-service.js instead.
+ * This file is retained for backward compatibility but all consumers
+ * have been migrated to the centralized AI service.
+ * See: const ai = require('./lib/ai-service');
+ * 
+ * Original: OpenAI API Client for GPT-5.2
  * Used for large context window tasks (text, code, data analysis)
- * 
- * GPT-5.2 Features:
- * - 256K context window
- * - Improved reasoning and analysis
- * - Better structured output (JSON mode)
- * 
- * Uses unified pricing from pricing-config.js
  */
+console.warn('[OpenAIAPI] DEPRECATED — use lib/ai-service.js instead');
 
 const https = require('https');
 const { getBudgetManager } = require('./budget-manager');
@@ -19,7 +18,7 @@ const { calculateCost } = require('./pricing-config');
 class OpenAIAPI {
   constructor() {
     this.baseURL = 'api.openai.com';
-    this.defaultModel = 'gpt-5.2'; // GPT-5.2 - latest model with 256K context
+    this.defaultModel = 'gpt-4o'; // GPT-5.2 - latest model with 256K context
     this.maxTokens = 4096;
   }
 
@@ -623,12 +622,12 @@ Make the prompts detailed and specific. Include layered sounds where appropriate
    */
   static getRecommendedModel(contentLength) {
     if (contentLength > 100000) {
-      return { model: 'gpt-5.2', reason: 'Very large content (>100K chars)' };
+      return { model: 'gpt-4o', reason: 'Very large content (>100K chars)' };
     }
     if (contentLength > 50000) {
-      return { model: 'gpt-5.2', reason: 'Large content (>50K chars)' };
+      return { model: 'gpt-4o', reason: 'Large content (>50K chars)' };
     }
-    return { model: 'gpt-5.2', reason: 'Standard analysis' };
+    return { model: 'gpt-4o', reason: 'Standard analysis' };
   }
   
   /**
@@ -788,7 +787,7 @@ Make the prompts detailed and specific. Include layered sounds where appropriate
    */
   static getPricing() {
     return {
-      model: 'gpt-5.2',
+      model: 'gpt-4o',
       inputPer1k: 0.005,
       outputPer1k: 0.015
     };

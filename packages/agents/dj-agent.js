@@ -15,6 +15,9 @@ const { getAgentMemory } = require('../../lib/agent-memory-store');
 const { getTimeContext, learnFromInteraction } = require('../../lib/thinking-agent');
 const mediaAgent = require('./media-agent');
 const { getCircuit } = require('./circuit-breaker');
+const ai = require('../../lib/ai-service');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 
 // Circuit breaker for AI calls
 const djCircuit = getCircuit('dj-agent-ai', {
@@ -24,32 +27,11 @@ const djCircuit = getCircuit('dj-agent-ai', {
 });
 
 /**
- * Get OpenAI API key
- */
-function getOpenAIApiKey() {
-  if (global.settingsManager) {
-    const openaiKey = global.settingsManager.get('openaiApiKey');
-    if (openaiKey) return openaiKey;
-    const provider = global.settingsManager.get('llmProvider');
-    const llmKey = global.settingsManager.get('llmApiKey');
-    if (provider === 'openai' && llmKey) return llmKey;
-  }
-  return process.env.OPENAI_API_KEY;
-}
-
-/**
  * Use AI to reason about music recommendations
  * @param {Object} context - Request context
  * @returns {Promise<Object>} AI reasoning result
  */
 async function aiReasonAboutMusic(context) {
-  const apiKey = getOpenAIApiKey();
-  
-  if (!apiKey) {
-    console.log('[DJAgent] No API key, using fallback logic');
-    return null; // Will fall back to static mapping
-  }
-  
   const { mood, partOfDay, memory, availableSpeakers, conversationHistory } = context;
   
   const systemPrompt = `You are a personal DJ assistant. Based on the user's mood, time of day, and their listening history, recommend specific music to play.
@@ -90,40 +72,23 @@ What should I play?`;
 
   try {
     const result = await djCircuit.execute(async () => {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt }
-          ],
-          temperature: 0.7,
-          max_tokens: 500,
-          response_format: { type: 'json_object' }
-        })
+      return await ai.chat({
+        profile: 'fast',
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+        temperature: 0.7,
+        maxTokens: 500,
+        jsonMode: true,
+        feature: 'dj-agent'
       });
-      
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status}`);
-      }
-      
-      return response.json();
     });
     
-    const content = result.choices?.[0]?.message?.content;
-    if (!content) return null;
-    
-    const parsed = JSON.parse(content);
-    console.log('[DJAgent] AI reasoning:', parsed.reasoning);
+    const parsed = JSON.parse(result.content);
+    log.info('agent', 'AI reasoning', { reasoning: parsed.reasoning });
     return parsed;
     
   } catch (error) {
-    console.warn('[DJAgent] AI reasoning failed:', error.message);
+    log.warn('agent', 'AI reasoning failed', { error: error.message });
     return null;
   }
 }
@@ -140,13 +105,6 @@ What should I play?`;
  */
 async function aiUnderstandMusicRequest(userRequest, context, retryCount = 0) {
   const MAX_RETRIES = 2;
-  const apiKey = getOpenAIApiKey();
-  
-  if (!apiKey) {
-    console.log('[DJAgent] No API key, falling back to simple parsing');
-    return { action: 'play', searchTerms: [userRequest], message: 'Playing music...' };
-  }
-  
   const { partOfDay, memory, availableSpeakers, conversationHistory, musicStatus, listeningHistory } = context;
   
   // Build music status context
@@ -271,63 +229,34 @@ What music should I play? (or what clarification do I need?)`;
 
   try {
     const result = await djCircuit.execute(async () => {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt }
-          ],
-          temperature: 0.7,
-          max_tokens: 400,
-          response_format: { type: 'json_object' }
-        })
+      return await ai.chat({
+        profile: 'fast',
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+        temperature: 0.7,
+        maxTokens: 400,
+        jsonMode: true,
+        feature: 'dj-agent'
       });
-      
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status}`);
-      }
-      
-      return response.json();
     });
     
-    const content = result.choices?.[0]?.message?.content;
-    if (!content) {
-      throw new Error('No content in AI response');
-    }
-    
-    const parsed = JSON.parse(content);
-    console.log('[DJAgent] AI understood request:', parsed.reasoning);
-    
-    // Track cost
-    if (global.budgetManager) {
-      global.budgetManager.trackUsage({
-        model: 'gpt-4o-mini',
-        inputTokens: result.usage?.prompt_tokens || 0,
-        outputTokens: result.usage?.completion_tokens || 0,
-        feature: 'dj-agent-understanding'
-      });
-    }
+    const parsed = JSON.parse(result.content);
+    log.info('agent', 'AI understood request', { reasoning: parsed.reasoning });
     
     return parsed;
     
   } catch (error) {
-    console.warn(`[DJAgent] AI understanding failed (attempt ${retryCount + 1}):`, error.message);
+    log.warn('agent', `AI understanding failed (attempt ${retryCount + 1})`, { error: error.message });
     
     // Retry logic
     if (retryCount < MAX_RETRIES) {
-      console.log(`[DJAgent] Retrying... (${retryCount + 1}/${MAX_RETRIES})`);
+      log.info('agent', `Retrying... (${retryCount + 1}/${MAX_RETRIES})`);
       await new Promise(r => setTimeout(r, 1000 * (retryCount + 1))); // Exponential backoff
       return aiUnderstandMusicRequest(userRequest, context, retryCount + 1);
     }
     
     // Final fallback - try to play with the raw request
-    console.log('[DJAgent] All retries failed, using raw request as search term');
+    log.info('agent', 'All retries failed, using raw request as search term');
     return {
       understood: true,
       action: 'play',
@@ -574,8 +503,8 @@ This agent CONTROLS Apple Music and Podcasts apps. It does not provide informati
         podcastStatus
       };
 
-      console.log('[DJAgent] Using AI to understand request:', task.content);
-      console.log('[DJAgent] Music status:', musicStatus?.state, 'Podcasts:', podcastStatus?.subscriptions?.length || 0);
+      log.info('agent', 'Using AI to understand request', { content: task.content });
+      log.info('agent', 'Music status', { state: musicStatus?.state, podcasts: podcastStatus?.subscriptions?.length || 0 });
       const aiResult = await aiUnderstandMusicRequest(task.content, aiContext);
       
       if (!aiResult) {
@@ -585,21 +514,21 @@ This agent CONTROLS Apple Music and Podcasts apps. It does not provide informati
       
       // Handle based on AI's decision
       if (aiResult.action === 'control') {
-        console.log('[DJAgent] Control action - letting LLM figure it out');
+        log.info('agent', 'Control action - letting LLM figure it out');
         // Pass original request - LLM will determine the AppleScript
         try {
           const controlResult = await this._handleControlAction(null, task.content);
-          console.log('[DJAgent] Control result:', JSON.stringify(controlResult));
+          log.info('agent', 'Control result', { data: JSON.stringify(controlResult) });
           return controlResult;
         } catch (controlError) {
-          console.error('[DJAgent] Control action threw:', controlError?.message || controlError);
+          log.error('agent', 'Control action threw', { error: controlError?.message || controlError });
           return { success: false, message: `Control failed: ${controlError?.message}` };
         }
       }
 
       // AI wants to play a podcast
       if (aiResult.action === 'podcast' || aiResult.mediaType === 'podcast') {
-        console.log('[DJAgent] Playing podcast:', aiResult.podcastSearch || 'any');
+        log.info('agent', 'Playing podcast', { podcastSearch: aiResult.podcastSearch || 'any' });
         return this._playPodcast(aiResult.podcastSearch, aiResult.message);
       }
 
@@ -621,25 +550,25 @@ This agent CONTROLS Apple Music and Podcasts apps. It does not provide informati
       
       // AI wants to create a playlist from the user's library
       if (aiResult.action === 'playlist') {
-        console.log('[DJAgent] Creating mood playlist:', aiResult.mood || aiResult.genre);
+        log.info('agent', 'Creating mood playlist', { mood: aiResult.mood || aiResult.genre });
         if (aiResult.speaker) {
-          console.log('[DJAgent] AI detected speaker:', aiResult.speaker);
+          log.info('agent', 'AI detected speaker', { speaker: aiResult.speaker });
         }
         return this._createMoodPlaylist(aiResult, context);
       }
 
       // AI understood the request - play music with the search terms
       if (aiResult.action === 'play' && aiResult.searchTerms?.length > 0) {
-        console.log('[DJAgent] AI provided search terms:', aiResult.searchTerms);
+        log.info('agent', 'AI provided search terms', { searchTerms: aiResult.searchTerms });
         if (aiResult.speaker) {
-          console.log('[DJAgent] AI detected speaker:', aiResult.speaker);
+          log.info('agent', 'AI detected speaker', { speaker: aiResult.speaker });
         }
         return this._playWithSearchTerms(aiResult.searchTerms, aiResult.message, aiResult.speaker);
       }
 
       // AI identified this as a custom/complex request requiring generated AppleScript
       if (aiResult.action === 'custom' && aiResult.customTask) {
-        console.log('[DJAgent] Generating custom AppleScript for:', aiResult.customTask);
+        log.info('agent', 'Generating custom AppleScript for', { customTask: aiResult.customTask });
         return this._generateAndExecuteCustomAppleScript(aiResult.customTask, task.content, aiResult.message);
       }
 
@@ -647,8 +576,8 @@ This agent CONTROLS Apple Music and Podcasts apps. It does not provide informati
       return this._askMood(context);
       
     } catch (error) {
-      console.error('[DJAgent] Execute error:', error?.message || error);
-      console.error('[DJAgent] Stack:', error?.stack);
+      log.error('agent', 'Execute error', { error: error?.message || error });
+      log.error('agent', 'Stack', { stack: error?.stack });
       return {
         success: false,
         message: "I had trouble getting your music ready. Let me try again."
@@ -677,7 +606,7 @@ This agent CONTROLS Apple Music and Podcasts apps. It does not provide informati
         return devices.map(d => d.name || d);
       }
     } catch (e) {
-      console.warn('[DJAgent] Could not get speakers:', e.message);
+      log.warn('agent', 'Could not get speakers', { error: e.message });
     }
     return ['default speaker'];
   },
@@ -690,10 +619,10 @@ This agent CONTROLS Apple Music and Podcasts apps. It does not provide informati
     try {
       const { getFullMusicStatus } = require('./applescript-helper');
       const status = await getFullMusicStatus('Music');
-      console.log('[DJAgent] Got music status:', status.state, status.track ? `playing ${status.track}` : 'no track');
+      log.info('agent', 'Got music status', { state: status.state, track: status.track ? `playing ${status.track}` : 'no track' });
       return status;
     } catch (e) {
-      console.warn('[DJAgent] Could not get music status:', e.message);
+      log.warn('agent', 'Could not get music status', { error: e.message });
       return null;
     }
   },
@@ -706,10 +635,10 @@ This agent CONTROLS Apple Music and Podcasts apps. It does not provide informati
     try {
       const { getPodcastStatus } = require('./applescript-helper');
       const status = await getPodcastStatus();
-      console.log('[DJAgent] Podcast status:', status.running ? 'running' : 'not running', 'Subscriptions:', status.subscriptions?.length || 0);
+      log.info('agent', 'Podcast status', { running: status.running ? 'running' : 'not running', subscriptions: status.subscriptions?.length || 0 });
       return status;
     } catch (e) {
-      console.warn('[DJAgent] Could not get podcast status:', e.message);
+      log.warn('agent', 'Could not get podcast status', { error: e.message });
       return { running: false, playing: false, subscriptions: [] };
     }
   },
@@ -721,7 +650,7 @@ This agent CONTROLS Apple Music and Podcasts apps. It does not provide informati
   async _playPodcast(searchTerm, message) {
     const { playPodcast, searchAndPlayPodcast, getPodcastStatus, controlPodcast } = require('./applescript-helper');
     
-    console.log('[DJAgent] Playing podcast:', searchTerm || 'any available');
+    log.info('agent', 'Playing podcast', { searchTerm: searchTerm || 'any available' });
     
     // First try subscriptions
     const result = await playPodcast(searchTerm || '');
@@ -754,7 +683,7 @@ This agent CONTROLS Apple Music and Podcasts apps. It does not provide informati
     
     // Not in subscriptions - search the catalog!
     if (searchTerm && result.needsCatalogSearch) {
-      console.log('[DJAgent] Not in subscriptions, searching podcast catalog for:', searchTerm);
+      log.info('agent', 'Not in subscriptions, searching podcast catalog for', { searchTerm });
       
       const catalogResult = await searchAndPlayPodcast(searchTerm);
       
@@ -815,7 +744,7 @@ This agent CONTROLS Apple Music and Podcasts apps. It does not provide informati
     };
     
     const mappedAction = actionMap[action] || action;
-    console.log('[DJAgent] Podcast control:', mappedAction);
+    log.info('agent', 'Podcast control', { mappedAction });
     
     const result = await controlPodcast(mappedAction);
     
@@ -847,14 +776,14 @@ This agent CONTROLS Apple Music and Podcasts apps. It does not provide informati
         getTopGenres()
       ]);
 
-      console.log('[DJAgent] Got listening history:', recentTracks.length, 'recent tracks,', topGenres.length, 'top genres');
+      log.info('agent', 'Got listening history', { length: recentTracks.length, recent_tracks: topGenres.length, detail: 'top genres' });
 
       return {
         recentTracks,
         topGenres
       };
     } catch (e) {
-      console.warn('[DJAgent] Could not get listening history:', e.message);
+      log.warn('agent', 'Could not get listening history', { error: e.message });
       return { recentTracks: [], topGenres: [] };
     }
   },
@@ -877,7 +806,7 @@ This agent CONTROLS Apple Music and Podcasts apps. It does not provide informati
       const status = await getFullMusicStatus('Music');
       if (status.state === 'paused' || status.state === 'stopped') {
         // Music stopped unexpectedly - restart it
-        console.warn('[DJAgent] Music stopped after volume change, restarting...');
+        log.warn('agent', 'Music stopped after volume change, restarting...');
         await runScript(`tell application "Music" to play`);
       }
       
@@ -910,7 +839,7 @@ This agent CONTROLS Apple Music and Podcasts apps. It does not provide informati
       const status = await getFullMusicStatus('Music');
       if (status.state === 'paused' || status.state === 'stopped') {
         // Music stopped unexpectedly - restart it
-        console.warn('[DJAgent] Music stopped after volume change, restarting...');
+        log.warn('agent', 'Music stopped after volume change, restarting...');
         await runScript(`tell application "Music" to play`);
       }
       
@@ -1042,9 +971,6 @@ AVAILABLE TOOLS:
    * @private
    */
   async _pickToolWithResponse(request, currentState) {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) throw new Error('No API key');
-
     const prompt = `You control Apple Music. User said: "${request}"
 Current: volume=${currentState.volume ?? '?'}%, state=${currentState.state ?? '?'}, track="${currentState.track ?? 'none'}"
 
@@ -1068,19 +994,17 @@ Examples:
 - "skip" → {"tool": "nextTrack", "args": {}, "response": "Skipping to the next one"}
 - "rate this 5 stars" → {"tool": "runCustomScript", "args": {"script": "set rating of current track to 100"}, "response": "Rated 5 stars"}`;
 
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-      body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], temperature: 0, max_tokens: 200 })
+    const result = await ai.chat({
+      profile: 'fast',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0,
+      maxTokens: 200,
+      jsonMode: true,
+      feature: 'dj-agent'
     });
 
-    const data = await response.json();
-    let content = data.choices?.[0]?.message?.content?.trim();
+    let content = result.content?.trim();
     if (content.includes('```')) content = content.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
-    
-    if (global.budgetManager) {
-      global.budgetManager.trackUsage({ model: 'gpt-4o-mini', inputTokens: data.usage?.prompt_tokens || 0, outputTokens: data.usage?.completion_tokens || 0, context: 'dj-pick-tool' });
-    }
 
     return JSON.parse(content);
   },
@@ -1153,15 +1077,15 @@ Examples:
   async _handleControlAction(_, originalRequest) {
     const { getFullMusicStatus } = require('./applescript-helper');
 
-    console.log(`[DJAgent] Control: "${originalRequest}"`);
+    log.info('agent', `Control: "${originalRequest}"`);
 
     // STEP 1: Get current state for context
     let currentState = {};
     try {
       currentState = await getFullMusicStatus('Music');
-      console.log(`[DJAgent] State: volume=${currentState.volume}, state=${currentState.state}`);
+      log.info('agent', `State: volume=${currentState.volume}, state=${currentState.state}`);
     } catch (e) {
-      console.warn('[DJAgent] Could not get state:', e.message);
+      log.warn('agent', 'Could not get state', { error: e.message });
     }
 
     // STEP 2: Try pattern cache first (no LLM needed for common requests)
@@ -1169,16 +1093,16 @@ Examples:
     let usedCache = false;
     
     if (toolCall) {
-      console.log(`[DJAgent] Cache hit: ${toolCall.tool}(${JSON.stringify(toolCall.args)})`);
+      log.info('agent', `Cache hit: ${toolCall.tool}(${JSON.stringify(toolCall.args)})`);
       usedCache = true;
     } else {
       // STEP 2b: Cache miss - use single LLM call for tool + response
-      console.log(`[DJAgent] Cache miss, calling LLM...`);
+      log.info('agent', `Cache miss, calling LLM...`);
       try {
         toolCall = await this._pickToolWithResponse(originalRequest, currentState);
-        console.log(`[DJAgent] LLM: ${toolCall.tool}(${JSON.stringify(toolCall.args)}) → "${toolCall.response}"`);
+        log.info('agent', `LLM: ${toolCall.tool}(${JSON.stringify(toolCall.args)}) → "${toolCall.response}"`);
       } catch (e) {
-        console.error('[DJAgent] LLM failed:', e.message);
+        log.error('agent', 'LLM failed', { error: e.message });
         return { success: false, message: `I couldn't figure that out` };
       }
     }
@@ -1186,16 +1110,16 @@ Examples:
     // STEP 3: Execute the tool
     const tool = this._tools[toolCall.tool];
     if (!tool) {
-      console.error(`[DJAgent] Unknown tool: ${toolCall.tool}`);
+      log.error('agent', `Unknown tool: ${toolCall.tool}`);
       return { success: false, message: `I don't know how to do that` };
     }
 
     let result;
     try {
       result = await tool(toolCall.args || {});
-      console.log(`[DJAgent] Result: ${JSON.stringify(result)}`);
+      log.info('agent', `Result: ${JSON.stringify(result)}`);
     } catch (e) {
-      console.error(`[DJAgent] Tool failed: ${e.message}`);
+      log.error('agent', `Tool failed: ${e.message}`);
       return { success: false, message: `That didn't work: ${e.message}` };
     }
 
@@ -1209,7 +1133,7 @@ Examples:
       message = this._enhanceResponse(toolCall.response || 'Done', result);
     }
     
-    console.log(`[DJAgent] Response: ${message}`);
+    log.info('agent', `Response: ${message}`);
     return { success: true, message };
   },
 
@@ -1230,12 +1154,12 @@ Examples:
       const status = await getFullMusicStatus('Music');
       
       if (!status || !status.running) {
-        console.log('[DJAgent] Verify: Music app not running');
+        log.info('agent', 'Verify: Music app not running');
         return { playing: false, track: null, retryNeeded: true };
       }
       
       if (status.state === 'playing') {
-        console.log('[DJAgent] Verify: Music is playing -', status.track);
+        log.info('agent', 'Verify: Music is playing -', { track: status.track });
         return { 
           playing: true, 
           track: status.track,
@@ -1245,11 +1169,11 @@ Examples:
       }
       
       // Music app is open but not playing
-      console.log('[DJAgent] Verify: Music app open but state is', status.state);
+      log.info('agent', 'Verify: Music app open but state is', { state: status.state });
       return { playing: false, track: null, retryNeeded: true };
       
     } catch (e) {
-      console.warn('[DJAgent] Verify failed:', e.message);
+      log.warn('agent', 'Verify failed', { error: e.message });
       // Can't verify - assume it might be working
       return { playing: false, track: null, retryNeeded: false };
     }
@@ -1272,7 +1196,7 @@ Examples:
       `, 5000);
       return true;
     } catch (e) {
-      console.warn('[DJAgent] Force play failed:', e.message);
+      log.warn('agent', 'Force play failed', { error: e.message });
       return false;
     }
   },
@@ -1312,7 +1236,7 @@ IMPORTANT GUIDELINES:
 
 Return ONLY the AppleScript code, no explanation. The code should be directly executable.`;
 
-      console.log('[DJAgent] Generating custom AppleScript with Claude...');
+      log.info('agent', 'Generating custom AppleScript with Claude...');
       
       const response = await claudeCode.complete(prompt, {
         maxTokens: 1000,
@@ -1335,12 +1259,12 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
         throw new Error('Empty script generated');
       }
       
-      console.log('[DJAgent] Generated AppleScript:', script.substring(0, 200) + '...');
+      log.info('agent', 'Generated AppleScript', { detail: script.substring(0, 200) + '...' });
       
       // Execute the generated script
       const result = await runScript(script, 15000); // 15 second timeout for complex scripts
       
-      console.log('[DJAgent] Custom script result:', result);
+      log.info('agent', 'Custom script result', { result });
       
       // Track successful script for potential promotion
       await this._trackCustomScriptSuccess(customTask, originalRequest, script);
@@ -1351,7 +1275,7 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
       };
       
     } catch (error) {
-      console.error('[DJAgent] Custom AppleScript failed:', error.message);
+      log.error('agent', 'Custom AppleScript failed', { error: error.message });
       
       // Track failure for learning
       await this._trackCustomScriptFailure(customTask, originalRequest, error.message);
@@ -1406,11 +1330,11 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
         // Check if ready for promotion (3+ successes)
         if (entries[existingIndex].successCount >= 3 && !entries[existingIndex].flaggedForPromotion) {
           entries[existingIndex].flaggedForPromotion = true;
-          console.log(`[DJAgent] PROMOTION CANDIDATE: "${customTask}" has ${entries[existingIndex].successCount} successes`);
-          console.log('[DJAgent] Script to add to applescript-helper.js:');
-          console.log('---BEGIN SCRIPT---');
-          console.log(script);
-          console.log('---END SCRIPT---');
+          log.info('agent', `PROMOTION CANDIDATE: "${customTask}" has ${entries[existingIndex].successCount} successes`);
+          log.info('agent', 'Script to add to applescript-helper.js');
+          log.info('agent', '---BEGIN SCRIPT---');
+          log.info('agent', script);
+          log.info('agent', '---END SCRIPT---');
         }
       } else {
         // Add new entry
@@ -1430,7 +1354,7 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
       await this.memory.save();
       
     } catch (error) {
-      console.warn('[DJAgent] Could not track custom script:', error.message);
+      log.warn('agent', 'Could not track custom script', { error: error.message });
     }
   },
 
@@ -1545,7 +1469,7 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
     // Set speaker/AirPlay if specified
     if (aiResult.speaker) {
       try {
-        console.log('[DJAgent] Setting speaker to:', aiResult.speaker);
+        log.info('agent', 'Setting speaker to', { speaker: aiResult.speaker });
         const setAirplayScript = `
           tell application "Music"
             set current AirPlay devices to (AirPlay device "${aiResult.speaker}")
@@ -1553,7 +1477,7 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
         `;
         await runScript(setAirplayScript, 5000);
       } catch (e) {
-        console.warn('[DJAgent] Could not set speaker:', e.message);
+        log.warn('agent', 'Could not set speaker', { error: e.message });
         // Continue anyway - the music will play on default output
       }
     }
@@ -1562,8 +1486,8 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
     const moodOrGenre = aiResult.mood || aiResult.genre || 'Custom';
     const playlistName = `DJ Mix - ${moodOrGenre.charAt(0).toUpperCase() + moodOrGenre.slice(1)}`;
     
-    console.log('[DJAgent] Creating playlist:', playlistName);
-    console.log('[DJAgent] Criteria:', { mood: aiResult.mood, genre: aiResult.genre, artist: aiResult.artist });
+    log.info('agent', 'Creating playlist', { playlistName });
+    log.info('agent', 'Criteria', { mood: aiResult.mood, genre: aiResult.genre, artist: aiResult.artist });
     
     const result = await createMoodPlaylist(playlistName, {
       mood: aiResult.mood,
@@ -1575,12 +1499,12 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
     
     if (result.success) {
       // VERIFY music actually started playing
-      console.log('[DJAgent] Playlist created, verifying playback...');
+      log.info('agent', 'Playlist created, verifying playback...');
       let verification = await this._verifyMusicPlaying(2000);
       
       if (!verification.playing && verification.retryNeeded) {
         // Try to force play
-        console.log('[DJAgent] Music not playing, attempting force play...');
+        log.info('agent', 'Music not playing, attempting force play...');
         await this._forcePlay();
         verification = await this._verifyMusicPlaying(1500);
       }
@@ -1594,10 +1518,10 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
       }
       
       // Playlist was created but music didn't start - try Apple Music search as backup
-      console.log('[DJAgent] Playlist created but music not playing, trying Apple Music...');
+      log.info('agent', 'Playlist created but music not playing, trying Apple Music...');
     } else {
       // Playlist creation failed
-      console.log('[DJAgent] Playlist creation failed, falling back to Apple Music search');
+      log.info('agent', 'Playlist creation failed, falling back to Apple Music search');
     }
     
     // Generate search terms based on the mood/genre
@@ -1629,7 +1553,7 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
     // Set speaker/AirPlay if specified
     if (speaker) {
       try {
-        console.log('[DJAgent] Setting speaker to:', speaker);
+        log.info('agent', 'Setting speaker to', { speaker });
         // Try to set AirPlay device
         const setAirplayScript = `
           tell application "Music"
@@ -1637,25 +1561,25 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
           end tell
         `;
         await runScript(setAirplayScript);
-        console.log('[DJAgent] Speaker set successfully');
+        log.info('agent', 'Speaker set successfully');
       } catch (e) {
-        console.warn('[DJAgent] Could not set speaker:', e.message);
+        log.warn('agent', 'Could not set speaker', { error: e.message });
         // Continue anyway - play on default speaker
       }
     }
     
     for (const term of searchTerms) {
-      console.log('[DJAgent] Trying search term:', term);
+      log.info('agent', 'Trying search term', { term });
       try {
         const result = await smartPlayWithSearchTerms([term]);
         if (result.success) {
           // VERIFY music actually started
-          console.log('[DJAgent] Search succeeded, verifying playback...');
+          log.info('agent', 'Search succeeded, verifying playback...');
           let verification = await this._verifyMusicPlaying(2500);
           
           if (!verification.playing && verification.retryNeeded) {
             // Try force play
-            console.log('[DJAgent] Music not playing after search, forcing play...');
+            log.info('agent', 'Music not playing after search, forcing play...');
             await this._forcePlay();
             verification = await this._verifyMusicPlaying(1500);
           }
@@ -1684,16 +1608,16 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
           }
           
           // Search said success but music not playing - try next term
-          console.log('[DJAgent] Search reported success but music not playing, trying next term...');
+          log.info('agent', 'Search reported success but music not playing, trying next term...');
         }
       } catch (e) {
-        console.warn(`[DJAgent] Search term "${term}" failed:`, e.message);
+        log.warn('agent', `Search term "${term}" failed`, { error: e.message });
         // Continue to next term
       }
     }
     
     // All search terms failed - last resort: open Music app and try to play anything
-    console.log('[DJAgent] All search terms failed, trying last resort...');
+    log.info('agent', 'All search terms failed, trying last resort...');
     try {
       await runScript(`
         tell application "Music"
@@ -1742,7 +1666,7 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
       ? `${originalRequest} - ${userResponse}`
       : userResponse;
     
-    console.log('[DJAgent] Processing clarification response:', combinedRequest);
+    log.info('agent', 'Processing clarification response', { combinedRequest });
     
     // Use AI again with the clarified request
     const aiContext = {
@@ -1909,7 +1833,7 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
         speakers = deviceResult.devices.map(d => d.name);
       }
     } catch (e) {
-      console.log('[DJAgent] Could not get speakers, using default');
+      log.info('agent', 'Could not get speakers, using default');
     }
     
     // Get memory content for AI context
@@ -1923,7 +1847,7 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
         }
       }
     } catch (e) {
-      console.log('[DJAgent] Could not load memory for AI');
+      log.info('agent', 'Could not load memory for AI');
     }
     
     // Get conversation history for context
@@ -1945,7 +1869,7 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
     
     if (aiResult && aiResult.options && aiResult.options.length > 0) {
       // Use AI-generated options
-      console.log('[DJAgent] Using AI-generated recommendations');
+      log.info('agent', 'Using AI-generated recommendations');
       options = aiResult.options.map(opt => ({
         label: opt.label,
         genre: opt.genre,
@@ -1955,7 +1879,7 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
       prompt = aiResult.greeting || `${mood} mood! Here are my AI picks:`;
     } else {
       // Fallback to static mappings
-      console.log('[DJAgent] Using fallback static recommendations');
+      log.info('agent', 'Using fallback static recommendations');
       
       // Normalize mood input
       const moodAliases = {
@@ -2096,7 +2020,7 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
       };
     }
     
-    console.log('[DJAgent] Selected option:', JSON.stringify(selectedOption));
+    log.info('agent', 'Selected option', { data: JSON.stringify(selectedOption) });
     
     // Play the music using intelligent genre-based playback
     let result;
@@ -2106,16 +2030,16 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
     if (selectedOption.speaker && selectedOption.speaker !== 'Computer') {
       try {
         await mediaAgent.setAirPlayDevice(selectedOption.speaker);
-        console.log('[DJAgent] Set AirPlay device:', selectedOption.speaker);
+        log.info('agent', 'Set AirPlay device', { speaker: selectedOption.speaker });
       } catch (e) {
-        console.log('[DJAgent] Could not set AirPlay device:', e.message);
+        log.info('agent', 'Could not set AirPlay device', { error: e.message });
       }
     }
     
     // Use AI-provided search terms if available, otherwise use genre
     if (selectedOption.searchTerms && selectedOption.searchTerms.length > 0) {
       // AI provided specific playlist/search terms - try each until one works
-      console.log('[DJAgent] Using AI search terms:', selectedOption.searchTerms);
+      log.info('agent', 'Using AI search terms', { searchTerms: selectedOption.searchTerms });
       result = await smartPlayWithSearchTerms(selectedOption.searchTerms, 'Music');
     } else {
       // Fallback to genre-based playback
@@ -2159,9 +2083,9 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
       // Save memory (includes both history and updated preferences)
       await this.memory.save();
       
-      console.log(`[DJAgent] Learned: ${mood} -> ${choice.genre} on ${choice.speaker} (${context.partOfDay})`);
+      log.info('agent', `Learned: ${mood} -> ${choice.genre} on ${choice.speaker} (${context.partOfDay})`);
     } catch (error) {
-      console.error('[DJAgent] Error learning from choice:', error);
+      log.error('agent', 'Error learning from choice', { error });
       // Non-fatal - don't fail the request
     }
   },
@@ -2451,11 +2375,11 @@ ${updatedNote}
       
       if (entries.length < 3) {
         // Not enough data to re-evaluate
-        console.log(`[DJAgent] Not enough history to re-evaluate (${entries.length} entries)`);
+        log.info('agent', `Not enough history to re-evaluate (${entries.length} entries)`);
         return;
       }
       
-      console.log(`[DJAgent] Re-evaluating preferences from ${entries.length} history entries`);
+      log.info('agent', `Re-evaluating preferences from ${entries.length} history entries`);
       
       // Analyze patterns
       const patterns = this._analyzePatterns(entries);
@@ -2465,9 +2389,9 @@ ${updatedNote}
       this._updateSpeakerPreferences(patterns, context.timestamp);
       this._updateFavoriteGenres(patterns, context.timestamp);
       
-      console.log('[DJAgent] Preferences re-evaluated and updated');
+      log.info('agent', 'Preferences re-evaluated and updated');
     } catch (error) {
-      console.error('[DJAgent] Error re-evaluating preferences:', error);
+      log.error('agent', 'Error re-evaluating preferences', { error });
       // Non-fatal - don't fail the request
     }
   }

@@ -14,6 +14,8 @@
 const fs = require('fs');
 const path = require('path');
 const { app } = require('electron');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 
 class AgentStatsTracker {
   constructor() {
@@ -56,9 +58,9 @@ class AgentStatsTracker {
       }
       
       this.initialized = true;
-      console.log('[AgentStats] Initialized with', Object.keys(this.stats).length, 'agents tracked');
+      log.info('voice', '[AgentStats] Initialized', { agentCount: Object.keys(this.stats).length });
     } catch (error) {
-      console.error('[AgentStats] Init error:', error);
+      log.error('voice', '[AgentStats] Init error', { error: error });
       this.stats = {};
       this.bidHistory = [];
       this.initialized = true;
@@ -73,7 +75,7 @@ class AgentStatsTracker {
       fs.writeFileSync(this.statsFile, JSON.stringify(this.stats, null, 2));
       fs.writeFileSync(this.historyFile, JSON.stringify(this.bidHistory, null, 2));
     } catch (error) {
-      console.error('[AgentStats] Save error:', error);
+      log.error('voice', '[AgentStats] Save error', { error: error });
     }
   }
   

@@ -9,6 +9,8 @@ import path from 'path';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { app, shell } = require('electron');
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 import { VersionManager } from '../versioning/VersionManager.js';
 import { BranchRenderer } from '../versioning/BranchRenderer.js';
@@ -71,7 +73,7 @@ export class ReleaseManager {
       try {
         this.releaseHistory = JSON.parse(fs.readFileSync(historyPath, 'utf8'));
       } catch (e) {
-        console.warn('[ReleaseManager] Failed to load history:', e);
+        log.warn('video', '[ReleaseManager] Failed to load history', { data: e });
         this.releaseHistory = [];
       }
     }
@@ -282,7 +284,7 @@ export class ReleaseManager {
       };
 
     } catch (error) {
-      console.error('[ReleaseManager] Release failed:', error);
+      log.error('video', '[ReleaseManager] Release failed', { error: error });
       
       if (this.activeRelease) {
         this.activeRelease.status = RELEASE_STATUS.FAILED;
@@ -297,20 +299,33 @@ export class ReleaseManager {
   }
 
   /**
-   * Release to Space (internal storage)
+   * Release to Space (internal storage via Spaces API)
    * @private
    */
   async _releaseToSpace(projectPath, project, branchId, videoPath, metadata, progressCallback) {
-    // This would integrate with the existing Spaces system
-    // For now, we'll copy to a "releases" space
-    
-    const spacesReleasesDir = path.join(app.getPath('userData'), 'clipboard-storage', 'releases');
-    fs.mkdirSync(spacesReleasesDir, { recursive: true });
+    const { getSpacesAPI } = require('../../../spaces-api');
+    const spacesAPI = getSpacesAPI();
+
+    // Ensure a "releases" space exists
+    let releasesSpace;
+    try {
+      const spaces = await spacesAPI.list();
+      releasesSpace = spaces.find(s => s.name === 'Releases');
+      if (!releasesSpace) {
+        releasesSpace = await spacesAPI.create('Releases');
+      }
+    } catch (e) {
+      // Fallback: create the space
+      releasesSpace = await spacesAPI.create('Releases');
+    }
 
     const fileName = metadata.title 
       ? `${metadata.title.replace(/[^a-zA-Z0-9-_]/g, '_')}.mp4`
       : path.basename(videoPath);
     
+    // Copy to spaces storage directory
+    const spacesReleasesDir = path.join(spacesAPI.storage.spacesDir, releasesSpace.id);
+    fs.mkdirSync(spacesReleasesDir, { recursive: true });
     const destPath = path.join(spacesReleasesDir, fileName);
     
     if (progressCallback) {
@@ -318,6 +333,24 @@ export class ReleaseManager {
     }
 
     fs.copyFileSync(videoPath, destPath);
+
+    // Add item to the releases space via API
+    try {
+      await spacesAPI.items.add(releasesSpace.id, {
+        type: 'video',
+        name: fileName,
+        content: destPath,
+        preview: `Release: ${metadata.title || project.name}`,
+        metadata: {
+          ...metadata,
+          projectId: project.id,
+          projectName: project.name,
+          filePath: destPath
+        }
+      });
+    } catch (e) {
+      log.error('release', 'Failed to add release to space', { error: e.message });
+    }
 
     // Create metadata file
     const metadataPath = destPath.replace('.mp4', '.json');
@@ -369,7 +402,7 @@ export class ReleaseManager {
         });
       }
     } catch (e) {
-      console.log('[ReleaseManager] YouTube API not available, using browser fallback');
+      log.info('video', '[ReleaseManager] YouTube API not available, using browser fallback');
     }
 
     // Browser fallback
@@ -434,7 +467,7 @@ export class ReleaseManager {
         });
       }
     } catch (e) {
-      console.log('[ReleaseManager] Vimeo API not available, using browser fallback');
+      log.info('video', '[ReleaseManager] Vimeo API not available, using browser fallback');
     }
 
     // Browser fallback
@@ -556,7 +589,7 @@ export class ReleaseManager {
     // Cancel any active render job
     if (this.activeRelease.status === RELEASE_STATUS.RENDERING) {
       // BranchRenderer doesn't track jobs by release ID, but we could add that
-      console.log('[ReleaseManager] Cancelling render...');
+      log.info('video', '[ReleaseManager] Cancelling render...');
     }
 
     this.activeRelease.status = RELEASE_STATUS.CANCELLED;
@@ -672,7 +705,7 @@ export class ReleaseManager {
       };
 
     } catch (error) {
-      console.error('[ReleaseManager] Direct release failed:', error);
+      log.error('video', '[ReleaseManager] Direct release failed', { error: error });
       
       if (this.activeRelease) {
         this.activeRelease.status = RELEASE_STATUS.FAILED;

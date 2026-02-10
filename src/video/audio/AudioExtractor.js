@@ -8,6 +8,8 @@ import path from 'path';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { app } = require('electron');
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 /**
  * Service for extracting audio from video files
@@ -44,7 +46,7 @@ export class AudioExtractor {
         .format(format)
         .output(output)
         .on('start', (cmd) => {
-          console.log('[AudioExtractor] Audio extraction started:', cmd);
+          log.info('video', '[AudioExtractor] Audio extraction started', { data: cmd });
           this.activeJobs.set(jobId, command);
         })
         .on('progress', (progress) => {
@@ -106,7 +108,7 @@ export class AudioExtractor {
         .format(format)
         .output(output)
         .on('start', (cmd) => {
-          console.log('[AudioExtractor] Range extraction started:', cmd);
+          log.info('video', '[AudioExtractor] Range extraction started', { data: cmd });
           this.activeJobs.set(jobId, command);
         })
         .on('progress', (progress) => {

@@ -1,5 +1,6 @@
 const { BrowserWindow } = require('electron');
 const https = require('https');
+const ai = require('./lib/ai-service');
 
 class WebStyleAnalyzer {
   constructor() {
@@ -71,10 +72,6 @@ class WebStyleAnalyzer {
 
   async enhanceWithLLM(styles, urls) {
     try {
-      // Use Claude API for enhancement
-      const ClaudeAPI = require('./claude-api');
-      const claudeAPI = new ClaudeAPI();
-      
       const prompt = `You are a professional UI/UX designer and design system expert. I've extracted styles from ${urls.join(', ')} but the extraction may be incomplete or ugly. Please review and enhance this style guide to make it complete and professional.
 
 Current extracted styles:
@@ -193,23 +190,13 @@ IMPORTANT: Your response must be a valid JSON object with this exact structure:
   }
 }`;
 
-      const response = await claudeAPI.sendMessage(prompt);
+      const enhancedStyles = await ai.json(prompt, {
+        profile: 'standard',
+        maxTokens: 4000,
+        feature: 'web-style-analyzer'
+      });
       
-      if (response.error) {
-        console.error('[WebStyleAnalyzer] Claude API error:', response.error);
-        return styles; // Return original if enhancement fails
-      }
-
-      // Parse the enhanced styles
-      let enhancedStyles;
       try {
-        // Extract JSON from the response - Claude sometimes adds explanation text
-        const jsonMatch = response.content.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          enhancedStyles = JSON.parse(jsonMatch[0]);
-        } else {
-          enhancedStyles = JSON.parse(response.content);
-        }
         
         // Ensure the enhanced styles have the required structure
         if (!enhancedStyles.colors || !Array.isArray(enhancedStyles.colors)) {
@@ -227,9 +214,9 @@ IMPORTANT: Your response must be a valid JSON object with this exact structure:
         
         console.log('[WebStyleAnalyzer] Successfully enhanced styles with LLM');
         return enhancedStyles;
-      } catch (parseError) {
-        console.error('[WebStyleAnalyzer] Failed to parse enhanced styles:', parseError);
-        return styles; // Return original if parsing fails
+      } catch (error) {
+        console.error('[WebStyleAnalyzer] Failed to enhance styles:', error);
+        return styles; // Return original if enhancement fails
       }
     } catch (error) {
       console.error('[WebStyleAnalyzer] LLM enhancement error:', error);

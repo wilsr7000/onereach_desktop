@@ -10,6 +10,9 @@
  * - HALF_OPEN: Testing if service recovered
  */
 
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
+
 const STATES = {
   CLOSED: 'CLOSED',
   OPEN: 'OPEN', 
@@ -57,7 +60,7 @@ class CircuitBreaker {
     if (this.state === STATES.OPEN) {
       if (this.shouldAttemptReset()) {
         this.state = STATES.HALF_OPEN;
-        console.log(`[${this.name}] Circuit half-open, testing...`);
+        log.info('agent', `[${this.name}] Circuit half-open, testing...`);
       } else {
         this.stats.rejectedCalls++;
         throw new CircuitOpenError(this.name, this.getRemainingOpenTime());
@@ -82,7 +85,7 @@ class CircuitBreaker {
     
     if (this.state === STATES.HALF_OPEN) {
       // Success in half-open means we're recovered
-      console.log(`[${this.name}] Circuit closed (recovered)`);
+      log.info('agent', `[${this.name}] Circuit closed (recovered)`);
       this.state = STATES.CLOSED;
       this.failures = [];
       this.openedAt = null;
@@ -106,12 +109,12 @@ class CircuitBreaker {
     
     if (this.state === STATES.HALF_OPEN) {
       // Failure in half-open means still broken
-      console.log(`[${this.name}] Circuit re-opened (still failing)`);
+      log.info('agent', `[${this.name}] Circuit re-opened (still failing)`);
       this.state = STATES.OPEN;
       this.openedAt = now;
     } else if (this.state === STATES.CLOSED && this.failures.length >= this.failureThreshold) {
       // Too many failures, open circuit
-      console.log(`[${this.name}] Circuit opened after ${this.failures.length} failures`);
+      log.info('agent', `[${this.name}] Circuit opened after ${this.failures.length} failures`);
       this.state = STATES.OPEN;
       this.openedAt = now;
     }
@@ -164,7 +167,7 @@ class CircuitBreaker {
     this.state = STATES.CLOSED;
     this.failures = [];
     this.openedAt = null;
-    console.log(`[${this.name}] Circuit force-closed`);
+    log.info('agent', `[${this.name}] Circuit force-closed`);
   }
 
   /**
@@ -173,7 +176,7 @@ class CircuitBreaker {
   forceOpen() {
     this.state = STATES.OPEN;
     this.openedAt = Date.now();
-    console.log(`[${this.name}] Circuit force-opened`);
+    log.info('agent', `[${this.name}] Circuit force-opened`);
   }
 }
 

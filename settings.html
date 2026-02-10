@@ -15,30 +15,92 @@
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background-color: #1e1e1e;
             color: #e0e0e0;
-            min-height: 100vh;
+            height: 100vh;
             display: flex;
             flex-direction: column;
+            overflow: hidden;
         }
         
         .header {
             background-color: #2d2d2d;
-            padding: 20px;
+            padding: 16px 20px;
             border-bottom: 1px solid #3e3e3e;
+            flex-shrink: 0;
         }
         
         h1 {
-            font-size: 24px;
+            font-size: 20px;
             font-weight: 500;
         }
         
-        .container {
+        /* Main layout: sidebar + content */
+        .settings-layout {
+            display: flex;
             flex: 1;
-            padding: 30px;
-            max-width: 800px;
-            margin: 0 auto;
-            width: 100%;
+            overflow: hidden;
         }
         
+        /* Sidebar */
+        .sidebar {
+            width: 180px;
+            background-color: #252525;
+            border-right: 1px solid #3e3e3e;
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            padding: 8px 0;
+        }
+        
+        .sidebar-tab {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 11px 16px;
+            cursor: pointer;
+            color: #999;
+            font-size: 13px;
+            border-left: 3px solid transparent;
+            transition: all 0.15s;
+            user-select: none;
+        }
+        
+        .sidebar-tab:hover {
+            color: #ccc;
+            background-color: rgba(255,255,255,0.04);
+        }
+        
+        .sidebar-tab.active {
+            color: #fff;
+            background-color: #2d2d2d;
+            border-left-color: #4a9eff;
+        }
+        
+        .sidebar-tab svg {
+            flex-shrink: 0;
+            opacity: 0.7;
+        }
+        
+        .sidebar-tab.active svg {
+            opacity: 1;
+        }
+        
+        /* Content area */
+        .content-area {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px 30px;
+        }
+        
+        .tab-pane {
+            display: none;
+            max-width: 640px;
+        }
+        
+        .tab-pane.active {
+            display: block;
+        }
+        
+        /* Sections within panes */
         .section {
             background-color: #2d2d2d;
             border-radius: 8px;
@@ -66,6 +128,8 @@
         
         input[type="text"],
         input[type="password"],
+        input[type="email"],
+        input[type="number"],
         select {
             width: 100%;
             padding: 10px 12px;
@@ -79,9 +143,15 @@
         
         input[type="text"]:focus,
         input[type="password"]:focus,
+        input[type="email"]:focus,
+        input[type="number"]:focus,
         select:focus {
             outline: none;
             border-color: #0e639c;
+        }
+        
+        input[type="number"] {
+            width: 120px;
         }
         
         .api-key-group {
@@ -121,13 +191,6 @@
             font-size: 12px;
             color: #888;
             margin-top: 5px;
-        }
-        
-        .button-group {
-            display: flex;
-            gap: 10px;
-            justify-content: flex-end;
-            margin-top: 30px;
         }
         
         button {
@@ -176,6 +239,12 @@
             color: #f44336;
         }
         
+        .status-info {
+            background-color: rgba(33, 150, 243, 0.1);
+            border: 1px solid rgba(33, 150, 243, 0.3);
+            color: #2196f3;
+        }
+        
         .test-connection {
             display: inline-block;
             margin-left: 10px;
@@ -212,7 +281,7 @@
         /* API Keys Card Grid */
         .api-keys-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
             gap: 16px;
             margin-top: 16px;
         }
@@ -337,20 +406,58 @@
             background: #3e3e3e;
         }
         
+        .subsection-title {
+            font-size: 16px;
+            font-weight: 500;
+            color: #fff;
+            margin-bottom: 16px;
+        }
+        
+        .checkbox-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            margin-top: 8px;
+        }
+        
+        .checkbox-row label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            margin-bottom: 0;
+        }
+        
+        .checkbox-row input[type="checkbox"] {
+            width: 14px;
+            height: 14px;
+        }
+        
+        /* Footer */
+        .footer {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            padding: 14px 24px;
+            border-top: 1px solid #3e3e3e;
+            background-color: #252525;
+            flex-shrink: 0;
+        }
+        
         /* Dark scrollbar styling */
         ::-webkit-scrollbar {
-            width: 12px;
-            height: 12px;
+            width: 10px;
+            height: 10px;
         }
         
         ::-webkit-scrollbar-track {
             background-color: #1e1e1e;
-            border-radius: 6px;
         }
         
         ::-webkit-scrollbar-thumb {
             background-color: #3e3e3e;
-            border-radius: 6px;
+            border-radius: 5px;
             border: 2px solid #1e1e1e;
         }
         
@@ -358,11 +465,6 @@
             background-color: #4e4e4e;
         }
         
-        ::-webkit-scrollbar-thumb:active {
-            background-color: #5e5e5e;
-        }
-        
-        /* Make scrollbar corners match */
         ::-webkit-scrollbar-corner {
             background-color: #1e1e1e;
         }
@@ -373,734 +475,811 @@
         <h1>Settings</h1>
     </div>
     
-    <div class="container">
-        <div id="statusMessage" class="status-message"></div>
+    <div class="settings-layout">
+        <!-- Sidebar Navigation -->
+        <nav class="sidebar">
+            <div class="sidebar-tab active" data-tab="api-keys" onclick="switchTab('api-keys')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+                </svg>
+                API Keys
+            </div>
+            <div class="sidebar-tab" data-tab="ai-config" onclick="switchTab('ai-config')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M12 2a4 4 0 0 0-4 4v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2h-2V6a4 4 0 0 0-4-4z"/>
+                    <circle cx="12" cy="15" r="2"/>
+                </svg>
+                AI Configuration
+            </div>
+            <div class="sidebar-tab" data-tab="onereach" onclick="switchTab('onereach')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                    <circle cx="12" cy="7" r="4"/>
+                </svg>
+                OneReach Login
+            </div>
+            <div class="sidebar-tab" data-tab="gsx-sync" onclick="switchTab('gsx-sync')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="17 8 12 3 7 8"/>
+                    <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                GSX File Sync
+            </div>
+            <div class="sidebar-tab" data-tab="budget" onclick="switchTab('budget')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <line x1="12" y1="1" x2="12" y2="23"/>
+                    <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                </svg>
+                Budget
+            </div>
+            <div class="sidebar-tab" data-tab="general" onclick="switchTab('general')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+                General
+            </div>
+        </nav>
         
-        <!-- API Keys Section -->
-        <div class="section">
-            <h2 class="section-title">API Keys</h2>
-            <p class="section-subtitle">All keys are encrypted and stored securely using your system's keychain</p>
+        <!-- Content Area -->
+        <div class="content-area">
+            <div id="statusMessage" class="status-message"></div>
             
-            <!-- Core AI Keys -->
-            <div class="api-section-header">
-                <h3>Core AI Services</h3>
-                <div class="api-section-line"></div>
-            </div>
-            
-            <div class="api-keys-grid">
-                <!-- OpenAI -->
-                <div class="api-key-card" id="openaiCard">
-                    <div class="api-key-card-header">
-                        <span class="api-key-card-title">
-                            OpenAI
-                            <span class="api-key-card-badge badge-required">Required</span>
-                        </span>
-                        <span id="openaiKeyStatus" class="api-key-status"></span>
-                    </div>
-                    <div class="api-key-card-desc">Voice Orb, Image Editing, Whisper Transcription, GPT Models</div>
-                    <div class="api-key-card-input">
-                        <input type="password" id="openaiApiKey" placeholder="sk-proj-...">
-                        <button class="toggle-visibility" onclick="toggleOpenAIKeyVisibility()">Show</button>
-                    </div>
-                    <a href="https://platform.openai.com/api-keys" target="_blank" class="api-key-card-link">Get API Key</a>
-                </div>
-                
-                <!-- Anthropic -->
-                <div class="api-key-card" id="anthropicCard">
-                    <div class="api-key-card-header">
-                        <span class="api-key-card-title">
-                            Anthropic (Claude)
-                            <span class="api-key-card-badge badge-required">Required</span>
-                        </span>
-                        <span id="anthropicKeyStatus" class="api-key-status"></span>
-                    </div>
-                    <div class="api-key-card-desc">Agent Composer, AI Analysis, Claude Models</div>
-                    <div class="api-key-card-input">
-                        <input type="password" id="anthropicApiKey" placeholder="sk-ant-...">
-                        <button class="toggle-visibility" onclick="toggleAnthropicKeyVisibility()">Show</button>
-                    </div>
-                    <a href="https://console.anthropic.com/settings/keys" target="_blank" class="api-key-card-link">Get API Key</a>
-                </div>
-            </div>
-            
-            <!-- Speech & Voice Keys -->
-            <div class="api-section-header" style="margin-top: 24px;">
-                <h3>Speech & Voice</h3>
-                <div class="api-section-line"></div>
-            </div>
-            
-            <div class="api-keys-grid">
-                <!-- AssemblyAI -->
-                <div class="api-key-card" id="assemblyaiCard">
-                    <div class="api-key-card-header">
-                        <span class="api-key-card-title">
-                            AssemblyAI
-                            <span class="api-key-card-badge badge-optional">Optional</span>
-                        </span>
-                        <span id="assemblyaiKeyStatus" class="api-key-status"></span>
-                    </div>
-                    <div class="api-key-card-desc">Speaker Recognition, Advanced Transcription</div>
-                    <div class="api-key-card-input">
-                        <input type="password" id="assemblyaiApiKey" placeholder="Enter API key">
-                        <button class="toggle-visibility" onclick="toggleAssemblyAIKeyVisibility()">Show</button>
-                    </div>
-                    <a href="https://www.assemblyai.com/app" target="_blank" class="api-key-card-link">Get API Key</a>
-                </div>
-                
-                <!-- ElevenLabs -->
-                <div class="api-key-card" id="elevenLabsCard">
-                    <div class="api-key-card-header">
-                        <span class="api-key-card-title">
-                            ElevenLabs
-                            <span class="api-key-card-badge badge-optional">Optional</span>
-                        </span>
-                        <span id="elevenLabsKeyStatus" class="api-key-status"></span>
-                    </div>
-                    <div class="api-key-card-desc">AI Voice Generation, Audio Replacement</div>
-                    <div class="api-key-card-input">
-                        <input type="password" id="elevenLabsApiKey" placeholder="Enter API key">
-                        <button class="toggle-visibility" onclick="toggleElevenLabsKeyVisibility()">Show</button>
-                    </div>
-                    <a href="https://elevenlabs.io/app/settings/api-keys" target="_blank" class="api-key-card-link">Get API Key</a>
-                </div>
-            </div>
-            
-            <!-- Video Platform Keys -->
-            <div class="api-section-header" style="margin-top: 24px;">
-                <h3>Video Platforms</h3>
-                <div class="api-section-line"></div>
-            </div>
-            
-            <div class="api-keys-grid">
-                <!-- YouTube -->
-                <div class="api-key-card" id="youtubeCard">
-                    <div class="api-key-card-header">
-                        <span class="api-key-card-title">
-                            YouTube
-                            <span class="api-key-card-badge badge-optional">Optional</span>
-                        </span>
-                        <span id="youtubeConnectionStatus" class="api-key-status"></span>
-                    </div>
-                    <div class="api-key-card-desc">Direct uploads to YouTube</div>
-                    <div class="api-key-card-input" style="margin-bottom: 8px;">
-                        <input type="text" id="youtubeClientId" placeholder="Client ID">
-                    </div>
-                    <div class="api-key-card-input">
-                        <input type="password" id="youtubeClientSecret" placeholder="Client Secret">
-                        <button class="toggle-visibility" onclick="toggleYouTubeSecretVisibility()">Show</button>
-                    </div>
-                    <button id="youtubeConnectBtn" onclick="connectYouTube()" style="margin-top: 10px; width: 100%; background: #3e3e3e; color: #e0e0e0; border: none; padding: 8px; border-radius: 4px; cursor: pointer; font-size: 12px;">
-                        Connect YouTube
-                    </button>
-                    <a href="https://console.cloud.google.com/apis/credentials" target="_blank" class="api-key-card-link">Setup OAuth</a>
-                </div>
-                
-                <!-- Vimeo -->
-                <div class="api-key-card" id="vimeoCard">
-                    <div class="api-key-card-header">
-                        <span class="api-key-card-title">
-                            Vimeo
-                            <span class="api-key-card-badge badge-optional">Optional</span>
-                        </span>
-                    </div>
-                    <div class="api-key-card-desc">Direct uploads to Vimeo</div>
-                    <div class="api-key-card-input" style="margin-bottom: 8px;">
-                        <input type="text" id="vimeoClientId" placeholder="Client ID">
-                    </div>
-                    <div class="api-key-card-input">
-                        <input type="password" id="vimeoClientSecret" placeholder="Client Secret">
-                        <button class="toggle-visibility" onclick="toggleVimeoSecretVisibility()">Show</button>
-                    </div>
-                    <a href="https://developer.vimeo.com/apps" target="_blank" class="api-key-card-link">Setup OAuth</a>
-                </div>
-            </div>
-        </div>
-        
-        <!-- OneReach Authentication Section -->
-        <div class="section">
-            <h2 class="section-title">OneReach Auto-Login</h2>
-            <p class="section-subtitle">Configure once to automatically log into all IDW and GSX windows, including 2FA</p>
-            
-            <!-- Credentials -->
-            <div class="form-group">
-                <label for="onereach-email">
-                    Email / Username
-                    <span id="onereach-creds-status" class="api-key-status"></span>
-                </label>
-                <input type="email" id="onereach-email" placeholder="your@email.com">
-            </div>
-            
-            <div class="form-group">
-                <label for="onereach-password">Password</label>
-                <div class="api-key-group">
-                    <input type="password" id="onereach-password" placeholder="Your OneReach password">
-                    <button class="toggle-visibility" onclick="toggleOneReachPasswordVisibility()">Show</button>
-                </div>
-            </div>
-            
-            <!-- 2FA Setup -->
-            <div class="api-section-header" style="margin-top: 24px;">
-                <h3>Two-Factor Authentication (2FA)</h3>
-                <div class="api-section-line"></div>
-            </div>
-            
-            <div id="totp-not-configured">
-                <p class="info-text" style="margin-bottom: 16px;">
-                    Scan your OneReach 2FA QR code to enable automatic code entry. 
-                    Make sure the QR code is visible on your screen before clicking "Scan".
-                </p>
-                
-                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                    <button class="btn-secondary" onclick="scanQRFromScreen()" style="display: flex; align-items: center; gap: 6px;">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <rect x="3" y="3" width="7" height="7"/>
-                            <rect x="14" y="3" width="7" height="7"/>
-                            <rect x="3" y="14" width="7" height="7"/>
-                            <rect x="14" y="14" width="7" height="7"/>
-                        </svg>
-                        Scan QR from Screen
-                    </button>
-                    <button class="btn-secondary" onclick="toggleManualSecretEntry()">Enter Secret Manually</button>
-                </div>
-                
-                <div id="manual-secret-entry" style="display: none; margin-top: 16px;">
-                    <div class="form-group">
-                        <label for="totp-secret-input">TOTP Secret Key</label>
-                        <input type="text" id="totp-secret-input" placeholder="JBSWY3DPEHPK3PXP" style="font-family: monospace;">
-                        <p class="info-text">Found in your authenticator setup, usually shown as "Secret Key" or "Manual Entry"</p>
-                    </div>
-                    <button class="btn-primary" onclick="saveManualTOTPSecret()" style="margin-top: 8px;">Save Secret</button>
-                </div>
-            </div>
-            
-            <div id="totp-configured" style="display: none;">
-                <div style="background: #1e1e1e; border-radius: 8px; padding: 20px; text-align: center;">
-                    <div style="font-size: 12px; color: #888; margin-bottom: 8px;">Current Code</div>
-                    <div id="current-totp-code" style="font-size: 32px; font-family: monospace; font-weight: 600; letter-spacing: 4px; color: #4CAF50;">
-                        --- ---
-                    </div>
-                    <div style="margin-top: 12px; display: flex; align-items: center; justify-content: center; gap: 8px;">
-                        <div id="totp-countdown-bar" style="width: 100px; height: 4px; background: #3e3e3e; border-radius: 2px; overflow: hidden;">
-                            <div id="totp-countdown-fill" style="width: 100%; height: 100%; background: #4CAF50; transition: width 1s linear;"></div>
-                        </div>
-                        <span id="totp-countdown-text" style="font-size: 12px; color: #888;">30s</span>
-                    </div>
-                </div>
-                <div style="display: flex; align-items: center; gap: 8px; margin-top: 12px; color: #4CAF50;">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M20 6L9 17l-5-5"/>
-                    </svg>
-                    <span>2FA configured and working</span>
-                </div>
-                <button class="btn-secondary" onclick="removeTOTPSecret()" style="margin-top: 12px; color: #f44336; border-color: #f44336;">
-                    Remove 2FA
-                </button>
-            </div>
-            
-            <!-- Environment Selection -->
-            <div class="api-section-header" style="margin-top: 24px;">
-                <h3>Auto-Login Environments</h3>
-                <div class="api-section-line"></div>
-            </div>
-            
-            <div style="display: flex; gap: 20px; flex-wrap: wrap;">
-                <label class="checkbox-group">
-                    <input type="checkbox" id="autologin-edison" checked>
-                    <span>Edison</span>
-                </label>
-                <label class="checkbox-group">
-                    <input type="checkbox" id="autologin-staging" checked>
-                    <span>Staging</span>
-                </label>
-                <label class="checkbox-group">
-                    <input type="checkbox" id="autologin-production" checked>
-                    <span>Production</span>
-                </label>
-            </div>
-            
-            <!-- Auto-Login Toggle -->
-            <div class="form-group" style="margin-top: 20px;">
-                <label class="checkbox-group">
-                    <input type="checkbox" id="autologin-enabled" checked>
-                    <span>Enable automatic login (fill forms and submit automatically)</span>
-                </label>
-                <p class="info-text">When disabled, credentials will be pre-filled but you'll need to click submit</p>
-            </div>
-            
-            <!-- Actions -->
-            <div style="display: flex; gap: 10px; margin-top: 20px;">
-                <button class="btn-primary" onclick="saveOneReachCredentials()">Save Credentials</button>
-                <button class="btn-secondary" onclick="testOneReachLogin()">Test Login</button>
-                <button class="btn-secondary" onclick="clearOneReachCredentials()" style="color: #f44336;">Clear All</button>
-            </div>
-        </div>
-        
-        <!-- LLM Configuration Section -->
-        <div class="section">
-            <h2 class="section-title">LLM Configuration</h2>
-            
-            <div class="form-group">
-                <label for="llmProvider">Default Provider</label>
-                <select id="llmProvider">
-                    <option value="openai">OpenAI</option>
-                    <option value="anthropic">Anthropic (Claude)</option>
-                    <option value="google">Google (Gemini)</option>
-                    <option value="mistral">Mistral</option>
-                    <option value="custom">Custom Endpoint</option>
-                </select>
-            </div>
-            
-            <div class="form-group">
-                <label for="llmModel">Default Model</label>
-                <select id="llmModel">
-                    <option value="gpt-5.2">GPT-5.2 Thinking</option>
-                    <option value="gpt-5.2-pro">GPT-5.2 Pro</option>
-                    <option value="gpt-5.2-chat-latest">GPT-5.2 Instant</option>
-                    <option value="claude-opus-4-5-20251101">Claude Opus 4.5</option>
-                    <option value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5</option>
-                    <option value="gemini-pro">Gemini Pro</option>
-                    <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
-                    <option value="mistral-large">Mistral Large</option>
-                    <option value="mistral-medium">Mistral Medium</option>
-                    <option value="mistral-small">Mistral Small</option>
-                </select>
-            </div>
-            
-            <div class="form-group" id="claude4ThinkingGroup" style="display: none;">
-                <label for="claude4ThinkingMode">Claude Thinking Mode</label>
-                <select id="claude4ThinkingMode">
-                    <option value="disabled">Disabled (Fast Response)</option>
-                    <option value="enabled">Enabled (Extended Thinking)</option>
-                </select>
-                <div class="info-text">Enable extended thinking for complex reasoning</div>
-            </div>
-            
-            <div class="form-group" id="claude4ThinkingLevelGroup" style="display: none;">
-                <label for="claude4ThinkingLevel">Thinking Level</label>
-                <select id="claude4ThinkingLevel">
-                    <option value="default">Default</option>
-                    <option value="think">Think (~4k tokens)</option>
-                    <option value="think-hard">Think Hard (~10k tokens)</option>
-                    <option value="ultrathink">Ultra Think (~32k tokens)</option>
-                </select>
-            </div>
-            
-            <div class="form-group" style="display: flex; align-items: center; gap: 12px;">
-                <button class="btn" id="vimeoConnectBtn" onclick="connectVimeo()" style="background: #1ab7ea; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer;">
-                    🎬 Connect Vimeo Account
-                </button>
-                <span id="vimeoConnectionStatus" style="font-size: 13px; color: #b0b0b0;"></span>
-            </div>
-            
-            <div class="info-text">
-                To enable direct Vimeo uploads:
-                1. Go to <a href="https://developer.vimeo.com/apps" style="color: #8b5cf6;">Vimeo Developer Apps</a>
-                2. Create a new app
-                3. Add <code style="background: #1e1e1e; padding: 2px 6px; border-radius: 4px;">http://localhost:8090/oauth/callback</code> as redirect URI
-                4. Request upload scope
-            </div>
-            
-            <div class="divider"></div>
-            
-            <h3 style="font-size: 16px; margin-bottom: 16px;">AI Features</h3>
-            
-            <div class="form-group">
-                <div class="checkbox-group">
-                    <input type="checkbox" id="autoAIMetadata">
-                    <label for="autoAIMetadata" style="margin-bottom: 0;">Auto-generate AI metadata for clipboard items</label>
-                </div>
-                <div class="info-text">Automatically analyze clipboard content and generate descriptions, tags, and notes using Claude Sonnet 4.5 (requires API key)</div>
-            </div>
-            
-            <div class="form-group" id="autoAIMetadataTypesGroup" style="display: block;">
-                <label>Content types to auto-analyze:</label>
-                <div style="display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px;">
-                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
-                        <input type="checkbox" id="aiTypeAll" value="all" style="width: 14px; height: 14px;" checked>
-                        <span style="font-size: 13px;">All types</span>
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
-                        <input type="checkbox" id="aiTypeImage" value="image" style="width: 14px; height: 14px;" checked disabled>
-                        <span style="font-size: 13px;">Images</span>
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
-                        <input type="checkbox" id="aiTypeScreenshot" value="screenshot" style="width: 14px; height: 14px;" checked disabled>
-                        <span style="font-size: 13px;">Screenshots</span>
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
-                        <input type="checkbox" id="aiTypeCode" value="code" style="width: 14px; height: 14px;" checked disabled>
-                        <span style="font-size: 13px;">Code</span>
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
-                        <input type="checkbox" id="aiTypeText" value="text" style="width: 14px; height: 14px;" checked disabled>
-                        <span style="font-size: 13px;">Text</span>
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
-                        <input type="checkbox" id="aiTypeHtml" value="html" style="width: 14px; height: 14px;" checked disabled>
-                        <span style="font-size: 13px;">HTML</span>
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
-                        <input type="checkbox" id="aiTypeFile" value="file" style="width: 14px; height: 14px;" checked disabled>
-                        <span style="font-size: 13px;">Files</span>
-                    </label>
-                </div>
-                <div class="info-text" style="margin-top: 8px;">Select which types of content should be automatically analyzed when captured</div>
-            </div>
-            
-            <div class="form-group">
-                <div class="checkbox-group">
-                    <input type="checkbox" id="autoGenerateScreenshotMetadata">
-                    <label for="autoGenerateScreenshotMetadata" style="margin-bottom: 0;">Legacy: Auto-analyze screenshots only</label>
-                </div>
-                <div class="info-text">⚠️ Deprecated - use the new "Auto-generate AI metadata" option above instead</div>
-            </div>
-            
-            <div class="divider"></div>
-            
-            <h3 style="font-size: 16px; margin-bottom: 16px;">Headless Claude (Free AI Calls)</h3>
-            
-            <div class="form-group">
-                <div class="checkbox-group">
-                    <input type="checkbox" id="claudePreferHeadless" checked>
-                    <label for="claudePreferHeadless" style="margin-bottom: 0;">Prefer headless Claude (free, uses web login)</label>
-                </div>
-                <div class="info-text">When enabled, AI operations will first try using your Claude web session (free), falling back to API only if needed. Requires being logged into claude.ai.</div>
-            </div>
-            
-            <div class="form-group">
-                <label for="claudeHeadlessTimeout">Headless Timeout (seconds)</label>
-                <select id="claudeHeadlessTimeout">
-                    <option value="30000">30 seconds</option>
-                    <option value="60000" selected>60 seconds (default)</option>
-                    <option value="90000">90 seconds</option>
-                    <option value="120000">120 seconds</option>
-                </select>
-                <div class="info-text">How long to wait for headless Claude before falling back to API</div>
-            </div>
-            
-            <div class="form-group">
-                <div class="checkbox-group">
-                    <input type="checkbox" id="claudeApiFallback" checked>
-                    <label for="claudeApiFallback" style="margin-bottom: 0;">Enable API fallback</label>
-                </div>
-                <div class="info-text">If headless fails (not logged in, timeout), automatically fall back to the Claude API (requires API key, has cost)</div>
-            </div>
-        </div>
-        
-        <div class="section">
-            <h2 class="section-title">GSX File Sync Configuration</h2>
-            
-            <div class="form-group">
-                <label for="gsxEnvironment">GSX Environment</label>
-                <select id="gsxEnvironment" onchange="console.log('Environment changed to:', this.value)">
-                    <option value="production">Production</option>
-                    <option value="edison">Edison</option>
-                    <option value="staging">Staging</option>
-                    <option value="qa">QA</option>
-                </select>
-                <div class="info-text">Select the environment where you obtained your token</div>
-            </div>
-            
-            <div class="form-group api-key-group">
-                <label for="gsxRefreshUrl">
-                    GSX Refresh URL
-                    <span id="gsxRefreshUrlStatus" class="api-key-status"></span>
-                </label>
-                <div style="position: relative;">
-                    <input type="text" id="gsxRefreshUrl" placeholder="https://em.edison.api.onereach.ai/http/YOUR_ACCOUNT_ID/refresh_token">
-                </div>
-                <div class="info-text">The URL that returns a fresh GSX token. The app will call this automatically.</div>
-                <div style="margin-top: 10px;">
-                    <button class="btn-secondary" onclick="fetchGSXToken()" style="padding: 6px 12px; font-size: 12px;">
-                        Fetch Token Now
-                    </button>
-                </div>
-            </div>
-            
-            <div class="form-group api-key-group">
-                <label for="gsxToken">
-                    GSX Token (Auto-fetched)
-                    <span id="gsxTokenStatus" class="api-key-status"></span>
-                    <a href="#" class="test-connection" onclick="testGSXConnection()">Test Connection</a>
-                </label>
-                <div style="position: relative;">
-                    <input type="password" id="gsxToken" placeholder="Token will be fetched automatically from Refresh URL" readonly>
-                    <button class="toggle-visibility" onclick="toggleGSXTokenVisibility()">Show</button>
-                </div>
-                <div class="info-text">This token is automatically fetched and refreshed from the Refresh URL above.</div>
-                <div style="margin-top: 10px;">
-                    <button class="btn-secondary" onclick="refreshGSXToken()" style="padding: 6px 12px; font-size: 12px;">
-                        Refresh Token
-                    </button>
-                    <button class="btn-secondary" onclick="clearGSXToken()" style="padding: 6px 12px; font-size: 12px; margin-left: 10px;">
-                        🗑️ Clear Token
-                    </button>
-                </div>
-                <div class="info-text">
-                    <strong>How to get your token:</strong> Log into OneReach → Account Settings → API Tokens → Generate New Token<br>
-                    Your token is encrypted and stored securely in your system keychain
-                </div>
-            </div>
-            
-            <div class="form-group">
-                <label for="gsxAccountId">
-                    GSX Account ID (Optional)
-                </label>
-                <input type="text" id="gsxAccountId" placeholder="e.g. 05bd3c92-5d3c-4dc5-a95d-0c584695cea4">
-                <div class="info-text">
-                    Your account ID from GSX (optional - found in user preferences or URL)
-                </div>
-            </div>
-            
-            <div class="divider"></div>
-            
-            <h3 style="font-size: 16px; margin-bottom: 16px;">Auto-Sync Settings</h3>
-            
-            <div class="form-group">
-                <div class="checkbox-group">
-                    <input type="checkbox" id="gsxAutoSync">
-                    <label for="gsxAutoSync" style="margin-bottom: 0;">Enable Auto-Sync</label>
-                </div>
-                <div class="info-text">Automatically sync configured directories to GSX Files</div>
-            </div>
-            
-            <div class="form-group">
-                <label for="gsxSyncInterval">Sync Interval</label>
-                <select id="gsxSyncInterval">
-                    <option value="hourly">Hourly</option>
-                    <option value="daily">Daily</option>
-                    <option value="weekly">Weekly</option>
-                    <option value="manual">Manual Only</option>
-                </select>
-                <div class="info-text">How often to automatically sync files to GSX</div>
-            </div>
-            
-            <div class="form-group">
-                <button class="btn-primary" onclick="syncCompleteBackup()" style="padding: 12px 24px;">
-                    🔒 Complete Backup (Recommended)
-                </button>
-                <button class="btn-secondary" onclick="syncNow()" style="margin-left: 10px;">Quick Sync</button>
-                <div class="info-text">
-                    <strong>Complete Backup</strong> syncs everything needed to restore on a new machine:<br>
-                    • OR-Spaces (clipboard data, items, spaces)<br>
-                    • App Configuration (settings, IDW entries, GSX links)<br>
-                    • Reading logs and preferences
-                </div>
-            </div>
-        </div>
-        
-        <div class="section">
-            <h2 class="section-title">General Settings</h2>
-            
-            <div class="form-group">
-                <label for="theme">Theme</label>
-                <select id="theme">
-                    <option value="dark">Dark</option>
-                    <option value="light">Light</option>
-                    <option value="system">System</option>
-                </select>
-            </div>
-            
-            <div class="form-group">
-                <div class="checkbox-group">
-                    <input type="checkbox" id="autoSave">
-                    <label for="autoSave" style="margin-bottom: 0;">Enable Auto-Save</label>
-                </div>
-                <div class="info-text">Automatically save settings when changed</div>
-            </div>
-            
-            <div class="form-group">
-                <div class="checkbox-group">
-                    <input type="checkbox" id="spacesUploadIntegration">
-                    <label for="spacesUploadIntegration" style="margin-bottom: 0;">Spaces Upload Integration</label>
-                </div>
-                <div class="info-text">Show "Choose from Spaces" option when uploading files throughout the app. Provides quick access to your Spaces content in file pickers.</div>
-            </div>
-            
-            <div class="form-group">
-                <div class="checkbox-group">
-                    <input type="checkbox" id="voiceOrbEnabled">
-                    <label for="voiceOrbEnabled" style="margin-bottom: 0;">Enable Voice Orb</label>
-                </div>
-                <div class="info-text">Show a floating voice orb for quick voice commands. Toggle visibility with Cmd+Shift+O (Mac) or Ctrl+Shift+O (Windows).</div>
-            </div>
-        </div>
-        
-        <div class="section">
-            <h2 class="section-title">Learning API Settings</h2>
-            
-            <div class="form-group">
-                <label for="learningApiUrl">Quick Starts API URL</label>
-                <div style="display: flex; gap: 10px;">
-                    <input type="text" id="learningApiUrl" placeholder="https://em.staging.api.onereach.ai/http/..." style="flex: 1;">
-                    <button class="btn-secondary" onclick="testLearningApi()" style="min-width: 100px;">Test API</button>
-                </div>
-                <div class="info-text">API endpoint for Quick Starts tutorials content</div>
-                <div id="learningApiStatus" class="api-key-status" style="display: none; margin-top: 5px;"></div>
-            </div>
-            
-            <div class="form-group">
-                <label for="learningApiMethod">API Method</label>
-                <select id="learningApiMethod">
-                    <option value="POST">POST</option>
-                    <option value="GET">GET</option>
-                </select>
-                <div class="info-text">HTTP method for the API request (usually POST)</div>
-            </div>
-            
-            <div class="form-group">
-                <div class="checkbox-group">
-                    <input type="checkbox" id="learningApiCache">
-                    <label for="learningApiCache" style="margin-bottom: 0;">Enable Response Caching</label>
-                </div>
-                <div class="info-text">Cache API responses for 5 minutes to improve performance</div>
-            </div>
-        </div>
-        
-        <!-- Voice Context Providers Section -->
-        <div class="section">
-            <h2 class="section-title">Voice Context Providers</h2>
-            <div class="info-text" style="margin-bottom: 20px;">
-                Context providers enrich voice commands with additional information like time, location, and custom facts. This helps the AI understand your requests better.
-            </div>
-            
-            <div id="contextProvidersContainer">
-                <!-- Time/Date Provider -->
-                <div class="form-group provider-group" data-provider-id="temporal">
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="providerTemporal" checked>
-                        <label for="providerTemporal" style="margin-bottom: 0;">Time & Date</label>
-                    </div>
-                    <div class="info-text">Provides current time, date, day of week, and part of day (morning/afternoon/evening)</div>
-                </div>
-                
-                <!-- Active App Provider -->
-                <div class="form-group provider-group" data-provider-id="active-app">
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="providerActiveApp" checked>
-                        <label for="providerActiveApp" style="margin-bottom: 0;">Active Application</label>
-                    </div>
-                    <div class="info-text">Detects the currently focused application and document you're working on</div>
-                </div>
-                
-                <!-- Custom Facts Provider -->
-                <div class="form-group provider-group" data-provider-id="custom-facts">
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="providerCustomFacts" checked>
-                        <label for="providerCustomFacts" style="margin-bottom: 0;">Custom Facts</label>
-                    </div>
-                    <div class="info-text">User-defined facts and preferences for personalized context</div>
+            <!-- ==================== TAB 1: API Keys ==================== -->
+            <div class="tab-pane active" id="pane-api-keys">
+                <div class="section">
+                    <h2 class="section-title">API Keys</h2>
+                    <p class="section-subtitle">All keys are encrypted and stored securely using your system's keychain</p>
                     
-                    <div id="customFactsEditor" style="margin-top: 15px; padding-left: 24px;">
-                        <div id="factsList" style="margin-bottom: 10px;"></div>
-                        <div style="display: flex; gap: 10px; align-items: center;">
-                            <input type="text" id="newFactKey" placeholder="Key (e.g., project_name)" style="flex: 1;">
-                            <input type="text" id="newFactValue" placeholder="Value" style="flex: 2;">
-                            <button class="btn-secondary" onclick="addCustomFact()" style="min-width: 60px;">Add</button>
+                    <!-- Core AI Keys -->
+                    <div class="api-section-header">
+                        <h3>Core AI Services</h3>
+                        <div class="api-section-line"></div>
+                    </div>
+                    
+                    <div class="api-keys-grid">
+                        <!-- OpenAI -->
+                        <div class="api-key-card" id="openaiCard">
+                            <div class="api-key-card-header">
+                                <span class="api-key-card-title">
+                                    OpenAI
+                                    <span class="api-key-card-badge badge-required">Required</span>
+                                </span>
+                                <span id="openaiKeyStatus" class="api-key-status"></span>
+                            </div>
+                            <div class="api-key-card-desc">Voice Orb, Image Editing, Whisper Transcription, GPT Models</div>
+                            <div class="api-key-card-input">
+                                <input type="password" id="openaiApiKey" placeholder="sk-proj-...">
+                                <button class="toggle-visibility" onclick="toggleKeyVisibility('openaiApiKey')">Show</button>
+                            </div>
+                            <a href="https://platform.openai.com/api-keys" target="_blank" class="api-key-card-link">Get API Key</a>
+                        </div>
+                        
+                        <!-- Anthropic -->
+                        <div class="api-key-card" id="anthropicCard">
+                            <div class="api-key-card-header">
+                                <span class="api-key-card-title">
+                                    Anthropic (Claude)
+                                    <span class="api-key-card-badge badge-required">Required</span>
+                                </span>
+                                <span id="anthropicKeyStatus" class="api-key-status"></span>
+                            </div>
+                            <div class="api-key-card-desc">Agent Composer, AI Analysis, Claude Models</div>
+                            <div class="api-key-card-input">
+                                <input type="password" id="anthropicApiKey" placeholder="sk-ant-...">
+                                <button class="toggle-visibility" onclick="toggleKeyVisibility('anthropicApiKey')">Show</button>
+                            </div>
+                            <a href="https://console.anthropic.com/settings/keys" target="_blank" class="api-key-card-link">Get API Key</a>
+                        </div>
+                    </div>
+                    
+                    <!-- Speech & Voice Keys -->
+                    <div class="api-section-header" style="margin-top: 24px;">
+                        <h3>Speech & Voice</h3>
+                        <div class="api-section-line"></div>
+                    </div>
+                    
+                    <div class="api-keys-grid">
+                        <!-- AssemblyAI -->
+                        <div class="api-key-card" id="assemblyaiCard">
+                            <div class="api-key-card-header">
+                                <span class="api-key-card-title">
+                                    AssemblyAI
+                                    <span class="api-key-card-badge badge-optional">Optional</span>
+                                </span>
+                                <span id="assemblyaiKeyStatus" class="api-key-status"></span>
+                            </div>
+                            <div class="api-key-card-desc">Speaker Recognition, Advanced Transcription</div>
+                            <div class="api-key-card-input">
+                                <input type="password" id="assemblyaiApiKey" placeholder="Enter API key">
+                                <button class="toggle-visibility" onclick="toggleKeyVisibility('assemblyaiApiKey')">Show</button>
+                            </div>
+                            <a href="https://www.assemblyai.com/app" target="_blank" class="api-key-card-link">Get API Key</a>
+                        </div>
+                        
+                        <!-- ElevenLabs -->
+                        <div class="api-key-card" id="elevenLabsCard">
+                            <div class="api-key-card-header">
+                                <span class="api-key-card-title">
+                                    ElevenLabs
+                                    <span class="api-key-card-badge badge-optional">Optional</span>
+                                </span>
+                                <span id="elevenLabsKeyStatus" class="api-key-status"></span>
+                            </div>
+                            <div class="api-key-card-desc">AI Voice Generation, Audio Replacement</div>
+                            <div class="api-key-card-input">
+                                <input type="password" id="elevenLabsApiKey" placeholder="Enter API key">
+                                <button class="toggle-visibility" onclick="toggleKeyVisibility('elevenLabsApiKey')">Show</button>
+                            </div>
+                            <a href="https://elevenlabs.io/app/settings/api-keys" target="_blank" class="api-key-card-link">Get API Key</a>
+                        </div>
+                    </div>
+                    
+                    <!-- Video Platform Keys -->
+                    <div class="api-section-header" style="margin-top: 24px;">
+                        <h3>Video Platforms</h3>
+                        <div class="api-section-line"></div>
+                    </div>
+                    
+                    <div class="api-keys-grid">
+                        <!-- YouTube -->
+                        <div class="api-key-card" id="youtubeCard">
+                            <div class="api-key-card-header">
+                                <span class="api-key-card-title">
+                                    YouTube
+                                    <span class="api-key-card-badge badge-optional">Optional</span>
+                                </span>
+                                <span id="youtubeConnectionStatus" class="api-key-status"></span>
+                            </div>
+                            <div class="api-key-card-desc">Direct uploads to YouTube</div>
+                            <div class="api-key-card-input" style="margin-bottom: 8px;">
+                                <input type="text" id="youtubeClientId" placeholder="Client ID">
+                            </div>
+                            <div class="api-key-card-input">
+                                <input type="password" id="youtubeClientSecret" placeholder="Client Secret">
+                                <button class="toggle-visibility" onclick="toggleKeyVisibility('youtubeClientSecret')">Show</button>
+                            </div>
+                            <button id="youtubeConnectBtn" onclick="connectYouTube()" style="margin-top: 10px; width: 100%; background: #3e3e3e; color: #e0e0e0; border: none; padding: 8px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                                Connect YouTube
+                            </button>
+                            <a href="https://console.cloud.google.com/apis/credentials" target="_blank" class="api-key-card-link">Setup OAuth</a>
+                        </div>
+                        
+                        <!-- Vimeo -->
+                        <div class="api-key-card" id="vimeoCard">
+                            <div class="api-key-card-header">
+                                <span class="api-key-card-title">
+                                    Vimeo
+                                    <span class="api-key-card-badge badge-optional">Optional</span>
+                                </span>
+                                <span id="vimeoConnectionStatus" class="api-key-status"></span>
+                            </div>
+                            <div class="api-key-card-desc">Direct uploads to Vimeo</div>
+                            <div class="api-key-card-input" style="margin-bottom: 8px;">
+                                <input type="text" id="vimeoClientId" placeholder="Client ID">
+                            </div>
+                            <div class="api-key-card-input">
+                                <input type="password" id="vimeoClientSecret" placeholder="Client Secret">
+                                <button class="toggle-visibility" onclick="toggleKeyVisibility('vimeoClientSecret')">Show</button>
+                            </div>
+                            <button onclick="connectVimeo()" style="margin-top: 10px; width: 100%; background: #3e3e3e; color: #e0e0e0; border: none; padding: 8px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                                Connect Vimeo
+                            </button>
+                            <a href="https://developer.vimeo.com/apps" target="_blank" class="api-key-card-link">Setup OAuth</a>
                         </div>
                     </div>
                 </div>
-                
-                <!-- Calendar Provider -->
-                <div class="form-group provider-group" data-provider-id="calendar">
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="providerCalendar">
-                        <label for="providerCalendar" style="margin-bottom: 0;">Calendar (requires configuration)</label>
+            </div>
+            
+            <!-- ==================== TAB 2: AI Configuration ==================== -->
+            <div class="tab-pane" id="pane-ai-config">
+                <div class="section">
+                    <h2 class="section-title">LLM Configuration</h2>
+                    
+                    <div class="form-group">
+                        <label for="llmProvider">Default Provider</label>
+                        <select id="llmProvider">
+                            <option value="openai">OpenAI</option>
+                            <option value="anthropic" selected>Anthropic (Claude)</option>
+                            <option value="google">Google (Gemini)</option>
+                            <option value="mistral">Mistral</option>
+                            <option value="custom">Custom Endpoint</option>
+                        </select>
                     </div>
-                    <div class="info-text">Shows current and upcoming meetings from your calendar</div>
-                    <div id="calendarSettings" style="display: none; margin-top: 15px; padding-left: 24px;">
-                        <label for="calendarSource" style="font-size: 12px;">Calendar Source</label>
-                        <select id="calendarSource" style="margin-bottom: 10px;">
-                            <option value="system">System Calendar (macOS)</option>
-                            <option value="google">Google Calendar</option>
-                            <option value="ical">iCal URL</option>
+                    
+                    <div class="form-group">
+                        <label for="llmModel">Default Model</label>
+                        <select id="llmModel">
+                            <option value="claude-opus-4-5-20251101">Claude Opus 4.5</option>
+                            <option value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group" id="claude4ThinkingGroup" style="display: none;">
+                        <label for="claude4ThinkingMode">Claude Thinking Mode</label>
+                        <select id="claude4ThinkingMode">
+                            <option value="disabled">Disabled (Fast Response)</option>
+                            <option value="enabled">Enabled (Extended Thinking)</option>
+                        </select>
+                        <div class="info-text">Enable extended thinking for complex reasoning</div>
+                    </div>
+                    
+                    <div class="form-group" id="claude4ThinkingLevelGroup" style="display: none;">
+                        <label for="claude4ThinkingLevel">Thinking Level</label>
+                        <select id="claude4ThinkingLevel">
+                            <option value="default">Default</option>
+                            <option value="think">Think (~4k tokens)</option>
+                            <option value="think-hard">Think Hard (~10k tokens)</option>
+                            <option value="ultrathink">Ultra Think (~32k tokens)</option>
                         </select>
                     </div>
                 </div>
                 
-                <!-- Location Provider -->
-                <div class="form-group provider-group" data-provider-id="location">
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="providerLocation">
-                        <label for="providerLocation" style="margin-bottom: 0;">Location (requires permission)</label>
+                <div class="section">
+                    <h2 class="section-title">AI Metadata</h2>
+                    
+                    <div class="form-group">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="autoAIMetadata">
+                            <label for="autoAIMetadata" style="margin-bottom: 0;">Auto-generate AI metadata for clipboard items</label>
+                        </div>
+                        <div class="info-text">Automatically analyze clipboard content and generate descriptions, tags, and notes using Claude Sonnet 4.5 (requires API key)</div>
                     </div>
-                    <div class="info-text">Provides city, region, and timezone. Uses IP geolocation by default.</div>
+                    
+                    <div class="form-group" id="autoAIMetadataTypesGroup" style="display: block;">
+                        <label>Content types to auto-analyze:</label>
+                        <div class="checkbox-row">
+                            <label>
+                                <input type="checkbox" id="aiTypeAll" value="all" checked>
+                                <span>All types</span>
+                            </label>
+                            <label>
+                                <input type="checkbox" id="aiTypeImage" value="image" checked disabled>
+                                <span>Images</span>
+                            </label>
+                            <label>
+                                <input type="checkbox" id="aiTypeScreenshot" value="screenshot" checked disabled>
+                                <span>Screenshots</span>
+                            </label>
+                            <label>
+                                <input type="checkbox" id="aiTypeCode" value="code" checked disabled>
+                                <span>Code</span>
+                            </label>
+                            <label>
+                                <input type="checkbox" id="aiTypeText" value="text" checked disabled>
+                                <span>Text</span>
+                            </label>
+                            <label>
+                                <input type="checkbox" id="aiTypeHtml" value="html" checked disabled>
+                                <span>HTML</span>
+                            </label>
+                            <label>
+                                <input type="checkbox" id="aiTypeFile" value="file" checked disabled>
+                                <span>Files</span>
+                            </label>
+                        </div>
+                        <div class="info-text" style="margin-top: 8px;">Select which types of content should be automatically analyzed when captured</div>
+                    </div>
+                </div>
+                
+                <div class="section">
+                    <h2 class="section-title">AI Conversation Capture</h2>
+                    <p class="section-subtitle">Automatically capture AI conversations to Spaces for review and context</p>
+                    
+                    <div class="form-group">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="captureEnabled" checked>
+                            <label for="captureEnabled" style="margin-bottom: 0;">Enable Conversation Capture</label>
+                        </div>
+                        <div class="info-text">Automatically capture AI conversations to Spaces</div>
+                    </div>
+                    
+                    <div id="captureSettingsGroup">
+                        <div class="form-group">
+                            <label>Capture Types</label>
+                            <div class="checkbox-row">
+                                <label>
+                                    <input type="checkbox" id="captureImages" checked>
+                                    <span>Images</span>
+                                </label>
+                                <label>
+                                    <input type="checkbox" id="captureFiles" checked>
+                                    <span>Files</span>
+                                </label>
+                                <label>
+                                    <input type="checkbox" id="captureCode" checked>
+                                    <span>Code</span>
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <div class="checkbox-group">
+                                <input type="checkbox" id="captureAutoCreateSpaces" checked>
+                                <label for="captureAutoCreateSpaces" style="margin-bottom: 0;">Auto-create Spaces for conversations</label>
+                            </div>
+                            <div class="info-text">Automatically create a new Space for each conversation</div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="captureTimeout">Conversation Timeout (minutes)</label>
+                            <input type="number" id="captureTimeout" value="30" min="1" max="120">
+                            <div class="info-text">Start a new conversation after this many minutes of inactivity</div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <div class="checkbox-group">
+                                <input type="checkbox" id="captureShowIndicator" checked>
+                                <label for="captureShowIndicator" style="margin-bottom: 0;">Show Recording Indicator</label>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <div class="checkbox-group">
+                                <input type="checkbox" id="captureUndoWindow" checked>
+                                <label for="captureUndoWindow" style="margin-bottom: 0;">Enable Undo Window</label>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group" id="undoMinutesGroup">
+                            <label for="captureUndoMinutes">Undo Window (minutes)</label>
+                            <input type="number" id="captureUndoMinutes" value="5" min="1" max="30">
+                        </div>
+                        
+                        <div class="form-group">
+                            <div class="checkbox-group">
+                                <input type="checkbox" id="capturePrivateMode">
+                                <label for="capturePrivateMode" style="margin-bottom: 0;">Private Mode by Default</label>
+                            </div>
+                            <div class="info-text">Start all conversations in private mode (not captured)</div>
+                        </div>
+                    </div>
                 </div>
             </div>
             
-            <!-- Conversation History -->
-            <div class="form-group" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #3e3e3e;">
-                <label style="color: #fff; font-size: 16px; margin-bottom: 15px;">Conversation History</label>
-                <div class="info-text" style="margin-bottom: 10px;">
-                    Conversation history helps the AI understand context from previous voice commands.
+            <!-- ==================== TAB 3: OneReach Login ==================== -->
+            <div class="tab-pane" id="pane-onereach">
+                <div class="section">
+                    <h2 class="section-title">OneReach Auto-Login</h2>
+                    <p class="section-subtitle">Configure once to automatically log into all IDW and GSX windows, including 2FA</p>
+                    
+                    <!-- Credentials -->
+                    <div class="form-group">
+                        <label for="onereach-email">
+                            Email / Username
+                            <span id="onereach-creds-status" class="api-key-status"></span>
+                        </label>
+                        <input type="email" id="onereach-email" placeholder="your@email.com">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="onereach-password">Password</label>
+                        <div class="api-key-group">
+                            <input type="password" id="onereach-password" placeholder="Your OneReach password">
+                            <button class="toggle-visibility" onclick="toggleOneReachPasswordVisibility()">Show</button>
+                        </div>
+                    </div>
+                    
+                    <!-- 2FA Setup -->
+                    <div class="api-section-header" style="margin-top: 24px;">
+                        <h3>Two-Factor Authentication (2FA)</h3>
+                        <div class="api-section-line"></div>
+                    </div>
+                    
+                    <div id="totp-not-configured">
+                        <p class="info-text" style="margin-bottom: 16px;">
+                            Scan your OneReach 2FA QR code to enable automatic code entry. 
+                            Make sure the QR code is visible on your screen before clicking "Scan".
+                        </p>
+                        
+                        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                            <button class="btn-secondary" onclick="scanQRFromScreen()" style="display: flex; align-items: center; gap: 6px;">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="3" y="3" width="7" height="7"/>
+                                    <rect x="14" y="3" width="7" height="7"/>
+                                    <rect x="3" y="14" width="7" height="7"/>
+                                    <rect x="14" y="14" width="7" height="7"/>
+                                </svg>
+                                Scan QR from Screen
+                            </button>
+                            <button class="btn-secondary" onclick="toggleManualSecretEntry()">Enter Secret Manually</button>
+                        </div>
+                        
+                        <div id="manual-secret-entry" style="display: none; margin-top: 16px;">
+                            <div class="form-group">
+                                <label for="totp-secret-input">TOTP Secret Key</label>
+                                <input type="text" id="totp-secret-input" placeholder="JBSWY3DPEHPK3PXP" style="font-family: monospace;">
+                                <p class="info-text">Found in your authenticator setup, usually shown as "Secret Key" or "Manual Entry"</p>
+                            </div>
+                            <button class="btn-primary" onclick="saveManualTOTPSecret()" style="margin-top: 8px;">Save Secret</button>
+                        </div>
+                    </div>
+                    
+                    <div id="totp-configured" style="display: none;">
+                        <div style="background: #1e1e1e; border-radius: 8px; padding: 20px; text-align: center;">
+                            <div style="font-size: 12px; color: #888; margin-bottom: 8px;">Current Code</div>
+                            <div id="current-totp-code" style="font-size: 32px; font-family: monospace; font-weight: 600; letter-spacing: 4px; color: #4CAF50;">
+                                --- ---
+                            </div>
+                            <div style="margin-top: 12px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                                <div id="totp-countdown-bar" style="width: 100px; height: 4px; background: #3e3e3e; border-radius: 2px; overflow: hidden;">
+                                    <div id="totp-countdown-fill" style="width: 100%; height: 100%; background: #4CAF50; transition: width 1s linear;"></div>
+                                </div>
+                                <span id="totp-countdown-text" style="font-size: 12px; color: #888;">30s</span>
+                            </div>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px; margin-top: 12px; color: #4CAF50;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M20 6L9 17l-5-5"/>
+                            </svg>
+                            <span>2FA configured and working</span>
+                        </div>
+                        <button class="btn-secondary" onclick="removeTOTPSecret()" style="margin-top: 12px; color: #f44336; border-color: #f44336;">
+                            Remove 2FA
+                        </button>
+                    </div>
+                    
+                    <!-- Environment Selection -->
+                    <div class="api-section-header" style="margin-top: 24px;">
+                        <h3>Auto-Login Environments</h3>
+                        <div class="api-section-line"></div>
+                    </div>
+                    
+                    <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+                        <label class="checkbox-group">
+                            <input type="checkbox" id="autologin-edison" checked>
+                            <span>Edison</span>
+                        </label>
+                        <label class="checkbox-group">
+                            <input type="checkbox" id="autologin-staging" checked>
+                            <span>Staging</span>
+                        </label>
+                        <label class="checkbox-group">
+                            <input type="checkbox" id="autologin-production" checked>
+                            <span>Production</span>
+                        </label>
+                    </div>
+                    
+                    <!-- Auto-Login Toggle -->
+                    <div class="form-group" style="margin-top: 20px;">
+                        <label class="checkbox-group">
+                            <input type="checkbox" id="autologin-enabled" checked>
+                            <span>Enable automatic login (fill forms and submit automatically)</span>
+                        </label>
+                        <p class="info-text">When disabled, credentials will be pre-filled but you'll need to click submit</p>
+                    </div>
+                    
+                    <!-- Actions -->
+                    <div style="display: flex; gap: 10px; margin-top: 20px;">
+                        <button class="btn-primary" onclick="saveOneReachCredentials()">Save Credentials</button>
+                        <button class="btn-secondary" onclick="testOneReachLogin()">Test Login</button>
+                        <button class="btn-secondary" onclick="clearOneReachCredentials()" style="color: #f44336;">Clear All</button>
+                    </div>
                 </div>
-                <button class="btn-secondary" onclick="clearConversationHistory()" style="background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.3); color: #fca5a5;">
-                    Clear Conversation History
-                </button>
+            </div>
+            
+            <!-- ==================== TAB 4: GSX File Sync ==================== -->
+            <div class="tab-pane" id="pane-gsx-sync">
+                <div class="section">
+                    <h2 class="section-title">GSX File Sync Configuration</h2>
+                    
+                    <div class="form-group">
+                        <label for="gsxEnvironment">GSX Environment</label>
+                        <select id="gsxEnvironment">
+                            <option value="production">Production</option>
+                            <option value="edison">Edison</option>
+                            <option value="staging">Staging</option>
+                            <option value="qa">QA</option>
+                        </select>
+                        <div class="info-text">Select the environment where you obtained your token</div>
+                    </div>
+                    
+                    <div class="form-group api-key-group">
+                        <label for="gsxRefreshUrl">
+                            GSX Refresh URL
+                            <span id="gsxRefreshUrlStatus" class="api-key-status"></span>
+                        </label>
+                        <div style="position: relative;">
+                            <input type="text" id="gsxRefreshUrl" placeholder="https://em.edison.api.onereach.ai/http/YOUR_ACCOUNT_ID/refresh_token">
+                        </div>
+                        <div class="info-text">The URL that returns a fresh GSX token. The app will call this automatically.</div>
+                        <div style="margin-top: 10px;">
+                            <button class="btn-secondary" onclick="fetchGSXToken()" style="padding: 6px 12px; font-size: 12px;">
+                                Fetch Token Now
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group api-key-group">
+                        <label for="gsxToken">
+                            GSX Token (Auto-fetched)
+                            <span id="gsxTokenStatus" class="api-key-status"></span>
+                            <a href="#" class="test-connection" onclick="testGSXConnection(); return false;">Test Connection</a>
+                        </label>
+                        <div style="position: relative;">
+                            <input type="password" id="gsxToken" placeholder="Token will be fetched automatically from Refresh URL" readonly>
+                            <button class="toggle-visibility" onclick="toggleGSXTokenVisibility()">Show</button>
+                        </div>
+                        <div class="info-text">This token is automatically fetched and refreshed from the Refresh URL above.</div>
+                        <div style="margin-top: 10px;">
+                            <button class="btn-secondary" onclick="refreshGSXToken()" style="padding: 6px 12px; font-size: 12px;">
+                                Refresh Token
+                            </button>
+                            <button class="btn-secondary" onclick="clearGSXToken()" style="padding: 6px 12px; font-size: 12px; margin-left: 10px;">
+                                Clear Token
+                            </button>
+                        </div>
+                        <div class="info-text">
+                            <strong>How to get your token:</strong> Log into OneReach > Account Settings > API Tokens > Generate New Token<br>
+                            Your token is encrypted and stored securely in your system keychain
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="gsxAccountId">
+                            GSX Account ID (Optional)
+                        </label>
+                        <input type="text" id="gsxAccountId" placeholder="e.g. 05bd3c92-5d3c-4dc5-a95d-0c584695cea4">
+                        <div class="info-text">
+                            Your account ID from GSX (optional - found in user preferences or URL)
+                        </div>
+                    </div>
+                    
+                    <div class="divider"></div>
+                    
+                    <h3 class="subsection-title">Auto-Sync Settings</h3>
+                    
+                    <div class="form-group">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="gsxAutoSync">
+                            <label for="gsxAutoSync" style="margin-bottom: 0;">Enable Auto-Sync</label>
+                        </div>
+                        <div class="info-text">Automatically sync configured directories to GSX Files</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="gsxSyncInterval">Sync Interval</label>
+                        <select id="gsxSyncInterval">
+                            <option value="hourly">Hourly</option>
+                            <option value="daily">Daily</option>
+                            <option value="weekly">Weekly</option>
+                            <option value="manual">Manual Only</option>
+                        </select>
+                        <div class="info-text">How often to automatically sync files to GSX</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <button class="btn-primary" onclick="syncCompleteBackup()" style="padding: 12px 24px;">
+                            Complete Backup (Recommended)
+                        </button>
+                        <button class="btn-secondary" onclick="syncNow()" style="margin-left: 10px;">Quick Sync</button>
+                        <div class="info-text" style="margin-top: 8px;">
+                            <strong>Complete Backup</strong> syncs everything needed to restore on a new machine:<br>
+                            OR-Spaces (clipboard data, items, spaces), App Configuration (settings, IDW entries, GSX links), Reading logs and preferences
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- ==================== TAB 5: Budget ==================== -->
+            <div class="tab-pane" id="pane-budget">
+                <div class="section">
+                    <h2 class="section-title">Budget Tracking</h2>
+                    <p class="section-subtitle">Monitor and control AI API costs across all features</p>
+                    
+                    <div class="form-group">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="budgetEnabled" checked>
+                            <label for="budgetEnabled" style="margin-bottom: 0;">Enable Budget Tracking</label>
+                        </div>
+                        <div class="info-text">Track AI API costs across all features. View details in the Budget Dashboard.</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="budgetShowEstimates" checked>
+                            <label for="budgetShowEstimates" style="margin-bottom: 0;">Show Cost Estimates</label>
+                        </div>
+                        <div class="info-text">Display estimated costs before expensive AI operations</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="budgetConfirmThreshold">Confirmation Threshold ($)</label>
+                        <input type="number" id="budgetConfirmThreshold" value="0.05" min="0.01" step="0.01">
+                        <div class="info-text">Ask for confirmation when a single operation is estimated to exceed this cost</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- ==================== TAB 6: General ==================== -->
+            <div class="tab-pane" id="pane-general">
+                <div class="section">
+                    <h2 class="section-title">General Settings</h2>
+                    
+                    <div class="form-group">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="autoSave">
+                            <label for="autoSave" style="margin-bottom: 0;">Enable Auto-Save</label>
+                        </div>
+                        <div class="info-text">Automatically save settings when changed</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="spacesUploadIntegration">
+                            <label for="spacesUploadIntegration" style="margin-bottom: 0;">Spaces Upload Integration</label>
+                        </div>
+                        <div class="info-text">Show "Choose from Spaces" option when uploading files throughout the app. Provides quick access to your Spaces content in file pickers.</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="voiceOrbEnabled">
+                            <label for="voiceOrbEnabled" style="margin-bottom: 0;">Enable Voice Orb</label>
+                        </div>
+                        <div class="info-text">Show a floating voice orb for quick voice commands. Toggle visibility with Cmd+Shift+O (Mac) or Ctrl+Shift+O (Windows).</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="diagnosticLogging">Diagnostic Logging</label>
+                        <select id="diagnosticLogging">
+                            <option value="off">Off</option>
+                            <option value="error">Errors Only</option>
+                            <option value="warn">Warnings and Errors</option>
+                            <option value="info">Standard (recommended)</option>
+                            <option value="debug">Verbose (debugging)</option>
+                        </select>
+                        <div class="info-text">Controls diagnostic data collection. "Standard" captures errors and key events. "Verbose" enables full debug logging. Accessible to developer tools via REST API on port 47292.</div>
+                    </div>
+                </div>
+                
+                <div class="section">
+                    <h2 class="section-title">Learning API</h2>
+                    
+                    <div class="form-group">
+                        <label for="learningApiUrl">Quick Starts API URL</label>
+                        <div style="display: flex; gap: 10px;">
+                            <input type="text" id="learningApiUrl" placeholder="https://em.staging.api.onereach.ai/http/..." style="flex: 1;">
+                            <button class="btn-secondary" onclick="testLearningApi()" style="min-width: 100px;">Test API</button>
+                        </div>
+                        <div class="info-text">API endpoint for Quick Starts tutorials content</div>
+                        <div id="learningApiStatus" class="api-key-status" style="display: none; margin-top: 5px;"></div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="learningApiMethod">API Method</label>
+                        <select id="learningApiMethod">
+                            <option value="POST">POST</option>
+                            <option value="GET">GET</option>
+                        </select>
+                        <div class="info-text">HTTP method for the API request (usually POST)</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="learningApiCache">
+                            <label for="learningApiCache" style="margin-bottom: 0;">Enable Response Caching</label>
+                        </div>
+                        <div class="info-text">Cache API responses for 5 minutes to improve performance</div>
+                    </div>
+                </div>
+                
+                <div class="section">
+                    <h2 class="section-title">Voice History</h2>
+                    
+                    <div class="info-text" style="margin-bottom: 12px;">
+                        Conversation history helps the AI understand context from previous voice commands.
+                    </div>
+                    <button class="btn-secondary" onclick="clearConversationHistory()" style="background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.3); color: #fca5a5;">
+                        Clear Conversation History
+                    </button>
+                </div>
             </div>
         </div>
-        
-        <div class="button-group">
-            <button class="btn-secondary" onclick="window.close()">Cancel</button>
-            <button class="btn-primary" onclick="saveSettings()">Save Settings</button>
-        </div>
+    </div>
+    
+    <!-- Footer -->
+    <div class="footer">
+        <button class="btn-secondary" onclick="window.close()">Cancel</button>
+        <button class="btn-primary" onclick="saveSettings()">Save Settings</button>
     </div>
     
     <script>
         let settings = {};
-        let openaiKeyVisible = false;
-        let anthropicKeyVisible = false;
-        let assemblyaiKeyVisible = false;
-        let elevenLabsKeyVisible = false;
-        let gsxTokenVisible = false;
-        let youtubeSecretVisible = false;
-        let vimeoSecretVisible = false;
+        const keyVisibility = {};
         
-        // Load settings when window opens
+        // ==================== TAB NAVIGATION ====================
+        
+        function switchTab(tabId) {
+            // Deactivate all tabs
+            document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.remove('active'));
+            // Hide all panes
+            document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+            // Activate selected
+            const tab = document.querySelector(`.sidebar-tab[data-tab="${tabId}"]`);
+            if (tab) tab.classList.add('active');
+            const pane = document.getElementById(`pane-${tabId}`);
+            if (pane) pane.classList.add('active');
+        }
+        
+        // ==================== LOAD / SAVE SETTINGS ====================
+        
         window.addEventListener('DOMContentLoaded', async () => {
             await loadSettings();
+            await loadOneReachCredentials();
         });
         
         async function loadSettings() {
             try {
                 settings = await window.api.getSettings();
                 
-                // Populate form fields
-                document.getElementById('llmProvider').value = settings.llmProvider || 'openai';
-                document.getElementById('llmModel').value = settings.llmModel || 'gpt-5.2';
+                // LLM Configuration
+                document.getElementById('llmProvider').value = settings.llmProvider || 'anthropic';
+                document.getElementById('llmModel').value = settings.llmModel || 'claude-opus-4-5-20251101';
+                updateModelOptions();
+                // Re-set model after options populated
+                if (settings.llmModel) {
+                    document.getElementById('llmModel').value = settings.llmModel;
+                }
+                
+                // Claude thinking settings
+                if (settings.claude4ThinkingMode) {
+                    document.getElementById('claude4ThinkingMode').value = settings.claude4ThinkingMode;
+                }
+                if (settings.claude4ThinkingLevel) {
+                    document.getElementById('claude4ThinkingLevel').value = settings.claude4ThinkingLevel;
+                }
+                if (settings.llmModel === 'claude-opus-4-5-20251101') {
+                    document.getElementById('claude4ThinkingGroup').style.display = 'block';
+                    if (settings.claude4ThinkingMode === 'enabled') {
+                        document.getElementById('claude4ThinkingLevelGroup').style.display = 'block';
+                    }
+                }
+                
+                // API Keys
                 document.getElementById('openaiApiKey').value = settings.openaiApiKey || '';
                 document.getElementById('anthropicApiKey').value = settings.anthropicApiKey || '';
                 document.getElementById('assemblyaiApiKey').value = settings.assemblyaiApiKey || '';
-                document.getElementById('theme').value = settings.theme || 'dark';
-                document.getElementById('autoSave').checked = settings.autoSave !== false;
-                document.getElementById('spacesUploadIntegration').checked = settings.spacesUploadIntegration !== false; // Default true
-                document.getElementById('voiceOrbEnabled').checked = settings.voiceOrbEnabled === true; // Default false
-                document.getElementById('autoGenerateScreenshotMetadata').checked = settings.autoGenerateScreenshotMetadata === true;
+                document.getElementById('elevenLabsApiKey').value = settings.elevenLabsApiKey || '';
+                document.getElementById('youtubeClientId').value = settings.youtubeClientId || '';
+                document.getElementById('youtubeClientSecret').value = settings.youtubeClientSecret || '';
+                document.getElementById('vimeoClientId').value = settings.vimeoClientId || '';
+                document.getElementById('vimeoClientSecret').value = settings.vimeoClientSecret || '';
                 
-                // Auto AI Metadata settings
-                const autoAIEnabled = settings.autoAIMetadata !== false; // Default to true
+                // API key statuses
+                if (settings.openaiApiKey) setKeyStatus('openaiKeyStatus', 'Key saved');
+                if (settings.anthropicApiKey) setKeyStatus('anthropicKeyStatus', 'Key saved');
+                if (settings.assemblyaiApiKey) setKeyStatus('assemblyaiKeyStatus', 'Key saved');
+                if (settings.elevenLabsApiKey) setKeyStatus('elevenLabsKeyStatus', 'Key saved');
+                
+                // Auto AI Metadata
+                const autoAIEnabled = settings.autoAIMetadata !== false;
                 document.getElementById('autoAIMetadata').checked = autoAIEnabled;
                 document.getElementById('autoAIMetadataTypesGroup').style.display = autoAIEnabled ? 'block' : 'none';
                 
-                // Load AI metadata types (default to 'all')
                 const aiTypes = settings.autoAIMetadataTypes || ['all'];
                 const isAllTypes = aiTypes.includes('all');
-                
                 document.getElementById('aiTypeAll').checked = isAllTypes;
-                document.getElementById('aiTypeImage').checked = aiTypes.includes('image') || isAllTypes;
-                document.getElementById('aiTypeScreenshot').checked = aiTypes.includes('screenshot') || isAllTypes;
-                document.getElementById('aiTypeCode').checked = aiTypes.includes('code') || isAllTypes;
-                document.getElementById('aiTypeText').checked = aiTypes.includes('text') || isAllTypes;
-                document.getElementById('aiTypeHtml').checked = aiTypes.includes('html') || isAllTypes;
-                document.getElementById('aiTypeFile').checked = aiTypes.includes('file') || isAllTypes;
+                ['Image', 'Screenshot', 'Code', 'Text', 'Html', 'File'].forEach(t => {
+                    const el = document.getElementById('aiType' + t);
+                    el.checked = aiTypes.includes(t.toLowerCase()) || isAllTypes;
+                    el.disabled = isAllTypes;
+                });
                 
-                // Disable individual checkboxes when "All" is selected
-                document.getElementById('aiTypeImage').disabled = isAllTypes;
-                document.getElementById('aiTypeScreenshot').disabled = isAllTypes;
-                document.getElementById('aiTypeCode').disabled = isAllTypes;
-                document.getElementById('aiTypeText').disabled = isAllTypes;
-                document.getElementById('aiTypeHtml').disabled = isAllTypes;
-                document.getElementById('aiTypeFile').disabled = isAllTypes;
+                // AI Conversation Capture
+                const capture = settings.aiConversationCapture || {};
+                document.getElementById('captureEnabled').checked = capture.enabled !== false;
+                document.getElementById('captureImages').checked = capture.captureImages !== false;
+                document.getElementById('captureFiles').checked = capture.captureFiles !== false;
+                document.getElementById('captureCode').checked = capture.captureCode !== false;
+                document.getElementById('captureAutoCreateSpaces').checked = capture.autoCreateSpaces !== false;
+                document.getElementById('captureTimeout').value = capture.conversationTimeoutMinutes || 30;
+                document.getElementById('captureShowIndicator').checked = capture.showRecordingIndicator !== false;
+                document.getElementById('captureUndoWindow').checked = capture.enableUndoWindow !== false;
+                document.getElementById('captureUndoMinutes').value = capture.undoWindowMinutes || 5;
+                document.getElementById('capturePrivateMode').checked = capture.privateModeByDefault === true;
+                toggleCaptureSettings(capture.enabled !== false);
                 
                 // GSX Settings
                 document.getElementById('gsxRefreshUrl').value = settings.gsxRefreshUrl || '';
@@ -1110,100 +1289,37 @@
                 document.getElementById('gsxAutoSync').checked = settings.gsxAutoSync === true;
                 document.getElementById('gsxSyncInterval').value = settings.gsxSyncInterval || 'daily';
                 
-                // Learning API Settings
-                document.getElementById('learningApiUrl').value = settings.learningApiUrl || 'https://em.staging.api.onereach.ai/http/48cc49ef-ab05-4d51-acc6-559c7ff22150/idw_quick_starts';
-                document.getElementById('learningApiMethod').value = settings.learningApiMethod || 'POST';
-                document.getElementById('learningApiCache').checked = settings.learningApiCache !== false;
-                
-                // Check if GSX refresh URL exists
                 if (settings.gsxRefreshUrl) {
                     document.getElementById('gsxRefreshUrlStatus').textContent = '(Configured)';
                     document.getElementById('gsxRefreshUrlStatus').className = 'api-key-status status-valid';
                 }
-                
-                // Check if GSX token exists
                 if (settings.gsxToken) {
                     document.getElementById('gsxTokenStatus').textContent = '(Token saved)';
                     document.getElementById('gsxTokenStatus').className = 'api-key-status status-valid';
                 }
                 
-                // Update model options based on provider
-                updateModelOptions();
+                // Budget
+                document.getElementById('budgetEnabled').checked = settings.budgetEnabled !== false;
+                document.getElementById('budgetShowEstimates').checked = settings.budgetShowEstimates !== false;
+                document.getElementById('budgetConfirmThreshold').value = settings.budgetConfirmThreshold || 0.05;
                 
-                // Load Claude 4 thinking settings
-                if (settings.claude4ThinkingMode) {
-                    document.getElementById('claude4ThinkingMode').value = settings.claude4ThinkingMode;
-                }
-                if (settings.claude4ThinkingLevel) {
-                    document.getElementById('claude4ThinkingLevel').value = settings.claude4ThinkingLevel;
-                }
+                // General
+                document.getElementById('autoSave').checked = settings.autoSave !== false;
+                document.getElementById('spacesUploadIntegration').checked = settings.spacesUploadIntegration !== false;
+                document.getElementById('voiceOrbEnabled').checked = settings.voiceOrbEnabled === true;
+                document.getElementById('diagnosticLogging').value = settings.diagnosticLogging || 'info';
                 
-                // Show Claude 4 options if Claude 4 Opus is selected
-                if (settings.llmModel === 'claude-opus-4-5-20251101') {
-                    document.getElementById('claude4ThinkingGroup').style.display = 'block';
-                    if (settings.claude4ThinkingMode === 'enabled') {
-                        document.getElementById('claude4ThinkingLevelGroup').style.display = 'block';
-                    }
-                }
+                // Learning API
+                document.getElementById('learningApiUrl').value = settings.learningApiUrl || 'https://em.staging.api.onereach.ai/http/48cc49ef-ab05-4d51-acc6-559c7ff22150/idw_quick_starts';
+                document.getElementById('learningApiMethod').value = settings.learningApiMethod || 'POST';
+                document.getElementById('learningApiCache').checked = settings.learningApiCache !== false;
                 
-                // Check if OpenAI API key exists
-                if (settings.openaiApiKey) {
-                    document.getElementById('openaiKeyStatus').textContent = '(Key saved)';
-                    document.getElementById('openaiKeyStatus').className = 'api-key-status status-valid';
-                }
-                
-                // Check if Anthropic API key exists
-                if (settings.anthropicApiKey) {
-                    document.getElementById('anthropicKeyStatus').textContent = '(Key saved)';
-                    document.getElementById('anthropicKeyStatus').className = 'api-key-status status-valid';
-                }
-                
-                // Check if AssemblyAI API key exists
-                if (settings.assemblyaiApiKey) {
-                    document.getElementById('assemblyaiKeyStatus').textContent = '(Key saved)';
-                    document.getElementById('assemblyaiKeyStatus').className = 'api-key-status status-valid';
-                }
-                
-                // Load ElevenLabs API key
-                document.getElementById('elevenLabsApiKey').value = settings.elevenLabsApiKey || '';
-
-                // Check if ElevenLabs API key exists
-                if (settings.elevenLabsApiKey) {
-                    document.getElementById('elevenLabsKeyStatus').textContent = '(Key saved)';
-                    document.getElementById('elevenLabsKeyStatus').className = 'api-key-status status-valid';
-                }
-                
-                // Load YouTube credentials
-                document.getElementById('youtubeClientId').value = settings.youtubeClientId || '';
-                document.getElementById('youtubeClientSecret').value = settings.youtubeClientSecret || '';
-                
-                if (settings.youtubeClientId) {
-                    document.getElementById('youtubeClientIdStatus').textContent = '(Saved)';
-                    document.getElementById('youtubeClientIdStatus').className = 'api-key-status status-valid';
-                }
-                
-                // Load Vimeo credentials
-                document.getElementById('vimeoClientId').value = settings.vimeoClientId || '';
-                document.getElementById('vimeoClientSecret').value = settings.vimeoClientSecret || '';
-                
-                if (settings.vimeoClientId) {
-                    document.getElementById('vimeoClientIdStatus').textContent = '(Saved)';
-                    document.getElementById('vimeoClientIdStatus').className = 'api-key-status status-valid';
-                }
-                
-                // Check video release connections
+                // Update card statuses
+                updateApiKeyCardStatus();
                 checkVideoReleaseConnections();
                 
-                // Load Claude headless settings
-                document.getElementById('claudePreferHeadless').checked = settings.claudePreferHeadless !== false; // Default true
-                document.getElementById('claudeHeadlessTimeout').value = settings.claudeHeadlessTimeout || '60000';
-                document.getElementById('claudeApiFallback').checked = settings.claudeApiFallback !== false; // Default true
-                
-                // Update card status indicators
-                updateApiKeyCardStatus();
-                
                 // Add input listeners for real-time card updates
-                ['openaiApiKey', 'anthropicApiKey', 'assemblyaiApiKey', 'elevenLabsApiKey', 
+                ['openaiApiKey', 'anthropicApiKey', 'assemblyaiApiKey', 'elevenLabsApiKey',
                  'youtubeClientId', 'youtubeClientSecret', 'vimeoClientId', 'vimeoClientSecret'].forEach(id => {
                     const el = document.getElementById(id);
                     if (el) el.addEventListener('input', updateApiKeyCardStatus);
@@ -1220,17 +1336,18 @@
             if (document.getElementById('aiTypeAll').checked) {
                 aiMetadataTypes.push('all');
             } else {
-                if (document.getElementById('aiTypeImage').checked) aiMetadataTypes.push('image');
-                if (document.getElementById('aiTypeScreenshot').checked) aiMetadataTypes.push('screenshot');
-                if (document.getElementById('aiTypeCode').checked) aiMetadataTypes.push('code');
-                if (document.getElementById('aiTypeText').checked) aiMetadataTypes.push('text');
-                if (document.getElementById('aiTypeHtml').checked) aiMetadataTypes.push('html');
-                if (document.getElementById('aiTypeFile').checked) aiMetadataTypes.push('file');
+                ['Image', 'Screenshot', 'Code', 'Text', 'Html', 'File'].forEach(t => {
+                    if (document.getElementById('aiType' + t).checked) aiMetadataTypes.push(t.toLowerCase());
+                });
             }
             
             const newSettings = {
+                // LLM
                 llmProvider: document.getElementById('llmProvider').value,
                 llmModel: document.getElementById('llmModel').value,
+                claude4ThinkingMode: document.getElementById('claude4ThinkingMode').value,
+                claude4ThinkingLevel: document.getElementById('claude4ThinkingLevel').value,
+                // API Keys
                 openaiApiKey: document.getElementById('openaiApiKey').value,
                 anthropicApiKey: document.getElementById('anthropicApiKey').value,
                 assemblyaiApiKey: document.getElementById('assemblyaiApiKey').value,
@@ -1239,37 +1356,53 @@
                 youtubeClientSecret: document.getElementById('youtubeClientSecret').value,
                 vimeoClientId: document.getElementById('vimeoClientId').value,
                 vimeoClientSecret: document.getElementById('vimeoClientSecret').value,
-                theme: document.getElementById('theme').value,
-                autoSave: document.getElementById('autoSave').checked,
-                spacesUploadIntegration: document.getElementById('spacesUploadIntegration').checked,
-                voiceOrbEnabled: document.getElementById('voiceOrbEnabled').checked,
-                claude4ThinkingMode: document.getElementById('claude4ThinkingMode').value,
-                claude4ThinkingLevel: document.getElementById('claude4ThinkingLevel').value,
-                autoGenerateScreenshotMetadata: document.getElementById('autoGenerateScreenshotMetadata').checked,
+                // AI Metadata
                 autoAIMetadata: document.getElementById('autoAIMetadata').checked,
                 autoAIMetadataTypes: aiMetadataTypes,
+                // AI Conversation Capture
+                aiConversationCapture: {
+                    enabled: document.getElementById('captureEnabled').checked,
+                    captureImages: document.getElementById('captureImages').checked,
+                    captureFiles: document.getElementById('captureFiles').checked,
+                    captureCode: document.getElementById('captureCode').checked,
+                    autoCreateSpaces: document.getElementById('captureAutoCreateSpaces').checked,
+                    conversationTimeoutMinutes: parseInt(document.getElementById('captureTimeout').value) || 30,
+                    showRecordingIndicator: document.getElementById('captureShowIndicator').checked,
+                    enableUndoWindow: document.getElementById('captureUndoWindow').checked,
+                    undoWindowMinutes: parseInt(document.getElementById('captureUndoMinutes').value) || 5,
+                    privateModeByDefault: document.getElementById('capturePrivateMode').checked
+                },
+                // GSX
                 gsxRefreshUrl: document.getElementById('gsxRefreshUrl').value,
                 gsxToken: document.getElementById('gsxToken').value,
                 gsxEnvironment: document.getElementById('gsxEnvironment').value,
                 gsxAccountId: document.getElementById('gsxAccountId').value,
                 gsxAutoSync: document.getElementById('gsxAutoSync').checked,
                 gsxSyncInterval: document.getElementById('gsxSyncInterval').value,
+                // Budget
+                budgetEnabled: document.getElementById('budgetEnabled').checked,
+                budgetShowEstimates: document.getElementById('budgetShowEstimates').checked,
+                budgetConfirmThreshold: parseFloat(document.getElementById('budgetConfirmThreshold').value) || 0.05,
+                // General
+                autoSave: document.getElementById('autoSave').checked,
+                spacesUploadIntegration: document.getElementById('spacesUploadIntegration').checked,
+                voiceOrbEnabled: document.getElementById('voiceOrbEnabled').checked,
+                diagnosticLogging: document.getElementById('diagnosticLogging').value,
+                // Learning API
                 learningApiUrl: document.getElementById('learningApiUrl').value,
                 learningApiMethod: document.getElementById('learningApiMethod').value,
-                learningApiCache: document.getElementById('learningApiCache').checked,
-                // Claude headless settings
-                claudePreferHeadless: document.getElementById('claudePreferHeadless').checked,
-                claudeHeadlessTimeout: parseInt(document.getElementById('claudeHeadlessTimeout').value),
-                claudeApiFallback: document.getElementById('claudeApiFallback').checked
+                learningApiCache: document.getElementById('learningApiCache').checked
             };
             
             try {
                 const result = await window.api.saveSettings(newSettings);
                 if (result) {
+                    // Apply logging level change immediately
+                    try {
+                        await window.api.invoke('logging:set-level', newSettings.diagnosticLogging || 'info');
+                    } catch (e) { /* logging IPC may not be registered yet */ }
                     showStatus('Settings saved successfully', 'success');
-                    setTimeout(() => {
-                        window.close();
-                    }, 1000);
+                    setTimeout(() => { window.close(); }, 1000);
                 } else {
                     showStatus('Error saving settings', 'error');
                 }
@@ -1279,145 +1412,26 @@
             }
         }
         
-        async function testLearningApi() {
-            const url = document.getElementById('learningApiUrl').value;
-            const method = document.getElementById('learningApiMethod').value;
-            const statusDiv = document.getElementById('learningApiStatus');
-            
-            if (!url) {
-                showApiStatus(statusDiv, 'Please enter an API URL', 'error');
-                return;
-            }
-            
-            showApiStatus(statusDiv, 'Testing API connection...', 'info');
-            
-            try {
-                const response = await fetch(url, {
-                    method: method,
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Accept': 'application/json'
-                    },
-                    body: method === 'POST' ? '{}' : undefined
-                });
-                
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data && data.user && data.categories) {
-                        showApiStatus(statusDiv, `✅ API working! Found ${Object.keys(data.categories).length} categories`, 'success');
-                    } else {
-                        showApiStatus(statusDiv, '⚠️ API responded but data format may be incorrect', 'warning');
-                    }
-                } else {
-                    showApiStatus(statusDiv, `❌ API error: ${response.status} ${response.statusText}`, 'error');
-                }
-            } catch (error) {
-                showApiStatus(statusDiv, `❌ Connection failed: ${error.message}`, 'error');
-            }
-        }
+        // ==================== KEY VISIBILITY TOGGLE ====================
         
-        function showApiStatus(element, message, type) {
-            element.textContent = message;
-            element.className = 'api-key-status';
-            if (type === 'success') {
-                element.className += ' status-valid';
-            } else if (type === 'error') {
-                element.className += ' status-invalid';
-            }
-            element.style.display = 'block';
-        }
-        
-        function toggleOpenAIKeyVisibility() {
-            const input = document.getElementById('openaiApiKey');
+        function toggleKeyVisibility(inputId) {
+            const input = document.getElementById(inputId);
             const button = input.parentElement.querySelector('.toggle-visibility');
-            
-            if (openaiKeyVisible) {
-                input.type = 'password';
-                button.textContent = 'Show';
-                openaiKeyVisible = false;
-            } else {
-                input.type = 'text';
-                button.textContent = 'Hide';
-                openaiKeyVisible = true;
+            keyVisibility[inputId] = !keyVisibility[inputId];
+            input.type = keyVisibility[inputId] ? 'text' : 'password';
+            button.textContent = keyVisibility[inputId] ? 'Hide' : 'Show';
+        }
+        
+        function setKeyStatus(elementId, text) {
+            const el = document.getElementById(elementId);
+            if (el) {
+                el.textContent = `(${text})`;
+                el.className = 'api-key-status status-valid';
             }
         }
         
-        function toggleAnthropicKeyVisibility() {
-            const input = document.getElementById('anthropicApiKey');
-            const button = input.parentElement.querySelector('.toggle-visibility');
-            
-            if (anthropicKeyVisible) {
-                input.type = 'password';
-                button.textContent = 'Show';
-                anthropicKeyVisible = false;
-            } else {
-                input.type = 'text';
-                button.textContent = 'Hide';
-                anthropicKeyVisible = true;
-            }
-        }
+        // ==================== API KEY CARD STATUS ====================
         
-        function toggleAssemblyAIKeyVisibility() {
-            const input = document.getElementById('assemblyaiApiKey');
-            const button = input.parentElement.querySelector('.toggle-visibility');
-            
-            if (assemblyaiKeyVisible) {
-                input.type = 'password';
-                button.textContent = 'Show';
-                assemblyaiKeyVisible = false;
-            } else {
-                input.type = 'text';
-                button.textContent = 'Hide';
-                assemblyaiKeyVisible = true;
-            }
-        }
-        
-        function toggleElevenLabsKeyVisibility() {
-            const input = document.getElementById('elevenLabsApiKey');
-            const button = input.parentElement.querySelector('.toggle-visibility');
-            
-            if (elevenLabsKeyVisible) {
-                input.type = 'password';
-                button.textContent = 'Show';
-                elevenLabsKeyVisible = false;
-            } else {
-                input.type = 'text';
-                button.textContent = 'Hide';
-                elevenLabsKeyVisible = true;
-            }
-        }
-        
-        function toggleYouTubeSecretVisibility() {
-            const input = document.getElementById('youtubeClientSecret');
-            const button = input.parentElement.querySelector('.toggle-visibility');
-            
-            if (youtubeSecretVisible) {
-                input.type = 'password';
-                button.textContent = 'Show';
-                youtubeSecretVisible = false;
-            } else {
-                input.type = 'text';
-                button.textContent = 'Hide';
-                youtubeSecretVisible = true;
-            }
-        }
-        
-        function toggleVimeoSecretVisibility() {
-            const input = document.getElementById('vimeoClientSecret');
-            const button = input.parentElement.querySelector('.toggle-visibility');
-            
-            if (vimeoSecretVisible) {
-                input.type = 'password';
-                button.textContent = 'Show';
-                vimeoSecretVisible = false;
-            } else {
-                input.type = 'text';
-                button.textContent = 'Hide';
-                vimeoSecretVisible = true;
-            }
-        }
-        
-        // Update card styling based on configured state
         function updateApiKeyCardStatus() {
             const keys = [
                 { id: 'openaiApiKey', card: 'openaiCard', status: 'openaiKeyStatus' },
@@ -1438,7 +1452,6 @@
                             statusEl.textContent = 'Configured';
                             statusEl.className = 'api-key-status status-valid';
                         }
-                        // Update badge
                         const badge = cardEl.querySelector('.api-key-card-badge');
                         if (badge) {
                             badge.textContent = 'Configured';
@@ -1454,178 +1467,59 @@
                 }
             });
             
-            // Check YouTube
-            const ytClientId = document.getElementById('youtubeClientId');
+            // YouTube
+            const ytId = document.getElementById('youtubeClientId');
             const ytSecret = document.getElementById('youtubeClientSecret');
             const ytCard = document.getElementById('youtubeCard');
-            if (ytClientId && ytSecret && ytCard) {
-                if (ytClientId.value && ytSecret.value) {
-                    ytCard.classList.add('configured');
-                } else {
-                    ytCard.classList.remove('configured');
-                }
+            if (ytId && ytSecret && ytCard) {
+                ytCard.classList.toggle('configured', !!(ytId.value && ytSecret.value));
             }
             
-            // Check Vimeo
-            const vimeoClientId = document.getElementById('vimeoClientId');
-            const vimeoSecret = document.getElementById('vimeoClientSecret');
-            const vimeoCard = document.getElementById('vimeoCard');
-            if (vimeoClientId && vimeoSecret && vimeoCard) {
-                if (vimeoClientId.value && vimeoSecret.value) {
-                    vimeoCard.classList.add('configured');
-                } else {
-                    vimeoCard.classList.remove('configured');
-                }
+            // Vimeo
+            const vmId = document.getElementById('vimeoClientId');
+            const vmSecret = document.getElementById('vimeoClientSecret');
+            const vmCard = document.getElementById('vimeoCard');
+            if (vmId && vmSecret && vmCard) {
+                vmCard.classList.toggle('configured', !!(vmId.value && vmSecret.value));
             }
         }
         
-        async function connectYouTube() {
-            const clientId = document.getElementById('youtubeClientId').value;
-            const clientSecret = document.getElementById('youtubeClientSecret').value;
-            
-            if (!clientId || !clientSecret) {
-                showStatus('Please enter YouTube Client ID and Secret first', 'error');
-                return;
-            }
-            
-            document.getElementById('youtubeConnectionStatus').textContent = 'Connecting...';
-            
-            try {
-                // First save the credentials
-                await window.api.saveSettings({
-                    youtubeClientId: clientId,
-                    youtubeClientSecret: clientSecret
-                });
-                
-                // Then initiate OAuth
-                const result = await window.api.authenticateYouTube();
-                
-                if (result.success) {
-                    const channelName = result.channel?.title || 'Connected';
-                    document.getElementById('youtubeConnectionStatus').innerHTML = 
-                        `<span style="color: #22c55e;">✓ Connected as ${channelName}</span>`;
-                    showStatus('YouTube connected successfully!', 'success');
-                } else {
-                    document.getElementById('youtubeConnectionStatus').innerHTML = 
-                        `<span style="color: #ef4444;">✗ ${result.error || 'Connection failed'}</span>`;
-                }
-            } catch (error) {
-                document.getElementById('youtubeConnectionStatus').innerHTML = 
-                    `<span style="color: #ef4444;">✗ ${error.message}</span>`;
-                showStatus('YouTube connection failed: ' + error.message, 'error');
-            }
-        }
-        
-        async function connectVimeo() {
-            const clientId = document.getElementById('vimeoClientId').value;
-            const clientSecret = document.getElementById('vimeoClientSecret').value;
-            
-            if (!clientId || !clientSecret) {
-                showStatus('Please enter Vimeo Client ID and Secret first', 'error');
-                return;
-            }
-            
-            document.getElementById('vimeoConnectionStatus').textContent = 'Connecting...';
-            
-            try {
-                // First save the credentials
-                await window.api.saveSettings({
-                    vimeoClientId: clientId,
-                    vimeoClientSecret: clientSecret
-                });
-                
-                // Then initiate OAuth
-                const result = await window.api.authenticateVimeo();
-                
-                if (result.success) {
-                    const userName = result.user?.name || 'Connected';
-                    document.getElementById('vimeoConnectionStatus').innerHTML = 
-                        `<span style="color: #22c55e;">✓ Connected as ${userName}</span>`;
-                    showStatus('Vimeo connected successfully!', 'success');
-                } else {
-                    document.getElementById('vimeoConnectionStatus').innerHTML = 
-                        `<span style="color: #ef4444;">✗ ${result.error || 'Connection failed'}</span>`;
-                }
-            } catch (error) {
-                document.getElementById('vimeoConnectionStatus').innerHTML = 
-                    `<span style="color: #ef4444;">✗ ${error.message}</span>`;
-                showStatus('Vimeo connection failed: ' + error.message, 'error');
-            }
-        }
-        
-        async function checkVideoReleaseConnections() {
-            // Check YouTube connection
-            try {
-                const ytStatus = await window.api.getYouTubeStatus();
-                if (ytStatus.authenticated) {
-                    document.getElementById('youtubeConnectionStatus').innerHTML = 
-                        `<span style="color: #22c55e;">✓ Connected as ${ytStatus.channel?.title || 'Unknown'}</span>`;
-                } else if (ytStatus.configured) {
-                    document.getElementById('youtubeConnectionStatus').textContent = 'Not connected';
-                }
-            } catch (e) { /* ignore */ }
-            
-            // Check Vimeo connection
-            try {
-                const vimeoStatus = await window.api.getVimeoStatus();
-                if (vimeoStatus.authenticated) {
-                    document.getElementById('vimeoConnectionStatus').innerHTML = 
-                        `<span style="color: #22c55e;">✓ Connected as ${vimeoStatus.user?.name || 'Unknown'}</span>`;
-                } else if (vimeoStatus.configured) {
-                    document.getElementById('vimeoConnectionStatus').textContent = 'Not connected';
-                }
-            } catch (e) { /* ignore */ }
-        }
+        // ==================== MODEL OPTIONS ====================
         
         function updateModelOptions() {
             const provider = document.getElementById('llmProvider').value;
             const modelSelect = document.getElementById('llmModel');
-            
-            // Clear current options
             modelSelect.innerHTML = '';
             
-            // Hide Claude 4 thinking options by default
             document.getElementById('claude4ThinkingGroup').style.display = 'none';
             document.getElementById('claude4ThinkingLevelGroup').style.display = 'none';
             
-            // Add options based on provider
-            let options = [];
-            switch (provider) {
-                case 'openai':
-                    options = [
-                        { value: 'gpt-5.2', text: 'GPT-5.2 Thinking' },
-                        { value: 'gpt-5.2-pro', text: 'GPT-5.2 Pro' },
-                        { value: 'gpt-5.2-chat-latest', text: 'GPT-5.2 Instant' }
-                    ];
-                    break;
-                case 'anthropic':
-                    options = [
-                        { value: 'claude-opus-4-5-20251101', text: 'Claude Opus 4.5' },
-                        { value: 'claude-sonnet-4-5-20250929', text: 'Claude Sonnet 4.5' }
-                    ];
-                    break;
-                case 'google':
-                    options = [
-                        { value: 'gemini-1.5-pro', text: 'Gemini 1.5 Pro' },
-                        { value: 'gemini-pro', text: 'Gemini Pro' },
-                        { value: 'gemini-1.5-flash', text: 'Gemini 1.5 Flash' }
-                    ];
-                    break;
-                case 'mistral':
-                    options = [
-                        { value: 'mistral-large', text: 'Mistral Large' },
-                        { value: 'mistral-medium', text: 'Mistral Medium' },
-                        { value: 'mistral-small', text: 'Mistral Small' }
-                    ];
-                    break;
-                case 'custom':
-                    options = [
-                        { value: 'custom', text: 'Custom Model' }
-                    ];
-                    break;
-            }
+            const modelSets = {
+                openai: [
+                    { value: 'gpt-5.2', text: 'GPT-5.2 Thinking' },
+                    { value: 'gpt-5.2-pro', text: 'GPT-5.2 Pro' },
+                    { value: 'gpt-5.2-chat-latest', text: 'GPT-5.2 Instant' }
+                ],
+                anthropic: [
+                    { value: 'claude-opus-4-5-20251101', text: 'Claude Opus 4.5' },
+                    { value: 'claude-sonnet-4-5-20250929', text: 'Claude Sonnet 4.5' }
+                ],
+                google: [
+                    { value: 'gemini-1.5-pro', text: 'Gemini 1.5 Pro' },
+                    { value: 'gemini-pro', text: 'Gemini Pro' },
+                    { value: 'gemini-1.5-flash', text: 'Gemini 1.5 Flash' }
+                ],
+                mistral: [
+                    { value: 'mistral-large', text: 'Mistral Large' },
+                    { value: 'mistral-medium', text: 'Mistral Medium' },
+                    { value: 'mistral-small', text: 'Mistral Small' }
+                ],
+                custom: [
+                    { value: 'custom', text: 'Custom Model' }
+                ]
+            };
             
-            options.forEach(opt => {
+            (modelSets[provider] || []).forEach(opt => {
                 const option = document.createElement('option');
                 option.value = opt.value;
                 option.textContent = opt.text;
@@ -1633,161 +1527,109 @@
             });
         }
         
-        async function testConnection(providerOverride) {
-            const provider = providerOverride || document.getElementById('llmProvider').value;
-            const model = document.getElementById('llmModel').value;
-            
-            // Get the appropriate API key based on provider
-            let apiKey;
-            let statusEl;
-            if (provider === 'openai') {
-                apiKey = document.getElementById('openaiApiKey').value;
-                statusEl = document.getElementById('openaiKeyStatus');
-            } else if (provider === 'anthropic') {
-                apiKey = document.getElementById('anthropicApiKey').value;
-                statusEl = document.getElementById('anthropicKeyStatus');
-            }
-            
-            if (!apiKey) {
-                showStatus(`Please enter an API key for ${provider} first`, 'error');
+        // ==================== CAPTURE SETTINGS TOGGLE ====================
+        
+        function toggleCaptureSettings(enabled) {
+            const group = document.getElementById('captureSettingsGroup');
+            if (group) group.style.opacity = enabled ? '1' : '0.5';
+        }
+        
+        // ==================== VIDEO PLATFORM CONNECTIONS ====================
+        
+        async function connectYouTube() {
+            const clientId = document.getElementById('youtubeClientId').value;
+            const clientSecret = document.getElementById('youtubeClientSecret').value;
+            if (!clientId || !clientSecret) {
+                showStatus('Please enter YouTube Client ID and Secret first', 'error');
                 return;
             }
-            
-            showStatus('Testing connection...', 'success');
-            
+            document.getElementById('youtubeConnectionStatus').textContent = 'Connecting...';
             try {
-                const result = await window.api.testLLMConnection({ provider, apiKey, model });
+                await window.api.saveSettings({ youtubeClientId: clientId, youtubeClientSecret: clientSecret });
+                const result = await window.api.authenticateYouTube();
                 if (result.success) {
-                    showStatus('Connection successful!', 'success');
-                    if (statusEl) {
-                        statusEl.textContent = '(Valid)';
-                        statusEl.className = 'api-key-status status-valid';
-                    }
+                    const name = result.channel?.title || 'Connected';
+                    document.getElementById('youtubeConnectionStatus').innerHTML = `<span style="color: #22c55e;">Connected as ${name}</span>`;
+                    showStatus('YouTube connected successfully!', 'success');
                 } else {
-                    showStatus(`Connection failed: ${result.error}`, 'error');
-                    if (statusEl) {
-                        statusEl.textContent = '(Invalid)';
-                        statusEl.className = 'api-key-status status-invalid';
-                    }
+                    document.getElementById('youtubeConnectionStatus').innerHTML = `<span style="color: #ef4444;">${result.error || 'Connection failed'}</span>`;
                 }
             } catch (error) {
-                showStatus(`Error testing connection: ${error.message}`, 'error');
+                document.getElementById('youtubeConnectionStatus').innerHTML = `<span style="color: #ef4444;">${error.message}</span>`;
+                showStatus('YouTube connection failed: ' + error.message, 'error');
             }
         }
         
-        function showStatus(message, type) {
-            const statusEl = document.getElementById('statusMessage');
-            statusEl.textContent = message;
-            statusEl.className = `status-message status-${type}`;
-            statusEl.style.display = 'block';
-            
-            // Auto-hide after 5 seconds
-            setTimeout(() => {
-                statusEl.style.display = 'none';
-            }, 5000);
-        }
-        
-        // Handle provider change
-        document.getElementById('llmProvider').addEventListener('change', updateModelOptions);
-        
-        // Handle model change to show/hide Claude 4 options
-        document.getElementById('llmModel').addEventListener('change', (e) => {
-            const selectedModel = e.target.value;
-            
-            if (selectedModel === 'claude-opus-4-5-20251101') {
-                document.getElementById('claude4ThinkingGroup').style.display = 'block';
-                const thinkingMode = document.getElementById('claude4ThinkingMode').value;
-                if (thinkingMode === 'enabled') {
-                    document.getElementById('claude4ThinkingLevelGroup').style.display = 'block';
+        async function connectVimeo() {
+            const clientId = document.getElementById('vimeoClientId').value;
+            const clientSecret = document.getElementById('vimeoClientSecret').value;
+            if (!clientId || !clientSecret) {
+                showStatus('Please enter Vimeo Client ID and Secret first', 'error');
+                return;
+            }
+            document.getElementById('vimeoConnectionStatus').textContent = 'Connecting...';
+            try {
+                await window.api.saveSettings({ vimeoClientId: clientId, vimeoClientSecret: clientSecret });
+                const result = await window.api.authenticateVimeo();
+                if (result.success) {
+                    const name = result.user?.name || 'Connected';
+                    document.getElementById('vimeoConnectionStatus').innerHTML = `<span style="color: #22c55e;">Connected as ${name}</span>`;
+                    showStatus('Vimeo connected successfully!', 'success');
+                } else {
+                    document.getElementById('vimeoConnectionStatus').innerHTML = `<span style="color: #ef4444;">${result.error || 'Connection failed'}</span>`;
                 }
-            } else {
-                document.getElementById('claude4ThinkingGroup').style.display = 'none';
-                document.getElementById('claude4ThinkingLevelGroup').style.display = 'none';
+            } catch (error) {
+                document.getElementById('vimeoConnectionStatus').innerHTML = `<span style="color: #ef4444;">${error.message}</span>`;
+                showStatus('Vimeo connection failed: ' + error.message, 'error');
             }
-        });
+        }
         
-        // Handle thinking mode change
-        document.getElementById('claude4ThinkingMode').addEventListener('change', (e) => {
-            if (e.target.value === 'enabled') {
-                document.getElementById('claude4ThinkingLevelGroup').style.display = 'block';
-            } else {
-                document.getElementById('claude4ThinkingLevelGroup').style.display = 'none';
-            }
-        });
+        async function checkVideoReleaseConnections() {
+            try {
+                const ytStatus = await window.api.getYouTubeStatus();
+                if (ytStatus.authenticated) {
+                    document.getElementById('youtubeConnectionStatus').innerHTML = `<span style="color: #22c55e;">Connected as ${ytStatus.channel?.title || 'Unknown'}</span>`;
+                } else if (ytStatus.configured) {
+                    document.getElementById('youtubeConnectionStatus').textContent = 'Not connected';
+                }
+            } catch (e) { /* ignore */ }
+            try {
+                const vimeoStatus = await window.api.getVimeoStatus();
+                if (vimeoStatus.authenticated) {
+                    document.getElementById('vimeoConnectionStatus').innerHTML = `<span style="color: #22c55e;">Connected as ${vimeoStatus.user?.name || 'Unknown'}</span>`;
+                } else if (vimeoStatus.configured) {
+                    document.getElementById('vimeoConnectionStatus').textContent = 'Not connected';
+                }
+            } catch (e) { /* ignore */ }
+        }
         
-        // Auto-save if enabled
-        document.getElementById('autoSave').addEventListener('change', (e) => {
-            if (e.target.checked) {
-                saveSettings();
-            }
-        });
+        // ==================== GSX FUNCTIONS ====================
         
-        // Handle auto AI metadata toggle
-        document.getElementById('autoAIMetadata').addEventListener('change', (e) => {
-            document.getElementById('autoAIMetadataTypesGroup').style.display = e.target.checked ? 'block' : 'none';
-        });
-        
-        // Handle "All types" checkbox - toggle all other checkboxes
-        document.getElementById('aiTypeAll').addEventListener('change', (e) => {
-            const checked = e.target.checked;
-            document.getElementById('aiTypeImage').checked = checked;
-            document.getElementById('aiTypeScreenshot').checked = checked;
-            document.getElementById('aiTypeCode').checked = checked;
-            document.getElementById('aiTypeText').checked = checked;
-            document.getElementById('aiTypeHtml').checked = checked;
-            document.getElementById('aiTypeFile').checked = checked;
-            
-            // Disable individual checkboxes when "All" is selected
-            document.getElementById('aiTypeImage').disabled = checked;
-            document.getElementById('aiTypeScreenshot').disabled = checked;
-            document.getElementById('aiTypeCode').disabled = checked;
-            document.getElementById('aiTypeText').disabled = checked;
-            document.getElementById('aiTypeHtml').disabled = checked;
-            document.getElementById('aiTypeFile').disabled = checked;
-        });
+        let gsxTokenVisible = false;
         
         function toggleGSXTokenVisibility() {
             const input = document.getElementById('gsxToken');
-            const button = event.target;
-            
-            if (gsxTokenVisible) {
-                input.type = 'password';
-                button.textContent = '👁';
-                gsxTokenVisible = false;
-            } else {
-                input.type = 'text';
-                button.textContent = '🙈';
-                gsxTokenVisible = true;
-            }
+            gsxTokenVisible = !gsxTokenVisible;
+            input.type = gsxTokenVisible ? 'text' : 'password';
+            event.target.textContent = gsxTokenVisible ? 'Hide' : 'Show';
         }
         
         async function fetchGSXToken() {
             const refreshUrl = document.getElementById('gsxRefreshUrl').value;
+            if (!refreshUrl) { showStatus('Please enter a GSX Refresh URL first', 'error'); return; }
             const statusEl = document.getElementById('gsxTokenStatus');
-            const refreshUrlStatusEl = document.getElementById('gsxRefreshUrlStatus');
-            
-            if (!refreshUrl) {
-                showStatus('Please enter a GSX Refresh URL first', 'error');
-                return;
-            }
-            
             statusEl.textContent = '(Fetching...)';
             statusEl.className = 'api-key-status';
             showStatus('Fetching GSX token...', 'info');
-            
             try {
-                // First save the refresh URL
                 await window.api.saveSettings({ gsxRefreshUrl: refreshUrl });
-                
-                // Then call the refresh endpoint
                 const result = await window.electronAPI.refreshGSXToken();
-                
                 if (result.success && result.token) {
                     document.getElementById('gsxToken').value = result.token;
                     statusEl.textContent = '(Token fetched!)';
                     statusEl.className = 'api-key-status status-valid';
-                    refreshUrlStatusEl.textContent = '(Valid)';
-                    refreshUrlStatusEl.className = 'api-key-status status-valid';
+                    document.getElementById('gsxRefreshUrlStatus').textContent = '(Valid)';
+                    document.getElementById('gsxRefreshUrlStatus').className = 'api-key-status status-valid';
                     showStatus('GSX token fetched successfully!', 'success');
                 } else {
                     statusEl.textContent = '(Fetch failed)';
@@ -1806,32 +1648,15 @@
             const environment = document.getElementById('gsxEnvironment').value;
             const accountId = document.getElementById('gsxAccountId').value;
             const refreshUrl = document.getElementById('gsxRefreshUrl').value;
-            
-            // If no token but we have a refresh URL, try to fetch one first
             if (!token && refreshUrl) {
                 showStatus('No token - fetching from refresh URL...', 'info');
                 await fetchGSXToken();
                 token = document.getElementById('gsxToken').value;
             }
-            
-            if (!token) {
-                showStatus('Please configure a GSX Refresh URL to get a token', 'error');
-                return;
-            }
-            
-            console.log('Testing connection with:');
-            console.log('- Environment:', environment);
-            console.log('- Token length:', token.length);
-            console.log('- Token starts:', token.substring(0, 20));
-            console.log('- Token ends:', token.substring(token.length - 20));
-            console.log('- Account ID:', accountId || 'not provided');
-            
+            if (!token) { showStatus('Please configure a GSX Refresh URL to get a token', 'error'); return; }
             showStatus('Testing GSX connection...', 'success');
-            
             try {
                 const result = await window.api.testGSXConnection({ token, environment, accountId });
-                console.log('Test result:', result);
-                
                 if (result.success) {
                     showStatus('GSX connection successful!', 'success');
                     document.getElementById('gsxTokenStatus').textContent = '(Valid)';
@@ -1846,124 +1671,15 @@
             }
         }
         
-        async function configureSyncPaths() {
-            // This would open a dialog to configure sync paths
-            showStatus('Sync paths configuration coming soon...', 'success');
-        }
-        
-        async function syncCompleteBackup() {
-            // Get the button and disable it during backup
-            const backupBtn = event.target;
-            const originalText = backupBtn.textContent;
-            backupBtn.disabled = true;
-            backupBtn.textContent = 'Backing up...';
-            backupBtn.style.opacity = '0.6';
-            
-            // Show persistent status
-            const statusEl = document.getElementById('statusMessage');
-            statusEl.textContent = 'Starting complete backup... This may take a few minutes.';
-            statusEl.className = 'status-message status-info';
-            statusEl.style.display = 'block';
-            
-            try {
-                const result = await window.api.syncGSXCompleteBackup();
-                if (result.success) {
-                    // Build detailed success message
-                    const summary = result.result.summary;
-                    const results = result.result.results;
-                    
-                    let message = `✅ Backup completed in ${summary.durationFormatted}\n\n`;
-                    message += `📊 Summary:\n`;
-                    message += `• Total Files: ${summary.totalFiles}\n`;
-                    message += `• Total Size: ${summary.totalSizeFormatted}\n`;
-                    message += `• Environment: ${summary.environment}\n\n`;
-                    message += `📁 What was backed up:\n\n`;
-                    
-                    results.forEach(r => {
-                        message += `${r.name}:\n`;
-                        message += `  • Files: ${r.fileCount || 0}\n`;
-                        message += `  • Size: ${r.totalSizeFormatted || '0 Bytes'}\n`;
-                        message += `  • Duration: ${r.durationFormatted || '0s'}\n`;
-                        message += `  • Location: GSX Files/${r.remotePath}\n\n`;
-                    });
-                    
-                    // Show detailed modal
-                    alert(message);
-                    showStatus(`✅ Backup complete! ${summary.totalFiles} files (${summary.totalSizeFormatted}) backed up in ${summary.durationFormatted}`, 'success');
-                } else {
-                    showStatus(`Backup failed: ${result.error}`, 'error');
-                }
-            } catch (error) {
-                showStatus(`Error during backup: ${error.message}`, 'error');
-            } finally {
-                // Re-enable the button
-                backupBtn.disabled = false;
-                backupBtn.textContent = originalText;
-                backupBtn.style.opacity = '1';
-            }
-        }
-        
-        async function syncNow() {
-            showStatus('Starting sync...', 'success');
-            
-            try {
-                const result = await window.api.syncGSXNow();
-                if (result.success) {
-                    showStatus('Files synced successfully!', 'success');
-                } else {
-                    showStatus(`Sync failed: ${result.error}`, 'error');
-                }
-            } catch (error) {
-                showStatus(`Error syncing: ${error.message}`, 'error');
-            }
-        }
-        
-        async function pasteGSXToken() {
-            try {
-                // Read from clipboard
-                const clipboardText = await navigator.clipboard.readText();
-                
-                if (!clipboardText) {
-                    showStatus('Clipboard is empty', 'error');
-                    return;
-                }
-                
-                // Basic validation - check if it looks like a token
-                if (clipboardText.length < 20) {
-                    showStatus('Invalid token format in clipboard', 'error');
-                    return;
-                }
-                
-                // Set the token value
-                document.getElementById('gsxToken').value = clipboardText.trim();
-                
-                // Show success message
-                showStatus('Token pasted from clipboard', 'success');
-                
-                // Optionally auto-test the connection
-                setTimeout(() => {
-                    testGSXConnection();
-                }, 500);
-            } catch (error) {
-                console.error('Failed to read clipboard:', error);
-                showStatus('Failed to read clipboard. Please paste manually with Ctrl+V or Cmd+V', 'error');
-            }
-        }
-        
         async function refreshGSXToken() {
             const statusEl = document.getElementById('gsxTokenStatus');
             statusEl.textContent = '(Refreshing...)';
             statusEl.className = 'api-key-status';
-            
             try {
                 showStatus('Refreshing GSX token...', 'info');
                 const result = await window.electronAPI.refreshGSXToken();
-                
                 if (result.success) {
-                    // Update the token field with the new token
-                    if (result.token) {
-                        document.getElementById('gsxToken').value = result.token;
-                    }
+                    if (result.token) document.getElementById('gsxToken').value = result.token;
                     statusEl.textContent = '(Token refreshed!)';
                     statusEl.className = 'api-key-status status-valid';
                     showStatus('GSX token refreshed successfully!', 'success');
@@ -1978,7 +1694,7 @@
                 showStatus('Token refresh error: ' + error.message, 'error');
             }
         }
-
+        
         function clearGSXToken() {
             if (confirm('Are you sure you want to clear the GSX token?')) {
                 document.getElementById('gsxToken').value = '';
@@ -1988,143 +1704,106 @@
             }
         }
         
-        // ==================== CONTEXT PROVIDERS ====================
-        
-        let customFacts = [];
-        
-        // Initialize context provider settings
-        async function initContextProviders() {
+        async function syncCompleteBackup() {
+            const backupBtn = event.target;
+            const originalText = backupBtn.textContent;
+            backupBtn.disabled = true;
+            backupBtn.textContent = 'Backing up...';
+            backupBtn.style.opacity = '0.6';
+            showStatus('Starting complete backup... This may take a few minutes.', 'info');
             try {
-                // Load provider states from settings
-                const providerSettings = settings.contextProviders || {};
-                
-                document.getElementById('providerTemporal').checked = providerSettings.temporal !== false;
-                document.getElementById('providerActiveApp').checked = providerSettings.activeApp !== false;
-                document.getElementById('providerCustomFacts').checked = providerSettings.customFacts !== false;
-                document.getElementById('providerCalendar').checked = providerSettings.calendar === true;
-                document.getElementById('providerLocation').checked = providerSettings.location === true;
-                
-                // Load custom facts
-                if (window.api && window.api.getCustomFacts) {
-                    customFacts = await window.api.getCustomFacts() || [];
+                const result = await window.api.syncGSXCompleteBackup();
+                if (result.success) {
+                    const summary = result.result.summary;
+                    showStatus(`Backup complete! ${summary.totalFiles} files (${summary.totalSizeFormatted}) backed up in ${summary.durationFormatted}`, 'success');
                 } else {
-                    customFacts = settings.customFacts || [];
+                    showStatus(`Backup failed: ${result.error}`, 'error');
                 }
-                renderCustomFacts();
-                
-                // Set up calendar settings visibility
-                const calendarCheckbox = document.getElementById('providerCalendar');
-                const calendarSettings = document.getElementById('calendarSettings');
-                calendarCheckbox.addEventListener('change', () => {
-                    calendarSettings.style.display = calendarCheckbox.checked ? 'block' : 'none';
+            } catch (error) {
+                showStatus(`Error during backup: ${error.message}`, 'error');
+            } finally {
+                backupBtn.disabled = false;
+                backupBtn.textContent = originalText;
+                backupBtn.style.opacity = '1';
+            }
+        }
+        
+        async function syncNow() {
+            showStatus('Starting sync...', 'success');
+            try {
+                const result = await window.api.syncGSXNow();
+                if (result.success) {
+                    showStatus('Files synced successfully!', 'success');
+                } else {
+                    showStatus(`Sync failed: ${result.error}`, 'error');
+                }
+            } catch (error) {
+                showStatus(`Error syncing: ${error.message}`, 'error');
+            }
+        }
+        
+        // ==================== LLM CONNECTION TEST ====================
+        
+        async function testConnection(providerOverride) {
+            const provider = providerOverride || document.getElementById('llmProvider').value;
+            const model = document.getElementById('llmModel').value;
+            let apiKey, statusEl;
+            if (provider === 'openai') {
+                apiKey = document.getElementById('openaiApiKey').value;
+                statusEl = document.getElementById('openaiKeyStatus');
+            } else if (provider === 'anthropic') {
+                apiKey = document.getElementById('anthropicApiKey').value;
+                statusEl = document.getElementById('anthropicKeyStatus');
+            }
+            if (!apiKey) { showStatus(`Please enter an API key for ${provider} first`, 'error'); return; }
+            showStatus('Testing connection...', 'success');
+            try {
+                const result = await window.api.testLLMConnection({ provider, apiKey, model });
+                if (result.success) {
+                    showStatus('Connection successful!', 'success');
+                    if (statusEl) { statusEl.textContent = '(Valid)'; statusEl.className = 'api-key-status status-valid'; }
+                } else {
+                    showStatus(`Connection failed: ${result.error}`, 'error');
+                    if (statusEl) { statusEl.textContent = '(Invalid)'; statusEl.className = 'api-key-status status-invalid'; }
+                }
+            } catch (error) {
+                showStatus(`Error testing connection: ${error.message}`, 'error');
+            }
+        }
+        
+        // ==================== LEARNING API TEST ====================
+        
+        async function testLearningApi() {
+            const url = document.getElementById('learningApiUrl').value;
+            const method = document.getElementById('learningApiMethod').value;
+            const statusDiv = document.getElementById('learningApiStatus');
+            if (!url) { showApiStatus(statusDiv, 'Please enter an API URL', 'error'); return; }
+            showApiStatus(statusDiv, 'Testing API connection...', 'info');
+            try {
+                const response = await fetch(url, {
+                    method: method,
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    body: method === 'POST' ? '{}' : undefined
                 });
-                
-                // Add change handlers for providers
-                document.querySelectorAll('.provider-group input[type="checkbox"]').forEach(checkbox => {
-                    checkbox.addEventListener('change', saveProviderSettings);
-                });
-                
-            } catch (e) {
-                console.warn('Could not load context provider settings:', e);
-            }
-        }
-        
-        // Save provider settings
-        async function saveProviderSettings() {
-            const providerSettings = {
-                temporal: document.getElementById('providerTemporal').checked,
-                activeApp: document.getElementById('providerActiveApp').checked,
-                customFacts: document.getElementById('providerCustomFacts').checked,
-                calendar: document.getElementById('providerCalendar').checked,
-                location: document.getElementById('providerLocation').checked,
-                calendarSource: document.getElementById('calendarSource').value,
-            };
-            
-            settings.contextProviders = providerSettings;
-        }
-        
-        // Render custom facts list
-        function renderCustomFacts() {
-            const container = document.getElementById('factsList');
-            
-            if (customFacts.length === 0) {
-                container.innerHTML = '<div style="color: #666; font-size: 12px; margin-bottom: 10px;">No custom facts defined. Add facts below.</div>';
-                return;
-            }
-            
-            container.innerHTML = customFacts.map((fact, index) => `
-                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px; padding: 8px; background: #1e1e1e; border-radius: 6px;">
-                    <span style="flex: 1; font-size: 13px;"><strong style="color: #8888ff;">${escapeHtml(fact.key)}:</strong> ${escapeHtml(fact.value)}</span>
-                    <button onclick="removeCustomFact(${index})" style="background: none; border: none; color: #888; cursor: pointer; padding: 4px;">×</button>
-                </div>
-            `).join('');
-        }
-        
-        // Add a custom fact
-        async function addCustomFact() {
-            const keyInput = document.getElementById('newFactKey');
-            const valueInput = document.getElementById('newFactValue');
-            
-            const key = keyInput.value.trim();
-            const value = valueInput.value.trim();
-            
-            if (!key || !value) {
-                showStatus('Please enter both key and value', 'error');
-                return;
-            }
-            
-            // Check for duplicate key
-            const existing = customFacts.findIndex(f => f.key === key);
-            if (existing >= 0) {
-                customFacts[existing].value = value;
-            } else {
-                customFacts.push({ key, value });
-            }
-            
-            // Save to API if available
-            if (window.api && window.api.addCustomFact) {
-                try {
-                    await window.api.addCustomFact(key, value);
-                } catch (e) {
-                    console.warn('Could not save fact via API:', e);
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data && data.user && data.categories) {
+                        showApiStatus(statusDiv, `API working! Found ${Object.keys(data.categories).length} categories`, 'success');
+                    } else {
+                        showApiStatus(statusDiv, 'API responded but data format may be incorrect', 'warning');
+                    }
+                } else {
+                    showApiStatus(statusDiv, `API error: ${response.status} ${response.statusText}`, 'error');
                 }
+            } catch (error) {
+                showApiStatus(statusDiv, `Connection failed: ${error.message}`, 'error');
             }
-            
-            // Also save to settings
-            settings.customFacts = customFacts;
-            
-            keyInput.value = '';
-            valueInput.value = '';
-            renderCustomFacts();
-            showStatus('Custom fact added', 'success');
         }
         
-        // Remove a custom fact
-        async function removeCustomFact(index) {
-            const fact = customFacts[index];
-            if (!fact) return;
-            
-            customFacts.splice(index, 1);
-            
-            // Remove via API if available
-            if (window.api && window.api.removeCustomFact) {
-                try {
-                    await window.api.removeCustomFact(fact.key);
-                } catch (e) {
-                    console.warn('Could not remove fact via API:', e);
-                }
-            }
-            
-            settings.customFacts = customFacts;
-            renderCustomFacts();
-        }
+        // ==================== VOICE HISTORY ====================
         
-        // Clear conversation history
         async function clearConversationHistory() {
-            if (!confirm('Are you sure you want to clear your voice conversation history?')) {
-                return;
-            }
-            
+            if (!confirm('Are you sure you want to clear your voice conversation history?')) return;
             try {
                 if (window.api && window.api.clearConversationHistory) {
                     await window.api.clearConversationHistory();
@@ -2135,85 +1814,43 @@
             }
         }
         
-        // Escape HTML helper
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-        
-        // Call initContextProviders after loadSettings
-        const originalLoadSettings = loadSettings;
-        loadSettings = async function() {
-            await originalLoadSettings.call(this);
-            await initContextProviders();
-            await loadOneReachCredentials();
-        };
-        
-        // ============================================================
-        // OneReach Auto-Login Functions
-        // ============================================================
+        // ==================== ONEREACH LOGIN ====================
         
         let oneReachPasswordVisible = false;
         let totpUpdateInterval = null;
         
-        // Load OneReach credentials on settings load
         async function loadOneReachCredentials() {
             try {
-                console.log('[OneReach] Loading credentials...');
                 const result = await window.api.invoke('onereach:get-credentials');
-                console.log('[OneReach] Got credentials result:', result ? { email: result.email, has2FA: result.has2FA } : null);
-                
                 if (result && result.email) {
                     document.getElementById('onereach-email').value = result.email;
                     document.getElementById('onereach-password').value = result.password || '';
-                    
                     document.getElementById('onereach-creds-status').textContent = '(Saved)';
                     document.getElementById('onereach-creds-status').className = 'api-key-status status-valid';
-                    
                     if (result.has2FA && result.totpSecret) {
-                        console.log('[OneReach] 2FA configured, showing TOTP display');
                         show2FAConfigured(result.totpSecret);
                     }
                 }
-                
-                // Load auto-login settings from persisted settings
-                console.log('[OneReach] Loading autoLoginSettings from:', settings.autoLoginSettings);
                 const autoLoginSettings = settings.autoLoginSettings || {};
                 document.getElementById('autologin-edison').checked = autoLoginSettings.edison !== false;
                 document.getElementById('autologin-staging').checked = autoLoginSettings.staging !== false;
                 document.getElementById('autologin-production').checked = autoLoginSettings.production !== false;
                 document.getElementById('autologin-enabled').checked = autoLoginSettings.enabled !== false;
-                
-                console.log('[OneReach] Credentials loaded successfully');
             } catch (error) {
                 console.error('Failed to load OneReach credentials:', error);
             }
         }
         
-        // Save OneReach credentials
         async function saveOneReachCredentials() {
             const email = document.getElementById('onereach-email').value.trim();
             const password = document.getElementById('onereach-password').value;
-            
-            if (!email || !password) {
-                showStatus('Please enter both email and password', 'error');
-                return;
-            }
-            
+            if (!email || !password) { showStatus('Please enter both email and password', 'error'); return; }
             try {
                 showStatus('Saving credentials...', 'info');
-                
-                const result = await window.api.invoke('onereach:save-credentials', {
-                    email,
-                    password
-                });
-                
+                const result = await window.api.invoke('onereach:save-credentials', { email, password });
                 if (result.success) {
                     document.getElementById('onereach-creds-status').textContent = '(Saved)';
                     document.getElementById('onereach-creds-status').className = 'api-key-status status-valid';
-
-                    // Save auto-login settings to disk
                     const autoLoginSettings = {
                         edison: document.getElementById('autologin-edison').checked,
                         staging: document.getElementById('autologin-staging').checked,
@@ -2221,82 +1858,51 @@
                         enabled: document.getElementById('autologin-enabled').checked
                     };
                     settings.autoLoginSettings = autoLoginSettings;
-                    
-                    // Persist to settings file
-                    console.log('[OneReach] Saving autoLoginSettings:', autoLoginSettings);
-                    const saveResult = await window.api.saveSettings({ autoLoginSettings });
-                    console.log('[OneReach] Settings save result:', saveResult);
-                    
+                    await window.api.saveSettings({ autoLoginSettings });
                     showStatus('Credentials saved successfully', 'success');
                 } else {
                     showStatus('Failed to save credentials: ' + (result.error || 'Unknown error'), 'error');
                 }
             } catch (error) {
-                console.error('Failed to save credentials:', error);
                 showStatus('Failed to save credentials: ' + error.message, 'error');
             }
         }
         
-        // Clear OneReach credentials
         async function clearOneReachCredentials() {
-            if (!confirm('Are you sure you want to remove your OneReach credentials? This will disable auto-login.')) {
-                return;
-            }
-            
+            if (!confirm('Are you sure you want to remove your OneReach credentials? This will disable auto-login.')) return;
             try {
                 await window.api.invoke('onereach:delete-credentials');
-                
                 document.getElementById('onereach-email').value = '';
                 document.getElementById('onereach-password').value = '';
                 document.getElementById('onereach-creds-status').textContent = '';
-                
-                // Reset 2FA UI
                 document.getElementById('totp-not-configured').style.display = 'block';
                 document.getElementById('totp-configured').style.display = 'none';
-                if (totpUpdateInterval) {
-                    clearInterval(totpUpdateInterval);
-                    totpUpdateInterval = null;
-                }
-                
+                if (totpUpdateInterval) { clearInterval(totpUpdateInterval); totpUpdateInterval = null; }
                 showStatus('Credentials removed', 'success');
             } catch (error) {
                 showStatus('Failed to remove credentials: ' + error.message, 'error');
             }
         }
         
-        // Toggle password visibility
         function toggleOneReachPasswordVisibility() {
             const input = document.getElementById('onereach-password');
             const button = input.parentElement.querySelector('.toggle-visibility');
-            
-            if (oneReachPasswordVisible) {
-                input.type = 'password';
-                button.textContent = 'Show';
-                oneReachPasswordVisible = false;
-            } else {
-                input.type = 'text';
-                button.textContent = 'Hide';
-                oneReachPasswordVisible = true;
-            }
+            oneReachPasswordVisible = !oneReachPasswordVisible;
+            input.type = oneReachPasswordVisible ? 'text' : 'password';
+            button.textContent = oneReachPasswordVisible ? 'Hide' : 'Show';
         }
         
-        // Toggle manual secret entry
         function toggleManualSecretEntry() {
             const el = document.getElementById('manual-secret-entry');
             el.style.display = el.style.display === 'none' ? 'block' : 'none';
         }
         
-        // Scan QR code from screen
         async function scanQRFromScreen() {
             try {
                 showStatus('Scanning screen for QR code... Make sure the QR code is visible!', 'info');
-                
                 const result = await window.api.invoke('totp:scan-qr-screen');
-                
                 if (result.success && result.secret) {
-                    // Save the TOTP secret
                     const saveResult = await window.api.invoke('onereach:save-totp', { secret: result.secret });
-                    
                     if (saveResult.success) {
                         show2FAConfigured(result.secret);
                         showStatus('2FA configured successfully! Code: ' + result.issuer + ' - ' + result.account, 'success');
@@ -2307,32 +1913,21 @@
                     showStatus('No QR code found on screen. Make sure the authenticator setup QR code is visible.', 'error');
                 }
             } catch (error) {
-                console.error('QR scan error:', error);
                 showStatus('Failed to scan QR: ' + error.message, 'error');
             }
         }
         
-        // Save manually entered TOTP secret
         async function saveManualTOTPSecret() {
             const secretInput = document.getElementById('totp-secret-input');
             const secret = secretInput.value.trim().toUpperCase().replace(/\s/g, '');
-            
-            if (!secret) {
-                showStatus('Please enter a TOTP secret', 'error');
-                return;
-            }
-            
-            // Basic validation
+            if (!secret) { showStatus('Please enter a TOTP secret', 'error'); return; }
             if (!/^[A-Z2-7]+=*$/.test(secret)) {
                 showStatus('Invalid secret format. It should only contain letters A-Z and numbers 2-7.', 'error');
                 return;
             }
-            
             try {
                 showStatus('Verifying secret...', 'info');
-                
                 const result = await window.api.invoke('onereach:save-totp', { secret });
-                
                 if (result.success) {
                     show2FAConfigured(secret);
                     secretInput.value = '';
@@ -2346,79 +1941,47 @@
             }
         }
         
-        // Show 2FA configured state with live code
         async function show2FAConfigured(secret) {
             document.getElementById('totp-not-configured').style.display = 'none';
             document.getElementById('totp-configured').style.display = 'block';
-            
-            // Start updating the code
             updateTOTPCode();
-            
-            // Clear any existing interval
-            if (totpUpdateInterval) {
-                clearInterval(totpUpdateInterval);
-            }
-            
-            // Update every second
+            if (totpUpdateInterval) clearInterval(totpUpdateInterval);
             totpUpdateInterval = setInterval(updateTOTPCode, 1000);
         }
         
-        // Update TOTP code display
         async function updateTOTPCode() {
             try {
                 const result = await window.api.invoke('totp:get-current-code');
-                
                 if (result.success) {
-                    // Update code display
                     document.getElementById('current-totp-code').textContent = result.formattedCode;
-                    
-                    // Update countdown
                     const remaining = result.timeRemaining;
                     const percentage = (remaining / 30) * 100;
-                    
                     document.getElementById('totp-countdown-fill').style.width = percentage + '%';
                     document.getElementById('totp-countdown-text').textContent = remaining + 's';
-                    
-                    // Change color when time is low
-                    const fillColor = remaining <= 5 ? '#f44336' : '#4CAF50';
-                    document.getElementById('totp-countdown-fill').style.background = fillColor;
+                    document.getElementById('totp-countdown-fill').style.background = remaining <= 5 ? '#f44336' : '#4CAF50';
                 }
             } catch (error) {
                 console.error('Failed to update TOTP code:', error);
             }
         }
         
-        // Remove 2FA
         async function removeTOTPSecret() {
-            if (!confirm('Are you sure you want to remove 2FA? You will need to scan the QR code again to re-enable it.')) {
-                return;
-            }
-            
+            if (!confirm('Are you sure you want to remove 2FA? You will need to scan the QR code again to re-enable it.')) return;
             try {
                 await window.api.invoke('onereach:delete-totp');
-                
-                // Reset UI
                 document.getElementById('totp-not-configured').style.display = 'block';
                 document.getElementById('totp-configured').style.display = 'none';
-                
-                if (totpUpdateInterval) {
-                    clearInterval(totpUpdateInterval);
-                    totpUpdateInterval = null;
-                }
-                
+                if (totpUpdateInterval) { clearInterval(totpUpdateInterval); totpUpdateInterval = null; }
                 showStatus('2FA removed', 'success');
             } catch (error) {
                 showStatus('Failed to remove 2FA: ' + error.message, 'error');
             }
         }
         
-        // Test OneReach login
         async function testOneReachLogin() {
             showStatus('Testing login... Opening test window', 'info');
-            
             try {
                 const result = await window.api.invoke('onereach:test-login');
-                
                 if (result.success) {
                     showStatus('Login test initiated. Watch the test window.', 'success');
                 } else {
@@ -2428,6 +1991,65 @@
                 showStatus('Test failed: ' + error.message, 'error');
             }
         }
+        
+        // ==================== STATUS / UTILITY ====================
+        
+        function showStatus(message, type) {
+            const statusEl = document.getElementById('statusMessage');
+            statusEl.textContent = message;
+            statusEl.className = `status-message status-${type}`;
+            statusEl.style.display = 'block';
+            setTimeout(() => { statusEl.style.display = 'none'; }, 5000);
+        }
+        
+        function showApiStatus(element, message, type) {
+            element.textContent = message;
+            element.className = 'api-key-status';
+            if (type === 'success') element.className += ' status-valid';
+            else if (type === 'error') element.className += ' status-invalid';
+            element.style.display = 'block';
+        }
+        
+        // ==================== EVENT LISTENERS ====================
+        
+        document.getElementById('llmProvider').addEventListener('change', updateModelOptions);
+        
+        document.getElementById('llmModel').addEventListener('change', (e) => {
+            if (e.target.value === 'claude-opus-4-5-20251101') {
+                document.getElementById('claude4ThinkingGroup').style.display = 'block';
+                if (document.getElementById('claude4ThinkingMode').value === 'enabled') {
+                    document.getElementById('claude4ThinkingLevelGroup').style.display = 'block';
+                }
+            } else {
+                document.getElementById('claude4ThinkingGroup').style.display = 'none';
+                document.getElementById('claude4ThinkingLevelGroup').style.display = 'none';
+            }
+        });
+        
+        document.getElementById('claude4ThinkingMode').addEventListener('change', (e) => {
+            document.getElementById('claude4ThinkingLevelGroup').style.display = e.target.value === 'enabled' ? 'block' : 'none';
+        });
+        
+        document.getElementById('autoSave').addEventListener('change', (e) => {
+            if (e.target.checked) saveSettings();
+        });
+        
+        document.getElementById('autoAIMetadata').addEventListener('change', (e) => {
+            document.getElementById('autoAIMetadataTypesGroup').style.display = e.target.checked ? 'block' : 'none';
+        });
+        
+        document.getElementById('aiTypeAll').addEventListener('change', (e) => {
+            const checked = e.target.checked;
+            ['Image', 'Screenshot', 'Code', 'Text', 'Html', 'File'].forEach(t => {
+                const el = document.getElementById('aiType' + t);
+                el.checked = checked;
+                el.disabled = checked;
+            });
+        });
+        
+        document.getElementById('captureEnabled').addEventListener('change', (e) => {
+            toggleCaptureSettings(e.target.checked);
+        });
     </script>
 </body>
-</html> 
+</html>

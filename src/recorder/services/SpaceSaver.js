@@ -3,6 +3,8 @@
  * @module src/recorder/services/SpaceSaver
  */
 
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 /**
  * Space saver class
  */
@@ -42,7 +44,7 @@ export class SpaceSaver {
     // Call Electron IPC to save
     if (window.spaces?.addFile) {
       const result = await window.spaces.addFile(spaceId, file, metadata);
-      console.log('[SpaceSaver] Saved:', result);
+      log.info('recorder', '[SpaceSaver] Saved', { data: result });
       return result;
     }
 
@@ -63,7 +65,7 @@ export class SpaceSaver {
     a.click();
     
     URL.revokeObjectURL(url);
-    console.log('[SpaceSaver] Downloaded:', filename);
+    log.info('recorder', '[SpaceSaver] Downloaded', { data: filename });
   }
 
   /**

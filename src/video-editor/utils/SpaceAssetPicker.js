@@ -591,7 +591,7 @@ export class SpaceAssetPicker {
         }
       }
     } catch (error) {
-      console.error('[SpaceAssetPicker] Error loading spaces:', error);
+      window.logging.error('video', 'SpaceAssetPicker Error loading spaces', { error: { error: error } });
       this.app.showToast?.('error', 'Failed to load Spaces');
     }
   }
@@ -631,7 +631,7 @@ export class SpaceAssetPicker {
       
       this._filterItems();
     } catch (error) {
-      console.error('[SpaceAssetPicker] Error loading items:', error);
+      window.logging.error('video', 'SpaceAssetPicker Error loading items', { error: { error: error } });
       this._renderEmptyState('Failed to load assets');
     }
   }
@@ -841,7 +841,7 @@ export class SpaceAssetPicker {
       this.hide();
       
     } catch (error) {
-      console.error('[SpaceAssetPicker] Import error:', error);
+      window.logging.error('video', 'SpaceAssetPicker Import error', { error: { error: error } });
       this.app.showToast?.('error', 'Failed to import asset');
     }
   }

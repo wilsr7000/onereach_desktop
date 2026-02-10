@@ -8,6 +8,8 @@
  * - Branch comparison view
  */
 
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 export class BranchSwitcher {
   constructor(appContext) {
     this.app = appContext;
@@ -482,7 +484,7 @@ export class BranchSwitcher {
       if (!confirmed) return;
     }
     
-    console.log('[BranchSwitcher] Switching to branch:', branchId);
+    log.info('video', '[BranchSwitcher] Switching to branch', { data: branchId });
     
     // Switch via version manager if available
     if (this.app.versionManager?.switchBranch) {

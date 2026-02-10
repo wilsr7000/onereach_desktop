@@ -1,0 +1,155 @@
+---
+description: Test audit orchestrator protocol -- how to run tests one at a time with full audit trail
+globs:
+  - test/**
+  - "*.spec.js"
+alwaysApply: false
+---
+
+# Test Audit Protocol
+
+The project has a persistent test audit orchestrator in `test/audit/` that walks through 1194 test items across 35 plans, one at a time, with a full append-only audit trail. Use it whenever the user asks to "run tests", "test next", "run regression", or "check test progress".
+
+## Quick Commands
+
+```bash
+# Check current progress
+node test/audit/cli.js status
+
+# Run the next untested item
+node test/audit/cli.js next
+
+# Re-run a specific item (e.g., after fixing a failure)
+node test/audit/cli.js run <item-id>
+
+# List all currently failed items
+node test/audit/cli.js failed
+
+# Re-run all failed items to verify fixes
+node test/audit/cli.js retry-failed
+
+# Run all items in a specific plan (e.g., plan 1 = Settings)
+node test/audit/cli.js plan 1
+
+# Record a manual test result
+node test/audit/cli.js record <item-id> pass
+node test/audit/cli.js record <item-id> fail "reason for failure"
+
+# Skip an item with reason
+node test/audit/cli.js skip <item-id> "reason"
+
+# Run regression on all passed items
+node test/audit/cli.js regression
+
+# Generate a full audit report
+node test/audit/cli.js report
+
+# View history for a specific item
+node test/audit/cli.js item <item-id>
+
+# Diagnose a failed item (source files, errors, fix suggestion)
+node test/audit/cli.js diagnose <item-id>
+
+# Reset all state (destructive)
+node test/audit/cli.js reset --confirm
+```
+
+## Workflow: Test, Fix, Retest Loop
+
+The core cycle is: **test -> diagnose failure -> fix code -> retest -> confirm pass -> next**.
+
+**CRITICAL: When a test fails, you MUST fix it before moving on.** Do NOT just record "failed" and continue. The orchestrator now provides auto-diagnosis on every failure -- use it.
+
+### Step 1: Run the next item
+```bash
+node test/audit/cli.js next
+```
+The output tells you what to do:
+- **[A] Automated**: The orchestrator ran the test and reports pass/fail/skip. Review the result.
+  - **If FAILED**: The output includes a DIAGNOSIS section with: source files to edit, recent errors from the log server, and a specific FIX instruction. **READ THE DIAGNOSIS AND FIX THE CODE IMMEDIATELY.**
+- **[M] Manual**: YOU must guide the user through the test. Tell them what to do, then record the result with `record <id> pass` or `record <id> fail "reason"`.
+- **[P] Partial**: The automated part ran. Ask the user to verify visually, then record the result.
+
+### Step 2: Handle failures (the fix loop) -- MANDATORY
+
+If a test fails, do NOT skip it. The orchestrator outputs a DIAGNOSIS block with everything you need. Follow this cycle **immediately, without asking the user**:
+
+1. **Read the DIAGNOSIS output**: It contains:
+   - `FIX:` -- A specific instruction for what to fix (e.g., "REGISTER IPC HANDLER: Add ipcMain.handle('voice-task-sdk:submit', ...) in integration.js")
+   - `Source files:` -- The exact files to open and edit
+   - `Recent errors:` -- Live errors from the log server related to this area
+   - `Exchange port / Missing IPC / etc.` -- Additional context
+
+2. **Fix the code immediately**: Open the source files listed in the diagnosis, apply the minimal fix.
+   - If the diagnosis says "REGISTER IPC HANDLER" -- add the handler
+   - If the diagnosis says "SERVICE DOWN" -- check initialization code
+   - If the diagnosis says "MISSING MODULE" -- install or fix the import
+   - If the diagnosis says "ENDPOINT NOT FOUND" -- add the route
+
+3. **Retest the specific item**:
+   ```bash
+   node test/audit/cli.js run <item-id>
+   ```
+
+4. **If it passes now**: Move on to `next`
+5. **If it still fails**: The retest will produce a NEW diagnosis. Read it and fix again.
+6. **Only skip if unfixable after 3 attempts**: Use `skip <id> "reason"` with a clear documented reason
+
+### Diagnose on demand
+
+If you need more context for a failed item:
+```bash
+node test/audit/cli.js diagnose <item-id>
+```
+This gathers: source files, recent log errors, exchange health status, IPC handler locations, and produces a specific fix suggestion.
+
+### Step 3: Batch retry after multiple fixes
+After fixing several issues at once:
+```bash
+# See what's still failing
+node test/audit/cli.js failed
+
+# Re-run all failed items to verify fixes
+node test/audit/cli.js retry-failed
+```
+This re-runs every failed item and reports which ones are now passing ("fixed") vs. still failing.
+
+### Step 4: Periodic regression
+After every 10 items tested (or after any code change), verify nothing broke:
+```bash
+node test/audit/cli.js regression
+```
+If regressions are found, they are automatically marked as "failed" in the item state. Use `failed` to see them and `retry-failed` after fixing.
+
+### Step 5: Never skip without a reason
+Every skip must have a documented reason. Use `skip <id> "reason"`.
+
+## Item Types
+
+- `[A]` -- Fully automated. The orchestrator attempts REST API calls, health checks, or IPC evaluation. If no automation exists yet, it auto-skips with "no automation implemented".
+- `[M]` -- Manual. The orchestrator returns the test description. YOU must instruct the user to perform the test and then record the result.
+- `[P]` -- Partial. The orchestrator runs the automated portion and returns the result. YOU must ask the user to visually verify, then record pass/fail.
+
+## State Files
+
+- `test/audit/state/audit-state.json` -- Current progress (resumable). Contains every item's status, run history, cursor position, and regression runs.
+- `test/audit/state/audit-trail.jsonl` -- Append-only permanent audit log. Every test start, pass, fail, skip, regression run is recorded here with timestamps.
+- These files are .gitignored -- they are local testing state.
+
+## Regression Testing
+
+The `regression` command re-runs all previously passed automated items. If any item that was passing now fails, it is flagged as a **regression**. Run regression:
+- After completing a full plan
+- After any code changes that touch tested areas
+- Before any release
+- On demand when the user asks
+
+## Important Rules
+
+1. Always check status before starting
+2. Process items in order (the orchestrator tracks the cursor)
+3. Record every result -- the audit trail is the permanent record
+4. Fix failures before moving on (unless explicitly skipping)
+5. Run regression periodically to catch breakage
+6. For manual items, give the user clear, specific instructions
+7. The orchestrator reads test plans from `test/plans/*.md` (read-only, never modify plan files)

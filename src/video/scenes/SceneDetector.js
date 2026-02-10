@@ -10,6 +10,8 @@ import path from 'path';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { app } = require('electron');
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 /**
  * Service for automatic scene detection
@@ -34,7 +36,7 @@ export class SceneDetector {
       silenceDuration = 0.5 // Minimum silence duration to mark as scene break
     } = options;
 
-    console.log(`[SceneDetector] Detecting scenes in: ${inputPath}`);
+    log.info('video', '[SceneDetector] Detecting scenes in:', { v0: inputPath });
 
     const info = await this.videoProcessor.getVideoInfo(inputPath);
     const duration = info.duration;
@@ -80,7 +82,7 @@ export class SceneDetector {
             // Generate scene boundaries from silence points
             const scenes = this.buildScenesFromSilence(silencePoints, duration, minSceneDuration);
 
-            console.log(`[SceneDetector] Detected ${scenes.length} scenes`);
+            log.info('video', '[SceneDetector] Detected scenes', { v0: scenes.length });
 
             resolve({
               success: true,

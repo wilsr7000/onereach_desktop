@@ -7,6 +7,8 @@
 
 const { withAgenticRetry } = require('../agentic-retry');
 const { smartPlay, smartPause, smartSkip, getMediaState, runScript } = require('../applescript-helper');
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 // Base media agent (simple version)
 const baseMediaAgent = {
@@ -14,13 +16,8 @@ const baseMediaAgent = {
   name: 'Media Agent',
   description: 'Controls Music and Spotify',
   
-  bid(task) {
-    const lower = task?.content?.toLowerCase() || '';
-    if (['play', 'pause', 'skip', 'music'].some(k => lower.includes(k))) {
-      return { confidence: 0.9 };
-    }
-    return null;
-  },
+  // No bid() method. Routing is 100% LLM-based via unified-bidder.js.
+  // NEVER add keyword/regex bidding here. See .cursorrules.
   
   async execute(task) {
     const lower = task.content.toLowerCase();
@@ -172,7 +169,7 @@ const result = await mediaAgent.execute({
 // 4. Maybe: try_alternate_app → shuffle_library → ask_user
 // 5. Return final result with reasoning chain
 
-console.log(result);
+log.info('agent', result);
 // {
 //   success: true,
 //   message: "Now playing jazz",

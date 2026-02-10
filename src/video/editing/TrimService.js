@@ -8,6 +8,8 @@ import path from 'path';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { app } = require('electron');
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 /**
  * Service for video trimming operations
@@ -98,7 +100,7 @@ export class TrimService {
       command
         .output(output)
         .on('start', (cmd) => {
-          console.log('[TrimService] Trim started:', cmd);
+          log.info('video', '[TrimService] Trim started', { data: cmd });
           this.activeJobs.set(jobId, command);
         })
         .on('progress', (progress) => {

@@ -9,6 +9,8 @@
  * - Toast notifications for save/undo
  */
 
+const { getLogQueue } = require('../lib/log-event-queue');
+const log = getLogQueue();
 class AIWindowOverlay {
   constructor(aiService) {
     this.aiService = aiService;
@@ -26,13 +28,13 @@ class AIWindowOverlay {
       this.isPaused = await window.api.conversation.isPaused();
       this.currentDoNotSave = await window.api.conversation.isMarkedDoNotSave(this.aiService);
     } catch (error) {
-      console.error('[AIOverlay] Error getting initial state:', error);
+      log.error('app', '[AIOverlay] Error getting initial state', { error: error });
     }
 
     // No UI overlay - user knows they're recording because they opened in Onereach app
     // Just listen for save notifications in case we need to handle them programmatically
     window.addEventListener('conversation-saved', (event) => {
-      console.log('[AIOverlay] Conversation saved:', event.detail);
+      log.info('app', '[AIOverlay] Conversation saved', { data: event.detail });
     });
   }
 
@@ -73,7 +75,7 @@ if (typeof window !== 'undefined' && window.location) {
   
   // For ChatGPT, intercept fetch to capture streaming responses
   if (aiService === 'ChatGPT') {
-    console.log('[ChatGPT Interceptor] Setting up fetch interceptor for conversation capture...');
+    log.info('app', '[ChatGPT Interceptor] Setting up fetch interceptor for conversation capture...');
     
     const originalFetch = window.fetch;
     window.fetch = async function(...args) {
@@ -82,7 +84,7 @@ if (typeof window !== 'undefined' && window.location) {
       
       // Only intercept conversation API calls
       if (url && url.includes('/backend-api') && url.includes('conversation') && !url.includes('/init')) {
-        console.log('[ChatGPT Interceptor] Intercepting conversation request:', url);
+        log.info('app', '[ChatGPT Interceptor] Intercepting conversation request', { data: url });
         
         try {
           const response = await originalFetch.apply(this, args);
@@ -93,7 +95,7 @@ if (typeof window !== 'undefined' && window.location) {
           // Check if it's a streaming response
           const contentType = response.headers.get('content-type') || '';
           if (contentType.includes('text/event-stream') || contentType.includes('application/octet-stream')) {
-            console.log('[ChatGPT Interceptor] Detected streaming response, capturing...');
+            log.info('app', '[ChatGPT Interceptor] Detected streaming response, capturing...');
             
             // Read the stream in the background
             (async () => {
@@ -111,7 +113,7 @@ if (typeof window !== 'undefined' && window.location) {
                   fullText += chunk;
                 }
                 
-                console.log('[ChatGPT Interceptor] Stream complete, parsing SSE data...');
+                log.info('app', '[ChatGPT Interceptor] Stream complete, parsing SSE data...');
                 
                 // Parse SSE format
                 const lines = fullText.split('\n');
@@ -147,7 +149,7 @@ if (typeof window !== 'undefined' && window.location) {
                 
                 if (assistantMessage && assistantMessage.length > 0) {
                   console.log('[ChatGPT Interceptor] Captured response:', assistantMessage.substring(0, 100) + '...');
-                  console.log('[ChatGPT Interceptor] Conversation ID:', conversationId);
+                  log.info('app', '[ChatGPT Interceptor] Conversation ID', { data: conversationId });
                   
                   // Send to main process via IPC
                   if (window.electronAPI && window.electronAPI.sendChatGPTResponse) {
@@ -163,7 +165,7 @@ if (typeof window !== 'undefined' && window.location) {
                       timestamp: new Date().toISOString()
                     });
                   } else {
-                    console.log('[ChatGPT Interceptor] No IPC channel available, logging response');
+                    log.info('app', '[ChatGPT Interceptor] No IPC channel available, logging response');
                     // Store in a global for debugging
                     window.__lastChatGPTResponse = {
                       conversationId: conversationId,
@@ -173,14 +175,14 @@ if (typeof window !== 'undefined' && window.location) {
                   }
                 }
               } catch (err) {
-                console.error('[ChatGPT Interceptor] Error reading stream:', err);
+                log.error('app', '[ChatGPT Interceptor] Error reading stream', { error: err });
               }
             })();
           }
           
           return response;
         } catch (err) {
-          console.error('[ChatGPT Interceptor] Error intercepting request:', err);
+          log.error('app', '[ChatGPT Interceptor] Error intercepting request', { error: err });
           return originalFetch.apply(this, args);
         }
       }
@@ -188,12 +190,12 @@ if (typeof window !== 'undefined' && window.location) {
       return originalFetch.apply(this, args);
     };
     
-    console.log('[ChatGPT Interceptor] Fetch interceptor installed');
+    log.info('app', '[ChatGPT Interceptor] Fetch interceptor installed');
   }
   
   // For Claude, monitor for artifact creation in the DOM
   if (aiService === 'Claude') {
-    console.log('[Artifact Monitor] Setting up Claude artifact monitoring...');
+    log.info('app', '[Artifact Monitor] Setting up Claude artifact monitoring...');
     
     // Track captured artifacts to avoid duplicates
     const capturedHashes = new Set();
@@ -309,7 +311,7 @@ if (typeof window !== 'undefined' && window.location) {
           childList: true,
           subtree: true
         });
-        console.log('[Artifact Monitor] ✅ Started watching for Claude artifacts');
+        log.info('app', '[Artifact Monitor] ✅ Started watching for Claude artifacts');
       }
     }, 2000);
   }

@@ -6,6 +6,8 @@
  * export formats optimized for that content type.
  */
 
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 /**
  * Export format definitions per template
  */
@@ -1141,7 +1143,7 @@ export class ExportPresets {
       await navigator.clipboard.writeText(content);
       return true;
     } catch (error) {
-      console.error('[ExportPresets] Copy failed:', error);
+      log.error('video', '[ExportPresets] Copy failed', { error: error });
       return false;
     }
   }

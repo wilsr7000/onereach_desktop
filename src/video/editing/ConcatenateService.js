@@ -9,6 +9,8 @@ import path from 'path';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { app } = require('electron');
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 /**
  * Service for concatenating multiple videos
@@ -51,7 +53,7 @@ export class ConcatenateService {
         .outputOptions(['-c copy'])
         .output(output)
         .on('start', (cmd) => {
-          console.log('[ConcatenateService] Concatenation started:', cmd);
+          log.info('video', '[ConcatenateService] Concatenation started', { data: cmd });
           this.activeJobs.set(jobId, {});
         })
         .on('progress', (progress) => {
@@ -118,7 +120,7 @@ export class ConcatenateService {
         ])
         .output(output)
         .on('start', (cmd) => {
-          console.log('[ConcatenateService] Merge started:', cmd);
+          log.info('video', '[ConcatenateService] Merge started', { data: cmd });
           this.activeJobs.set(jobId, {});
         })
         .on('progress', (progress) => {

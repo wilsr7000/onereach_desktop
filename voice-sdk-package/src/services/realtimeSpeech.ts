@@ -3,6 +3,11 @@
  * 
  * Uses WebSocket connection to OpenAI's Realtime API for streaming speech-to-text.
  * Provides real-time transcription as the user speaks.
+ * 
+ * NOTE: This intentionally uses a direct WebSocket connection rather than
+ * routing through the centralized ai-service. Real-time audio streaming
+ * requires browser-native WebSocket for acceptable latency. The API key
+ * and model are provided via config from the centralized service.
  */
 
 import { MODEL_REALTIME } from '../config/models'

@@ -7,6 +7,8 @@
  * - Recent context (for pronoun resolution)
  */
 
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 const conversationState = {
   // Pending question from agent needing user input
   // { prompt, field, agentId, taskId, resolve, timeoutId }
@@ -30,7 +32,7 @@ const conversationState = {
     this.clearPendingQuestion();
     
     const timeoutId = setTimeout(() => {
-      console.log('[ConversationState] Pending question timed out');
+      log.info('voice', '[ConversationState] Pending question timed out');
       this.pendingQuestion = null;
       resolve({ timedOut: true });
     }, timeoutMs);
@@ -42,7 +44,7 @@ const conversationState = {
       createdAt: Date.now()
     };
     
-    console.log('[ConversationState] Set pending question:', options.prompt);
+    log.info('voice', '[ConversationState] Set pending question', { data: options.prompt });
   },
   
   /**
@@ -57,7 +59,7 @@ const conversationState = {
     clearTimeout(timeoutId);
     this.pendingQuestion = null;
     
-    console.log('[ConversationState] Resolved pending question with answer');
+    log.info('voice', '[ConversationState] Resolved pending question with answer');
     
     // Return routing info so answer goes back to correct agent
     resolve({ answer, agentId, taskId, field });
@@ -85,7 +87,7 @@ const conversationState = {
     this.clearPendingConfirmation();
     
     const timeoutId = setTimeout(() => {
-      console.log('[ConversationState] Pending confirmation timed out');
+      log.info('voice', '[ConversationState] Pending confirmation timed out');
       this.pendingConfirmation = null;
       resolve({ confirmed: false, timedOut: true });
     }, timeoutMs);
@@ -98,7 +100,7 @@ const conversationState = {
       createdAt: Date.now()
     };
     
-    console.log('[ConversationState] Set pending confirmation:', action, dangerous ? '(DANGEROUS)' : '');
+    log.info('voice', '[ConversationState] Set pending confirmation', { action, dangerous });
   },
   
   /**
@@ -113,7 +115,7 @@ const conversationState = {
     clearTimeout(timeoutId);
     this.pendingConfirmation = null;
     
-    console.log('[ConversationState] Resolved confirmation:', confirmed ? 'YES' : 'NO');
+    log.info('voice', '[ConversationState] Resolved confirmation', { data: confirmed ? 'YES' : 'NO' });
     
     resolve({ confirmed });
     return { action, dangerous, confirmed };
@@ -144,7 +146,7 @@ const conversationState = {
       this.recentContext.pop();
     }
     
-    console.log('[ConversationState] Added context, now have', this.recentContext.length, 'items');
+    log.info('voice', '[ConversationState] Added context, now have', { arg0: this.recentContext.length, arg1: 'items' });
   },
   
   /**
@@ -162,7 +164,7 @@ const conversationState = {
     this.clearPendingQuestion();
     this.clearPendingConfirmation();
     // Keep recentContext for potential follow-ups after cancel
-    console.log('[ConversationState] Cleared pending state');
+    log.info('voice', '[ConversationState] Cleared pending state');
   },
   
   /**
@@ -171,7 +173,7 @@ const conversationState = {
   clearAll() {
     this.clear();
     this.recentContext = [];
-    console.log('[ConversationState] Cleared all state');
+    log.info('voice', '[ConversationState] Cleared all state');
   },
   
   /**

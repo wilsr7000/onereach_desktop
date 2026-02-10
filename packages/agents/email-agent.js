@@ -14,6 +14,9 @@
 const { getAgentMemory } = require('../../lib/agent-memory-store');
 const { getTimeContext, learnFromInteraction } = require('../../lib/thinking-agent');
 const { getCircuit } = require('./circuit-breaker');
+const ai = require('../../lib/ai-service');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 
 // Circuit breaker for AI calls
 const emailCircuit = getCircuit('email-agent-ai', {
@@ -26,20 +29,6 @@ const emailCircuit = getCircuit('email-agent-ai', {
 const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 /**
- * Get OpenAI API key
- */
-function getOpenAIApiKey() {
-  if (global.settingsManager) {
-    const openaiKey = global.settingsManager.get('openaiApiKey');
-    if (openaiKey) return openaiKey;
-    const provider = global.settingsManager.get('llmProvider');
-    const llmKey = global.settingsManager.get('llmApiKey');
-    if (provider === 'openai' && llmKey) return llmKey;
-  }
-  return process.env.OPENAI_API_KEY;
-}
-
-/**
  * AI-driven email request understanding
  * Takes a raw user request and uses LLM to understand what they want
  * 
@@ -48,13 +37,6 @@ function getOpenAIApiKey() {
  * @returns {Promise<Object>} - { action, parameters, message, needsClarification?, clarificationPrompt? }
  */
 async function aiUnderstandEmailRequest(userRequest, context) {
-  const apiKey = getOpenAIApiKey();
-  
-  if (!apiKey) {
-    console.log('[EmailAgent] No API key, cannot use LLM');
-    return null;
-  }
-  
   const { partOfDay, memory, emailSummary, conversationHistory } = context;
 
   const systemPrompt = `You are an AI assistant helping understand email requests. Interpret what the user wants to do.
@@ -105,53 +87,24 @@ What email action does the user want?`;
 
   try {
     const result = await emailCircuit.execute(async () => {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt }
-          ],
-          temperature: 0.3,
-          max_tokens: 300,
-          response_format: { type: 'json_object' }
-        })
+      return await ai.chat({
+        profile: 'fast',
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+        temperature: 0.3,
+        maxTokens: 300,
+        jsonMode: true,
+        feature: 'email-agent'
       });
-      
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status}`);
-      }
-      
-      return response.json();
     });
     
-    const content = result.choices?.[0]?.message?.content;
-    if (!content) {
-      throw new Error('No content in AI response');
-    }
-    
-    const parsed = JSON.parse(content);
-    console.log('[EmailAgent] AI understood request:', parsed.reasoning);
-    
-    // Track cost
-    if (global.budgetManager) {
-      global.budgetManager.trackUsage({
-        model: 'gpt-4o-mini',
-        inputTokens: result.usage?.prompt_tokens || 0,
-        outputTokens: result.usage?.completion_tokens || 0,
-        feature: 'email-agent-understanding'
-      });
-    }
+    const parsed = JSON.parse(result.content);
+    log.info('agent', 'AI understood request', { reasoning: parsed.reasoning });
     
     return parsed;
     
   } catch (error) {
-    console.warn('[EmailAgent] AI understanding failed:', error.message);
+    log.warn('agent', 'AI understanding failed', { error: error.message });
     return null;
   }
 }
@@ -166,6 +119,35 @@ const emailAgent = {
   
   // Empty keywords - using semantic LLM prompts only (per project rules)
   keywords: [],
+  executionType: 'action',  // Needs email API for data and sending
+  estimatedExecutionMs: 5000,  // Email API polling
+  dataSources: ['email-api'],
+  
+  /**
+   * Briefing contribution: unread email summary.
+   * Priority 4 = appears after calendar in the daily brief.
+   */
+  async getBriefing() {
+    try {
+      // Use cached email state if available (background polling keeps it fresh)
+      const summary = this._cachedEmailSummary || null;
+      if (summary) {
+        return {
+          section: 'Email',
+          priority: 4,
+          content: summary,
+        };
+      }
+      // Try a quick inbox check
+      const result = await this.execute({ content: 'check inbox summary', metadata: { briefingMode: true } });
+      if (result && result.success && result.message) {
+        return { section: 'Email', priority: 4, content: result.message };
+      }
+    } catch (e) {
+      // Email unavailable
+    }
+    return { section: 'Email', priority: 4, content: null };
+  },
   
   // Prompt for LLM evaluation (semantic, no keywords/regex)
   prompt: `Email Assistant handles ALL email communications with data-aware context.
@@ -270,7 +252,7 @@ CRITICAL: Any request about email, inbox, messages, compose, send, or reply belo
       return; // Already running
     }
     
-    console.log('[EmailAgent] Starting background polling (every 5 minutes)');
+    log.info('agent', 'Starting background polling (every 5 minutes)');
     
     // Initial fetch
     this._refreshCache();
@@ -288,7 +270,7 @@ CRITICAL: Any request about email, inbox, messages, compose, send, or reply belo
     if (this._pollInterval) {
       clearInterval(this._pollInterval);
       this._pollInterval = null;
-      console.log('[EmailAgent] Background polling stopped');
+      log.info('agent', 'Background polling stopped');
     }
   },
   
@@ -297,7 +279,7 @@ CRITICAL: Any request about email, inbox, messages, compose, send, or reply belo
    */
   async _refreshCache() {
     try {
-      console.log('[EmailAgent] Refreshing email cache...');
+      log.info('agent', 'Refreshing email cache...');
       
       // Fetch email summary from API (stub for now)
       const summary = await this._tools.getEmailSummary();
@@ -309,86 +291,16 @@ CRITICAL: Any request about email, inbox, messages, compose, send, or reply belo
         lastFetch: Date.now()
       };
       
-      console.log(`[EmailAgent] Cache updated: ${this._cache.unreadCount} unread, ${this._cache.urgentEmails.length} urgent`);
+      log.info('agent', `Cache updated: ${this._cache.unreadCount} unread, ${this._cache.urgentEmails.length} urgent`);
       
     } catch (error) {
-      console.error('[EmailAgent] Failed to refresh cache:', error.message);
+      log.error('agent', 'Failed to refresh cache', { error: error.message });
       // Keep stale cache rather than clearing
     }
   },
   
-  // ==================== DATA-AWARE BIDDING ====================
-  
-  /**
-   * Bid on a task - uses cached data for context-aware bidding
-   * 
-   * This is the key innovation: we check our cache to see if we have
-   * relevant data before bidding. "Anything urgent?" only gets a high
-   * bid if we actually HAVE urgent emails.
-   * 
-   * @param {Object} task - The task to bid on
-   * @returns {Object|null} - { confidence, reasoning } or null to defer to unified bidder
-   */
-  bid(task) {
-    const content = (task.content || task.phrase || '').toLowerCase();
-    
-    // Quick check: is this even email-related?
-    const emailSignals = ['email', 'mail', 'inbox', 'message', 'urgent', 'important', 'compose', 'send', 'reply'];
-    const hasEmailSignal = emailSignals.some(s => content.includes(s));
-    
-    // If no email signals, let unified bidder handle
-    if (!hasEmailSignal) {
-      return null;
-    }
-    
-    // Data-aware bidding based on cache
-    const { unreadCount, urgentEmails } = this._cache;
-    
-    // "Anything urgent?" type queries - bid based on actual data
-    if (content.includes('urgent') || content.includes('important') || content.includes('priority')) {
-      if (urgentEmails.length > 0) {
-        return {
-          confidence: 0.90,
-          reasoning: `${urgentEmails.length} urgent email${urgentEmails.length > 1 ? 's' : ''} waiting`
-        };
-      } else {
-        // We're the right agent, but nothing urgent - still claim it but lower confidence
-        return {
-          confidence: 0.70,
-          reasoning: 'Email agent - no urgent emails currently'
-        };
-      }
-    }
-    
-    // "Check email" type queries - bid based on unread count
-    if (content.includes('check') || content.includes('inbox') || content.includes('unread')) {
-      if (unreadCount > 0) {
-        return {
-          confidence: 0.85,
-          reasoning: `${unreadCount} unread email${unreadCount > 1 ? 's' : ''} in inbox`
-        };
-      } else {
-        return {
-          confidence: 0.75,
-          reasoning: 'Email agent - inbox is clear'
-        };
-      }
-    }
-    
-    // Compose/send/reply - always high confidence
-    if (content.includes('compose') || content.includes('send') || content.includes('reply') || content.includes('email')) {
-      return {
-        confidence: 0.85,
-        reasoning: 'Email composition/action request'
-      };
-    }
-    
-    // Generic email query
-    return {
-      confidence: 0.75,
-      reasoning: 'Email-related query'
-    };
-  },
+  // No bid() method. Routing is 100% LLM-based via unified-bidder.js.
+  // NEVER add keyword/regex bidding here. See .cursorrules.
   
   // ==================== EXECUTION ====================
   
@@ -408,7 +320,7 @@ CRITICAL: Any request about email, inbox, messages, compose, send, or reply belo
       // ==================== MULTI-TURN STATE HANDLING ====================
       // Check if this is a follow-up response to a previous needsInput
       if (task.context?.originalRequest && task.context?.partialUnderstanding) {
-        console.log('[EmailAgent] Handling follow-up clarification');
+        log.info('agent', 'Handling follow-up clarification');
         return this._handleClarificationResponse(task, context);
       }
       
@@ -448,7 +360,7 @@ CRITICAL: Any request about email, inbox, messages, compose, send, or reply belo
       return this._fallbackResponse(content);
       
     } catch (error) {
-      console.error('[EmailAgent] Error:', error);
+      log.error('agent', 'Error', { error });
       return {
         success: false,
         message: "I couldn't access your email right now. The email service may not be connected."
@@ -464,7 +376,7 @@ CRITICAL: Any request about email, inbox, messages, compose, send, or reply belo
     const originalRequest = task.context?.originalRequest;
     const partialUnderstanding = task.context?.partialUnderstanding;
     
-    console.log(`[EmailAgent] Original: "${originalRequest}", Clarification: "${userResponse}"`);
+    log.info('agent', `Original: "${originalRequest}", Clarification: "${userResponse}"`);
     
     // Build context for AI understanding with combined info
     const aiContext = {
@@ -803,7 +715,7 @@ CRITICAL: Any request about email, inbox, messages, compose, send, or reply belo
      */
     async getEmailSummary() {
       // TODO: Connect to real email API (Gmail, Outlook, etc.)
-      console.log('[EmailAgent] getEmailSummary() - STUB returning mock data');
+      log.info('agent', 'getEmailSummary() - STUB returning mock data');
       return {
         connected: false,
         unreadCount: 0,
@@ -817,7 +729,7 @@ CRITICAL: Any request about email, inbox, messages, compose, send, or reply belo
      * STUB: Returns mock data until email API connected
      */
     async getUrgentEmails() {
-      console.log('[EmailAgent] getUrgentEmails() - STUB returning mock data');
+      log.info('agent', 'getUrgentEmails() - STUB returning mock data');
       return {
         connected: false,
         urgentEmails: [],
@@ -830,7 +742,7 @@ CRITICAL: Any request about email, inbox, messages, compose, send, or reply belo
      * STUB: Returns mock data until email API connected
      */
     async readEmails({ count = 10, from, unreadOnly = false }) {
-      console.log(`[EmailAgent] readEmails(count=${count}, unreadOnly=${unreadOnly}) - STUB`);
+      log.info('agent', `readEmails(count=${count}, unreadOnly=${unreadOnly}) - STUB`);
       return {
         connected: false,
         emails: [],
@@ -843,7 +755,7 @@ CRITICAL: Any request about email, inbox, messages, compose, send, or reply belo
      * STUB: Returns mock data until email API connected
      */
     async searchEmails({ query, from, subject }) {
-      console.log(`[EmailAgent] searchEmails(query="${query}") - STUB`);
+      log.info('agent', `searchEmails(query="${query}") - STUB`);
       return {
         connected: false,
         emails: [],
@@ -856,7 +768,7 @@ CRITICAL: Any request about email, inbox, messages, compose, send, or reply belo
      * STUB: Returns success message until email API connected
      */
     async composeEmail({ to, subject, body }) {
-      console.log(`[EmailAgent] composeEmail(to="${to}", subject="${subject}") - STUB`);
+      log.info('agent', `composeEmail(to="${to}", subject="${subject}") - STUB`);
       return {
         success: true,
         message: `Email draft created for ${to || 'recipient'}. Connect email provider in Settings to send.`,
@@ -869,7 +781,7 @@ CRITICAL: Any request about email, inbox, messages, compose, send, or reply belo
      * STUB: Returns success message until email API connected
      */
     async sendEmail({ to, subject, body }) {
-      console.log(`[EmailAgent] sendEmail(to="${to}", subject="${subject}") - STUB`);
+      log.info('agent', `sendEmail(to="${to}", subject="${subject}") - STUB`);
       return {
         success: true,
         message: `Email to ${to || 'recipient'} queued. Connect email provider in Settings to actually send.`
@@ -881,7 +793,7 @@ CRITICAL: Any request about email, inbox, messages, compose, send, or reply belo
      * STUB: Returns success message until email API connected
      */
     async replyToEmail({ emailId, body }) {
-      console.log(`[EmailAgent] replyToEmail(emailId="${emailId}") - STUB`);
+      log.info('agent', `replyToEmail(emailId="${emailId}") - STUB`);
       return {
         success: true,
         message: 'Reply drafted. Connect email provider in Settings to send.'
@@ -893,7 +805,7 @@ CRITICAL: Any request about email, inbox, messages, compose, send, or reply belo
      * STUB: Returns success message until email API connected
      */
     async createDraft({ to, subject, body }) {
-      console.log(`[EmailAgent] createDraft(to="${to}", subject="${subject}") - STUB`);
+      log.info('agent', `createDraft(to="${to}", subject="${subject}") - STUB`);
       return {
         success: true,
         message: 'Draft saved locally. Connect email provider in Settings for cloud sync.',
@@ -906,7 +818,7 @@ CRITICAL: Any request about email, inbox, messages, compose, send, or reply belo
      * STUB: Returns 0 until email API connected
      */
     async getUnreadCount() {
-      console.log('[EmailAgent] getUnreadCount() - STUB');
+      log.info('agent', 'getUnreadCount() - STUB');
       return {
         connected: false,
         count: 0
@@ -921,7 +833,7 @@ CRITICAL: Any request about email, inbox, messages, compose, send, or reply belo
    */
   cleanup() {
     this._stopPolling();
-    console.log('[EmailAgent] Cleaned up');
+    log.info('agent', 'Cleaned up');
   }
 };
 

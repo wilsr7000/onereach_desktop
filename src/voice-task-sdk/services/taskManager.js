@@ -11,6 +11,19 @@
  * - Bulk operations
  */
 
+// Structured logging (safe for browser context where require may not exist)
+let log;
+try {
+  const { getLogQueue } = require('../../../lib/log-event-queue');
+  log = getLogQueue();
+} catch (e) {
+  log = {
+    info: (cat, msg, data) => console.log(`[${cat}] ${msg}`, data || ''),
+    warn: (cat, msg, data) => console.warn(`[${cat}] ${msg}`, data || ''),
+    error: (cat, msg, data) => console.error(`[${cat}] ${msg}`, data || '')
+  };
+}
+
 class TaskManager {
   constructor(options = {}) {
     this.storageKey = options.storageKey || 'onereach-tasks'
@@ -30,7 +43,7 @@ class TaskManager {
       const stored = localStorage.getItem(this.storageKey)
       return stored ? JSON.parse(stored) : []
     } catch (error) {
-      console.error('[TaskManager] Failed to load tasks:', error)
+      log.error('voice', '[TaskManager] Failed to load tasks', { error: error })
       return []
     }
   }
@@ -48,7 +61,7 @@ class TaskManager {
         this.syncToSpaces()
       }
     } catch (error) {
-      console.error('[TaskManager] Failed to save tasks:', error)
+      log.error('voice', '[TaskManager] Failed to save tasks', { error: error })
     }
   }
 
@@ -82,7 +95,7 @@ class TaskManager {
     this.tasks.push(task)
     this.saveTasks()
     
-    console.log('[TaskManager] Task added:', task.id)
+    log.info('voice', '[TaskManager] Task added', { data: task.id })
     return task
   }
 
@@ -154,7 +167,7 @@ class TaskManager {
   update(id, updates) {
     const task = this.get(id)
     if (!task) {
-      console.warn('[TaskManager] Task not found:', id)
+      log.warn('voice', '[TaskManager] Task not found', { data: id })
       return null
     }
 
@@ -175,7 +188,7 @@ class TaskManager {
 
     this.saveTasks()
     
-    console.log('[TaskManager] Task updated:', id)
+    log.info('voice', '[TaskManager] Task updated', { data: id })
     return task
   }
 
@@ -187,14 +200,14 @@ class TaskManager {
   delete(id) {
     const index = this.tasks.findIndex(task => task.id === id)
     if (index === -1) {
-      console.warn('[TaskManager] Task not found:', id)
+      log.warn('voice', '[TaskManager] Task not found', { data: id })
       return false
     }
 
     this.tasks.splice(index, 1)
     this.saveTasks()
     
-    console.log('[TaskManager] Task deleted:', id)
+    log.info('voice', '[TaskManager] Task deleted', { data: id })
     return true
   }
 
@@ -389,10 +402,10 @@ class TaskManager {
       this.tasks.push(...newTasks)
       this.saveTasks()
 
-      console.log('[TaskManager] Imported', newTasks.length, 'tasks')
+      log.info('voice', '[TaskManager] Imported', newTasks.length, 'tasks')
       return true
     } catch (error) {
-      console.error('[TaskManager] Import failed:', error)
+      log.error('voice', '[TaskManager] Import failed', { error: error })
       return false
     }
   }
@@ -403,7 +416,7 @@ class TaskManager {
   clear() {
     this.tasks = []
     this.saveTasks()
-    console.log('[TaskManager] All tasks cleared')
+    log.info('voice', '[TaskManager] All tasks cleared')
   }
 
   /**
@@ -423,9 +436,9 @@ class TaskManager {
         spaceId: 'default'
       })
 
-      console.log('[TaskManager] Synced to Spaces')
+      log.info('voice', '[TaskManager] Synced to Spaces')
     } catch (error) {
-      console.error('[TaskManager] Spaces sync failed:', error)
+      log.error('voice', '[TaskManager] Spaces sync failed', { error: error })
     }
   }
 
@@ -441,10 +454,10 @@ class TaskManager {
 
       if (note && note.content) {
         this.import(note.content)
-        console.log('[TaskManager] Loaded from Spaces')
+        log.info('voice', '[TaskManager] Loaded from Spaces')
       }
     } catch (error) {
-      console.error('[TaskManager] Failed to load from Spaces:', error)
+      log.error('voice', '[TaskManager] Failed to load from Spaces', { error: error })
     }
   }
 }

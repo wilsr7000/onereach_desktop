@@ -166,7 +166,7 @@ export class LineScriptAI {
       this.chunks.push(currentChunk);
     }
     
-    console.log(`[LineScriptAI] Created ${this.chunks.length} chunks from ${words.length} words`);
+    window.logging.info('video', `LineScriptAI Created ${this.chunks.length} chunks from ${words.length} words`);
     
     return this.chunks;
   }
@@ -223,7 +223,7 @@ export class LineScriptAI {
    */
   async startProcessing() {
     if (this.isProcessing) {
-      console.warn('[LineScriptAI] Already processing');
+      window.logging.warn('video', 'LineScriptAI Already processing');
       return;
     }
     
@@ -311,7 +311,7 @@ export class LineScriptAI {
         try {
           frameBase64 = await window.videoEditor.captureFrameAtTime(snapshotTime);
         } catch (e) {
-          console.warn('[LineScriptAI] Failed to capture frame:', e);
+          window.logging.warn('video', 'LineScriptAI Failed to capture frame', { data: e });
         }
       }
       
@@ -373,7 +373,7 @@ export class LineScriptAI {
       return result;
       
     } catch (error) {
-      console.error('[LineScriptAI] Chunk processing error:', error);
+      window.logging.error('video', 'LineScriptAI Chunk processing error', { error: error.message || error });
       
       // Return basic result without AI analysis
       return {
@@ -450,7 +450,7 @@ Provide analysis in JSON format with these fields:
           suggestedMarkers: []
         };
       } catch (e) {
-        console.warn('[LineScriptAI] Text analysis fallback error:', e);
+        window.logging.warn('video', 'LineScriptAI Text analysis fallback error', { data: e });
       }
     }
     
@@ -702,7 +702,7 @@ Provide analysis in JSON format with these fields:
       }
     });
     
-    console.log(`[LineScriptAI] Applied ${this.results.length} results to markers`);
+    window.logging.info('video', `LineScriptAI Applied ${this.results.length} results to markers`);
   }
 
   // Event emitter methods

@@ -7,6 +7,8 @@
  * - Gap/insert segments (green, dashed)
  * - Duration comparison (original vs new)
  */
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 export class MiniTimeline {
   constructor(appContext) {
     this.app = appContext;
@@ -27,7 +29,7 @@ export class MiniTimeline {
   init() {
     this.container = document.getElementById('storyBeatsMiniTimeline');
     if (!this.container) {
-      console.warn('[MiniTimeline] Container not found');
+      log.warn('video', '[MiniTimeline] Container not found');
       return;
     }
     

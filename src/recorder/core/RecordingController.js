@@ -3,6 +3,8 @@
  * @module src/recorder/core/RecordingController
  */
 
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 /**
  * Recording controller class
  */
@@ -67,7 +69,7 @@ export class RecordingController {
     
     this.startDurationTracking();
 
-    console.log('[RecordingController] Started recording');
+    log.info('recorder', '[RecordingController] Started recording');
   }
 
   /**
@@ -86,7 +88,7 @@ export class RecordingController {
 
     for (const type of types) {
       if (MediaRecorder.isTypeSupported(type)) {
-        console.log('[RecordingController] Using MIME type:', type);
+        log.info('recorder', '[RecordingController] Using MIME type', { data: type });
         return type;
       }
     }
@@ -101,7 +103,7 @@ export class RecordingController {
     if (this.mediaRecorder && this.isRecording && !this.isPaused) {
       this.mediaRecorder.pause();
       this.isPaused = true;
-      console.log('[RecordingController] Paused');
+      log.info('recorder', '[RecordingController] Paused');
     }
   }
 
@@ -112,7 +114,7 @@ export class RecordingController {
     if (this.mediaRecorder && this.isRecording && this.isPaused) {
       this.mediaRecorder.resume();
       this.isPaused = false;
-      console.log('[RecordingController] Resumed');
+      log.info('recorder', '[RecordingController] Resumed');
     }
   }
 
@@ -133,7 +135,7 @@ export class RecordingController {
         this.isPaused = false;
         
         const blob = this.getBlob();
-        console.log('[RecordingController] Stopped, size:', blob.size);
+        log.info('recorder', '[RecordingController] Stopped, size', { data: blob.size });
         
         if (this.onStop) {
           this.onStop(blob);

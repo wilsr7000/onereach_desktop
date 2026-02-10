@@ -3,11 +3,13 @@
  * 
  * Records audio chunks and sends them to the Whisper API for transcription.
  * Used as a fallback when Realtime API is unavailable or for longer recordings.
+ * 
+ * Preferred: provide config.transcribeFn (from window.ai.transcribe) to route
+ * through the centralized ai-service with retry, fallback, and cost tracking.
  */
 
 import type { SpeechService, WhisperConfig, VoiceState } from '../types'
 
-const WHISPER_API_URL = 'https://api.openai.com/v1/audio/transcriptions'
 const DEFAULT_MODEL = 'whisper-1'
 
 export function createWhisperSpeechService(config: WhisperConfig): SpeechService {
@@ -22,6 +24,7 @@ export function createWhisperSpeechService(config: WhisperConfig): SpeechService
     chunkDurationMs = 5000,
     minChunkDurationMs = 1000,
     maxSilenceMs = 2000,
+    transcribeFn,
   } = config
 
   let mediaStream: MediaStream | null = null
@@ -57,26 +60,23 @@ export function createWhisperSpeechService(config: WhisperConfig): SpeechService
     updateState({ status: 'processing' })
 
     try {
-      const formData = new FormData()
-      formData.append('file', audioBlob, 'audio.webm')
-      formData.append('model', model)
-      formData.append('language', language)
-      formData.append('response_format', 'json')
+      let result: { text: string }
 
-      const response = await fetch(WHISPER_API_URL, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-        },
-        body: formData,
-      })
-
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: { message: 'Unknown error' } }))
-        throw new Error(error.error?.message || `HTTP ${response.status}`)
+      if (transcribeFn) {
+        // Preferred: use IPC-proxied transcription via centralized ai-service
+        const arrayBuffer = await audioBlob.arrayBuffer()
+        result = await transcribeFn(arrayBuffer, { language, filename: 'audio.webm' })
+      } else if (typeof window !== 'undefined' && (window as any).ai?.transcribe) {
+        // Fallback: use window.ai.transcribe IPC bridge
+        console.warn('[whisperSpeech] Using window.ai.transcribe fallback. Provide config.transcribeFn for best results.')
+        const arrayBuffer = await audioBlob.arrayBuffer()
+        result = await (window as any).ai.transcribe(arrayBuffer, { language, filename: 'audio.webm' })
+      } else {
+        throw new Error(
+          '[whisperSpeech] No transcription method available. ' +
+          'Provide config.transcribeFn or ensure window.ai.transcribe is available via preload.'
+        )
       }
-
-      const result = await response.json()
 
       if (result.text) {
         onTranscript?.(result.text.trim(), true)

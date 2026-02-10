@@ -10,6 +10,8 @@
  */
 
 const EventEmitter = require('events');
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 // Notification priorities
 const PRIORITY = {
@@ -60,7 +62,7 @@ class NotificationManager extends EventEmitter {
     const delay = options.delay || (options.at ? options.at.getTime() - Date.now() : 0);
     
     if (delay < 0) {
-      console.log(`[NotificationManager] Notification "${id}" scheduled in past, delivering now`);
+      log.info('voice', '[NotificationManager] Notification "" scheduled in past, delivering now', { v0: id });
     }
     
     const notification = {
@@ -78,7 +80,7 @@ class NotificationManager extends EventEmitter {
     
     this.scheduled.set(id, { timeout, notification });
     
-    console.log(`[NotificationManager] Scheduled "${id}" in ${delay}ms (priority: ${priority})`);
+    log.info('voice', '[NotificationManager] Scheduled "" in ms (priority: )', { v0: id, v1: delay, v2: priority });
     
     return true;
   }
@@ -141,7 +143,7 @@ class NotificationManager extends EventEmitter {
         entry.notification.onCancelled();
       }
       
-      console.log(`[NotificationManager] Cancelled "${id}"`);
+      log.info('voice', '[NotificationManager] Cancelled ""', { v0: id });
       return true;
     }
     
@@ -187,7 +189,7 @@ class NotificationManager extends EventEmitter {
       this.doDeliver(notification);
     } else {
       // Queue for later
-      console.log(`[NotificationManager] Queueing "${notification.id}" (DND or active conversation)`);
+      log.info('voice', '[NotificationManager] Queueing "" (DND or active conversation)', { v0: notification.id });
       this.pendingQueue.push(notification);
       this.pendingQueue.sort((a, b) => b.priority - a.priority);
     }
@@ -230,7 +232,7 @@ class NotificationManager extends EventEmitter {
    * @param {Object} notification 
    */
   doDeliver(notification) {
-    console.log(`[NotificationManager] Delivering "${notification.id}": ${notification.message}`);
+    log.info('voice', '[NotificationManager] Delivering "":', { v0: notification.id, v1: notification.message });
     
     this.emit('notify', {
       id: notification.id,
@@ -272,7 +274,7 @@ class NotificationManager extends EventEmitter {
   enableDND(duration = null) {
     this.doNotDisturb = true;
     this.dndEndTime = duration ? Date.now() + duration : null;
-    console.log(`[NotificationManager] DND enabled${duration ? ` for ${duration}ms` : ''}`);
+    log.info('voice', `[NotificationManager] DND enabled${duration ? ` for ${duration}ms` : ''}`);
   }
 
   /**
@@ -281,7 +283,7 @@ class NotificationManager extends EventEmitter {
   disableDND() {
     this.doNotDisturb = false;
     this.dndEndTime = null;
-    console.log(`[NotificationManager] DND disabled`);
+    log.info('voice', '[NotificationManager] DND disabled');
     
     // Try to deliver pending
     this.deliverPending();

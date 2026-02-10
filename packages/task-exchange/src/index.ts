@@ -57,7 +57,9 @@ const DEFAULT_CONFIG: Omit<ExchangeConfig, 'categories'> = {
     instantWinThreshold: 0.85,
     dominanceMargin: 0.3,
     maxAuctionAttempts: 3,
-    executionTimeoutMs: 30000,
+    executionTimeoutMs: 120000,
+    ackTimeoutMs: 10000,
+    heartbeatExtensionMs: 30000,
   },
   reputation: {
     initialScore: 1.0,

@@ -3,6 +3,8 @@
  * @module src/agentic-player/core/SessionManager
  */
 
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 /**
  * Generate unique session ID
  * @returns {string} Session ID
@@ -50,7 +52,7 @@ export class SessionManager {
       watchedIds: []
     };
 
-    console.log(`[SessionManager] Started: ${this.session.id}`);
+    log.info('agent', '[SessionManager] Started:', { v0: this.session.id });
     return this.session;
   }
 
@@ -60,7 +62,7 @@ export class SessionManager {
    */
   end(reason = 'Session ended') {
     this.session.active = false;
-    console.log(`[SessionManager] Ended: ${reason}`);
+    log.info('agent', '[SessionManager] Ended:', { v0: reason });
   }
 
   /**

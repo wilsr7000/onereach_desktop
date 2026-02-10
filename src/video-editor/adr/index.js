@@ -46,7 +46,7 @@ export function initADRModule(appContext) {
   // Patch renderAudioTrack to auto-attach context menu to new tracks
   _patchRenderAudioTrack(appContext, trackContextMenu);
   
-  console.log('[ADR Module] Initialized');
+  window.logging.info('video', 'ADR Module Initialized');
   
   return {
     adrManager,

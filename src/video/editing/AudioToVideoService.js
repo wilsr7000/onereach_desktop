@@ -9,6 +9,8 @@ import path from 'path';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { app } = require('electron');
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 /**
  * Service for creating videos from audio files
@@ -48,12 +50,12 @@ export class AudioToVideoService {
     const output = outputPath || path.join(this.outputDir, `${baseName}_video.mp4`);
     const jobId = `audio2video_${Date.now()}`;
 
-    console.log(`[AudioToVideoService] Creating video from audio: ${audioPath}`);
-    console.log(`[AudioToVideoService] Type: ${type}, Resolution: ${resolution}`);
+    log.info('video', '[AudioToVideoService] Creating video from audio:', { v0: audioPath });
+    log.info('video', '[AudioToVideoService] Type: , Resolution:', { v0: type, v1: resolution });
 
     // Get audio duration first
     const duration = await this.getAudioDuration(audioPath);
-    console.log(`[AudioToVideoService] Audio duration: ${duration}s`);
+    log.info('video', '[AudioToVideoService] Audio duration: s', { v0: duration });
 
     try {
       switch (type) {
@@ -87,7 +89,7 @@ export class AudioToVideoService {
           throw new Error(`Unknown video type: ${type}`);
       }
     } catch (error) {
-      console.error('[AudioToVideoService] Error:', error);
+      log.error('video', '[AudioToVideoService] Error', { error: error });
       throw error;
     }
   }
@@ -133,7 +135,7 @@ export class AudioToVideoService {
         ])
         .output(outputPath)
         .on('start', (cmd) => {
-          console.log('[AudioToVideoService] FFmpeg command:', cmd);
+          log.info('video', '[AudioToVideoService] FFmpeg command', { data: cmd });
           this.activeJobs.set(jobId, command);
         })
         .on('progress', (progress) => {
@@ -146,7 +148,7 @@ export class AudioToVideoService {
         })
         .on('end', () => {
           this.activeJobs.delete(jobId);
-          console.log('[AudioToVideoService] Video created:', outputPath);
+          log.info('video', '[AudioToVideoService] Video created', { data: outputPath });
           resolve({
             success: true,
             outputPath,
@@ -194,7 +196,7 @@ export class AudioToVideoService {
         ])
         .output(outputPath)
         .on('start', (cmd) => {
-          console.log('[AudioToVideoService] FFmpeg command:', cmd);
+          log.info('video', '[AudioToVideoService] FFmpeg command', { data: cmd });
           this.activeJobs.set(jobId, command);
         })
         .on('progress', (progress) => {
@@ -207,7 +209,7 @@ export class AudioToVideoService {
         })
         .on('end', () => {
           this.activeJobs.delete(jobId);
-          console.log('[AudioToVideoService] Video created:', outputPath);
+          log.info('video', '[AudioToVideoService] Video created', { data: outputPath });
           resolve({
             success: true,
             outputPath,
@@ -246,7 +248,7 @@ export class AudioToVideoService {
     const imageCount = imagePaths.length;
     const displayTime = duration / imageCount;
     
-    console.log(`[AudioToVideoService] Creating slideshow: ${imageCount} images, ${displayTime.toFixed(2)}s each`);
+    log.info('video', '[AudioToVideoService] Creating slideshow: images, s each', { v0: imageCount, v1: displayTime.toFixed(2) });
 
     // Create concat file for slideshow
     const concatFile = path.join(this.outputDir, `slideshow_${jobId}.txt`);
@@ -278,7 +280,7 @@ export class AudioToVideoService {
         ])
         .output(outputPath)
         .on('start', (cmd) => {
-          console.log('[AudioToVideoService] FFmpeg command:', cmd);
+          log.info('video', '[AudioToVideoService] FFmpeg command', { data: cmd });
           this.activeJobs.set(jobId, command);
         })
         .on('progress', (progress) => {
@@ -293,7 +295,7 @@ export class AudioToVideoService {
           this.activeJobs.delete(jobId);
           // Cleanup temp file
           try { fs.unlinkSync(concatFile); } catch (e) {}
-          console.log('[AudioToVideoService] Slideshow created:', outputPath);
+          log.info('video', '[AudioToVideoService] Slideshow created', { data: outputPath });
           resolve({
             success: true,
             outputPath,

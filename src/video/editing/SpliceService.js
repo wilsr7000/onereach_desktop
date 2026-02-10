@@ -10,6 +10,8 @@ import path from 'path';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { app } = require('electron');
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 
 /**
  * Service for video splicing operations
@@ -108,7 +110,7 @@ export class SpliceService {
           .outputOptions(['-c', 'copy'])
           .output(output)
           .on('start', (cmd) => {
-            console.log('[SpliceService] Splice concatenation started:', cmd);
+            log.info('video', '[SpliceService] Splice concatenation started', { data: cmd });
             this.activeJobs.set(jobId, { cancel: () => {} });
           })
           .on('progress', (progress) => {
@@ -166,7 +168,7 @@ export class SpliceService {
         try {
           fs.unlinkSync(f);
         } catch (e) {
-          console.warn('[SpliceService] Failed to delete temp file:', f);
+          log.warn('video', '[SpliceService] Failed to delete temp file', { data: f });
         }
       }
     });

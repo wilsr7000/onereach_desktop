@@ -3,6 +3,22 @@ const path = require('path');
 const fs = require('fs');
 const { setApplicationMenu, refreshGSXLinks } = require('../menu');
 
+// Prefer MenuDataManager API when available, fall back to direct imports
+function rebuildMenu(idwEnvironments) {
+  if (global.menuDataManager) {
+    global.menuDataManager.rebuild(idwEnvironments);
+  } else {
+    setApplicationMenu(idwEnvironments);
+  }
+}
+function refreshLinks() {
+  if (global.menuDataManager) {
+    global.menuDataManager.refreshGSXLinks();
+  } else {
+    refreshGSXLinks();
+  }
+}
+
 // Test configuration
 const TEST_CONFIG = {
   // Test data directory
@@ -189,7 +205,7 @@ function setupIPCHandlers() {
       fs.writeFileSync(configPath, JSON.stringify(environments, null, 2));
       
       // Update menu
-      setApplicationMenu(environments);
+      rebuildMenu(environments);
       
       event.reply('idw-environments-saved', true);
       addTestResult('IPC: save-idw-environments', true, `Saved ${environments.length} environments`);
@@ -213,8 +229,8 @@ function setupIPCHandlers() {
         idwEnvironments = JSON.parse(data);
       }
       
-      setApplicationMenu(idwEnvironments);
-      refreshGSXLinks();
+      rebuildMenu(idwEnvironments);
+      refreshLinks();
       
       addTestResult('IPC: refresh-menu', true);
     } catch (error) {
@@ -425,7 +441,7 @@ async function runAllTests() {
     });
     
     // Set initial menu
-    setApplicationMenu(TEST_CONFIG.testEnvironments);
+    rebuildMenu(TEST_CONFIG.testEnvironments);
     
     // Create setup wizard window
     setupWizardWindow = new BrowserWindow({

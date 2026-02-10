@@ -6,6 +6,9 @@
  */
 
 const { getCircuit } = require('./circuit-breaker');
+const ai = require('../../lib/ai-service');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 
 // Circuit breaker for OpenAI API calls
 const openaiCircuit = getCircuit('openai-bidder', {
@@ -14,20 +17,6 @@ const openaiCircuit = getCircuit('openai-bidder', {
   windowMs: 60000
 });
 
-/**
- * Get OpenAI API key from app settings (same as realtime-speech.js)
- */
-function getOpenAIApiKey() {
-  if (global.settingsManager) {
-    const openaiKey = global.settingsManager.get('openaiApiKey');
-    if (openaiKey) return openaiKey;
-    
-    const provider = global.settingsManager.get('llmProvider');
-    const llmKey = global.settingsManager.get('llmApiKey');
-    if (provider === 'openai' && llmKey) return llmKey;
-  }
-  return process.env.OPENAI_API_KEY;
-}
 
 // Agent capability definitions
 const AGENT_CAPABILITIES = {
@@ -124,51 +113,32 @@ async function getAgentBid(agentId, capabilities, task) {
     return null; // Quick reject - no relevant keywords
   }
   
-  // Get API key from app settings
-  const apiKey = getOpenAIApiKey();
-  if (!apiKey) {
-    console.error('[AgentBidder] OpenAI API key required - check Settings → LLM Settings');
-    return null;
-  }
-  
   try {
     // Use circuit breaker to protect against cascading failures
-    const data = await openaiCircuit.execute(async () => {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [
-            { role: 'system', content: buildBidderPrompt(agentId, capabilities) },
-            { role: 'user', content: JSON.stringify(task) }
-          ],
-          temperature: 0,
-          max_tokens: 200,
-          response_format: { type: 'json_object' }
-        })
+    const result = await openaiCircuit.execute(async () => {
+      return await ai.chat({
+        profile: 'fast',
+        system: buildBidderPrompt(agentId, capabilities),
+        messages: [
+          { role: 'user', content: JSON.stringify(task) }
+        ],
+        temperature: 0,
+        maxTokens: 200,
+        jsonMode: true,
+        feature: 'agent-bidder'
       });
-
-      if (!response.ok) {
-        throw new Error(`API error for ${agentId}`);
-      }
-
-      return response.json();
     });
 
-    const content = data.choices?.[0]?.message?.content;
+    const content = result.content;
     
     if (!content) {
       return null;
     }
 
-    return JSON.parse(content);
+    return typeof content === 'string' ? JSON.parse(content) : content;
 
   } catch (error) {
-    console.error(`[AgentBidder] ${agentId} error:`, error.message);
+    log.error('agent', `${agentId} error`, { error: error.message });
     return null;
   }
 }

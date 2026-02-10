@@ -13,13 +13,17 @@
 const WebSocket = require('ws');
 const { ipcMain, BrowserWindow } = require('electron');
 const { getBudgetManager } = require('./budget-manager');
+const { getAIService } = require('./lib/ai-service');
+const hudApi = require('./lib/hud-api');
+const { getLogQueue } = require('./lib/log-event-queue');
+const log = getLogQueue();
 
 class VoiceListener {
   constructor() {
     this.ws = null;
+    this.session = null;
     this.isConnected = false;
     this.sessionId = null;
-    this.apiKey = null;
     this.subscribers = new Map();
     this.audioBuffer = [];
     this.reconnectAttempts = 0;
@@ -35,78 +39,91 @@ class VoiceListener {
     this.pendingFunctionCallId = null;
     this.pendingFunctionItemId = null;
     
-    console.log('[VoiceListener] Initialized');
+    log.info('voice', 'Initialized')
   }
 
-  /**
-   * Get OpenAI API key from settings
-   */
-  getApiKey() {
-    if (this.apiKey) return this.apiKey;
-    
-    if (global.settingsManager) {
-      const openaiKey = global.settingsManager.get('openaiApiKey');
-      if (openaiKey) {
-        this.apiKey = openaiKey;
-        return this.apiKey;
-      }
-      
-      const provider = global.settingsManager.get('llmProvider');
-      const llmKey = global.settingsManager.get('llmApiKey');
-      
-      if (llmKey && (!provider || provider === 'openai')) {
-        this.apiKey = llmKey;
-        return this.apiKey;
-      }
-      
-      if (llmKey && llmKey.startsWith('sk-')) {
-        this.apiKey = llmKey;
-        return this.apiKey;
-      }
-    }
-    
-    return null;
-  }
-
-  /**
-   * Clear cached API key
-   */
-  clearApiKey() {
-    this.apiKey = null;
-  }
 
   /**
    * Connect to OpenAI Realtime API
    */
   async connect() {
-    this.apiKey = null;  // Refresh from settings
-    const apiKey = this.getApiKey();
-    if (!apiKey) {
-      throw new Error('OpenAI API key not found');
-    }
+    // #region agent log
+    this._connectSeq = (this._connectSeq || 0) + 1;
+    const _cSeq = this._connectSeq;
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'voice-listener.js:connect',message:'connect() called',data:{seq:_cSeq,hasWs:!!this.ws,isConnected:this.isConnected,sessionId:this.sessionId,subscriberCount:this.subscribers.size},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-RACE'})}).catch(()=>{});
+    // #endregion
 
     if (this.ws && this.isConnected) {
-      console.log('[VoiceListener] Already connected');
+      log.info('voice', 'Already connected')
       return true;
     }
 
     return new Promise((resolve, reject) => {
       try {
-        const url = 'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview';
+        log.info('voice', 'Connecting to OpenAI Realtime API...')
         
-        console.log('[VoiceListener] Connecting to OpenAI Realtime API...');
-        
-        this.ws = new WebSocket(url, {
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'OpenAI-Beta': 'realtime=v1'
-          }
+        const session = getAIService().realtime({
+          onMessage: (event) => this.handleEvent(event),
+          onError: (error) => {
+            log.error('voice', 'WebSocket error', { error: error.message })
+            this.isConnected = false;
+            reject(error);
+          },
+          onClose: (code, reason) => {
+            log.info('voice', 'Connection closed: ...', { code })
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'voice-listener.js:ws-close',message:'WebSocket close event fired',data:{seq:_cSeq,code,currentConnectSeq:this._connectSeq,wasConnected:this.isConnected,hadWs:!!this.ws,subscriberCount:this.subscribers.size},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-RACE'})}).catch(()=>{});
+            // #endregion
+            this.isConnected = false;
+            this.ws = null;
+            this.session = null;
+            
+            // Attempt reconnection for unexpected closures (not user-initiated)
+            // Code 1000 = normal close, 1005 = no status (server timeout)
+            const isUserInitiated = code === 1000;
+            const hasSubscribers = this.subscribers.size > 0;
+            
+            if (!isUserInitiated && hasSubscribers && this.reconnectAttempts < this.maxReconnectAttempts) {
+              this.reconnectAttempts++;
+              const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts - 1), 8000); // 1s, 2s, 4s
+              log.info('voice', `Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+              this.broadcast({ type: 'reconnecting', attempt: this.reconnectAttempts, delay });
+              
+              setTimeout(async () => {
+                if (this.subscribers.size === 0) {
+                  log.info('voice', 'Reconnect cancelled - no subscribers');
+                  return;
+                }
+                try {
+                  await this.connect();
+                  log.info('voice', 'Reconnected successfully');
+                  this.broadcast({ type: 'reconnected' });
+                } catch (err) {
+                  log.error('voice', 'Reconnect failed', { error: err.message, attempt: this.reconnectAttempts });
+                  // If all attempts exhausted, notify subscribers to reset
+                  if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+                    log.warn('voice', 'Max reconnect attempts reached - giving up');
+                    this.broadcast({ type: 'disconnected', code, permanent: true });
+                  }
+                }
+              }, delay);
+            } else {
+              this.broadcast({ type: 'disconnected', code });
+            }
+          },
         });
-
+        
+        this.ws = session.ws;
+        this.session = session;
+        
+        // Register open handler BEFORE connection completes (WebSocket may connect immediately)
         this.ws.on('open', () => {
-          console.log('[VoiceListener] Connected');
+          log.info('voice', 'Connected')
           this.isConnected = true;
           this.reconnectAttempts = 0;
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'voice-listener.js:ws-open',message:'WebSocket opened',data:{seq:_cSeq,wsIdentity:this.ws?._debugId||'unknown'},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-RACE'})}).catch(()=>{});
+          // #endregion
           
           // Configure session for transcription with function calling
           this.sendEvent({
@@ -150,30 +167,8 @@ ABSOLUTE RULES - NO EXCEPTIONS:
           resolve(true);
         });
 
-        this.ws.on('message', (data) => {
-          try {
-            const event = JSON.parse(data.toString());
-            this.handleEvent(event);
-          } catch (err) {
-            console.error('[VoiceListener] Error parsing message:', err);
-          }
-        });
-
-        this.ws.on('error', (error) => {
-          console.error('[VoiceListener] WebSocket error:', error.message);
-          this.isConnected = false;
-          reject(error);
-        });
-
-        this.ws.on('close', (code, reason) => {
-          console.log(`[VoiceListener] Connection closed: ${code}`);
-          this.isConnected = false;
-          this.ws = null;
-          this.broadcast({ type: 'disconnected', code });
-        });
-
       } catch (err) {
-        console.error('[VoiceListener] Connection error:', err);
+        log.error('voice', 'Connection error', { error: err.message || err })
         reject(err);
       }
     });
@@ -184,7 +179,10 @@ ABSOLUTE RULES - NO EXCEPTIONS:
    */
   sendEvent(event) {
     if (!this.ws || !this.isConnected) {
-      console.warn('[VoiceListener] Not connected');
+      // #region agent log
+      if (event.type !== 'input_audio_buffer.append') fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'voice-listener.js:sendEvent-fail',message:'sendEvent failed - not connected',data:{eventType:event.type,hasWs:!!this.ws,isConnected:this.isConnected,connectSeq:this._connectSeq},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-NOSEND'})}).catch(()=>{});
+      // #endregion
+      log.warn('voice', 'Not connected')
       return false;
     }
     
@@ -192,7 +190,7 @@ ABSOLUTE RULES - NO EXCEPTIONS:
       this.ws.send(JSON.stringify(event));
       return true;
     } catch (err) {
-      console.error('[VoiceListener] Error sending event:', err);
+      log.error('voice', 'Error sending event', { error: err.message || err })
       return false;
     }
   }
@@ -204,22 +202,34 @@ ABSOLUTE RULES - NO EXCEPTIONS:
     switch (event.type) {
       case 'session.created':
         this.sessionId = event.session?.id;
-        console.log('[VoiceListener] Session created:', this.sessionId);
+        log.info('voice', 'Session created', { sessionId: this.sessionId })
         this.broadcast({ type: 'session_created', sessionId: this.sessionId });
         break;
 
       case 'session.updated':
-        console.log('[VoiceListener] Session updated');
+        log.info('voice', 'Session updated')
         this.broadcast({ type: 'session_updated' });
         break;
 
       case 'input_audio_buffer.speech_started':
-        console.log('[VoiceListener] Speech started');
+        // If TTS is playing, this is likely our own audio bleeding into the mic.
+        // Clear the buffer so the Realtime API doesn't transcribe it.
+        if (hudApi.isSpeaking()) {
+          log.info('voice', 'Speech detected during TTS playback -- clearing input buffer (mic gate)')
+          this.sendEvent({ type: 'input_audio_buffer.clear' });
+          break;
+        }
+        log.info('voice', 'Speech started')
         this.broadcast({ type: 'speech_started' });
         break;
 
       case 'input_audio_buffer.speech_stopped':
-        console.log('[VoiceListener] Speech stopped');
+        // If TTS is still playing, ignore this event entirely
+        if (hudApi.isSpeaking()) {
+          log.info('voice', 'Speech stopped during TTS playback -- ignoring (mic gate)')
+          break;
+        }
+        log.info('voice', 'Speech stopped')
         this.broadcast({ type: 'speech_stopped' });
         break;
 
@@ -231,7 +241,7 @@ ABSOLUTE RULES - NO EXCEPTIONS:
 
       case 'conversation.item.input_audio_transcription.completed':
         if (event.transcript) {
-          console.log('[VoiceListener] Transcription:', event.transcript);
+          log.info('voice', 'Transcription', { transcript: event.transcript })
           this.broadcast({ 
             type: 'transcript', 
             text: event.transcript, 
@@ -242,11 +252,11 @@ ABSOLUTE RULES - NO EXCEPTIONS:
 
       case 'error':
         if (event.error?.code === 'response_cancel_not_active') {
-          console.log('[VoiceListener] Cancel failed (no active response)');
+          log.info('voice', 'Cancel failed (no active response)')
           this.hasActiveResponse = false;
           break;
         }
-        console.error('[VoiceListener] API Error:', event.error);
+        log.error('voice', 'API Error', { error: event.error })
         this.broadcast({ type: 'error', error: event.error });
         break;
 
@@ -265,7 +275,7 @@ ABSOLUTE RULES - NO EXCEPTIONS:
         // Note: We no longer cancel unsanctioned responses here because that
         // prevents the function call from happening. Audio blocking happens
         // in response.audio.delta if needed.
-        console.log('[VoiceListener] Response created:', event.response?.id);
+        log.info('voice', 'Response created', { detail: event.response?.id })
         break;
 
       case 'response.done':
@@ -289,13 +299,13 @@ ABSOLUTE RULES - NO EXCEPTIONS:
               operation: 'voice-transcription'
             });
           } catch (e) {
-            console.warn('[VoiceListener] Failed to track usage:', e.message);
+            log.warn('voice', 'Failed to track usage', { error: e.message })
           }
         }
         break;
 
       case 'response.cancelled':
-        console.log('[VoiceListener] Response cancelled');
+        log.info('voice', 'Response cancelled')
         this.hasActiveResponse = false;
         this.broadcast({ type: 'response_cancelled' });
         break;
@@ -305,7 +315,7 @@ ABSOLUTE RULES - NO EXCEPTIONS:
         // With tool_choice: "required", this shouldn't happen, but just in case
         if (!this.sanctionedResponseIds.has(event.response_id)) {
           // Silently drop - don't forward audio
-          console.log('[VoiceListener] Blocking unsanctioned audio');
+          log.info('voice', 'Blocking unsanctioned audio')
         }
         break;
 
@@ -317,14 +327,14 @@ ABSOLUTE RULES - NO EXCEPTIONS:
         break;
 
       case 'response.function_call_arguments.done':
-        console.log('[VoiceListener] Function call:', event.name);
+        log.info('voice', 'Function call', { eventName: event.name })
         
         if (event.name === 'handle_user_request') {
           try {
             const args = JSON.parse(event.arguments);
             const transcript = args.transcript;
             
-            console.log('[VoiceListener] User request:', transcript);
+            log.info('voice', 'User request', { transcript })
             
             this.pendingFunctionCallId = event.call_id;
             this.pendingFunctionItemId = event.item_id;
@@ -337,7 +347,7 @@ ABSOLUTE RULES - NO EXCEPTIONS:
               itemId: event.item_id
             });
           } catch (err) {
-            console.error('[VoiceListener] Error parsing function arguments:', err);
+            log.error('voice', 'Error parsing function arguments', { error: err.message || err })
           }
         }
         break;
@@ -345,11 +355,25 @@ ABSOLUTE RULES - NO EXCEPTIONS:
   }
 
   /**
-   * Send audio data to OpenAI
+   * Send audio data to OpenAI.
+   * Drops audio when TTS is playing to prevent feedback loops.
    */
   sendAudio(base64Audio) {
     if (!this.isConnected) {
-      this.audioBuffer.push(base64Audio);
+      // Cap buffer to prevent unbounded memory growth (max ~5 seconds of audio at 24kHz)
+      if (this.audioBuffer.length < 120) {
+        this.audioBuffer.push(base64Audio);
+      }
+      return false;
+    }
+
+    // ---- MIC GATING: drop audio while system is speaking ----
+    if (hudApi.isSpeaking()) {
+      // Discard any buffered audio that accumulated during speech
+      if (this.audioBuffer.length > 0) {
+        this.audioBuffer = [];
+      }
+      // Don't send this chunk -- it's our own TTS output
       return false;
     }
 
@@ -387,11 +411,11 @@ ABSOLUTE RULES - NO EXCEPTIONS:
    */
   respondToFunctionCall(callId, result = '') {
     if (!this.isConnected) {
-      console.error('[VoiceListener] Cannot respond - not connected');
+      log.error('voice', 'Cannot respond - not connected')
       return false;
     }
     
-    console.log('[VoiceListener] Responding to function call:', callId);
+    log.info('voice', 'Responding to function call', { callId })
     
     this.sendEvent({
       type: 'conversation.item.create',
@@ -411,7 +435,7 @@ ABSOLUTE RULES - NO EXCEPTIONS:
   cancelResponse() {
     if (!this.isConnected) return false;
     
-    console.log('[VoiceListener] Cancelling response');
+    log.info('voice', 'Cancelling response')
     this.hasActiveResponse = false;
     this.sendEvent({ type: 'response.cancel' });
     return true;
@@ -422,7 +446,7 @@ ABSOLUTE RULES - NO EXCEPTIONS:
    */
   subscribe(webContentsId, callback) {
     this.subscribers.set(webContentsId, callback);
-    console.log(`[VoiceListener] Subscriber added: ${webContentsId}`);
+    log.info('voice', 'Subscriber added: ...', { webContentsId })
   }
 
   /**
@@ -430,7 +454,7 @@ ABSOLUTE RULES - NO EXCEPTIONS:
    */
   unsubscribe(webContentsId) {
     this.subscribers.delete(webContentsId);
-    console.log(`[VoiceListener] Subscriber removed: ${webContentsId}`);
+    log.info('voice', 'Subscriber removed: ...', { webContentsId })
     
     if (this.subscribers.size === 0) {
       this.disconnect();
@@ -445,7 +469,7 @@ ABSOLUTE RULES - NO EXCEPTIONS:
       try {
         callback(event);
       } catch (err) {
-        console.error(`[VoiceListener] Error broadcasting to ${id}:`, err);
+        log.error('voice', 'Error broadcasting to ...', { id })
       }
     });
   }
@@ -454,15 +478,29 @@ ABSOLUTE RULES - NO EXCEPTIONS:
    * Disconnect from OpenAI
    */
   disconnect() {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'voice-listener.js:disconnect',message:'disconnect() called',data:{hasWs:!!this.ws,isConnected:this.isConnected,connectSeq:this._connectSeq,subscriberCount:this.subscribers.size},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H-RACE'})}).catch(()=>{});
+    // #endregion
+    if (this.session) {
+      log.info('voice', 'Disconnecting...')
+      this.session.close();
+      this.session = null;
+    }
     if (this.ws) {
-      console.log('[VoiceListener] Disconnecting...');
-      this.ws.close();
       this.ws = null;
     }
     this.isConnected = false;
     this.sessionId = null;
     this.audioBuffer = [];
     this.sanctionedResponseIds.clear();
+    this.reconnectAttempts = 0; // Reset for next connection
+    
+    // Clear pending function call state
+    this.pendingFunctionCallId = null;
+    this.pendingFunctionItemId = null;
+    this.hasActiveResponse = false;
+    this.activeResponseId = null;
+    this.pendingResponseCreate = false;
   }
 
   /**
@@ -504,10 +542,20 @@ ABSOLUTE RULES - NO EXCEPTIONS:
     });
 
     ipcMain.handle('voice-listener:is-connected', async () => {
+      // Check if API key is available via ai-service
+      let hasApiKey = false;
+      try {
+        const ai = getAIService();
+        ai._getApiKey('openai'); // This will throw if no key
+        hasApiKey = true;
+      } catch {
+        hasApiKey = false;
+      }
+      
       return {
         connected: this.isConnected,
         sessionId: this.sessionId,
-        hasApiKey: !!this.getApiKey()
+        hasApiKey
       };
     });
 
@@ -524,7 +572,7 @@ ABSOLUTE RULES - NO EXCEPTIONS:
       }
     });
 
-    console.log('[VoiceListener] IPC handlers registered');
+    log.info('voice', 'IPC handlers registered')
   }
 }
 

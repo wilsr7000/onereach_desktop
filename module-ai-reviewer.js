@@ -2,12 +2,11 @@ const fs = require('fs');
 const path = require('path');
 const unzipper = require('unzipper');
 const archiver = require('archiver');
-const ClaudeAPI = require('./claude-api');
+const ai = require('./lib/ai-service');
 const { getSettingsManager } = require('./settings-manager');
 
 class ModuleAIReviewer {
   constructor() {
-    this.claudeAPI = new ClaudeAPI();
     this.settingsManager = getSettingsManager();
   }
 
@@ -160,32 +159,15 @@ Focus on:
 - Security issues`;
 
     try {
-      const response = await this.claudeAPI.analyze(prompt, {
+      const response = await ai.json(prompt, {
+        profile: 'standard',
         maxTokens: 4000,
-        temperature: 0.2
+        temperature: 0.2,
+        feature: 'ai-reviewer'
       });
 
-      // Parse the response
-      let review;
-      try {
-        // Extract JSON from response
-        const jsonMatch = response.summary.match(/```json\s*([\s\S]*?)\s*```/) || 
-                         response.summary.match(/{[\s\S]*}/);
-        const jsonStr = jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : response.summary;
-        review = JSON.parse(jsonStr);
-      } catch (parseError) {
-        console.error('Failed to parse Claude response:', parseError);
-        // Create a basic review from the response
-        review = {
-          needsFixes: response.issues && response.issues.length > 0,
-          issues: response.issues || [],
-          fixes: response.fixes || [],
-          summary: response.summary || 'Review completed',
-          score: 50
-        };
-      }
-
-      return review;
+      // Response is already parsed JSON from ai.json()
+      return response;
     } catch (error) {
       console.error('Claude API error:', error);
       throw error;

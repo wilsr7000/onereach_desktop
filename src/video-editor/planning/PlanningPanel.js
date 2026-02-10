@@ -62,7 +62,7 @@ export class PlanningPanel {
     this.sidebar = document.getElementById('planningSidebar');
     
     if (!this.sidebar) {
-      console.warn('[PlanningPanel] Sidebar element not found');
+      window.logging.warn('video', 'PlanningPanel Sidebar element not found');
       return;
     }
     
@@ -80,7 +80,7 @@ export class PlanningPanel {
     // Initial render
     this.renderAll();
     
-    console.log('[PlanningPanel] Initialized');
+    window.logging.info('video', 'PlanningPanel Initialized');
   }
 
   /**
@@ -99,7 +99,7 @@ export class PlanningPanel {
       toggleBtn.classList.toggle('active', this.visible);
     }
     
-    console.log('[PlanningPanel] Visibility:', this.visible);
+    window.logging.info('video', 'PlanningPanel visibility changed', { visible: this.visible });
   }
 
   /**
@@ -162,11 +162,8 @@ export class PlanningPanel {
       this.nextLocationId = Math.max(1, ...this.planning.locations.map(l => l.id || 0)) + 1;
       this.nextBeatId = Math.max(1, ...this.planning.storyBeats.map(b => b.id || 0)) + 1;
       
-      console.log('[PlanningPanel] Loaded planning data:', {
-        characters: this.planning.characters.length,
-        scenes: this.planning.scenes.length,
-        locations: this.planning.locations.length,
-        storyBeats: this.planning.storyBeats.length
+      window.logging.info('video', 'PlanningPanel loaded planning data', {
+        characters: this.planning.characters.length, scenes: this.planning.scenes.length, locations: this.planning.locations.length, storyBeats: this.planning.storyBeats.length
       });
     }
   }
@@ -176,7 +173,7 @@ export class PlanningPanel {
    */
   saveToAppState() {
     this.app.planning = this.planning;
-    console.log('[PlanningPanel] Saved planning data to app state');
+    window.logging.info('video', 'PlanningPanel Saved planning data to app state');
   }
 
   /**
@@ -940,7 +937,7 @@ export class PlanningPanel {
           throw new Error('Invalid planning file format');
         }
       } catch (error) {
-        console.error('[PlanningPanel] Import error:', error);
+        window.logging.error('video', 'PlanningPanel Import error', { error: { error: error } });
         this.app.showToast?.('error', 'Failed to import planning data');
       }
     };

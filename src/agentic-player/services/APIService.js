@@ -3,6 +3,8 @@
  * @module src/agentic-player/services/APIService
  */
 
+const { getLogQueue } = require('../../../lib/log-event-queue');
+const log = getLogQueue();
 /**
  * API service class
  */
@@ -22,7 +24,7 @@ export class APIService {
    */
   async fetchClips(payload) {
     if (this.isFetching) {
-      console.log('[APIService] Already fetching, skipping');
+      log.info('agent', '[APIService] Already fetching, skipping');
       return null;
     }
 
@@ -31,7 +33,7 @@ export class APIService {
     }
 
     this.isFetching = true;
-    console.log('[APIService] Fetching clips...');
+    log.info('agent', '[APIService] Fetching clips...');
 
     try {
       const response = await fetch(this.config.apiEndpoint, {
@@ -52,7 +54,7 @@ export class APIService {
       }
 
       const data = await response.json();
-      console.log('[APIService] Response:', data);
+      log.info('agent', '[APIService] Response', { data: data });
 
       // Reset retry count on success
       this.retryCount = 0;
@@ -61,14 +63,14 @@ export class APIService {
       return data;
 
     } catch (error) {
-      console.error('[APIService] Error:', error);
+      log.error('agent', '[APIService] Error', { error: error });
 
       // Retry logic
       if (this.retryCount < this.maxRetries) {
         this.retryCount++;
         const delay = this.retryDelay * Math.pow(2, this.retryCount - 1);
         
-        console.log(`[APIService] Retrying in ${delay}ms (${this.retryCount}/${this.maxRetries})`);
+        log.info('agent', '[APIService] Retrying in ms (/)', { v0: delay, v1: this.retryCount, v2: this.maxRetries });
         
         await this.sleep(delay);
         this.isFetching = false;

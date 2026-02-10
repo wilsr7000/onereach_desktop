@@ -43,8 +43,8 @@ interface AgentEvents {
 }
 
 const DEFAULT_CAPABILITIES: AgentCapabilities = {
-  quickMatch: true,
-  llmEvaluate: false,
+  quickMatch: false,   // Deprecated -- all bidding goes through LLM
+  llmEvaluate: true,
   maxConcurrent: 5,
 };
 
@@ -79,7 +79,7 @@ export class BaseAgent {
       capabilities: {
         ...DEFAULT_CAPABILITIES,
         ...config.capabilities,
-        quickMatch: !!handlers.quickMatch,
+        quickMatch: false,                // Deprecated -- always false
         llmEvaluate: !!handlers.evaluate,
       },
     };
@@ -162,9 +162,10 @@ export class BaseAgent {
 
     return new Promise((resolve, reject) => {
       try {
-        this.ws = new WebSocket(url);
+        const ws = new WebSocket(url);
+        this.ws = ws;
 
-        this.ws.on('open', () => {
+        ws.on('open', () => {
           console.log('[Agent] Connected');
           this.reconnectAttempts = 0;
           this.emit('connected', { exchangeUrl: url });
@@ -173,19 +174,24 @@ export class BaseAgent {
           resolve();
         });
 
-        this.ws.on('message', (data) => {
+        ws.on('message', (data) => {
           this.handleMessage(data.toString());
         });
 
-        this.ws.on('close', (code, reason) => {
+        ws.on('close', (code, reason) => {
           const reasonStr = reason?.toString() || 'unknown';
           console.log(`[Agent] Disconnected: ${code} - ${reasonStr}`);
           this.emit('disconnected', { reason: reasonStr });
           this.stopHeartbeat();
-          this.handleDisconnect();
+          // Only handle disconnect if this is still the active WebSocket.
+          // Stale close events from replaced connections must not clobber
+          // the current connection or trigger spurious reconnects.
+          if (this.ws === ws) {
+            this.handleDisconnect(code);
+          }
         });
 
-        this.ws.on('error', (error) => {
+        ws.on('error', (error) => {
           console.error('[Agent] WebSocket error:', error);
           this.emit('error', { error });
           reject(error);
@@ -214,10 +220,16 @@ export class BaseAgent {
     console.log(`[Agent] Registered as ${this.config.name} v${this.config.version}`);
   }
 
-  private handleDisconnect(): void {
+  private handleDisconnect(code?: number): void {
     this.ws = null;
 
     if (!this.isRunning || !this.config.exchange.reconnect) {
+      return;
+    }
+
+    // Don't reconnect on clean close (code 1000) — this includes intentional
+    // replacement by the exchange ("Reconnection from same agent") and graceful stops.
+    if (code === 1000) {
       return;
     }
 
@@ -341,46 +353,14 @@ export class BaseAgent {
   }
 
   private async generateBid(task: Task, context: BiddingContext): Promise<BidDecision | null> {
-    // Tier 1: Quick match
-    if (this.handlers.quickMatch) {
-      const quickScore = this.handlers.quickMatch(task);
-
-      if (quickScore === 0) {
-        return null; // Definitely can't handle
-      }
-
-      if (quickScore >= 0.9) {
-        // High confidence - skip LLM
-        return {
-          shouldBid: true,
-          confidence: quickScore,
-          reasoning: 'Exact match for specialty',
-          estimatedTimeMs: 500,
-          tier: 'keyword',
-        };
-      }
-
-      // Medium confidence - try LLM if available
-      if (this.handlers.evaluate) {
-        return this.handlers.evaluate(task, context);
-      }
-
-      // No LLM, use quick score
-      return {
-        shouldBid: true,
-        confidence: quickScore,
-        reasoning: 'Partial keyword match',
-        estimatedTimeMs: 1000,
-        tier: 'keyword',
-      };
-    }
-
-    // No quick match, try LLM
+    // All bidding goes through LLM evaluation (unified-bidder).
+    // No keyword/regex shortcuts -- per project policy, classification must
+    // use semantic understanding, never deterministic pattern matching.
     if (this.handlers.evaluate) {
       return this.handlers.evaluate(task, context);
     }
 
-    // No handlers - shouldn't happen
+    // No evaluate handler -- agent cannot bid
     return null;
   }
 

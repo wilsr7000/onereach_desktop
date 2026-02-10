@@ -27,6 +27,8 @@
  * ```
  */
 
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 class StateManager {
   /**
    * Create a new StateManager instance
@@ -60,7 +62,7 @@ class StateManager {
     // Snapshot storage (will use IPC for persistence)
     this.snapshotStorage = null;
 
-    console.log(`[StateManager] Initialized for ${editorId}`);
+    log.info('app', '[StateManager] Initialized for', { v0: editorId });
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -106,7 +108,7 @@ class StateManager {
     // Trigger debounced auto-save
     this._triggerAutoSave();
 
-    console.log(`[StateManager] State pushed: "${description}" (undo: ${this.undoStack.length}, redo: ${this.redoStack.length})`);
+    log.info('app', '[StateManager] State pushed: "" (undo: , redo: )', { v0: description, v1: this.undoStack.length, v2: this.redoStack.length });
   }
 
   /**
@@ -115,7 +117,7 @@ class StateManager {
    */
   undo() {
     if (!this.canUndo()) {
-      console.log('[StateManager] Nothing to undo');
+      log.info('app', '[StateManager] Nothing to undo');
       return false;
     }
 
@@ -132,7 +134,7 @@ class StateManager {
       this.onStateChange(this.currentState.state, 'undo', this.currentState.description);
     }
 
-    console.log(`[StateManager] Undo: "${this.currentState.description}" (undo: ${this.undoStack.length}, redo: ${this.redoStack.length})`);
+    log.info('app', '[StateManager] Undo: "" (undo: , redo: )', { v0: this.currentState.description, v1: this.undoStack.length, v2: this.redoStack.length });
     return true;
   }
 
@@ -142,7 +144,7 @@ class StateManager {
    */
   redo() {
     if (!this.canRedo()) {
-      console.log('[StateManager] Nothing to redo');
+      log.info('app', '[StateManager] Nothing to redo');
       return false;
     }
 
@@ -159,7 +161,7 @@ class StateManager {
       this.onStateChange(this.currentState.state, 'redo', this.currentState.description);
     }
 
-    console.log(`[StateManager] Redo: "${this.currentState.description}" (undo: ${this.undoStack.length}, redo: ${this.redoStack.length})`);
+    log.info('app', '[StateManager] Redo: "" (undo: , redo: )', { v0: this.currentState.description, v1: this.undoStack.length, v2: this.redoStack.length });
     return true;
   }
 
@@ -204,7 +206,7 @@ class StateManager {
   clearHistory() {
     this.undoStack = [];
     this.redoStack = [];
-    console.log('[StateManager] History cleared');
+    log.info('app', '[StateManager] History cleared');
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -222,7 +224,7 @@ class StateManager {
       this._performAutoSave();
     }, this.autoSaveInterval);
 
-    console.log(`[StateManager] Auto-save started (interval: ${this.autoSaveInterval}ms)`);
+    log.info('app', '[StateManager] Auto-save started (interval: ms)', { v0: this.autoSaveInterval });
   }
 
   /**
@@ -289,9 +291,9 @@ class StateManager {
         this.onAutoSave(stateToSave);
       }
 
-      console.log(`[StateManager] Auto-saved for ${this.editorId}`);
+      log.info('app', '[StateManager] Auto-saved for', { v0: this.editorId });
     } catch (error) {
-      console.error('[StateManager] Auto-save failed:', error);
+      log.error('app', '[StateManager] Auto-save failed', { error: error });
     }
   }
 
@@ -306,11 +308,11 @@ class StateManager {
       
       if (saved) {
         const data = JSON.parse(saved);
-        console.log(`[StateManager] Loaded auto-save from ${new Date(data.timestamp).toLocaleString()}`);
+        log.info('app', '[StateManager] Loaded auto-save from', { v0: new Date(data.timestamp).toLocaleString() });
         return data;
       }
     } catch (error) {
-      console.error('[StateManager] Failed to load auto-save:', error);
+      log.error('app', '[StateManager] Failed to load auto-save', { error: error });
     }
     return null;
   }
@@ -321,7 +323,7 @@ class StateManager {
   clearAutoSave() {
     const key = `stateManager_${this.editorId}_autosave`;
     localStorage.removeItem(key);
-    console.log('[StateManager] Auto-save cleared');
+    log.info('app', '[StateManager] Auto-save cleared');
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -367,7 +369,7 @@ class StateManager {
       localStorage.setItem(key, JSON.stringify(snapshots));
     }
 
-    console.log(`[StateManager] Snapshot created: "${name}"`);
+    log.info('app', '[StateManager] Snapshot created: ""', { v0: name });
     return snapshot;
   }
 
@@ -413,7 +415,7 @@ class StateManager {
     }
 
     if (!snapshot) {
-      console.error(`[StateManager] Snapshot not found: ${snapshotId}`);
+      log.error('app', '[StateManager] Snapshot not found:', { v0: snapshotId });
       return false;
     }
 
@@ -434,7 +436,7 @@ class StateManager {
       this.onStateChange(snapshot.state, 'restore', snapshot.name);
     }
 
-    console.log(`[StateManager] Restored snapshot: "${snapshot.name}"`);
+    log.info('app', '[StateManager] Restored snapshot: ""', { v0: snapshot.name });
     return true;
   }
 
@@ -460,7 +462,7 @@ class StateManager {
     }
 
     localStorage.setItem(key, JSON.stringify(snapshots));
-    console.log(`[StateManager] Deleted snapshot: ${snapshotId}`);
+    log.info('app', '[StateManager] Deleted snapshot:', { v0: snapshotId });
     return true;
   }
 
@@ -487,7 +489,7 @@ class StateManager {
 
     snapshot.name = newName;
     localStorage.setItem(key, JSON.stringify(snapshots));
-    console.log(`[StateManager] Renamed snapshot to: "${newName}"`);
+    log.info('app', '[StateManager] Renamed snapshot to: ""', { v0: newName });
     return true;
   }
 
@@ -503,7 +505,7 @@ class StateManager {
     try {
       return JSON.parse(JSON.stringify(state));
     } catch (error) {
-      console.error('[StateManager] Failed to clone state:', error);
+      log.error('app', '[StateManager] Failed to clone state', { error: error });
       return state;
     }
   }
@@ -533,7 +535,7 @@ class StateManager {
    */
   destroy() {
     this.stopAutoSave();
-    console.log(`[StateManager] Destroyed for ${this.editorId}`);
+    log.info('app', '[StateManager] Destroyed for', { v0: this.editorId });
   }
 }
 

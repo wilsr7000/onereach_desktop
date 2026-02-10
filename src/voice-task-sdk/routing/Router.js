@@ -19,6 +19,9 @@ const pronounResolver = require('../intent/pronounResolver');
 const correctionDetector = require('../intent/correctionDetector');
 const progressReporter = require('../events/progressReporter');
 
+// Module-level logger for use in default parameters and static contexts
+const log = getLogger();
+
 // Critical commands that are handled locally
 const CRITICAL_COMMANDS = ['cancel', 'stop', 'nevermind', 'repeat', 'undo'];
 
@@ -56,7 +59,7 @@ class Router {
    */
   constructor(exchange, speak) {
     this.exchange = exchange;
-    this.speak = speak || ((msg) => console.log('[Router] Would speak:', msg));
+    this.speak = speak || ((msg) => log.info('voice', '[Router] Would speak', { msg }));
     this.log = getLogger();
     
     // Track current task for cancel semantics
@@ -147,7 +150,27 @@ class Router {
     const lower = transcript.toLowerCase().trim();
     
     // Cancel: clear state AND mark current task as cancelled
-    if (['cancel', 'stop', 'nevermind', 'never mind'].some(c => lower === c || lower.startsWith(c + ' '))) {
+    //
+    // IMPORTANT: Distinguish system cancel from agent intent:
+    //   "cancel"                     → system (stop current task)
+    //   "stop"                       → system
+    //   "cancel it" / "stop that"    → system (pronoun = current task)
+    //   "nevermind" / "never mind"   → system
+    //   "cancel the dentist appointment" → AGENT (calendar delete intent)
+    //   "cancel my 3pm meeting"         → AGENT
+    //   "stop the recording"            → AGENT
+    //
+    // Rule: intercept only bare commands or commands followed by a pronoun
+    // (it, that, this, everything, all). Anything with a noun phrase routes to agents.
+    const cancelWords = ['cancel', 'stop', 'nevermind', 'never mind'];
+    const isCancelWord = cancelWords.some(c => lower === c);
+    const pronounFollowers = ['it', 'that', 'this', 'everything', 'all', 'now'];
+    const isCancelPronoun = cancelWords.some(c => {
+      if (!lower.startsWith(c + ' ')) return false;
+      const rest = lower.slice(c.length + 1).trim();
+      return pronounFollowers.includes(rest);
+    });
+    if (isCancelWord || isCancelPronoun) {
       if (this.currentTaskId) {
         this.cancelledTaskIds.add(this.currentTaskId);
         this.log.info('Router', `Cancelled task: ${this.currentTaskId}`);

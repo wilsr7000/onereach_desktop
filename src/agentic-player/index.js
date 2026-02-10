@@ -38,7 +38,7 @@ export function createPlayer() {
   // Debug logger
   const debug = (...args) => {
     if (config.debugMode) {
-      console.log('[Player:DEBUG]', ...args);
+      window.logging.debug('agent', 'Player debug', { args });
     }
   };
 
@@ -129,7 +129,7 @@ export function createPlayer() {
     // Check for preloaded video
     const preloaded = buffer.getPreloadedVideo(clip);
     if (preloaded) {
-      console.log('[Player] Using preloaded video');
+      window.logging.info('agent', 'Player Using preloaded video');
       buffer.transferToMain(videoElement, clip.inTime || 0);
       playback.loadClip(clip, true);
     } else {
@@ -150,7 +150,7 @@ export function createPlayer() {
     debug('checkPrefetch:', { queueLength: queue.length, fetching: api.fetching });
     
     if (queue.shouldPrefetch(config.prefetchWhenRemaining) && !api.fetching) {
-      console.log(`[Player] Queue low (${queue.length}), pre-fetching...`);
+      window.logging.info('agent', `Player Queue low (${queue.length}), pre-fetching...`);
       fetchClips();
     }
 
@@ -173,7 +173,7 @@ export function createPlayer() {
     if (clip) {
       const duration = (clip.outTime || videoElement.duration) - (clip.inTime || 0);
       session.addWatchedTime(duration);
-      console.log(`[Player] Clip ended. Total: ${ui.formatTime(session.current.timeWatched)}`);
+      window.logging.info('agent', `Player Clip ended. Total: ${ui.formatTime(session.current.timeWatched)}`);
     }
     playNext();
   };
@@ -185,7 +185,7 @@ export function createPlayer() {
     // Check buffer health
     if (remainingInClip !== null) {
       if (remainingInClip <= 3 && queue.length === 0 && !api.fetching && !queue.endSignaled) {
-        console.warn('[Player] Buffer low! Emergency fetch...');
+        window.logging.warn('agent', 'Player Buffer low! Emergency fetch..');
         ui.showThinking(true);
         checkPrefetch();
       } else if (remainingInClip <= config.prefetchThreshold) {
@@ -213,7 +213,7 @@ export function createPlayer() {
 
     ui.showSessionStarted();
     logReasoning(null, `Session started: "${prompt}"`);
-    console.log(`[Player] Session started: ${session.current.id}`);
+    window.logging.info('agent', `Player Session started: ${session.current.id}`);
 
     await fetchClips();
   };
@@ -228,7 +228,7 @@ export function createPlayer() {
 
     ui.showSessionEnded();
     logReasoning(null, `Ended: ${reason}`);
-    console.log(`[Player] Session ended: ${reason} (watched ${queue.historyLength} clips)`);
+    window.logging.info('agent', `Player Session ended: ${reason} (watched ${queue.historyLength} clips)`);
   };
 
   // Return public API
@@ -242,7 +242,7 @@ export function createPlayer() {
     },
     skipClip: () => {
       if (session.isActive) {
-        console.log('[Player] Skipping clip...');
+        window.logging.info('agent', 'Player Skipping clip..');
         playback.skipClip();
       }
     },
@@ -262,7 +262,7 @@ let player;
 document.addEventListener('DOMContentLoaded', () => {
   player = createPlayer();
   window.player = player; // Expose globally
-  console.log('[Player] Ready');
+  window.logging.info('agent', 'Player Ready');
 });
 
 export default createPlayer;

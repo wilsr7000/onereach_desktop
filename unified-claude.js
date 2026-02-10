@@ -1,16 +1,12 @@
 /**
- * Unified Claude Service - Headless First, API Fallback
+ * @deprecated Use lib/ai-service.js instead.
+ * This file is retained for backward compatibility but all consumers
+ * have been migrated to the centralized AI service.
+ * See: const ai = require('./lib/ai-service');
  * 
- * This service provides a unified interface for Claude completions that:
- * 1. Tries headless Claude first (free, uses existing web login)
- * 2. Falls back to API if headless fails (paid, more reliable)
- * 
- * Benefits:
- * - Cost savings: Headless uses existing Claude Pro subscription
- * - Reliability: API fallback ensures prompts always complete
- * - Transparency: Logs which method was used
- * - Configuration: Can disable headless or set preferences
+ * Original: Unified Claude Service - Headless First, API Fallback
  */
+console.warn('[UnifiedClaude] DEPRECATED — use lib/ai-service.js instead');
 
 const { getSettingsManager } = require('./settings-manager');
 
@@ -151,36 +147,27 @@ class UnifiedClaudeService {
   }
 
   /**
-   * Try Claude API (direct HTTP calls)
+   * Try Claude API via centralized AI service
    */
   async tryApi(prompt, options = {}) {
-    const ClaudeAPI = require('./claude-api');
-    const claude = new ClaudeAPI();
-    
-    // Get API key from settings
-    const settingsManager = getSettingsManager();
-    const apiKey = settingsManager.get('llmApiKey') || 
-                   settingsManager.get('anthropicApiKey') ||
-                   settingsManager.get('llmConfig.anthropic.apiKey');
-    
-    if (!apiKey) {
-      throw new Error('Claude API key not configured. Please set it in Settings.');
-    }
-
     try {
-      const response = await claude.chat([
-        { role: 'user', content: prompt }
-      ], apiKey, {
+      const { getAIService } = require('./lib/ai-service');
+      const ai = getAIService();
+      
+      const result = await ai.chat({
+        profile: 'standard',
+        messages: [{ role: 'user', content: prompt }],
         maxTokens: options.maxTokens || 4096,
-        temperature: options.temperature || 0.3
+        temperature: options.temperature || 0.3,
+        feature: 'unified-claude-compat'
       });
 
       return { 
         success: true, 
-        response: response.content,
+        response: result.content,
         method: 'api',
-        usage: response.usage,
-        cost: this._estimateCost(response.usage)
+        usage: result.usage,
+        cost: result.cost || 0
       };
     } catch (err) {
       return {
@@ -189,19 +176,6 @@ class UnifiedClaudeService {
         method: 'api'
       };
     }
-  }
-
-  /**
-   * Estimate cost based on usage (rough estimate)
-   */
-  _estimateCost(usage) {
-    if (!usage) return 0;
-    
-    // Claude pricing (approximate): $15/1M input, $75/1M output for Opus
-    const inputCost = (usage.input_tokens || 0) * 0.000015;
-    const outputCost = (usage.output_tokens || 0) * 0.000075;
-    
-    return inputCost + outputCost;
   }
 
   /**
@@ -219,8 +193,8 @@ class UnifiedClaudeService {
   async isApiAvailable() {
     try {
       const settingsManager = getSettingsManager();
-      const apiKey = settingsManager.get('llmApiKey') || 
-                     settingsManager.get('anthropicApiKey');
+      const apiKey = settingsManager.get('anthropicApiKey') || 
+                     settingsManager.get('llmApiKey');
       return !!apiKey;
     } catch {
       return false;

@@ -2,6 +2,8 @@ const { BrowserWindow, shell, app, dialog, Notification, ipcMain } = require('el
 const path = require('path');
 const fs = require('fs');
 const getLogger = require('./event-logger');
+const { getLogQueue } = require('./lib/log-event-queue');
+const log = getLogQueue();
 let logger;
 
 // Main browser window reference - kept global to prevent garbage collection
@@ -24,6 +26,81 @@ let totpManager = null;
 const gsxAutoLoginState = new Map();
 
 /**
+ * Safe helper: send IPC message to a window only if it exists and isn't destroyed.
+ * Returns true if the message was sent, false otherwise.
+ */
+function safeSend(win, channel, ...args) {
+  try {
+    if (win && !win.isDestroyed() && win.webContents && !win.webContents.isDestroyed()) {
+      win.webContents.send(channel, ...args);
+      return true;
+    }
+  } catch (e) {
+    log.warn('window', 'Failed to send \'...\'', { channel })
+  }
+  return false;
+}
+
+/**
+ * Attach structured log forwarding to a BrowserWindow.
+ * Captures renderer console.log/warn/error/debug and renderer crashes,
+ * routing them through the central LogEventQueue so they appear in the
+ * log server, file logger, and ring buffer.
+ *
+ * @param {BrowserWindow} win - The Electron BrowserWindow to attach to
+ * @param {string} [category='window'] - Log category (e.g. 'clipboard', 'video')
+ */
+function attachLogForwarder(win, category = 'window') {
+  if (!win || !win.webContents) return;
+  const levelFn = { 0: 'debug', 1: 'info', 2: 'warn', 3: 'error' };
+
+  win.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    const fn = levelFn[level] || 'info';
+    const short = (sourceId || '').split('/').pop();
+    log[fn](category, `[renderer:${short}:${line}] ${message.substring(0, 500)}`, { source: 'renderer' });
+  });
+
+  win.webContents.on('render-process-gone', (_event, details) => {
+    log.error(category, 'Renderer process crashed', { reason: details.reason, exitCode: details.exitCode });
+  });
+
+  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    if (errorCode !== -3) { // -3 is ERR_ABORTED (navigation cancelled), not a real error
+      log.error(category, 'Page failed to load', { errorCode, errorDescription, url: validatedURL });
+    }
+  });
+
+  win.webContents.on('preload-error', (_event, preloadPath, error) => {
+    log.error(category, 'Preload script failed', { preloadPath, error: error.message || String(error) });
+  });
+}
+
+/**
+ * Safe helper: execute JavaScript in a window only if it exists and isn't destroyed.
+ * Returns the result, or undefined if the window is unavailable.
+ */
+async function safeExecuteJS(win, script) {
+  try {
+    if (win && !win.isDestroyed() && win.webContents && !win.webContents.isDestroyed()) {
+      return await win.webContents.executeJavaScript(script);
+    }
+  } catch (e) {
+    log.warn('window', `[safeExecuteJS] Failed:`)
+  }
+  return undefined;
+}
+
+/**
+ * Clean up auto-login state for a closed GSX window.
+ */
+function cleanupGSXAutoLoginState(windowId) {
+  if (gsxAutoLoginState.has(windowId)) {
+    log.info('window', 'Cleaning up state for window ...', { windowId })
+    gsxAutoLoginState.delete(windowId);
+  }
+}
+
+/**
  * Check if auto-login should be attempted for a GSX window
  */
 function shouldAttemptGSXAutoLogin(windowId) {
@@ -32,13 +109,13 @@ function shouldAttemptGSXAutoLogin(windowId) {
   
   // Don't attempt if login completed successfully
   if (state.loginComplete) {
-    console.log(`[GSX AutoLogin] Skipping window ${windowId} - login already complete`);
+    log.info('window', 'Skipping window ... - login already complete', { windowId })
     return false;
   }
   
   // Don't attempt if already in progress (within 5 seconds)
   if (state.inProgress && Date.now() - state.lastAttempt < 5000) {
-    console.log(`[GSX AutoLogin] Skipping window ${windowId} - login in progress`);
+    log.info('window', 'Skipping window ... - login in progress', { windowId })
     return false;
   }
   
@@ -54,6 +131,13 @@ function shouldAttemptGSXAutoLogin(windowId) {
 async function attemptGSXAutoLoginWithRetry(gsxWindow, url, attempt = 0) {
   const maxAttempts = 5;
   const retryDelay = 1000;
+  
+  // Guard: bail if window was destroyed since this was scheduled
+  if (gsxWindow.isDestroyed()) {
+    log.info('window', `[GSX AutoLogin] Window destroyed, aborting retry`)
+    return;
+  }
+  
   const windowId = gsxWindow.id;
   
   // Check if we should attempt login
@@ -70,21 +154,21 @@ async function attemptGSXAutoLoginWithRetry(gsxWindow, url, attempt = 0) {
     });
   }
   
-  console.log(`[GSX AutoLogin] Attempt ${attempt + 1}/${maxAttempts} for window ${windowId}`);
+  log.info('window', 'Attempt .../... for window ...', { detail: attempt + 1, maxAttempts, windowId })
   
   try {
     // Check if form fields exist yet (including cross-origin detection)
-    const formInfo = await gsxWindow.webContents.executeJavaScript(`
+    const formInfo = await safeExecuteJS(gsxWindow, `
       (function() {
         const hasPasswordInMain = !!document.querySelector('input[type="password"]');
         if (hasPasswordInMain) {
-          console.log('[GSX AutoLogin] Form found in main document');
+          log.info('window', 'Form found in main document')
           return { location: 'main', crossOrigin: false };
         }
         
         // Check iframes
         const iframes = document.querySelectorAll('iframe');
-        console.log('[GSX AutoLogin] Found ' + iframes.length + ' iframes');
+        log.info('window', 'Found \' + iframes.length + \' iframes')
         
         let hasCrossOriginAuthIframe = false;
         
@@ -95,12 +179,12 @@ async function attemptGSXAutoLoginWithRetry(gsxWindow, url, attempt = 0) {
           try {
             const doc = iframe.contentDocument || iframe.contentWindow.document;
             if (doc && doc.querySelector('input[type="password"]')) {
-              console.log('[GSX AutoLogin] Form found in same-origin iframe ' + i);
+              log.info('window', 'Form found in same-origin iframe \' +')
               return { location: 'iframe', crossOrigin: false };
             }
           } catch (e) {
             // Cross-origin iframe
-            console.log('[GSX AutoLogin] Cross-origin iframe detected: ' + src);
+            log.info('window', 'Cross-origin iframe detected: \' + sr')
             if (src.includes('auth.') && src.includes('onereach.ai')) {
               hasCrossOriginAuthIframe = true;
             }
@@ -113,9 +197,12 @@ async function attemptGSXAutoLoginWithRetry(gsxWindow, url, attempt = 0) {
         
         return { location: 'none', crossOrigin: false };
       })()
-    `).catch(() => ({ location: 'error', crossOrigin: false }));
+    `);
     
-    console.log(`[GSX AutoLogin] Form info for window ${windowId}:`, formInfo);
+    // If safeExecuteJS returned undefined, the window was destroyed
+    if (!formInfo) return;
+    
+    log.info('window', 'Form info for window ...', { windowId })
     
     if (formInfo.location === 'main' || formInfo.location === 'iframe') {
       await attemptGSXAutoLogin(gsxWindow, url);
@@ -127,18 +214,18 @@ async function attemptGSXAutoLoginWithRetry(gsxWindow, url, attempt = 0) {
       });
     } else if (formInfo.crossOrigin) {
       // Cross-origin iframe - use webFrameMain to access it
-      console.log(`[GSX AutoLogin] Cross-origin auth iframe detected, accessing via frames...`);
+      log.info('window', `[GSX AutoLogin] Cross-origin auth iframe detected, accessing via frames...`)
       await attemptGSXCrossOriginLogin(gsxWindow, windowId);
     } else if (formInfo.location === 'none' && attempt < maxAttempts - 1) {
-      console.log(`[GSX AutoLogin] No form found, retrying in ${retryDelay}ms...`);
+      log.info('window', 'No form found, retrying', { retryDelay })
       setTimeout(() => {
         attemptGSXAutoLoginWithRetry(gsxWindow, url, attempt + 1);
       }, retryDelay);
     } else {
-      console.log(`[GSX AutoLogin] No form found after ${attempt + 1} attempts`);
+      log.info('window', 'No form found after ... attempts', { detail: attempt + 1 })
     }
   } catch (error) {
-    console.error('[GSX AutoLogin] Retry error:', error);
+    log.error('window', 'Retry error', { error: error.message || error })
   }
 }
 
@@ -147,6 +234,12 @@ async function attemptGSXAutoLoginWithRetry(gsxWindow, url, attempt = 0) {
  */
 async function attemptGSXCrossOriginLogin(gsxWindow, windowId) {
   try {
+    // Guard: bail if window was destroyed
+    if (gsxWindow.isDestroyed()) {
+      log.info('window', 'Window ... destroyed, aborting', { windowId })
+      return;
+    }
+    
     // Lazy load credential manager
     if (!credentialManager) {
       credentialManager = require('./credential-manager');
@@ -154,7 +247,7 @@ async function attemptGSXCrossOriginLogin(gsxWindow, windowId) {
     
     const credentials = await credentialManager.getOneReachCredentials();
     if (!credentials || !credentials.email || !credentials.password) {
-      console.log('[GSX CrossOrigin] No credentials configured');
+      log.info('window', 'No credentials configured')
       return;
     }
     
@@ -162,22 +255,22 @@ async function attemptGSXCrossOriginLogin(gsxWindow, windowId) {
     const mainFrame = gsxWindow.webContents.mainFrame;
     const allFrames = [mainFrame, ...mainFrame.framesInSubtree];
     
-    console.log(`[GSX CrossOrigin] Found ${allFrames.length} frames total`);
+    log.info('window', 'Found ... frames total', { allFramesCount: allFrames.length })
     
     // Find the auth frame
     let authFrame = null;
     for (const frame of allFrames) {
       const frameUrl = frame.url;
-      console.log(`[GSX CrossOrigin] Frame: ${frameUrl}`);
+      log.info('window', 'Frame: ...', { frameUrl })
       if (frameUrl && frameUrl.includes('auth.') && frameUrl.includes('onereach.ai')) {
         authFrame = frame;
-        console.log(`[GSX CrossOrigin] Found auth frame: ${frameUrl}`);
+        log.info('window', 'Found auth frame: ...', { frameUrl })
         break;
       }
     }
     
     if (!authFrame) {
-      console.log('[GSX CrossOrigin] No auth frame found');
+      log.info('window', 'No auth frame found')
       return;
     }
     
@@ -187,8 +280,8 @@ async function attemptGSXCrossOriginLogin(gsxWindow, windowId) {
         const email = ${JSON.stringify(credentials.email)};
         const password = ${JSON.stringify(credentials.password)};
         
-        console.log('[GSX CrossOrigin] Running in auth frame');
-        console.log('[GSX CrossOrigin] URL:', window.location.href);
+        log.info('window', 'Running in auth frame')
+        log.info('window', 'URL', { href: window.location.href })
         
         function fillInput(input, value) {
           if (!input) return false;
@@ -204,7 +297,7 @@ async function attemptGSXCrossOriginLogin(gsxWindow, windowId) {
           input.dispatchEvent(new Event('input', { bubbles: true }));
           input.dispatchEvent(new Event('change', { bubbles: true }));
           input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
-          console.log('[GSX CrossOrigin] Filled:', input.name || input.type);
+          log.info('window', 'Filled', { detail: input.name || input.type })
           return true;
         }
         
@@ -219,7 +312,7 @@ async function attemptGSXCrossOriginLogin(gsxWindow, windowId) {
         const passwordField = document.querySelector('input[type="password"]');
         
         if (!passwordField) {
-          console.log('[GSX CrossOrigin] No password field found');
+          log.info('window', 'No password field found')
           return { success: false, reason: 'no_password_field' };
         }
         
@@ -231,14 +324,14 @@ async function attemptGSXCrossOriginLogin(gsxWindow, windowId) {
           const submitBtn = document.querySelector('button[type="submit"], input[type="submit"]') ||
                            document.querySelector('form button:not([type="button"])');
           if (submitBtn) {
-            console.log('[GSX CrossOrigin] Clicking submit:', submitBtn.textContent);
+            log.info('window', 'Clicking submit', { textContent: submitBtn.textContent })
             submitBtn.click();
           } else {
             const buttons = document.querySelectorAll('button');
             for (const btn of buttons) {
               const text = (btn.textContent || '').toLowerCase();
               if (text.includes('sign in') || text.includes('log in') || text.includes('login') || text.includes('continue')) {
-                console.log('[GSX CrossOrigin] Clicking button by text:', btn.textContent);
+                log.info('window', 'Clicking button by text', { textContent: btn.textContent })
                 btn.click();
                 break;
               }
@@ -251,14 +344,13 @@ async function attemptGSXCrossOriginLogin(gsxWindow, windowId) {
     `;
     
     const result = await authFrame.executeJavaScript(loginScript);
-    console.log('[GSX CrossOrigin] Login result:', result);
+    log.info('window', 'Login result', { result })
     
     if (result && result.success) {
-      console.log('[GSX CrossOrigin] Successfully filled login form, setting up 2FA monitoring...');
+      log.info('window', 'Successfully filled login form, setting up 2FA monitoring...')
       
       // Mark login as in progress (not complete until 2FA done)
-      gsxAutoLoginState.set(windowId, {
-        ...(gsxAutoLoginState.get(windowId) || {}),
+      gsxAutoLoginState.set(windowId, { ...gsxAutoLoginState.get(windowId || { }),
         loginFilled: true
       });
       
@@ -269,7 +361,7 @@ async function attemptGSXCrossOriginLogin(gsxWindow, windowId) {
     }
     
   } catch (error) {
-    console.error('[GSX CrossOrigin] Login error:', error);
+    log.error('window', 'Login error', { error: error.message || error })
   }
 }
 
@@ -280,15 +372,22 @@ async function attemptGSXCrossOrigin2FA(gsxWindow, windowId, attempt) {
   const maxAttempts = 5;
   const retryDelay = 1500;
   
+  // Guard: bail if window was destroyed since this was scheduled
+  if (gsxWindow.isDestroyed()) {
+    log.info('window', 'Window ... destroyed, aborting 2FA', { windowId })
+    cleanupGSXAutoLoginState(windowId);
+    return;
+  }
+  
   // Check if already complete
   const state = gsxAutoLoginState.get(windowId);
   if (state && state.twoFAComplete) {
-    console.log(`[GSX 2FA] Skipping window ${windowId} - 2FA already complete`);
+    log.info('window', 'Skipping window ... - 2FA already complete', { windowId })
     return;
   }
   
   try {
-    console.log(`[GSX 2FA] Attempt ${attempt + 1}/${maxAttempts} for window ${windowId}`);
+    log.info('window', 'Attempt .../... for window ...', { detail: attempt + 1, maxAttempts, windowId })
     
     // Get auth frame
     const mainFrame = gsxWindow.webContents.mainFrame;
@@ -303,8 +402,8 @@ async function attemptGSXCrossOrigin2FA(gsxWindow, windowId, attempt) {
     }
     
     if (!authFrame) {
-      console.log('[GSX 2FA] No auth frame found');
-      if (attempt < maxAttempts - 1) {
+      log.info('window', 'No auth frame found')
+      if (attempt < maxAttempts - 1 && !gsxWindow.isDestroyed()) {
         setTimeout(() => attemptGSXCrossOrigin2FA(gsxWindow, windowId, attempt + 1), retryDelay);
       }
       return;
@@ -325,16 +424,15 @@ async function attemptGSXCrossOrigin2FA(gsxWindow, windowId, attempt) {
       })()
     `);
     
-    console.log('[GSX 2FA] Detection:', detection);
+    log.info('window', 'Detection', { detection })
     
     if (!detection.is2FAPage) {
-      if (attempt < maxAttempts - 1) {
-        console.log(`[GSX 2FA] Not on 2FA page yet, retrying in ${retryDelay}ms...`);
+      if (attempt < maxAttempts - 1 && !gsxWindow.isDestroyed()) {
+        log.info('window', 'Not on 2FA page yet, retrying in ...ms...', { retryDelay })
         setTimeout(() => attemptGSXCrossOrigin2FA(gsxWindow, windowId, attempt + 1), retryDelay);
       } else {
-        console.log('[GSX 2FA] Not on 2FA page after max attempts (may have succeeded without 2FA)');
-        gsxAutoLoginState.set(windowId, {
-          ...(gsxAutoLoginState.get(windowId) || {}),
+        log.info('window', 'Not on 2FA page after max attempts (may have succeeded without 2FA)')
+        gsxAutoLoginState.set(windowId, { ...gsxAutoLoginState.get(windowId || { }),
           loginComplete: true
         });
       }
@@ -353,12 +451,12 @@ async function attemptGSXCrossOrigin2FA(gsxWindow, windowId, attempt) {
     
     const totpSecret = await credentialManager.getTOTPSecret();
     if (!totpSecret) {
-      console.log('[GSX 2FA] No TOTP secret configured');
+      log.info('window', 'No TOTP secret configured')
       return;
     }
     
     const code = totpManager.generateCode(totpSecret);
-    console.log('[GSX 2FA] Generated TOTP code, filling form...');
+    log.info('window', 'Generated TOTP code, filling form...')
     
     // Fill 2FA code
     const fillResult = await authFrame.executeJavaScript(`
@@ -393,7 +491,7 @@ async function attemptGSXCrossOrigin2FA(gsxWindow, windowId, attempt) {
             const submitBtn = document.querySelector('button[type="submit"]') ||
                              document.querySelector('form button');
             if (submitBtn) {
-              console.log('[GSX 2FA] Clicking submit');
+              console.log('[GSX Auth] Clicking submit');
               submitBtn.click();
             }
           }, 500);
@@ -405,19 +503,18 @@ async function attemptGSXCrossOrigin2FA(gsxWindow, windowId, attempt) {
       })()
     `);
     
-    console.log('[GSX 2FA] Fill result:', fillResult);
+    log.info('window', 'Fill result', { fillResult })
     
     if (fillResult && fillResult.success) {
-      console.log('[GSX 2FA] Successfully filled 2FA code!');
-      gsxAutoLoginState.set(windowId, {
-        ...(gsxAutoLoginState.get(windowId) || {}),
+      log.info('window', 'Successfully filled 2FA code!')
+      gsxAutoLoginState.set(windowId, { ...gsxAutoLoginState.get(windowId || { }),
         twoFAComplete: true,
         loginComplete: true
       });
     }
     
   } catch (error) {
-    console.error('[GSX 2FA] Error:', error);
+    log.error('window', 'Error', { error: error.message || error })
   }
 }
 
@@ -436,7 +533,7 @@ async function attemptGSXAutoLogin(gsxWindow, url) {
     // Check if we have credentials
     const credentials = await credentialManager.getOneReachCredentials();
     if (!credentials || !credentials.email || !credentials.password) {
-      console.log('[GSX AutoLogin] No credentials configured');
+      log.info('window', 'No credentials configured')
       return;
     }
     
@@ -446,7 +543,7 @@ async function attemptGSXAutoLogin(gsxWindow, url) {
     const autoLoginSettings = settings.autoLoginSettings || {};
     
     if (autoLoginSettings.enabled === false) {
-      console.log('[GSX AutoLogin] Auto-login disabled');
+      log.info('window', 'Auto-login disabled')
       return;
     }
     
@@ -455,10 +552,10 @@ async function attemptGSXAutoLogin(gsxWindow, url) {
       (function() {
         // Log all inputs for debugging
         const allInputs = document.querySelectorAll('input');
-        console.log('[GSX AutoLogin] Found ' + allInputs.length + ' input fields on page');
+        console.log('[GSX Auth] Found ' + allInputs.length + ' input fields on page');
         allInputs.forEach((inp, i) => {
           if (inp.type !== 'hidden') {
-            console.log('[GSX AutoLogin] Input ' + i + ': type=' + inp.type + ', name=' + inp.name + ', placeholder=' + inp.placeholder);
+            console.log('[GSX Auth] Input ' + i + ': type=' + inp.type + ', name=' + inp.name + ', placeholder=' + inp.placeholder);
           }
         });
         
@@ -475,7 +572,7 @@ async function attemptGSXAutoLogin(gsxWindow, url) {
                           pageContent.includes('enter the code') || pageContent.includes('6-digit');
         
         if (has2FAField || (has2FAText && !document.querySelector('input[type="password"]'))) {
-          console.log('[GSX AutoLogin] 2FA page detected');
+          console.log('[GSX Auth] 2FA page detected');
           return '2fa';
         }
         
@@ -488,15 +585,15 @@ async function attemptGSXAutoLogin(gsxWindow, url) {
         );
         const hasPasswordField = document.querySelector('input[type="password"]');
         
-        console.log('[GSX AutoLogin] Email field:', !!hasEmailField, 'Password field:', !!hasPasswordField);
+        console.log('[GSX Auth] Email field:', !!hasEmailField, 'Password field:', !!hasPasswordField);
         
         if (hasEmailField && hasPasswordField) {
-          console.log('[GSX AutoLogin] Login form detected');
+          console.log('[GSX Auth] Login form detected');
           return 'login';
         }
         
         if (hasPasswordField) {
-          console.log('[GSX AutoLogin] Password-only page');
+          console.log('[GSX Auth] Password-only page');
           return 'password-only';
         }
         
@@ -504,14 +601,14 @@ async function attemptGSXAutoLogin(gsxWindow, url) {
       })()
     `);
     
-    console.log('[GSX AutoLogin] Page type:', pageType);
+    log.info('window', 'Page type', { pageType })
     
     if (pageType === 'other') {
       return; // Not a login page
     }
     
     if (pageType === 'login' || pageType === 'password-only') {
-      console.log('[GSX AutoLogin] Filling', pageType, 'form for', credentials.email);
+      log.info('window', 'Filling', { pageType, arg2: 'form for', email: credentials.email })
       
       await gsxWindow.webContents.executeJavaScript(`
         (function() {
@@ -533,7 +630,7 @@ async function attemptGSXAutoLogin(gsxWindow, url) {
             input.dispatchEvent(new Event('change', { bubbles: true }));
             input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
             
-            console.log('[GSX AutoLogin] Filled field:', input.name || input.type);
+            console.log('[GSX Auth] Filled field:', input.name || input.type);
             return true;
           }
           
@@ -561,7 +658,7 @@ async function attemptGSXAutoLogin(gsxWindow, url) {
             ) || document.querySelector('form button:not([type="button"])');
             
             if (submitBtn) {
-              console.log('[GSX AutoLogin] Clicking submit:', submitBtn.textContent || submitBtn.type);
+              console.log('[GSX Auth] Clicking submit:', submitBtn.textContent || submitBtn.type);
               submitBtn.click();
             } else {
               // Try finding by text content
@@ -569,7 +666,7 @@ async function attemptGSXAutoLogin(gsxWindow, url) {
               for (const btn of buttons) {
                 const text = (btn.textContent || '').toLowerCase();
                 if (text.includes('sign in') || text.includes('log in') || text.includes('login') || text.includes('submit') || text.includes('continue')) {
-                  console.log('[GSX AutoLogin] Clicking button by text:', btn.textContent);
+                  console.log('[GSX Auth] Clicking button by text:', btn.textContent);
                   btn.click();
                   break;
                 }
@@ -583,7 +680,7 @@ async function attemptGSXAutoLogin(gsxWindow, url) {
       
     } else if (pageType === '2fa') {
       if (!credentials.totpSecret) {
-        console.log('[GSX AutoLogin] No TOTP secret configured');
+        log.info('window', 'No TOTP secret configured')
         return;
       }
       
@@ -595,7 +692,7 @@ async function attemptGSXAutoLogin(gsxWindow, url) {
       
       // Generate TOTP code
       const code = totpManager.generateCode(credentials.totpSecret);
-      console.log('[GSX AutoLogin] Filling 2FA code');
+      log.info('window', 'Filling 2FA code')
       
       await gsxWindow.webContents.executeJavaScript(`
         (function() {
@@ -632,7 +729,7 @@ async function attemptGSXAutoLogin(gsxWindow, url) {
     }
     
   } catch (error) {
-    console.error('[GSX AutoLogin] Error:', error.message);
+    log.error('window', 'Error', { error: error.message })
   }
 }
 
@@ -647,6 +744,14 @@ function createMainWindow(app) {
     logger = getLogger();
   }
   
+  // Reset shutdown state when creating a new main window
+  // (handles the case where createMainWindow is called again after a close)
+  isShuttingDown = false;
+  if (shutdownTimeout) {
+    clearTimeout(shutdownTimeout);
+    shutdownTimeout = null;
+  }
+  
   // Use the PNG icon for all platforms for consistency
   const iconPath = path.join(__dirname, 'assets/tray-icon.png');
   
@@ -654,7 +759,7 @@ function createMainWindow(app) {
     action: 'creating',
     icon: iconPath
   });
-  console.log(`Using icon path for main window: ${iconPath}`);
+  log.info('window', 'Using icon path for main window: ...', { iconPath })
 
   // Create the browser window
   mainWindow = new BrowserWindow({
@@ -691,7 +796,7 @@ function createMainWindow(app) {
       cookie.domain.includes('onereach.ai') ||
       cookie.domain.includes('microsoft.com')
     )) {
-      console.log(`Auth cookie ${removed ? 'removed' : 'changed'}: ${cookie.name} for ${cookie.domain}`);
+      log.info('window', 'Auth cookie ...: ... for ...', { detail: removed ? 'removed' : 'changed', cookieName: cookie.name, domain: cookie.domain })
     }
   });
   
@@ -733,7 +838,7 @@ function createMainWindow(app) {
   
   // Set up permission handlers for the main window
   mainWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
-    console.log(`Main window permission requested: ${permission}`);
+    log.info('window', 'Main window permission requested: ...', { permission })
     
     // Allow media and other necessary permissions
     if (permission === 'media' || 
@@ -743,17 +848,17 @@ function createMainWindow(app) {
         permission === 'notifications' ||
         permission === 'clipboard-read' ||
         permission === 'clipboard-write') {
-      console.log(`Main window allowing ${permission} permission`);
+      log.info('window', 'Main window allowing ... permission', { permission })
       callback(true);
     } else {
-      console.log(`Main window denying ${permission} permission`);
+      log.info('window', 'Main window denying ... permission', { permission })
       callback(false);
     }
   });
   
   // Also set permission check handler
   mainWindow.webContents.session.setPermissionCheckHandler((webContents, permission) => {
-    console.log(`Main window permission check: ${permission}`);
+    log.info('window', 'Main window permission check: ...', { permission })
     
     if (permission === 'media' || 
         permission === 'audioCapture' || 
@@ -771,18 +876,16 @@ function createMainWindow(app) {
   // Special handler for new-window events in WebContents
   // This affects windows requested by the main HTML file, not webviews
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    console.log('Main window open handler, URL:', url);
+    log.info('window', 'Main window open handler, URL', { url })
     
     // For Google authentication, notify the renderer to handle in the current tab
     if (url.includes('accounts.google.com') || 
         url.includes('oauth2') || 
         url.includes('auth')) {
-      console.log('Google auth URL detected, sending to renderer to handle in current tab:', url);
+      log.info('window', 'Google auth URL detected, sending to renderer to handle in current tab', { url })
       
       // Send to renderer to handle in the current tab
-      setTimeout(() => {
-        mainWindow.webContents.send('handle-auth-url', url);
-      }, 0);
+      setTimeout(() => safeSend(mainWindow, 'handle-auth-url', url), 0);
       
       return { action: 'deny' };
     }
@@ -790,21 +893,17 @@ function createMainWindow(app) {
     // For chat URLs, notify the renderer to handle in the appropriate tab
     if (url.includes('/chat/') || 
         url.startsWith('https://flow-desc.chat.edison.onereach.ai/')) {
-      console.log('Main process: Chat URL detected in window open handler, sending to renderer');
+      log.info('window', 'Main process: Chat URL detected in window open handler, sending to renderer')
       
       // Send to renderer to handle in the current tab
-      setTimeout(() => {
-        mainWindow.webContents.send('handle-chat-url', url);
-      }, 0);
+      setTimeout(() => safeSend(mainWindow, 'handle-chat-url', url), 0);
       
       // Prevent default window creation
       return { action: 'deny' };
     }
     
     // For non-chat URLs, let the renderer handle it by opening in a new tab
-    setTimeout(() => {
-      mainWindow.webContents.send('open-in-new-tab', url);
-    }, 0);
+    setTimeout(() => safeSend(mainWindow, 'open-in-new-tab', url), 0);
     
     // Prevent default window creation
     return { action: 'deny' };
@@ -812,30 +911,30 @@ function createMainWindow(app) {
 
   // Add navigation handler for Google auth redirects
   mainWindow.webContents.on('will-navigate', (event, url) => {
-    console.log('Main window navigation attempted to:', url);
+    log.info('window', 'Main window navigation attempted to', { url })
     
     // Handle Google auth redirects
     if (url.includes('accounts.google.com') || 
         url.includes('oauth2') || 
         url.includes('auth')) {
-      console.log('Auth navigation detected, allowing:', url);
+      log.info('window', 'Auth navigation detected, allowing', { url })
       return;
     }
     
     // Allow navigation for onereach.ai domains
     if (url.includes('.onereach.ai/')) {
-      console.log('Navigation to onereach.ai URL allowed:', url);
+      log.info('window', 'Navigation to onereach.ai URL allowed', { url })
       return;
     }
     
     // Block navigation to other domains
-    console.log('Blocking navigation to non-onereach.ai URL:', url);
+    log.info('window', 'Blocking navigation to non-onereach.ai URL', { url })
     event.preventDefault();
     
     // Open external URLs in default browser
     if (url.startsWith('http://') || url.startsWith('https://')) {
       shell.openExternal(url).catch(err => {
-        console.error('Failed to open external URL:', err);
+        log.error('window', 'Failed to open external URL', { error: err.message || err })
       });
     }
   });
@@ -849,14 +948,14 @@ function createMainWindow(app) {
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
-          "default-src 'self' * https://*.onereach.ai https://*.api.onereach.ai https://unpkg.com https://chatgpt.com https://*.chatgpt.com https://chat.openai.com https://*.openai.com; " +
-          "style-src 'self' 'unsafe-inline' * https://*.onereach.ai https://fonts.googleapis.com; " + 
-          "style-src-elem 'self' 'unsafe-inline' * https://*.onereach.ai https://fonts.googleapis.com; " +
-          "script-src 'self' 'unsafe-inline' 'unsafe-eval' * https://*.onereach.ai https://unpkg.com https://cdn.jsdelivr.net; " +
-          "connect-src 'self' * https://*.onereach.ai https://*.api.onereach.ai ws://localhost:3322 wss://*; " +
-          "img-src 'self' data: blob: spaces: * https://*.onereach.ai; " +
-          "font-src 'self' data: * https://*.onereach.ai https://fonts.gstatic.com; " +
-          "media-src 'self' blob: mediastream: * https://*.onereach.ai https://*.chatgpt.com https://*.openai.com; " +
+          "default-src 'self' https://*.onereach.ai https://*.api.onereach.ai https://unpkg.com https://chatgpt.com https://*.chatgpt.com https://chat.openai.com https://*.openai.com https://cdn.jsdelivr.net; " +
+          "style-src 'self' 'unsafe-inline' https://*.onereach.ai https://fonts.googleapis.com; " + 
+          "style-src-elem 'self' 'unsafe-inline' https://*.onereach.ai https://fonts.googleapis.com; " +
+          "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.onereach.ai https://unpkg.com https://cdn.jsdelivr.net; " +
+          "connect-src 'self' https://*.onereach.ai https://*.api.onereach.ai https://*.openai.com https://*.chatgpt.com ws://localhost:3322 wss://*.onereach.ai http://127.0.0.1:47291 http://localhost:47291; " +
+          "img-src 'self' data: spaces: https://*.onereach.ai https://*.googleapis.com https://*.gstatic.com https://www.google.com; " +
+          "font-src 'self' data: https://*.onereach.ai https://fonts.gstatic.com; " +
+          "media-src 'self' blob: https://*.onereach.ai https://*.chatgpt.com https://*.openai.com; " +
           "worker-src 'self' blob:; " +
           "object-src 'none'; " +
           "base-uri 'self'"
@@ -864,6 +963,9 @@ function createMainWindow(app) {
       }
     });
   });
+
+  // Attach structured log forwarding for the main window
+  attachLogForwarder(mainWindow, 'app');
 
   // Load the tabbed browser HTML file instead of directly loading a URL
   mainWindow.loadFile('tabbed-browser.html');
@@ -876,10 +978,13 @@ function createMainWindow(app) {
 
   // Add custom scrollbar styling to main window
   mainWindow.webContents.on('did-finish-load', () => {
+    // Guard: bail if window was destroyed between event dispatch and handler
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    
     // Inject Chrome-like behavior and remove Electron fingerprints
     mainWindow.webContents.executeJavaScript(`
       (function() {
-        console.log('[Main Window] Injecting Chrome-like behavior and removing Electron fingerprints');
+        console.log('[Window] Injecting Chrome-like behavior and removing Electron fingerprints');
         
         // Remove Electron fingerprints
         delete window.navigator.__proto__.webdriver;
@@ -957,24 +1062,13 @@ function createMainWindow(app) {
           return getParameter.apply(this, arguments);
         };
         
-        // Override canvas fingerprinting
-        const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
-        HTMLCanvasElement.prototype.toDataURL = function() {
-          const context = this.getContext('2d');
-          if (context) {
-            // Add imperceptible noise to match Chrome
-            const imageData = context.getImageData(0, 0, this.width, this.height);
-            for (let i = 0; i < imageData.data.length; i += 4) {
-              imageData.data[i] = Math.min(255, imageData.data[i] + Math.random() * 0.1);
-            }
-            context.putImageData(imageData, 0, 0);
-          }
-          return originalToDataURL.apply(this, arguments);
-        };
+        // NOTE: Canvas toDataURL override removed - it was corrupting ALL canvas
+        // exports (images, thumbnails, etc.) by adding random noise to every pixel.
+        // The anti-fingerprinting benefit was minimal compared to the data corruption risk.
         
-        console.log('[Main Window] Enhanced Chrome-like behavior applied');
+        console.log('[Window] Enhanced Chrome-like behavior applied');
       })();
-    `).catch(err => console.error('Failed to inject Chrome-like behavior:', err));
+    `).catch(err => log.warn('window', 'Chrome-like behavior injection skipped (page not ready)', { error: err.message || err }))
     
     mainWindow.webContents.insertCSS(`
       ::-webkit-scrollbar {
@@ -995,7 +1089,7 @@ function createMainWindow(app) {
       ::-webkit-scrollbar-thumb:hover {
         background: rgba(255, 255, 255, 0.2);
       }
-    `).catch(err => console.error('Failed to inject scrollbar CSS:', err));
+    `).catch(err => log.error('window', 'Failed to inject scrollbar CSS', { error: err.message || err }))
 
     // Check for Material Symbols font and preload if needed
     mainWindow.webContents.executeJavaScript(`
@@ -1003,7 +1097,7 @@ function createMainWindow(app) {
         // Check if page uses Material Symbols
         const hasSymbols = document.querySelector('.material-symbols-outlined, .material-icons');
         if (hasSymbols) {
-          console.log('Material Symbols found on page, preloading font');
+          console.log('[Window] Material Symbols found on page, preloading font');
           
           // Add preload link for Material Icons font
           const preloadLink = document.createElement('link');
@@ -1014,20 +1108,20 @@ function createMainWindow(app) {
           
           return true;
         } else {
-          console.log('No Material Symbols elements found on page, skipping preload');
+          console.log('[Window] No Material Symbols elements found on page, skipping preload');
           return false;
         }
       })();
-    `).catch(err => console.error('Failed to check for Material Symbols:', err));
+    `).catch(err => log.warn('window', 'Material Symbols check skipped (page not ready)', { error: err.message || err }))
   });
 
   // Handle window close event - save state and close gracefully
   mainWindow.on('close', (event) => {
-    console.log('[BrowserWindow] Close event - isShuttingDown:', isShuttingDown);
+    log.info('window', 'Close event', { isShuttingDown, isQuitting: !!global.isQuitting })
     
-    // If already shutting down, allow the close
-    if (isShuttingDown) {
-      console.log('[BrowserWindow] Already shutting down, allowing close');
+    // If app.quit() was called or already shutting down, allow immediate close
+    if (isShuttingDown || global.isQuitting) {
+      log.info('window', 'Allowing close (shutdown/quit in progress)')
       return;
     }
     
@@ -1036,22 +1130,19 @@ function createMainWindow(app) {
     
     // Prevent the default close temporarily
     event.preventDefault();
-    console.log('[BrowserWindow] Close requested - giving renderer time to save state');
+    log.info('window', 'Close requested - giving renderer time to save state')
     
     // Send shutdown signal to renderer (it will save state via beforeunload anyway)
-    try {
-      mainWindow.webContents.send('request-graceful-shutdown');
-    } catch (e) {
-      console.log('[BrowserWindow] Could not send shutdown signal:', e.message);
-    }
+    safeSend(mainWindow, 'request-graceful-shutdown');
     
     // Short delay to let beforeunload complete, then force destroy
     // This is a simple, reliable approach
-    setTimeout(() => {
-      console.log('[BrowserWindow] Forcing window destroy');
+    shutdownTimeout = setTimeout(() => {
+      log.info('window', 'Forcing window destroy')
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.destroy();
       }
+      shutdownTimeout = null;
     }, 500); // 500ms is enough for localStorage saves
   });
   
@@ -1061,16 +1152,14 @@ function createMainWindow(app) {
     
     // Optional: renderer can signal early if ready
     ipcMain.on('shutdown-ready', () => {
-      console.log('[BrowserWindow] Renderer signaled shutdown-ready (early)');
+      log.info('window', 'Renderer signaled shutdown-ready (early)')
       // Window will be destroyed by the timeout anyway
     });
   }
   
   // Handle window closed event
-  mainWindow.on('closed', () => {
-    logger.logWindowClosed('main-window', 'main');
-    mainWindow = null;
-  });
+  mainWindow.on('closed', () => { logWindowClosed: logger.logWindowClosed('main-window', 'main');
+    mainWindow = null; });
   
   // Log window focus events
   mainWindow.on('focus', () => {
@@ -1079,12 +1168,15 @@ function createMainWindow(app) {
 
   // Add context menu handler for right-click with standard editing options and "Send to Space"
   mainWindow.webContents.on('context-menu', (event, params) => {
-    console.log('[BrowserWindow] Context menu requested at:', params.x, params.y, 'selectionText:', params.selectionText);
+    // Guard: bail if mainWindow was destroyed (edge case during shutdown)
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    
+    log.info('window', 'Context menu requested at', { x: params.x, y: params.y, arg3: 'selectionText:', selectionText: params.selectionText })
     
     // Allow native DevTools context menu to work (only when right-clicking IN DevTools)
     const url = mainWindow.webContents.getURL();
     if (url.startsWith('devtools://') || url.startsWith('chrome-devtools://')) {
-      console.log('[BrowserWindow] DevTools panel detected, allowing native context menu');
+      log.info('window', 'DevTools panel detected, allowing native context menu')
       return; // Don't prevent default, let DevTools handle it
     }
     
@@ -1147,7 +1239,7 @@ function createMainWindow(app) {
       contextMenu.append(new MenuItem({
         label: 'Send to Space',
         click: () => {
-          console.log('[BrowserWindow] Send to Space clicked with selection:', params.selectionText.substring(0, 50));
+          log.info('window', 'Send to Space clicked with selection', { detail: params.selectionText.substring(0, 50) })
           
           if (global.clipboardManager) {
             const selectionData = {
@@ -1158,7 +1250,7 @@ function createMainWindow(app) {
               html: null
             };
             
-            console.log('[BrowserWindow] Selection data ready:', { textLength: params.selectionText.length });
+            log.info('window', 'Selection data ready', { detail: { textLength: params.selectionText.length } })
             
             // Position the window
             const bounds = mainWindow.getBounds();
@@ -1179,7 +1271,7 @@ function createMainWindow(app) {
       contextMenu.append(new MenuItem({
         label: 'Send Image to Space',
         click: async () => {
-          console.log('[BrowserWindow] Send Image to Space clicked:', params.srcURL);
+          log.info('window', 'Send Image to Space clicked', { srcURL: params.srcURL })
           
           if (global.clipboardManager) {
             try {
@@ -1221,7 +1313,7 @@ function createMainWindow(app) {
                 sourceUrl: params.srcURL
               };
               
-              console.log('[BrowserWindow] Image data ready from:', params.srcURL);
+              log.info('window', 'Image data ready from', { srcURL: params.srcURL })
               
               // Position the window
               const bounds = mainWindow.getBounds();
@@ -1233,7 +1325,7 @@ function createMainWindow(app) {
               // Create window with image data - will show modal directly
               global.clipboardManager.createBlackHoleWindow(position, true, imageDataObj);
             } catch (error) {
-              console.error('[BrowserWindow] Error downloading image:', error);
+              log.error('window', 'Error downloading image', { error: error.message || error })
               // Fallback: just send the URL as text
               const fallbackData = {
                 hasText: true,
@@ -1268,7 +1360,7 @@ function createMainWindow(app) {
     contextMenu.append(new MenuItem({
       label: 'Paste to Space',
       click: () => {
-        console.log('[BrowserWindow] Paste to Space clicked');
+        log.info('window', 'Paste to Space clicked')
         
         // Get clipboard manager from global
         if (global.clipboardManager) {
@@ -1299,7 +1391,7 @@ function createMainWindow(app) {
             clipboardData.imageDataUrl = image.toDataURL();
           }
           
-          console.log('[BrowserWindow] Clipboard data ready:', { hasText: !!text, hasHtml: isRealHtml, hasImage: !image.isEmpty() });
+          log.info('window', 'Clipboard data ready', { detail: { hasText: !!text, hasHtml: isRealHtml, hasImage: !image.isEmpty() } })
           
           // Position the window
           const bounds = mainWindow.getBounds();
@@ -1356,14 +1448,14 @@ function createSecureContentWindow(parentWindow) {
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
-          "default-src 'self' * https://*.onereach.ai https://*.api.onereach.ai https://unpkg.com; " +
-          "style-src 'self' 'unsafe-inline' * https://*.onereach.ai https://fonts.googleapis.com; " + 
-          "style-src-elem 'self' 'unsafe-inline' * https://*.onereach.ai https://fonts.googleapis.com; " +
-          "script-src 'self' 'unsafe-inline' 'unsafe-eval' * https://*.onereach.ai https://unpkg.com https://cdn.jsdelivr.net; " +
-          "connect-src 'self' * https://*.onereach.ai https://*.api.onereach.ai ws://localhost:3322; " +
-          "img-src 'self' data: blob: spaces: * https://*.onereach.ai; " +
-          "font-src 'self' data: * https://*.onereach.ai https://fonts.gstatic.com; " +
-          "media-src 'self' blob: * https://*.onereach.ai; " +
+          "default-src 'self' https://*.onereach.ai https://*.api.onereach.ai https://unpkg.com https://cdn.jsdelivr.net; " +
+          "style-src 'self' 'unsafe-inline' https://*.onereach.ai https://fonts.googleapis.com; " + 
+          "style-src-elem 'self' 'unsafe-inline' https://*.onereach.ai https://fonts.googleapis.com; " +
+          "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.onereach.ai https://unpkg.com https://cdn.jsdelivr.net; " +
+          "connect-src 'self' https://*.onereach.ai https://*.api.onereach.ai ws://localhost:3322 http://127.0.0.1:47291 http://localhost:47291; " +
+          "img-src 'self' data: spaces: https://*.onereach.ai https://*.googleapis.com https://*.gstatic.com https://www.google.com; " +
+          "font-src 'self' data: https://*.onereach.ai https://fonts.gstatic.com; " +
+          "media-src 'self' blob: https://*.onereach.ai; " +
           "worker-src 'self' blob:; " +
           "object-src 'none'; " +
           "base-uri 'self'"
@@ -1372,16 +1464,19 @@ function createSecureContentWindow(parentWindow) {
     });
   });
 
+  // Attach structured log forwarding
+  attachLogForwarder(contentWindow, 'external');
+
   // Setup security monitoring for external content
   contentWindow.webContents.on('will-navigate', (event, url) => {
     // Log navigation attempts
-    console.log('Content window navigation attempted to:', url);
+    log.info('window', 'Content window navigation attempted to', { url })
     
     // Allow navigation within the same window for IDW and chat URLs
     if (url.startsWith('https://idw.edison.onereach.ai/') || 
         url.startsWith('https://flow-desc.chat.edison.onereach.ai/') || 
         url.includes('/chat/')) {
-      console.log('Navigation to IDW/chat URL allowed in same window:', url);
+      log.info('window', 'Navigation to IDW/chat URL allowed in same window', { url })
       return;
     }
     
@@ -1393,31 +1488,31 @@ function createSecureContentWindow(parentWindow) {
          url.includes('tickets.') || 
          url.includes('calendar.') || 
          url.includes('docs.'))) {
-      console.log('Navigation to GSX URL allowed in same window:', url);
+      log.info('window', 'Navigation to GSX URL allowed in same window', { url })
       return;
     }
     
     // Block navigation to unexpected URLs
-    console.log('Blocking navigation to non-IDW/GSX URL:', url);
+    log.info('window', 'Blocking navigation to non-IDW/GSX URL', { url })
     event.preventDefault();
     
     // Open external URLs in default browser instead
     if (url.startsWith('http://') || url.startsWith('https://')) {
       shell.openExternal(url).catch(err => {
-        console.error('Failed to open external URL:', err);
+        log.error('window', 'Failed to open external URL', { error: err.message || err })
       });
     }
   });
 
   // Handle redirect events
   contentWindow.webContents.on('will-redirect', (event, url) => {
-    console.log('Content window redirect attempted to:', url);
+    log.info('window', 'Content window redirect attempted to', { url })
     
     // Allow redirects to IDW and chat URLs in the same window
     if (url.startsWith('https://idw.edison.onereach.ai/') || 
         url.startsWith('https://flow-desc.chat.edison.onereach.ai/') || 
         url.includes('/chat/')) {
-      console.log('Redirect to IDW/chat URL allowed in same window:', url);
+      log.info('window', 'Redirect to IDW/chat URL allowed in same window', { url })
       return;
     }
     
@@ -1429,18 +1524,18 @@ function createSecureContentWindow(parentWindow) {
          url.includes('tickets.') || 
          url.includes('calendar.') || 
          url.includes('docs.'))) {
-      console.log('Redirect to GSX URL allowed in same window:', url);
+      log.info('window', 'Redirect to GSX URL allowed in same window', { url })
       return;
     }
     
     // Block redirects to unexpected URLs
-    console.log('Blocking redirect to non-IDW/GSX URL:', url);
+    log.info('window', 'Blocking redirect to non-IDW/GSX URL', { url })
     event.preventDefault();
     
     // Open external URLs in default browser instead
     if (url.startsWith('http://') || url.startsWith('https://')) {
       shell.openExternal(url).catch(err => {
-        console.error('Failed to open external URL on redirect:', err);
+        log.error('window', 'Failed to open external URL on redirect', { error: err.message || err })
       });
     }
   });
@@ -1453,7 +1548,7 @@ function createSecureContentWindow(parentWindow) {
         // Check if page uses Material Symbols
         const hasSymbols = document.querySelector('.material-symbols-outlined, .material-icons');
         if (hasSymbols) {
-          console.log('Material Symbols found on page, preloading font');
+          console.log('[Window] Material Symbols found on page, preloading font');
           
           // Add preload link for Material Icons font
           const preloadLink = document.createElement('link');
@@ -1464,11 +1559,11 @@ function createSecureContentWindow(parentWindow) {
           
           return true;
         } else {
-          console.log('No Material Symbols elements found on page, skipping preload');
+          console.log('[Window] No Material Symbols elements found on page, skipping preload');
           return false;
         }
       })();
-    `).catch(err => console.error('Failed to check for Material Symbols:', err));
+    `).catch(err => log.warn('window', 'Material Symbols check skipped (page not ready)', { error: err.message || err }))
     
     // Inject script to intercept link clicks
     contentWindow.webContents.executeJavaScript(`
@@ -1494,16 +1589,16 @@ function createSecureContentWindow(parentWindow) {
             // Log chat URLs (will be handled by will-navigate)
             if (url && (url.includes('/chat/') || 
                          url.startsWith('https://flow-desc.chat.edison.onereach.ai/'))) {
-              console.log('Chat link clicked:', url);
+              console.log('[Window] Chat link clicked:', url);
               // We don't need to do anything here - just log
             }
           }
         }, true);
         
-        console.log('Link click interceptor installed');
+        console.log('[Window] Link click interceptor installed');
         return true;
       })();
-    `).catch(err => console.error('Failed to inject link handler script:', err));
+    `).catch(err => log.error('window', 'Failed to inject link handler script', { error: err.message || err }))
     
     // Add custom scrollbar styling
     contentWindow.webContents.insertCSS(`
@@ -1525,7 +1620,7 @@ function createSecureContentWindow(parentWindow) {
       ::-webkit-scrollbar-thumb:hover {
         background: rgba(255, 255, 255, 0.2);
       }
-    `).catch(err => console.error('Failed to inject scrollbar CSS:', err));
+    `).catch(err => log.error('window', 'Failed to inject scrollbar CSS', { error: err.message || err }))
   });
 
   // Handle downloads in secure content windows
@@ -1536,17 +1631,17 @@ function createSecureContentWindow(parentWindow) {
 
   // Monitor for unexpected new windows
   contentWindow.webContents.setWindowOpenHandler(({ url }) => {
-    console.log('External content attempted to open new window:', url);
+    log.info('window', 'External content attempted to open new window', { url })
     
     // For chat URLs, navigate the current window instead of opening a new one
     if (url.includes('/chat/') || 
         url.startsWith('https://flow-desc.chat.edison.onereach.ai/')) {
-      console.log('Chat URL detected, navigating current window to:', url);
+      log.info('window', 'Chat URL detected, navigating current window to', { url })
       
       // Handle this URL manually by loading it in the current window
       setTimeout(() => {
         contentWindow.loadURL(url).catch(err => {
-          console.error('Failed to load chat URL in current window:', err);
+          log.error('window', 'Failed to load chat URL in current window', { error: err.message || err })
         });
       }, 0);
       
@@ -1562,12 +1657,12 @@ function createSecureContentWindow(parentWindow) {
          url.includes('tickets.') || 
          url.includes('calendar.') || 
          url.includes('docs.'))) {
-      console.log('GSX URL detected, navigating current window to:', url);
+      log.info('window', 'GSX URL detected, navigating current window to', { url })
       
       // Handle this URL manually by loading it in the current window
       setTimeout(() => {
         contentWindow.loadURL(url).catch(err => {
-          console.error('Failed to load GSX URL in current window:', err);
+          log.error('window', 'Failed to load GSX URL in current window', { error: err.message || err })
         });
       }, 0);
       
@@ -1579,7 +1674,7 @@ function createSecureContentWindow(parentWindow) {
     if (url.startsWith('https://idw.edison.onereach.ai/')) {
       // Open non-chat IDW URLs in the default browser
       shell.openExternal(url).catch(err => {
-        console.error('Failed to open external URL:', err);
+        log.error('window', 'Failed to open external URL', { error: err.message || err })
       });
     }
     
@@ -1595,10 +1690,10 @@ function createSecureContentWindow(parentWindow) {
  * @param {string} url - The URL to open
  */
 function openURLInMainWindow(url) {
-  console.log('Opening URL in main window:', url);
+  log.info('window', 'Opening URL in main window', { url })
   
   if (!mainWindow) {
-    console.error('Main window not available');
+    log.error('window', 'Main window not available')
     return;
   }
   
@@ -1608,11 +1703,11 @@ function openURLInMainWindow(url) {
     
     // Make sure it's using http or https protocol
     if (!urlObj.protocol.match(/^https?:$/)) {
-      console.error('Invalid URL protocol:', urlObj.protocol);
+      log.error('window', 'Invalid URL protocol', { protocol: urlObj.protocol })
       throw new Error(`Invalid URL protocol: ${urlObj.protocol}`);
     }
     
-    console.log('Loading URL in main window:', urlObj.href);
+    log.info('window', 'Loading URL in main window', { href: urlObj.href })
     
     // Create a secure window for external content to avoid security issues
     // with Node.js integration in the main window
@@ -1621,7 +1716,7 @@ function openURLInMainWindow(url) {
     // Show loading indicator in the main window before loading URL
     mainWindow.webContents.executeJavaScript(`
       document.body.innerHTML += '<div id="loading-overlay" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); display: flex; justify-content: center; align-items: center; z-index: 9999;"><div style="color: white; font-size: 20px;">Loading IDW environment...</div></div>';
-    `).catch(err => console.error('Error showing loading indicator:', err));
+    `).catch(err => log.error('window', 'Error showing loading indicator', { error: err.message || err }))
 
     // Close the main window when loading is complete
     contentWindow.webContents.on('did-finish-load', () => {
@@ -1637,7 +1732,7 @@ function openURLInMainWindow(url) {
 
     // Load the URL in the content window
     contentWindow.loadURL(urlObj.href).catch(error => {
-      console.error('Error loading URL:', error);
+      log.error('window', 'Error loading URL', { error: error.message || error })
       contentWindow.close(); // Close the content window on error
       
       // Show error notification
@@ -1647,7 +1742,7 @@ function openURLInMainWindow(url) {
       });
     });
   } catch (error) {
-    console.error('Error parsing URL:', error);
+    log.error('window', 'Error parsing URL', { error: error.message || error })
     
     // Show error notification
     if (mainWindow && mainWindow.webContents) {
@@ -1685,6 +1780,9 @@ function createSetupWizardWindow(options = {}) {
     ...options
   });
 
+  // Attach structured log forwarding
+  attachLogForwarder(wizardWindow, 'settings');
+
   // Set CSP for wizard window
   // PERFORMANCE: Only apply CSP to onereach.ai domains
   wizardWindow.webContents.session.webRequest.onHeadersReceived({ urls: ['*://*.onereach.ai/*', 'file://*'] }, (details, callback) => {
@@ -1692,14 +1790,14 @@ function createSetupWizardWindow(options = {}) {
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
-          "default-src 'self' * https://*.onereach.ai https://*.api.onereach.ai https://unpkg.com; " +
-          "style-src 'self' 'unsafe-inline' * https://*.onereach.ai; " +
-          "style-src-elem 'self' 'unsafe-inline' * https://*.onereach.ai; " +
-          "script-src 'self' 'unsafe-inline' 'unsafe-eval' * https://*.onereach.ai https://unpkg.com https://cdn.jsdelivr.net; " +
-          "connect-src 'self' * https://*.onereach.ai https://*.api.onereach.ai ws://localhost:3322; " +
-          "img-src 'self' data: blob: spaces: * https://*.onereach.ai; " +
-          "font-src 'self' data: * https://*.onereach.ai; " +
-          "media-src 'self' * https://*.onereach.ai; " +
+          "default-src 'self' https://*.onereach.ai https://*.api.onereach.ai https://unpkg.com https://cdn.jsdelivr.net; " +
+          "style-src 'self' 'unsafe-inline' https://*.onereach.ai; " +
+          "style-src-elem 'self' 'unsafe-inline' https://*.onereach.ai; " +
+          "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.onereach.ai https://unpkg.com https://cdn.jsdelivr.net; " +
+          "connect-src 'self' https://*.onereach.ai https://*.api.onereach.ai ws://localhost:3322 http://127.0.0.1:47291 http://localhost:47291; " +
+          "img-src 'self' data: spaces: https://*.onereach.ai; " +
+          "font-src 'self' data: https://*.onereach.ai; " +
+          "media-src 'self' https://*.onereach.ai; " +
           "object-src 'none'; " +
           "base-uri 'self'"
         ]
@@ -1726,6 +1824,9 @@ function createTestWindow() {
     }
   });
 
+  // Attach structured log forwarding
+  attachLogForwarder(testWindow, 'test');
+
   // Set CSP for test window
   // PERFORMANCE: Only apply CSP to onereach.ai domains
   testWindow.webContents.session.webRequest.onHeadersReceived({ urls: ['*://*.onereach.ai/*', 'file://*'] }, (details, callback) => {
@@ -1733,14 +1834,14 @@ function createTestWindow() {
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
-          "default-src 'self' * https://*.onereach.ai https://*.api.onereach.ai https://unpkg.com; " +
-          "style-src 'self' 'unsafe-inline' * https://*.onereach.ai https://fonts.googleapis.com; " + 
-          "style-src-elem 'self' 'unsafe-inline' * https://*.onereach.ai https://fonts.googleapis.com; " +
-          "script-src 'self' 'unsafe-inline' 'unsafe-eval' * https://*.onereach.ai https://unpkg.com https://cdn.jsdelivr.net; " +
-          "connect-src 'self' * https://*.onereach.ai https://*.api.onereach.ai ws://localhost:3322; " +
-          "img-src 'self' data: blob: spaces: * https://*.onereach.ai; " +
-          "font-src 'self' data: * https://*.onereach.ai https://fonts.gstatic.com; " +
-          "media-src 'self' * https://*.onereach.ai; " +
+          "default-src 'self' https://*.onereach.ai https://*.api.onereach.ai https://unpkg.com https://cdn.jsdelivr.net; " +
+          "style-src 'self' 'unsafe-inline' https://*.onereach.ai https://fonts.googleapis.com; " + 
+          "style-src-elem 'self' 'unsafe-inline' https://*.onereach.ai https://fonts.googleapis.com; " +
+          "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.onereach.ai https://unpkg.com https://cdn.jsdelivr.net; " +
+          "connect-src 'self' https://*.onereach.ai https://*.api.onereach.ai ws://localhost:3322 http://127.0.0.1:47291 http://localhost:47291; " +
+          "img-src 'self' data: spaces: https://*.onereach.ai https://*.googleapis.com https://*.gstatic.com https://www.google.com; " +
+          "font-src 'self' data: https://*.onereach.ai https://fonts.gstatic.com; " +
+          "media-src 'self' https://*.onereach.ai; " +
           "object-src 'none'; " +
           "base-uri 'self'"
         ]
@@ -1767,7 +1868,7 @@ function getMainWindow() {
  * @returns {BrowserWindow} The created GSX window
  */
 async function openGSXWindow(url, title, idwEnvironment) {
-  console.log(`Opening GSX window for ${title}: ${url}`);
+  log.info('window', 'Opening GSX window for ...: ...', { title, url })
   
   if (!logger) {
     logger = getLogger();
@@ -1778,18 +1879,19 @@ async function openGSXWindow(url, title, idwEnvironment) {
     environment: idwEnvironment
   });
   
+  // Multi-tenant token injection - inject BEFORE creating window
+  // This ensures the token is available when the window first loads
+  const multiTenantStore = require('./multi-tenant-store');
+  
   // Extract environment from URL if not provided
+  // Use the multi-tenant-store's extraction logic for consistency
   if (!idwEnvironment) {
     try {
-      const urlObj = new URL(url);
-      // Extract from hostname - e.g., studio.edison.onereach.ai -> edison
-      const hostParts = urlObj.hostname.split('.');
-      idwEnvironment = hostParts.find(part => 
-        ['staging', 'edison', 'production', 'store'].includes(part)
-      ) || 'unknown';
+      idwEnvironment = multiTenantStore.extractEnvironmentFromUrl(url);
+      log.info('window', 'Extracted environment \'...\' from URL: ...', { idwEnvironment, url })
     } catch (err) {
-      console.error('Error parsing GSX URL to extract environment:', err);
-      idwEnvironment = 'unknown';
+      log.error('window', 'Error parsing GSX URL to extract environment', { error: err.message || err })
+      idwEnvironment = 'production'; // Default to production
     }
   }
   
@@ -1799,66 +1901,29 @@ async function openGSXWindow(url, title, idwEnvironment) {
   const partitionName = `gsx-${idwEnvironment}`;
   const fullPartition = `persist:${partitionName}`;
   
-  console.log(`Using shared session partition for IDW group: ${partitionName}`);
+  log.info('window', 'Using shared session partition for IDW group: ...', { partitionName })
   
-  // Multi-tenant token injection - inject BEFORE creating window
-  // This ensures the token is available when the window first loads
-  const multiTenantStore = require('./multi-tenant-store');
+  // Use centralized hardened injection with retry logic and verification
+  const injectionResult = await multiTenantStore.injectAndRegister(
+    idwEnvironment, 
+    fullPartition, 
+    { source: 'browserWindow.openGSXWindow' }
+  );
   
-  // #region agent log
-  try{require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log',JSON.stringify({location:'browserWindow.js:1808',message:'openGSXWindow token check',data:{idwEnvironment,fullPartition,hasValidToken:multiTenantStore.hasValidToken(idwEnvironment)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-compare'})+'\n');}catch(e){}
-  // #endregion
+  // Store injection status for later display
+  const authStatus = {
+    hasToken: injectionResult.success,
+    cookieCount: injectionResult.cookieCount,
+    domains: injectionResult.domains,
+    error: injectionResult.error,
+    environment: idwEnvironment
+  };
   
-  if (multiTenantStore.hasValidToken(idwEnvironment)) {
-    const token = multiTenantStore.getToken(idwEnvironment);
-    const ses = session.fromPartition(fullPartition);
-    
-    // Use broader domain to cover all subdomains (auth, idw, chat, api)
-    const broaderDomain = multiTenantStore.getBroaderDomain(idwEnvironment);
-    
-    try {
-      // Check if token already exists in this partition (check broader domain)
-      const existing = await ses.cookies.get({ domain: broaderDomain, name: 'mult' });
-      if (existing.length === 0) {
-        // Inject token with broader domain so it's sent to all subdomains
-        await ses.cookies.set({
-          url: `https://auth${broaderDomain}`,
-          name: 'mult',
-          value: token.value,
-          domain: broaderDomain,
-          path: '/',
-          secure: true,
-          httpOnly: true,
-          sameSite: 'no_restriction',
-          expirationDate: token.expiresAt
-        });
-        
-        // CRITICAL: Flush to ensure cookie is persisted before window loads
-        await ses.cookies.flushStore();
-        
-        // Verify cookie was set
-        const cookies = await ses.cookies.get({ name: 'mult' });
-        console.log(`[GSX] Injected ${idwEnvironment} token into ${partitionName} - ${cookies.length} mult cookies:`,
-          cookies.map(c => ({ domain: c.domain, sameSite: c.sameSite })));
-        // #region agent log
-        try{require('fs').appendFileSync('/Users/richardwilson/Onereach_app/.cursor/debug.log',JSON.stringify({location:'browserWindow.js:1838',message:'openGSXWindow TOKEN INJECTED',data:{idwEnvironment,partitionName,cookieCount:cookies.length,cookieDomains:cookies.map(c=>c.domain)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-compare'})+'\n');}catch(e){}
-      } else {
-        console.log(`[GSX] Token already exists in ${partitionName}:`, existing.map(c => ({ domain: c.domain })));
-      }
-    } catch (err) {
-      console.error(`[GSX] Failed to inject token:`, err.message);
-      // Continue anyway - user can still login manually
-    }
-  } else {
-    console.log(`[GSX] No valid ${idwEnvironment} token available`);
+  if (injectionResult.success) {
+    log.info('window', 'Token injection successful: ... cookies on ...', { cookieCount: injectionResult.cookieCount, domains: injectionResult.domains.join(', ') })
+  } else if (injectionResult.error) {
+    log.warn('window', 'Token injection issue: ... - user may need to login manually', { error: injectionResult.error })
   }
-  
-  // ALWAYS register the GSX partition for token propagation (even if no token yet)
-  // This ensures that when user logs in via auto-login, tokens are propagated here
-  multiTenantStore.registerPartition(idwEnvironment, fullPartition);
-  
-  // Attach cookie listener (idempotent - only attaches once per partition)
-  multiTenantStore.attachCookieListener(fullPartition);
   
   // Create a window with proper security settings for GSX content
   const gsxWindow = new BrowserWindow({
@@ -1880,6 +1945,9 @@ async function openGSXWindow(url, title, idwEnvironment) {
     }
   });
   
+  // Attach structured log forwarding
+  attachLogForwarder(gsxWindow, 'window');
+
   // Set Content Security Policy for the GSX window
   // PERFORMANCE: Only apply CSP to onereach.ai domains
   gsxWindow.webContents.session.webRequest.onHeadersReceived({ urls: ['*://*.onereach.ai/*', 'file://*'] }, (details, callback) => {
@@ -1887,14 +1955,14 @@ async function openGSXWindow(url, title, idwEnvironment) {
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
-          "default-src 'self' * https://*.onereach.ai https://*.api.onereach.ai https://unpkg.com https://cdn.jsdelivr.net; " +
-          "style-src 'self' 'unsafe-inline' * https://*.onereach.ai https://fonts.googleapis.com; " + 
-          "style-src-elem 'self' 'unsafe-inline' * https://*.onereach.ai https://fonts.googleapis.com; " +
-          "script-src 'self' 'unsafe-inline' 'unsafe-eval' * https://*.onereach.ai https://unpkg.com https://cdn.jsdelivr.net; " +
-          "connect-src 'self' * https://*.onereach.ai https://*.api.onereach.ai ws://localhost:3322; " +
-          "img-src 'self' data: blob: spaces: * https://*.onereach.ai; " +
-          "font-src 'self' data: * https://*.onereach.ai https://fonts.gstatic.com; " +
-          "media-src 'self' blob: * https://*.onereach.ai; " +
+          "default-src 'self' https://*.onereach.ai https://*.api.onereach.ai https://unpkg.com https://cdn.jsdelivr.net; " +
+          "style-src 'self' 'unsafe-inline' https://*.onereach.ai https://fonts.googleapis.com; " + 
+          "style-src-elem 'self' 'unsafe-inline' https://*.onereach.ai https://fonts.googleapis.com; " +
+          "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.onereach.ai https://unpkg.com https://cdn.jsdelivr.net; " +
+          "connect-src 'self' https://*.onereach.ai https://*.api.onereach.ai ws://localhost:3322 wss://*.onereach.ai http://127.0.0.1:47291 http://localhost:47291; " +
+          "img-src 'self' data: spaces: https://*.onereach.ai https://*.googleapis.com https://*.gstatic.com https://www.google.com; " +
+          "font-src 'self' data: https://*.onereach.ai https://fonts.gstatic.com; " +
+          "media-src 'self' blob: https://*.onereach.ai; " +
           "worker-src 'self' blob:; " +
           "object-src 'none'; " +
           "base-uri 'self'"
@@ -1905,26 +1973,26 @@ async function openGSXWindow(url, title, idwEnvironment) {
   
   // Enable screen capture permissions
   gsxWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
-    console.log(`GSX Window - Permission requested: ${permission}`);
+    log.info('window', 'GSX Window - Permission requested: ...', { permission })
     
     // Allow screen capture and media permissions
     if (permission === 'media' || permission === 'display-capture' || permission === 'screen') {
-      console.log(`GSX Window - Granting ${permission} permission`);
+      log.info('window', 'GSX Window - Granting ... permission', { permission })
       callback(true);
     } else {
-      console.log(`GSX Window - Denying ${permission} permission`);
+      log.info('window', 'GSX Window - Denying ... permission', { permission })
       callback(false);
     }
   });
 
   // Handle media access requests
   gsxWindow.webContents.session.setPermissionCheckHandler((webContents, permission, requestingOrigin) => {
-    console.log(`GSX Window - Permission check: ${permission} from ${requestingOrigin}`);
+    log.info('window', 'GSX Window - Permission check: ... from ...', { permission, requestingOrigin })
     
     // Allow media permissions for onereach.ai domains
     if ((permission === 'media' || permission === 'display-capture' || permission === 'screen') && 
         requestingOrigin.includes('onereach.ai')) {
-      console.log(`GSX Window - Allowing ${permission} for ${requestingOrigin}`);
+      log.info('window', 'GSX Window - Allowing ... for ...', { permission, requestingOrigin })
       return true;
     }
     
@@ -1933,62 +2001,103 @@ async function openGSXWindow(url, title, idwEnvironment) {
 
   // Add debugging for window events
   gsxWindow.on('close', () => {
-    console.log(`GSX Window closing: ${title}`);
+    log.info('window', 'GSX Window closing: ...', { title })
   });
   
   gsxWindow.on('closed', () => {
-    console.log(`GSX Window closed: ${title}`);
+    log.info('window', 'GSX Window closed: ...', { title })
+    // Clean up auto-login state to prevent memory leak
+    cleanupGSXAutoLoginState(gsxWindow.id);
   });
   
   gsxWindow.on('hide', () => {
-    console.log(`GSX Window hidden: ${title}`);
+    log.info('window', 'GSX Window hidden: ...', { title })
   });
   
   gsxWindow.webContents.on('crashed', () => {
-    console.error(`GSX Window crashed: ${title}`);
+    log.error('window', 'GSX Window crashed: ...', { title })
   });
   
   gsxWindow.webContents.on('unresponsive', () => {
-    console.error(`GSX Window unresponsive: ${title}`);
+    log.error('window', 'GSX Window unresponsive: ...', { title })
   });
   
   gsxWindow.webContents.on('responsive', () => {
-    console.log(`GSX Window responsive again: ${title}`);
+    log.info('window', 'GSX Window responsive again: ...', { title })
   });
 
   // Load the URL
-  console.log(`Loading GSX URL: ${url}`);
+  log.info('window', 'Loading GSX URL: ...', { url })
   gsxWindow.loadURL(url);
   
-  // Handle downloads in GSX windows
-  gsxWindow.webContents.session.on('will-download', (event, item, webContents) => {
-    // Use the new handler with space option
-    handleDownloadWithSpaceOption(item, 'GSX Window');
+  // Show auth status notification when page loads
+  gsxWindow.webContents.on('did-finish-load', () => {
+    // Use JSON.stringify to safely inject values (prevents injection via quotes in env names)
+    const statusColor = authStatus.hasToken ? '#22c55e' : '#f59e0b';
+    const statusText = authStatus.hasToken 
+      ? `Authenticated (${authStatus.environment})` 
+      : `No token for ${authStatus.environment} - login required`;
+    const tooltipText = `Click to dismiss. Cookies: ${authStatus.cookieCount || 0}, Domains: ${(authStatus.domains || []).join(', ') || 'none'}`;
+    
+    safeExecuteJS(gsxWindow, `
+      (function() {
+        var statusColor = ${JSON.stringify(statusColor)};
+        var statusText = ${JSON.stringify(statusText)};
+        var tooltipText = ${JSON.stringify(tooltipText)};
+        
+        // Remove existing status if any
+        var existing = document.getElementById('gsx-auth-status');
+        if (existing) existing.remove();
+        
+        // Create status indicator
+        var status = document.createElement('div');
+        status.id = 'gsx-auth-status';
+        status.style.cssText = 'position:fixed;bottom:10px;right:10px;padding:8px 16px;background:' + statusColor + ';color:white;border-radius:6px;font-family:system-ui;font-size:12px;z-index:999999;box-shadow:0 2px 8px rgba(0,0,0,0.2);cursor:pointer;transition:opacity 0.3s;';
+        status.textContent = statusText;
+        status.title = tooltipText;
+        status.onclick = function() { this.style.opacity = '0'; setTimeout(function() { status.remove(); }, 300); };
+        document.body.appendChild(status);
+        
+        // Auto-hide after 8 seconds
+        setTimeout(function() {
+          if (status.parentNode) {
+            status.style.opacity = '0';
+            setTimeout(function() { status.remove(); }, 300);
+          }
+        }, 8000);
+        
+        log.info('window', 'Status: \' + statusTex')
+      })();
+    `);
   });
+  
+  // Handle downloads in GSX windows
+  gsxWindow.webContents.session.on('will-download', (event, item, webContents) => { detail: // Use the new handler with space option
+    handleDownloadWithSpaceOption(item, 'GSX Window'); });
   
   // Add event handlers for will-navigate and will-redirect
   gsxWindow.webContents.on('will-navigate', (event, navUrl) => {
-    console.log('GSX window navigation attempted to:', navUrl);
+    log.info('window', 'GSX window navigation attempted to', { navUrl })
     
     // Allow navigation for GSX and IDW domains
     if (navUrl.includes('.onereach.ai/')) {
-      console.log('Navigation to onereach.ai URL allowed in GSX window:', navUrl);
+      log.info('window', 'Navigation to onereach.ai URL allowed in GSX window', { navUrl })
       return;
     }
     
     // Block navigation to other domains
-    console.log('Blocking navigation to non-onereach.ai URL in GSX window:', navUrl);
+    log.info('window', 'Blocking navigation to non-onereach.ai URL in GSX window', { navUrl })
     event.preventDefault();
     
     // Open external URLs in default browser
     shell.openExternal(navUrl).catch(err => {
-      console.error('Failed to open external URL from GSX window:', err);
+      log.error('window', 'Failed to open external URL from GSX window', { error: err.message || err })
     });
   });
   
   // Handle window open events (like authentication popups)
   gsxWindow.webContents.setWindowOpenHandler(({ url }) => {
-    console.log('GSX window attempted to open URL:', url);
+    log.info('window', 'GSX window attempted to open URL', { url })
     
     // For authentication URLs, use the centralized auth window
     if (url.includes('auth.edison.onereach.ai') || 
@@ -2004,18 +2113,11 @@ async function openGSXWindow(url, title, idwEnvironment) {
       // Handle auth request
       handleAuthRequest(url, service)
         .then(token => {
-          // Inject token into the GSX window
-          gsxWindow.webContents.send('auth-token', {
-            service,
-            token
-          });
+          safeSend(gsxWindow, 'auth-token', { service, token });
         })
         .catch(error => {
-          console.error('Authentication failed:', error);
-          gsxWindow.webContents.send('auth-error', {
-            service,
-            error: error.message
-          });
+          log.error('window', 'Authentication failed', { error: error.message || error })
+          safeSend(gsxWindow, 'auth-error', { service, error: error.message });
         });
       
       return { action: 'deny' };
@@ -2028,7 +2130,7 @@ async function openGSXWindow(url, title, idwEnvironment) {
     
     // Deny other URLs and open in default browser
     shell.openExternal(url).catch(err => {
-      console.error('Failed to open external URL:', err);
+      log.error('window', 'Failed to open external URL', { error: err.message || err })
     });
     
     return { action: 'deny' };
@@ -2037,7 +2139,7 @@ async function openGSXWindow(url, title, idwEnvironment) {
   // Add custom scrollbar CSS when content loads
   gsxWindow.webContents.on('did-finish-load', async () => {
     const currentUrl = gsxWindow.webContents.getURL();
-    console.log(`[GSX Window] Loaded: ${currentUrl}`);
+    log.info('window', 'Loaded: ...', { currentUrl })
     
     // Inject scrollbar CSS
     gsxWindow.webContents.insertCSS(`
@@ -2059,15 +2161,15 @@ async function openGSXWindow(url, title, idwEnvironment) {
       ::-webkit-scrollbar-thumb:hover {
         background: rgba(255, 255, 255, 0.2);
       }
-    `).catch(err => console.error('Failed to inject scrollbar CSS in GSX window:', err));
+    `).catch(err => log.error('window', 'Failed to inject scrollbar CSS in GSX window', { error: err.message || err }))
     
     // Auto-login for OneReach pages (with retry for async-loaded forms)
     if (currentUrl && currentUrl.includes('onereach.ai')) {
       // Check state before attempting
       if (!shouldAttemptGSXAutoLogin(gsxWindow.id)) {
-        console.log('[GSX AutoLogin] Skipping - already in progress or complete');
+        log.info('window', 'Skipping - already in progress or complete')
       } else {
-        console.log('[GSX AutoLogin] OneReach page detected, starting auto-login...');
+        log.info('window', 'OneReach page detected, starting auto-login...')
         setTimeout(() => {
           attemptGSXAutoLoginWithRetry(gsxWindow, currentUrl, 0);
         }, 1000);
@@ -2077,16 +2179,16 @@ async function openGSXWindow(url, title, idwEnvironment) {
   
   // Handle full page navigation (for auth redirects)
   gsxWindow.webContents.on('did-navigate', async (event, url) => {
-    console.log(`[GSX Window] Full navigation: ${url}`);
+    log.info('window', 'Full navigation: ...', { url })
     
     // Auto-login for auth pages (when GSX redirects to auth.*.onereach.ai)
     if (url && url.includes('auth.') && url.includes('onereach.ai')) {
       // Check state before attempting
       if (!shouldAttemptGSXAutoLogin(gsxWindow.id)) {
-        console.log('[GSX AutoLogin] Skipping - already in progress or complete');
+        log.info('window', 'Skipping - already in progress or complete')
         return;
       }
-      console.log('[GSX AutoLogin] Auth page detected via redirect, starting auto-login...');
+      log.info('window', 'Auth page detected via redirect, starting auto-login...')
       // Wait for form to render
       setTimeout(() => {
         attemptGSXAutoLoginWithRetry(gsxWindow, url, 0);
@@ -2096,7 +2198,7 @@ async function openGSXWindow(url, title, idwEnvironment) {
   
   // Handle SPA navigation (for auth page internal navigation)
   gsxWindow.webContents.on('did-navigate-in-page', async (event, url) => {
-    console.log(`[GSX Window] In-page navigation: ${url}`);
+    log.info('window', 'In-page navigation: ...', { url })
     
     // Auto-login for auth pages
     if (url && url.includes('onereach.ai') && url.includes('/login')) {
@@ -2104,7 +2206,7 @@ async function openGSXWindow(url, title, idwEnvironment) {
       if (!shouldAttemptGSXAutoLogin(gsxWindow.id)) {
         return;
       }
-      console.log('[GSX AutoLogin] Auth login page detected via SPA navigation');
+      log.info('window', 'Auth login page detected via SPA navigation')
       // Wait for form to render then retry
       setTimeout(() => {
         attemptGSXAutoLoginWithRetry(gsxWindow, url, 0);
@@ -2140,6 +2242,9 @@ function getAuthWindow() {
     }
   });
 
+  // Attach structured log forwarding
+  attachLogForwarder(authWindow, 'window');
+
   // Handle auth window events
   authWindow.on('closed', () => {
     authWindow = null;
@@ -2153,13 +2258,10 @@ function getAuthWindow() {
         const [token, service] = args;
         authTokens.set(service, token);
         
-        // Broadcast token to all windows
-        BrowserWindow.getAllWindows().forEach(window => {
-          if (window !== authWindow) {
-            window.webContents.send('auth-token-update', {
-              service,
-              token
-            });
+        // Broadcast token to all windows (with destroyed-window guard)
+        BrowserWindow.getAllWindows().forEach(win => {
+          if (win !== authWindow) {
+            safeSend(win, 'auth-token-update', { service, token });
           }
         });
       }
@@ -2209,13 +2311,85 @@ async function handleAuthRequest(url, service) {
   });
 }
 
+/**
+ * Send a downloaded file to the black hole widget (Space picker).
+ * Extracted to eliminate code duplication - previously duplicated ~80 lines.
+ * Also fixes: ipcMain listener leak by adding a timeout cleanup.
+ */
+function sendFileToBlackHoleWidget(clipboardManager, filePayload, tempFilePath) {
+  const bhWindow = clipboardManager.blackHoleWindow;
+  if (!bhWindow || bhWindow.isDestroyed()) {
+    log.error('window', `[DOWNLOAD] Black hole window unavailable`)
+    return;
+  }
+  
+  // Set up one-time listener for widget ready signal with a timeout to prevent listener leak
+  const WIDGET_READY_TIMEOUT = 10000; // 10 seconds
+  let listenerFired = false;
+  
+  const onWidgetReady = () => {
+    if (listenerFired) return;
+    listenerFired = true;
+    log.info('window', `[DOWNLOAD] Black hole widget reported ready, sending file...`)
+    
+    setTimeout(() => {
+      if (clipboardManager.blackHoleWindow && !clipboardManager.blackHoleWindow.isDestroyed()) {
+        if (!clipboardManager.blackHoleWindow.isVisible()) {
+          clipboardManager.blackHoleWindow.show();
+        }
+        safeSend(clipboardManager.blackHoleWindow, 'external-file-drop', filePayload);
+        log.info('window', `[DOWNLOAD] external-file-drop event sent`)
+      } else {
+        log.error('window', `[DOWNLOAD] Black hole window destroyed before file send`)
+      }
+    }, 200);
+  };
+  
+  ipcMain.once('black-hole:widget-ready', onWidgetReady);
+  
+  // Timeout cleanup: remove the listener if widget never signals ready
+  setTimeout(() => {
+    if (!listenerFired) {
+      ipcMain.removeListener('black-hole:widget-ready', onWidgetReady);
+      log.warn('window', 'Widget ready listener timed out after ...ms', { WIDGET_READY_TIMEOUT })
+    }
+  }, WIDGET_READY_TIMEOUT);
+  
+  // Handle DOM readiness
+  const handleDomReady = () => {
+    log.info('window', `[DOWNLOAD] Black hole window DOM ready, sending prepare event`)
+    safeSend(clipboardManager.blackHoleWindow, 'prepare-for-download', {
+      fileName: filePayload.fileName
+    });
+    setTimeout(() => {
+      safeSend(clipboardManager.blackHoleWindow, 'check-widget-ready');
+    }, 100);
+  };
+  
+  if (bhWindow.webContents.getURL() && !bhWindow.webContents.isLoading()) {
+    handleDomReady();
+  } else {
+    bhWindow.webContents.once('dom-ready', handleDomReady);
+  }
+  
+  // Clean up temp file after a delay
+  if (tempFilePath) {
+    setTimeout(() => {
+      fs.unlink(tempFilePath, (err) => {
+        if (err && err.code !== 'ENOENT') log.error('window', 'Error deleting temp file', { error: err.message || err })
+        else log.info('window', 'Temp file cleaned up: ...', { tempFilePath })
+      });
+    }, 5000);
+  }
+}
+
 // Function to handle downloads with space option
 function handleDownloadWithSpaceOption(item, windowName = 'Main Window') {
   const fileName = item.getFilename();
   
-  console.log(`[DOWNLOAD] Download detected in ${windowName}: ${fileName}`);
-  console.log(`[DOWNLOAD] URL: ${item.getURL()}`);
-  console.log(`[DOWNLOAD] Size: ${item.getTotalBytes()} bytes`);
+  log.info('window', 'Download detected in ...: ...', { windowName, fileName })
+  log.info('window', 'URL: ...', { detail: item.getURL() })
+  log.info('window', 'Size: ... bytes', { detail: item.getTotalBytes() })
   
   // Create dialog options
   const options = {
@@ -2231,7 +2405,7 @@ function handleDownloadWithSpaceOption(item, windowName = 'Main Window') {
   
   // Show dialog
   dialog.showMessageBox(options).then(async (result) => {
-    console.log(`[DOWNLOAD] User selected option: ${result.response} (0=Downloads, 1=Space, 2=Cancel)`);
+    log.info('window', 'User selected option: ... (0=Downloads, 1=Space, 2=Cancel)', { response: result.response })
     
     if (result.response === 0) {
       // Save to Downloads - normal behavior
@@ -2239,261 +2413,112 @@ function handleDownloadWithSpaceOption(item, windowName = 'Main Window') {
       const filePath = path.join(downloadsPath, fileName);
       item.setSavePath(filePath);
       
-      console.log(`${windowName} - Download started (Downloads): ${fileName}`);
-      
-      // Resume the download (it's paused when dialog is shown)
+      log.info('window', '... - Download started (Downloads): ...', { windowName, fileName })
       item.resume();
       
       // Set up download progress tracking
       item.on('updated', (event, state) => {
         if (state === 'interrupted') {
-          console.log(`${windowName} - Download is interrupted but can be resumed`);
+          log.info('window', '... - Download interrupted but can be resumed', { windowName })
         } else if (state === 'progressing') {
           if (item.isPaused()) {
-            console.log(`${windowName} - Download is paused`);
+            log.info('window', '... - Download is paused', { windowName })
           } else {
-            const progress = item.getReceivedBytes() / item.getTotalBytes();
-            console.log(`${windowName} - Download progress: ${Math.round(progress * 100)}%`);
+            const total = item.getTotalBytes();
+            if (total > 0) {
+              const progress = item.getReceivedBytes() / total;
+              log.info('window', '... - Download progress: ...%', { windowName, detail: Math.round(progress * 100) })
+            }
           }
         }
       });
       
       item.once('done', (event, state) => {
         if (state === 'completed') {
-          console.log(`${windowName} - Download completed: ${fileName}`);
+          log.info('window', '... - Download completed: ...', { windowName, fileName })
           
-          // Show notification
           if (Notification.isSupported()) {
             const notification = new Notification({
               title: 'Download Complete',
               body: `${fileName} has been downloaded successfully`,
               icon: path.join(__dirname, 'assets/tray-icon.png')
             });
-            
-            notification.on('click', () => {
-              shell.showItemInFolder(filePath);
-            });
-            
+            notification.on('click', () => shell.showItemInFolder(filePath));
             notification.show();
           }
         } else {
-          console.log(`${windowName} - Download failed: ${state}`);
+          log.info('window', '... - Download failed: ...', { windowName, state })
         }
       });
     } else if (result.response === 1) {
       // Save to Space
-      console.log(`[DOWNLOAD] User chose to save to Space`);
+      log.info('window', `[DOWNLOAD] User chose to save to Space`)
       
       const tempPath = app.getPath('temp');
       const tempFilePath = path.join(tempPath, fileName);
       item.setSavePath(tempFilePath);
       
-      console.log(`${windowName} - Download started (Space): ${fileName}`);
-      console.log(`[DOWNLOAD] Temp file path: ${tempFilePath}`);
-      
-      // Resume the download (it's paused when dialog is shown)
+      log.info('window', '... - Download started (Space): ...', { windowName, fileName })
       item.resume();
       
       item.once('done', async (event, state) => {
         if (state === 'completed') {
-          console.log(`${windowName} - Download completed for Space: ${fileName}`);
+          log.info('window', '... - Download completed for Space: ...', { windowName, fileName })
           
-          // Read the file and add to clipboard manager
           try {
-            console.log(`[DOWNLOAD] Reading file from: ${tempFilePath}`);
             const fileData = fs.readFileSync(tempFilePath);
             const base64Data = fileData.toString('base64');
-            console.log(`[DOWNLOAD] File read successfully, size: ${fileData.length} bytes`);
+            log.info('window', 'File read successfully, size: ... bytes', { fileDataCount: fileData.length })
             
-            // Get clipboard manager
             const clipboardManager = global.clipboardManager;
-            console.log(`[DOWNLOAD] Clipboard manager available: ${!!clipboardManager}`);
-            console.log(`[DOWNLOAD] Black hole window available: ${!!(clipboardManager && clipboardManager.blackHoleWindow)}`);
+            if (!clipboardManager) {
+              log.error('window', `[DOWNLOAD] Clipboard manager not available`)
+              return;
+            }
             
-            if (clipboardManager && clipboardManager.blackHoleWindow) {
-              console.log(`[DOWNLOAD] Sending file to black hole widget`);
-              
-              // Send a pre-notification to prepare the modal
-              clipboardManager.blackHoleWindow.webContents.send('prepare-for-download', {
-                fileName: fileName
-              });
-              
-              // Wait for widget to be ready
-              const { ipcMain } = require('electron');
-              
-              // Set up one-time listener for widget ready signal FIRST
-              const onWidgetReady = () => {
-                console.log(`[DOWNLOAD] Black hole widget reported ready, sending external-file-drop event...`);
-                
-                // Give a small delay to ensure everything is initialized
-                setTimeout(() => {
-                  if (clipboardManager.blackHoleWindow && !clipboardManager.blackHoleWindow.isDestroyed()) {
-                    console.log(`[DOWNLOAD] Sending external-file-drop event now`);
-                    
-                    // First ensure window is visible
-                    if (!clipboardManager.blackHoleWindow.isVisible()) {
-                      console.log(`[DOWNLOAD] Black hole window was hidden, showing it now`);
-                      clipboardManager.blackHoleWindow.show();
-                    }
-                    
-                    // Send the file data
-                    clipboardManager.blackHoleWindow.webContents.send('external-file-drop', {
-                      fileName: fileName,
-                      fileData: base64Data,
-                      fileSize: fileData.length,
-                      mimeType: item.getMimeType() || 'application/octet-stream'
-                    });
-                    
-                    console.log(`[DOWNLOAD] external-file-drop event sent to black hole widget`);
-                  } else {
-                    console.error(`[DOWNLOAD] Black hole window was destroyed before we could send the file`);
-                  }
-                }, 200); // Small delay after widget reports ready
-              };
-              
-              // Listen for widget ready signal BEFORE sending any events
-              ipcMain.once('black-hole:widget-ready', onWidgetReady);
-              
-              // Function to handle when DOM is ready
-              const handleDomReady = () => {
-                console.log(`[DOWNLOAD] Black hole window DOM ready, sending prepare event`);
-                // Send a pre-notification to prepare the modal
-                clipboardManager.blackHoleWindow.webContents.send('prepare-for-download', {
-                  fileName: fileName
-                });
-                
-                // Also send a check-ready request in case widget is already initialized
-                setTimeout(() => {
-                  console.log(`[DOWNLOAD] Sending check-widget-ready request`);
-                  clipboardManager.blackHoleWindow.webContents.send('check-widget-ready');
-                }, 100);
-              };
-              
-              // Check if DOM is already ready
-              if (clipboardManager.blackHoleWindow.webContents.getURL() && 
-                  !clipboardManager.blackHoleWindow.webContents.isLoading()) {
-                console.log(`[DOWNLOAD] DOM appears to be already ready`);
-                handleDomReady();
-              } else {
-                console.log(`[DOWNLOAD] Waiting for DOM ready event`);
-                clipboardManager.blackHoleWindow.webContents.once('dom-ready', handleDomReady);
-              }
-                
-              // Clean up temp file after a delay
-              setTimeout(() => {
-                fs.unlink(tempFilePath, (err) => {
-                  if (err) console.error('Error deleting temp file:', err);
-                  else console.log(`[DOWNLOAD] Temp file deleted: ${tempFilePath}`);
-                });
-              }, 5000);
+            const filePayload = {
+              fileName: fileName,
+              fileData: base64Data,
+              fileSize: fileData.length,
+              mimeType: item.getMimeType() || 'application/octet-stream'
+            };
+            
+            if (clipboardManager.blackHoleWindow && !clipboardManager.blackHoleWindow.isDestroyed()) {
+              // Black hole window already exists - send file directly
+              safeSend(clipboardManager.blackHoleWindow, 'prepare-for-download', { fileName });
+              sendFileToBlackHoleWidget(clipboardManager, filePayload, tempFilePath);
             } else {
-              console.log(`[DOWNLOAD] Black hole window not available, creating it now`);
+              // Create black hole window first, then send
+              log.info('window', `[DOWNLOAD] Creating black hole window...`)
+              clipboardManager.createBlackHoleWindow(null, true);
               
-              // Create black hole window if it doesn't exist
-              if (clipboardManager && !clipboardManager.blackHoleWindow) {
-                console.log(`[DOWNLOAD] ClipboardManager available, creating black hole window...`);
-                // Create it in expanded state for downloads - pass true for startExpanded
-                clipboardManager.createBlackHoleWindow(null, true);
-                
-                // Wait for window to be ready before sending data
-                setTimeout(() => {
-                  if (clipboardManager.blackHoleWindow && !clipboardManager.blackHoleWindow.isDestroyed()) {
-                    console.log(`[DOWNLOAD] Black hole window created, waiting for DOM ready...`);
-                    
-                    // Wait for widget to be ready
-                    const { ipcMain } = require('electron');
-                    
-                    // Set up one-time listener for widget ready signal FIRST
-                    const onWidgetReady = () => {
-                      console.log(`[DOWNLOAD] Black hole widget reported ready, sending external-file-drop event...`);
-                      
-                      // Give a small delay to ensure everything is initialized
-                      setTimeout(() => {
-                        if (clipboardManager.blackHoleWindow && !clipboardManager.blackHoleWindow.isDestroyed()) {
-                          console.log(`[DOWNLOAD] Sending external-file-drop event now`);
-                          
-                          // First ensure window is visible
-                          if (!clipboardManager.blackHoleWindow.isVisible()) {
-                            console.log(`[DOWNLOAD] Black hole window was hidden, showing it now`);
-                            clipboardManager.blackHoleWindow.show();
-                          }
-                          
-                          // Send the file data
-                          clipboardManager.blackHoleWindow.webContents.send('external-file-drop', {
-                            fileName: fileName,
-                            fileData: base64Data,
-                            fileSize: fileData.length,
-                            mimeType: item.getMimeType() || 'application/octet-stream'
-                          });
-                          
-                          console.log(`[DOWNLOAD] external-file-drop event sent to black hole widget`);
-                        } else {
-                          console.error(`[DOWNLOAD] Black hole window was destroyed before we could send the file`);
-                        }
-                      }, 200); // Small delay after widget reports ready
-                    };
-                    
-                    // Listen for widget ready signal BEFORE sending any events
-                    ipcMain.once('black-hole:widget-ready', onWidgetReady);
-                    
-                    // Function to handle when DOM is ready
-                    const handleDomReady = () => {
-                      console.log(`[DOWNLOAD] Black hole window DOM ready, sending prepare event`);
-                      // Send a pre-notification to prepare the modal
-                      clipboardManager.blackHoleWindow.webContents.send('prepare-for-download', {
-                        fileName: fileName
-                      });
-                      
-                      // Also send a check-ready request in case widget is already initialized
-                      setTimeout(() => {
-                        console.log(`[DOWNLOAD] Sending check-widget-ready request`);
-                        clipboardManager.blackHoleWindow.webContents.send('check-widget-ready');
-                      }, 100);
-                    };
-                    
-                    // Check if DOM is already ready
-                    if (clipboardManager.blackHoleWindow.webContents.getURL() && 
-                        !clipboardManager.blackHoleWindow.webContents.isLoading()) {
-                      console.log(`[DOWNLOAD] DOM appears to be already ready`);
-                      handleDomReady();
-                    } else {
-                      console.log(`[DOWNLOAD] Waiting for DOM ready event`);
-                      clipboardManager.blackHoleWindow.webContents.once('dom-ready', handleDomReady);
-                    }
-                      
-                      
-                      // Clean up temp file after a delay
-                      setTimeout(() => {
-                        fs.unlink(tempFilePath, (err) => {
-                          if (err) console.error('Error deleting temp file:', err);
-                          else console.log(`[DOWNLOAD] Temp file deleted: ${tempFilePath}`);
-                        });
-                      }, 5000);
-                  } else {
-                    console.error(`[DOWNLOAD] Black hole window creation failed or was destroyed`);
-                  }
-                }, 1500); // 1.5 second fallback
-              }
+              // Wait for creation then send
+              setTimeout(() => {
+                if (clipboardManager.blackHoleWindow && !clipboardManager.blackHoleWindow.isDestroyed()) {
+                  sendFileToBlackHoleWidget(clipboardManager, filePayload, tempFilePath);
+                } else {
+                  log.error('window', `[DOWNLOAD] Black hole window creation failed`)
+                }
+              }, 1500);
             }
           } catch (error) {
-            console.error('[DOWNLOAD] Error processing file for space:', error);
+            log.error('window', 'Error processing file for space', { error: error.message || error })
           }
         } else {
-          console.log(`${windowName} - Download failed: ${state}`);
+          log.info('window', '... - Download failed: ...', { windowName, state })
         }
       });
     } else {
       // Cancel
       item.cancel();
-      console.log(`${windowName} - Download cancelled by user`);
+      log.info('window', '... - Download cancelled by user', { windowName })
     }
   }).catch(err => {
-    console.error('Error showing download dialog:', err);
+    log.error('window', 'Error showing download dialog', { error: err.message || err })
     // Fallback to normal download
     const downloadsPath = app.getPath('downloads');
     const filePath = path.join(downloadsPath, fileName);
     item.setSavePath(filePath);
-    // Resume the download for fallback case
     item.resume();
   });
 }
@@ -2508,5 +2533,6 @@ module.exports = {
   openGSXWindow,
   getAuthWindow,
   handleAuthRequest,
-  handleDownloadWithSpaceOption
+  handleDownloadWithSpaceOption,
+  attachLogForwarder
 }; 

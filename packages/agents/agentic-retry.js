@@ -11,16 +11,9 @@
  *   });
  */
 
-function getOpenAIApiKey() {
-  if (global.settingsManager) {
-    const openaiKey = global.settingsManager.get('openaiApiKey');
-    if (openaiKey) return openaiKey;
-    const provider = global.settingsManager.get('llmProvider');
-    const llmKey = global.settingsManager.get('llmApiKey');
-    if (provider === 'openai' && llmKey) return llmKey;
-  }
-  return process.env.OPENAI_API_KEY;
-}
+const ai = require('../../lib/ai-service');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 
 /**
  * Extract intent from user request using LLM
@@ -29,11 +22,6 @@ function getOpenAIApiKey() {
  * @returns {Promise<Object>} - Extracted intent details
  */
 async function extractIntent(request, domain = 'general') {
-  const apiKey = getOpenAIApiKey();
-  if (!apiKey) {
-    return { raw: request, parsed: null };
-  }
-
   const domainPrompts = {
     music: `Extract music intent. Return JSON: { "action": "play/pause/skip", "searchTerm": "term or null", "genre": "genre or null", "artist": "artist or null", "mood": "mood or null" }`,
     files: `Extract file operation intent. Return JSON: { "action": "open/save/find/delete", "filename": "name or null", "path": "path or null", "type": "type or null" }`,
@@ -42,35 +30,23 @@ async function extractIntent(request, domain = 'general') {
   };
 
   try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [{
-          role: 'system',
-          content: domainPrompts[domain] || domainPrompts.general
-        }, {
-          role: 'user',
-          content: request
-        }],
-        temperature: 0,
-        max_tokens: 200,
-        response_format: { type: 'json_object' }
-      })
+    const data = await ai.chat({
+      profile: 'fast',
+      system: domainPrompts[domain] || domainPrompts.general,
+      messages: [
+        { role: 'user', content: request }
+      ],
+      temperature: 0,
+      maxTokens: 200,
+      jsonMode: true,
+      feature: 'agentic-retry',
     });
-
-    if (!response.ok) throw new Error(`API error: ${response.status}`);
-    const data = await response.json();
     return {
       raw: request,
-      parsed: JSON.parse(data.choices?.[0]?.message?.content || '{}')
+      parsed: JSON.parse(data.content || '{}')
     };
   } catch (error) {
-    console.error('[AgenticRetry] Extract intent error:', error.message);
+    log.error('agent', 'Extract intent error', { error: error.message });
     return { raw: request, parsed: null };
   }
 }
@@ -120,33 +96,23 @@ Remaining attempts: ${maxAttempts - attempts.length}
 What should I try next?`;
 
   try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-        temperature: 0.3,
-        max_tokens: 300,
-        response_format: { type: 'json_object' }
-      })
+    const result = await ai.chat({
+      profile: 'fast',
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }],
+      temperature: 0.3,
+      maxTokens: 300,
+      jsonMode: true,
+      feature: 'agentic-retry',
     });
 
-    if (!response.ok) throw new Error(`API error: ${response.status}`);
-    const data = await response.json();
-    const decision = JSON.parse(data.choices?.[0]?.message?.content || '{}');
+    const decision = JSON.parse(result.content || '{}');
     
-    console.log(`[AgenticRetry] Decision: ${decision.action} - ${decision.reasoning}`);
+    log.info('agent', `Decision: ${decision.action} - ${decision.reasoning}`);
     return decision;
 
   } catch (error) {
-    console.error('[AgenticRetry] Decision error:', error.message);
+    log.error('agent', 'Decision error', { error: error.message });
     return { action: 'stop', reasoning: error.message, shouldStop: true };
   }
 }
@@ -168,7 +134,7 @@ async function executeWithRetry(config) {
 
   // Extract intent first
   const extracted = await extractIntent(intent, domain);
-  console.log(`[AgenticRetry] Extracted intent:`, extracted.parsed || extracted.raw);
+  log.info('agent', `Extracted intent`, { parsed: extracted.parsed || extracted.raw });
 
   const attempts = [];
   
@@ -214,7 +180,7 @@ async function executeWithRetry(config) {
     // Find and execute the action
     const actionDef = actions.find(a => a.name === decision.action);
     if (!actionDef) {
-      console.warn(`[AgenticRetry] Unknown action: ${decision.action}`);
+      log.warn('agent', `Unknown action: ${decision.action}`);
       break;
     }
 

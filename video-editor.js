@@ -25,6 +25,7 @@ const path = require('path');
 const fs = require('fs');
 const https = require('https');
 const { ipcMain, app, shell, BrowserWindow } = require('electron');
+const ai = require('./lib/ai-service');
 
 // Set FFmpeg paths
 ffmpeg.setFfmpegPath(ffmpegPath);
@@ -2318,20 +2319,7 @@ class VideoEditor {
       return { success: false, error: 'No scenes provided' };
     }
 
-    // Get OpenAI API key from settings
-    const settingsPath = path.join(app.getPath('userData'), 'settings.json');
-    let openaiKey = null;
-    
-    if (fs.existsSync(settingsPath)) {
-      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-      openaiKey = settings.openaiApiKey;
-    }
-
-    if (!openaiKey) {
-      return { success: false, error: 'OpenAI API key not configured. Please set it in Settings.' };
-    }
-
-    // Build the prompt for OpenAI
+    // Build the prompt for AI
     const systemPrompt = `You are a video editor assistant that helps create playlists from video scenes.
 You will receive a list of scenes with their metadata (name, description, transcription, tags, duration).
 Based on the user's request, select which scenes to include and in what order.
@@ -2363,56 +2351,24 @@ ${s.notes ? `- Notes: ${s.notes}` : ''}
 Select the appropriate scenes and return JSON.`;
 
     try {
-      const response = await new Promise((resolve, reject) => {
-        const postData = JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt }
-          ],
-          temperature: 0.7,
-          response_format: { type: 'json_object' }
-        });
-
-        const req = https.request({
-          hostname: 'api.openai.com',
-          path: '/v1/chat/completions',
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${openaiKey}`
-          }
-        }, (res) => {
-          let data = '';
-          res.on('data', chunk => data += chunk);
-          res.on('end', () => {
-            if (res.statusCode !== 200) {
-              try {
-                const errorJson = JSON.parse(data);
-                reject(new Error(errorJson.error?.message || `HTTP ${res.statusCode}`));
-              } catch {
-                reject(new Error(`HTTP ${res.statusCode}: ${data}`));
-              }
-              return;
-            }
-            resolve(JSON.parse(data));
-          });
-        });
-
-        req.on('error', reject);
-        req.write(postData);
-        req.end();
+      const result = await ai.chat({
+        profile: 'fast',
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+        temperature: 0.7,
+        jsonMode: true,
+        maxTokens: 2000,
+        feature: 'video-editor',
       });
 
       // Parse the AI response
-      const content = response.choices[0].message.content;
-      const result = JSON.parse(content);
+      const parsedResult = JSON.parse(result.content);
 
-      console.log('[VideoEditor] AI playlist result:', result);
+      console.log('[VideoEditor] AI playlist result:', parsedResult);
 
       // Validate the selected IDs
       const validIds = scenes.map(s => s.id);
-      const selectedIds = (result.selectedSceneIds || []).filter(id => validIds.includes(id));
+      const selectedIds = (parsedResult.selectedSceneIds || []).filter(id => validIds.includes(id));
 
       if (selectedIds.length === 0) {
         return { success: false, error: 'AI did not select any valid scenes' };
@@ -2421,7 +2377,7 @@ Select the appropriate scenes and return JSON.`;
       return {
         success: true,
         selectedSceneIds: selectedIds,
-        reasoning: result.reasoning || ''
+        reasoning: parsedResult.reasoning || ''
       };
 
     } catch (error) {
@@ -3960,50 +3916,22 @@ TEXT TO TRANSLATE:
 
 TRANSLATION:`;
 
-    return new Promise((resolve, reject) => {
-      const postData = JSON.stringify({
-        model: 'gpt-4o',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
+    try {
+      const result = await ai.chat({
+        profile: 'fast',
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
         temperature: 0.3,
-        max_tokens: 2000
+        maxTokens: 2000,
+        feature: 'video-editor',
       });
 
-      const req = https.request({
-        hostname: 'api.openai.com',
-        path: '/v1/chat/completions',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        }
-      }, (res) => {
-        let data = '';
-        res.on('data', chunk => data += chunk);
-        res.on('end', () => {
-          if (res.statusCode !== 200) {
-            try {
-              const errorJson = JSON.parse(data);
-              reject(new Error(errorJson.error?.message || `HTTP ${res.statusCode}`));
-            } catch {
-              reject(new Error(`HTTP ${res.statusCode}: ${data}`));
-            }
-            return;
-          }
-          
-          const response = JSON.parse(data);
-          const translation = response.choices[0].message.content.trim();
-          // Remove quotes if the model added them
-          resolve(translation.replace(/^["']|["']$/g, ''));
-        });
-      });
-
-      req.on('error', reject);
-      req.write(postData);
-      req.end();
-    });
+      const translation = result.content.trim();
+      // Remove quotes if the model added them
+      return translation.replace(/^["']|["']$/g, '');
+    } catch (error) {
+      throw error;
+    }
   }
 
   /**
@@ -4054,132 +3982,36 @@ ${sourceDuration ? `Source duration: ${sourceDuration}s` : ''}
 
 Evaluate and return JSON:`;
 
-    return new Promise((resolve, reject) => {
-      // Determine if using Claude or GPT
-      const isAnthropic = apiKey && apiKey.startsWith('sk-ant-');
+    try {
+      // Use standard profile (Claude Sonnet) for better evaluation quality
+      const result = await ai.chat({
+        profile: 'standard',
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+        temperature: 0.3,
+        maxTokens: 1500,
+        jsonMode: true,
+        feature: 'video-editor',
+      });
+
+      const evaluation = JSON.parse(result.content);
       
-      if (isAnthropic) {
-        // Use Anthropic API
-        const postData = JSON.stringify({
-          model: 'claude-3-5-sonnet-20241022',
-          max_tokens: 1500,
-          messages: [
-            { role: 'user', content: `${systemPrompt}\n\n${userPrompt}` }
-          ]
-        });
-
-        const req = https.request({
-          hostname: 'api.anthropic.com',
-          path: '/v1/messages',
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': apiKey,
-            'anthropic-version': '2023-06-01'
-          }
-        }, (res) => {
-          let data = '';
-          res.on('data', chunk => data += chunk);
-          res.on('end', () => {
-            if (res.statusCode !== 200) {
-              console.error('[Translation] Anthropic API error:', data);
-              // Fallback to default evaluation
-              resolve(this.getDefaultEvaluation());
-              return;
-            }
-            
-            try {
-              const response = JSON.parse(data);
-              const content = response.content[0].text;
-              const evaluation = JSON.parse(content);
-              
-              // Calculate composite if not provided
-              if (!evaluation.composite) {
-                const weights = { accuracy: 0.25, fluency: 0.25, adequacy: 0.20, cultural_fit: 0.15, timing_fit: 0.15 };
-                let composite = 0;
-                for (const [key, weight] of Object.entries(weights)) {
-                  composite += (evaluation.scores[key]?.score || 7) * weight;
-                }
-                evaluation.composite = Math.round(composite * 10) / 10;
-              }
-              
-              evaluation.pass = evaluation.composite >= 9.0;
-              resolve(evaluation);
-            } catch (e) {
-              console.error('[Translation] Failed to parse evaluation:', e);
-              resolve(this.getDefaultEvaluation());
-            }
-          });
-        });
-
-        req.on('error', (e) => {
-          console.error('[Translation] Evaluation request error:', e);
-          resolve(this.getDefaultEvaluation());
-        });
-        req.write(postData);
-        req.end();
-      } else {
-        // Use OpenAI API
-        const postData = JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt }
-          ],
-          temperature: 0.3,
-          response_format: { type: 'json_object' }
-        });
-
-        const req = https.request({
-          hostname: 'api.openai.com',
-          path: '/v1/chat/completions',
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`
-          }
-        }, (res) => {
-          let data = '';
-          res.on('data', chunk => data += chunk);
-          res.on('end', () => {
-            if (res.statusCode !== 200) {
-              console.error('[Translation] OpenAI evaluation error:', data);
-              resolve(this.getDefaultEvaluation());
-              return;
-            }
-            
-            try {
-              const response = JSON.parse(data);
-              const content = response.choices[0].message.content;
-              const evaluation = JSON.parse(content);
-              
-              // Calculate composite if not provided
-              if (!evaluation.composite) {
-                const weights = { accuracy: 0.25, fluency: 0.25, adequacy: 0.20, cultural_fit: 0.15, timing_fit: 0.15 };
-                let composite = 0;
-                for (const [key, weight] of Object.entries(weights)) {
-                  composite += (evaluation.scores[key]?.score || 7) * weight;
-                }
-                evaluation.composite = Math.round(composite * 10) / 10;
-              }
-              
-              evaluation.pass = evaluation.composite >= 9.0;
-              resolve(evaluation);
-            } catch (e) {
-              console.error('[Translation] Failed to parse evaluation:', e);
-              resolve(this.getDefaultEvaluation());
-            }
-          });
-        });
-
-        req.on('error', (e) => {
-          console.error('[Translation] Evaluation request error:', e);
-          resolve(this.getDefaultEvaluation());
-        });
-        req.write(postData);
-        req.end();
+      // Calculate composite if not provided
+      if (!evaluation.composite) {
+        const weights = { accuracy: 0.25, fluency: 0.25, adequacy: 0.20, cultural_fit: 0.15, timing_fit: 0.15 };
+        let composite = 0;
+        for (const [key, weight] of Object.entries(weights)) {
+          composite += (evaluation.scores[key]?.score || 7) * weight;
+        }
+        evaluation.composite = Math.round(composite * 10) / 10;
       }
-    });
+      
+      evaluation.pass = evaluation.composite >= 9.0;
+      return evaluation;
+    } catch (e) {
+      console.error('[Translation] Failed to evaluate:', e);
+      return this.getDefaultEvaluation();
+    }
   }
 
   /**
@@ -4211,45 +4043,23 @@ ${sourceDuration ? `Note: Translation should be speakable in ~${sourceDuration} 
 
 IMPROVED TRANSLATION:`;
 
-    return new Promise((resolve, reject) => {
-      const postData = JSON.stringify({
-        model: 'gpt-4o',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
+    try {
+      const result = await ai.chat({
+        profile: 'fast',
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
         temperature: 0.3,
-        max_tokens: 2000
+        maxTokens: 2000,
+        feature: 'video-editor',
       });
 
-      const req = https.request({
-        hostname: 'api.openai.com',
-        path: '/v1/chat/completions',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        }
-      }, (res) => {
-        let data = '';
-        res.on('data', chunk => data += chunk);
-        res.on('end', () => {
-          if (res.statusCode !== 200) {
-            // Return current translation if refinement fails
-            resolve(currentTranslation);
-            return;
-          }
-          
-          const response = JSON.parse(data);
-          const refined = response.choices[0].message.content.trim();
-          resolve(refined.replace(/^["']|["']$/g, ''));
-        });
-      });
-
-      req.on('error', () => resolve(currentTranslation));
-      req.write(postData);
-      req.end();
-    });
+      const refined = result.content.trim();
+      return refined.replace(/^["']|["']$/g, '');
+    } catch (error) {
+      // Return current translation if refinement fails
+      console.error('[Translation] Refinement error:', error);
+      return currentTranslation;
+    }
   }
 
   /**
@@ -5753,6 +5563,12 @@ IMPROVED TRANSLATION:`;
           }
         });
         
+        // Attach structured log forwarding
+        try {
+          const { attachLogForwarder } = require('./browserWindow');
+          attachLogForwarder(detachedWindow, 'video');
+        } catch (e) { /* browserWindow may not be available */ }
+
         // Store reference
         this.detachedVideoWindows.set(parentId, detachedWindow);
         
@@ -5961,99 +5777,16 @@ Write a brief (1-3 sentences) scene description that:
 
 Respond with ONLY the description text, no quotes or additional formatting.`;
 
-        let description;
+        // Use standard profile (Claude Sonnet) for better quality, with automatic fallback
+        const result = await ai.chat({
+          profile: 'standard',
+          messages: [{ role: 'user', content: prompt }],
+          maxTokens: 500,
+          temperature: 0.7,
+          feature: 'video-editor',
+        });
         
-        if (provider === 'anthropic' || apiKey.startsWith('sk-ant-')) {
-          // Use Anthropic Claude
-          const https = require('https');
-          
-          const requestBody = JSON.stringify({
-            model: model,
-            max_tokens: 500,
-            messages: [{
-              role: 'user',
-              content: prompt
-            }]
-          });
-          
-          const response = await new Promise((resolve, reject) => {
-            const req = https.request({
-              hostname: 'api.anthropic.com',
-              path: '/v1/messages',
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': apiKey,
-                'anthropic-version': '2023-06-01'
-              }
-            }, (res) => {
-              let data = '';
-              res.on('data', chunk => data += chunk);
-              res.on('end', () => {
-                try {
-                  resolve(JSON.parse(data));
-                } catch (e) {
-                  reject(new Error('Invalid response from Anthropic API'));
-                }
-              });
-            });
-            
-            req.on('error', reject);
-            req.write(requestBody);
-            req.end();
-          });
-          
-          if (response.error) {
-            throw new Error(response.error.message || 'Anthropic API error');
-          }
-          
-          description = response.content?.[0]?.text?.trim() || '';
-          
-        } else {
-          // Use OpenAI
-          const https = require('https');
-          
-          const requestBody = JSON.stringify({
-            model: model || 'gpt-4',
-            messages: [{
-              role: 'user',
-              content: prompt
-            }],
-            max_tokens: 500
-          });
-          
-          const response = await new Promise((resolve, reject) => {
-            const req = https.request({
-              hostname: 'api.openai.com',
-              path: '/v1/chat/completions',
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`
-              }
-            }, (res) => {
-              let data = '';
-              res.on('data', chunk => data += chunk);
-              res.on('end', () => {
-                try {
-                  resolve(JSON.parse(data));
-                } catch (e) {
-                  reject(new Error('Invalid response from OpenAI API'));
-                }
-              });
-            });
-            
-            req.on('error', reject);
-            req.write(requestBody);
-            req.end();
-          });
-          
-          if (response.error) {
-            throw new Error(response.error.message || 'OpenAI API error');
-          }
-          
-          description = response.choices?.[0]?.message?.content?.trim() || '';
-        }
+        const description = result.content.trim();
         
         if (!description) {
           return { success: false, error: 'No description generated' };

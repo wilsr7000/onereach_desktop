@@ -12,7 +12,7 @@
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
-const https = require('https');
+const ai = require('../lib/ai-service');
 
 // Configuration
 const PORT = process.env.AGENTIC_PORT || 3456;
@@ -125,12 +125,8 @@ function rankClips(clips, prompt, watchedIds = []) {
  * Use AI to select and rank clips (optional, requires API key)
  */
 async function aiSelectClips(clips, prompt, context, settings) {
-  const apiKey = settings.openaiApiKey;
-  if (!apiKey) {
-    return null; // Fall back to keyword matching
-  }
-  
-  return new Promise((resolve, reject) => {
+  // Check if API key is configured (ai-service handles this internally)
+  try {
     const systemPrompt = `You are a video clip selection AI. Given a user prompt and available clips, select the most relevant clips to play next.
 
 Return JSON with:
@@ -152,46 +148,19 @@ Already watched: ${context.watchedIds?.join(', ') || 'none'}
 
 Select the best clips to play next.`;
 
-    const postData = JSON.stringify({
-      model: 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt }
-      ],
+    const result = await ai.json(userPrompt, {
+      profile: 'fast', // gpt-4o-mini equivalent
+      system: systemPrompt,
       temperature: 0.7,
-      response_format: { type: 'json_object' }
+      maxTokens: 1000,
+      feature: 'agentic-player'
     });
 
-    const req = https.request({
-      hostname: 'api.openai.com',
-      path: '/v1/chat/completions',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      }
-    }, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        if (res.statusCode !== 200) {
-          resolve(null); // Fall back to keyword matching
-          return;
-        }
-        try {
-          const response = JSON.parse(data);
-          const content = JSON.parse(response.choices[0].message.content);
-          resolve(content);
-        } catch (e) {
-          resolve(null);
-        }
-      });
-    });
-
-    req.on('error', () => resolve(null));
-    req.write(postData);
-    req.end();
-  });
+    return result;
+  } catch (error) {
+    console.warn('[AgenticServer] AI selection failed, falling back to keyword matching:', error.message);
+    return null; // Fall back to keyword matching
+  }
 }
 
 /**

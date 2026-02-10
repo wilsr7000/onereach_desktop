@@ -1,10 +1,17 @@
 /**
- * Embedder - OpenAI embedding generation
+ * Embedder - Vector embedding generation via unified ai-service
  * 
- * Generates vector embeddings from text using OpenAI's embedding API.
+ * Generates vector embeddings from text using the centralized AI service.
+ * Supports automatic provider fallback, retry, and cost tracking.
+ * 
+ * Note: config.apiKey is accepted for backward compatibility but no longer
+ * used directly -- ai-service manages API keys via settingsManager.
  */
 
 import type { Embedding, Embedder, EmbedderConfig } from './types'
+
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const ai = require('../../../lib/ai-service')
 
 const DEFAULT_MODEL = 'text-embedding-3-small'
 const DEFAULT_DIMENSIONS = 1536
@@ -15,34 +22,15 @@ export function createEmbedder(config: EmbedderConfig): Embedder {
   const dimensions = config.dimensions ?? DEFAULT_DIMENSIONS
   const batchSize = config.batchSize ?? DEFAULT_BATCH_SIZE
 
-  async function callOpenAI(texts: string[]): Promise<number[][]> {
-    const response = await fetch('https://api.openai.com/v1/embeddings', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${config.apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        input: texts,
-        dimensions,
-      }),
+  async function callEmbedService(texts: string[]): Promise<number[][]> {
+    const result = await ai.embed(texts, {
+      feature: 'knowledge-embedder',
     })
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}))
-      throw new Error(`OpenAI API error: ${response.status} ${error.error?.message || response.statusText}`)
-    }
-
-    const data = await response.json()
-    
-    // Sort by index to maintain order
-    const sorted = data.data.sort((a: { index: number }, b: { index: number }) => a.index - b.index)
-    return sorted.map((item: { embedding: number[] }) => item.embedding)
+    return result.embeddings
   }
 
   async function embed(text: string): Promise<Embedding> {
-    const [vector] = await callOpenAI([text])
+    const [vector] = await callEmbedService([text])
     return {
       vector,
       model,
@@ -58,7 +46,7 @@ export function createEmbedder(config: EmbedderConfig): Embedder {
     // Process in batches
     for (let i = 0; i < texts.length; i += batchSize) {
       const batch = texts.slice(i, i + batchSize)
-      const vectors = await callOpenAI(batch)
+      const vectors = await callEmbedService(batch)
       
       for (const vector of vectors) {
         results.push({

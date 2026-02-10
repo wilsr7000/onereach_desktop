@@ -5,6 +5,8 @@
 
 const { ipcMain } = require('electron');
 const ProjectManager = require('./ProjectManager');
+const { getLogQueue } = require('../../lib/log-event-queue');
+const log = getLogQueue();
 
 let projectManager = null;
 
@@ -25,7 +27,7 @@ function getProjectManager() {
 function setupProjectManagerIPC() {
   const pm = getProjectManager();
   
-  console.log('[ProjectManagerIPC] Registering IPC handlers...');
+  log.info('app', '[ProjectManagerIPC] Registering IPC handlers...');
 
   // ==================== PROJECT OPERATIONS ====================
 
@@ -34,7 +36,7 @@ function setupProjectManagerIPC() {
       const result = await pm.createProject(options);
       return result;
     } catch (error) {
-      console.error('[ProjectManagerIPC] Create project error:', error);
+      log.error('app', '[ProjectManagerIPC] Create project error', { error: error });
       return { error: error.message };
     }
   });
@@ -43,7 +45,7 @@ function setupProjectManagerIPC() {
     try {
       return pm.getProject(projectId);
     } catch (error) {
-      console.error('[ProjectManagerIPC] Get project error:', error);
+      log.error('app', '[ProjectManagerIPC] Get project error', { error: error });
       return null;
     }
   });
@@ -52,7 +54,7 @@ function setupProjectManagerIPC() {
     try {
       return pm.getAllProjects();
     } catch (error) {
-      console.error('[ProjectManagerIPC] Get all projects error:', error);
+      log.error('app', '[ProjectManagerIPC] Get all projects error', { error: error });
       return [];
     }
   });
@@ -61,7 +63,7 @@ function setupProjectManagerIPC() {
     try {
       return pm.getProjectsForSpace(spaceId);
     } catch (error) {
-      console.error('[ProjectManagerIPC] Get projects by space error:', error);
+      log.error('app', '[ProjectManagerIPC] Get projects by space error', { error: error });
       return [];
     }
   });
@@ -70,7 +72,7 @@ function setupProjectManagerIPC() {
     try {
       return pm.storage.updateProject(projectId, updates);
     } catch (error) {
-      console.error('[ProjectManagerIPC] Update project error:', error);
+      log.error('app', '[ProjectManagerIPC] Update project error', { error: error });
       return { error: error.message };
     }
   });
@@ -79,7 +81,7 @@ function setupProjectManagerIPC() {
     try {
       return pm.renameProject(projectId, newName);
     } catch (error) {
-      console.error('[ProjectManagerIPC] Rename project error:', error);
+      log.error('app', '[ProjectManagerIPC] Rename project error', { error: error });
       return { error: error.message };
     }
   });
@@ -88,7 +90,7 @@ function setupProjectManagerIPC() {
     try {
       return pm.deleteProject(projectId);
     } catch (error) {
-      console.error('[ProjectManagerIPC] Delete project error:', error);
+      log.error('app', '[ProjectManagerIPC] Delete project error', { error: error });
       return false;
     }
   });
@@ -99,7 +101,7 @@ function setupProjectManagerIPC() {
     try {
       return await pm.addAssetToProject(projectId, filePath, type);
     } catch (error) {
-      console.error('[ProjectManagerIPC] Add asset error:', error);
+      log.error('app', '[ProjectManagerIPC] Add asset error', { error: error });
       return { error: error.message };
     }
   });
@@ -108,7 +110,7 @@ function setupProjectManagerIPC() {
     try {
       return pm.removeAssetFromProject(projectId, assetId);
     } catch (error) {
-      console.error('[ProjectManagerIPC] Remove asset error:', error);
+      log.error('app', '[ProjectManagerIPC] Remove asset error', { error: error });
       return false;
     }
   });
@@ -117,7 +119,7 @@ function setupProjectManagerIPC() {
     try {
       return pm.getProjectAssets(projectId);
     } catch (error) {
-      console.error('[ProjectManagerIPC] Get assets error:', error);
+      log.error('app', '[ProjectManagerIPC] Get assets error', { error: error });
       return [];
     }
   });
@@ -128,7 +130,7 @@ function setupProjectManagerIPC() {
     try {
       return pm.createVersion(projectId, options);
     } catch (error) {
-      console.error('[ProjectManagerIPC] Create version error:', error);
+      log.error('app', '[ProjectManagerIPC] Create version error', { error: error });
       return { error: error.message };
     }
   });
@@ -137,7 +139,7 @@ function setupProjectManagerIPC() {
     try {
       return pm.getVersion(versionId);
     } catch (error) {
-      console.error('[ProjectManagerIPC] Get version error:', error);
+      log.error('app', '[ProjectManagerIPC] Get version error', { error: error });
       return null;
     }
   });
@@ -146,7 +148,7 @@ function setupProjectManagerIPC() {
     try {
       return pm.getProjectVersions(projectId);
     } catch (error) {
-      console.error('[ProjectManagerIPC] Get versions error:', error);
+      log.error('app', '[ProjectManagerIPC] Get versions error', { error: error });
       return [];
     }
   });
@@ -155,7 +157,7 @@ function setupProjectManagerIPC() {
     try {
       return pm.updateVersion(versionId, updates);
     } catch (error) {
-      console.error('[ProjectManagerIPC] Update version error:', error);
+      log.error('app', '[ProjectManagerIPC] Update version error', { error: error });
       return { error: error.message };
     }
   });
@@ -164,7 +166,7 @@ function setupProjectManagerIPC() {
     try {
       return pm.renameVersion(versionId, newName);
     } catch (error) {
-      console.error('[ProjectManagerIPC] Rename version error:', error);
+      log.error('app', '[ProjectManagerIPC] Rename version error', { error: error });
       return { error: error.message };
     }
   });
@@ -173,7 +175,7 @@ function setupProjectManagerIPC() {
     try {
       return pm.deleteVersion(versionId);
     } catch (error) {
-      console.error('[ProjectManagerIPC] Delete version error:', error);
+      log.error('app', '[ProjectManagerIPC] Delete version error', { error: error });
       return false;
     }
   });
@@ -182,7 +184,7 @@ function setupProjectManagerIPC() {
     try {
       return pm.branchVersion(sourceVersionId, newName);
     } catch (error) {
-      console.error('[ProjectManagerIPC] Branch version error:', error);
+      log.error('app', '[ProjectManagerIPC] Branch version error', { error: error });
       return { error: error.message };
     }
   });
@@ -191,7 +193,7 @@ function setupProjectManagerIPC() {
     try {
       return pm.setDefaultVersion(projectId, versionId);
     } catch (error) {
-      console.error('[ProjectManagerIPC] Set default version error:', error);
+      log.error('app', '[ProjectManagerIPC] Set default version error', { error: error });
       return { error: error.message };
     }
   });
@@ -200,7 +202,7 @@ function setupProjectManagerIPC() {
     try {
       return pm.getVersionTree(projectId);
     } catch (error) {
-      console.error('[ProjectManagerIPC] Get version tree error:', error);
+      log.error('app', '[ProjectManagerIPC] Get version tree error', { error: error });
       return { root: null, nodes: {}, children: {} };
     }
   });
@@ -211,7 +213,7 @@ function setupProjectManagerIPC() {
     try {
       return pm.loadSession(projectId, versionId);
     } catch (error) {
-      console.error('[ProjectManagerIPC] Load session error:', error);
+      log.error('app', '[ProjectManagerIPC] Load session error', { error: error });
       return { error: error.message };
     }
   });
@@ -220,7 +222,7 @@ function setupProjectManagerIPC() {
     try {
       return pm.saveSession(state);
     } catch (error) {
-      console.error('[ProjectManagerIPC] Save session error:', error);
+      log.error('app', '[ProjectManagerIPC] Save session error', { error: error });
       return { error: error.message };
     }
   });
@@ -230,7 +232,7 @@ function setupProjectManagerIPC() {
       pm.closeSession(state);
       return { success: true };
     } catch (error) {
-      console.error('[ProjectManagerIPC] Close session error:', error);
+      log.error('app', '[ProjectManagerIPC] Close session error', { error: error });
       return { error: error.message };
     }
   });
@@ -239,7 +241,7 @@ function setupProjectManagerIPC() {
     try {
       return pm.getCurrentSession();
     } catch (error) {
-      console.error('[ProjectManagerIPC] Get current session error:', error);
+      log.error('app', '[ProjectManagerIPC] Get current session error', { error: error });
       return null;
     }
   });
@@ -250,7 +252,7 @@ function setupProjectManagerIPC() {
     try {
       return pm.exportProject(projectId);
     } catch (error) {
-      console.error('[ProjectManagerIPC] Export project error:', error);
+      log.error('app', '[ProjectManagerIPC] Export project error', { error: error });
       return null;
     }
   });
@@ -259,7 +261,7 @@ function setupProjectManagerIPC() {
     try {
       return pm.importProject(data);
     } catch (error) {
-      console.error('[ProjectManagerIPC] Import project error:', error);
+      log.error('app', '[ProjectManagerIPC] Import project error', { error: error });
       return { error: error.message };
     }
   });
@@ -268,12 +270,12 @@ function setupProjectManagerIPC() {
     try {
       return pm.getStats();
     } catch (error) {
-      console.error('[ProjectManagerIPC] Get stats error:', error);
+      log.error('app', '[ProjectManagerIPC] Get stats error', { error: error });
       return { projectCount: 0, versionCount: 0, assetCount: 0 };
     }
   });
 
-  console.log('[ProjectManagerIPC] All IPC handlers registered successfully');
+  log.info('app', '[ProjectManagerIPC] All IPC handlers registered successfully');
 }
 
 module.exports = {

@@ -114,7 +114,7 @@ const MODEL_ALIASES = {
  * @returns {string} Full model ID
  */
 function resolveModelName(model) {
-  if (!model) return MODEL_ALIASES['default'];
+  if (!model || typeof model !== 'string') return MODEL_ALIASES['default'];
   
   // Direct match
   if (PRICING[model]) return model;

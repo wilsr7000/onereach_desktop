@@ -18,7 +18,14 @@ const { contextBridge, ipcRenderer } = require('electron');
   const BATCH_INTERVAL = 500; // Flush every 500ms
   const MAX_BUFFER_SIZE = 50; // Flush if buffer gets too large
   let flushTimeout = null;
-  let isLoggingEnabled = true; // Can be disabled for maximum performance
+  let isLoggingEnabled = true; // Controlled by diagnosticLogging setting
+
+  // Read persisted setting on load (async, defaults to enabled)
+  ipcRenderer.invoke('settings:get-all').then(settings => {
+    if (settings && settings.diagnosticLogging === 'off') {
+      isLoggingEnabled = false;
+    }
+  }).catch(() => { /* settings IPC may not be ready yet */ });
 
   // Get window title or URL for context
   function getWindowContext() {
@@ -463,6 +470,7 @@ contextBridge.exposeInMainWorld(
         'multi-tenant:register-partition',
         'multi-tenant:unregister-partition',
         'multi-tenant:get-environments',
+        'multi-tenant:get-diagnostics',
         'multi-tenant:get-user-data',
         'multi-tenant:get-cookies',
         // OneReach auto-login channels
@@ -517,6 +525,107 @@ contextBridge.exposeInMainWorld(
   }
 );
 
+// ---------------------------------------------------------------------------
+// Centralized Logging Bridge
+// All renderer processes should use window.logging for structured logging.
+// Logs flow to the central LogEventQueue in the main process.
+// ---------------------------------------------------------------------------
+contextBridge.exposeInMainWorld('logging', {
+  // Producer API -- push log events onto the central queue
+  enqueue: (event) => ipcRenderer.send('logging:enqueue', event),
+  info: (category, message, data) => ipcRenderer.send('logging:enqueue', { level: 'info', category, message, data }),
+  warn: (category, message, data) => ipcRenderer.send('logging:enqueue', { level: 'warn', category, message, data }),
+  error: (category, message, data) => ipcRenderer.send('logging:enqueue', { level: 'error', category, message, data }),
+  debug: (category, message, data) => ipcRenderer.send('logging:enqueue', { level: 'debug', category, message, data }),
+
+  // Consumer API -- query and subscribe
+  query: (opts) => ipcRenderer.invoke('logging:query', opts),
+  getStats: () => ipcRenderer.invoke('logging:get-stats'),
+  getRecentLogs: (count) => ipcRenderer.invoke('logging:get-recent-logs', count),
+  export: (opts) => ipcRenderer.invoke('logging:export', opts),
+  getFiles: () => ipcRenderer.invoke('logging:get-files'),
+
+  // Real-time subscriptions
+  subscribe: (filter) => ipcRenderer.invoke('logging:subscribe', filter),
+  onEvent: (callback) => {
+    ipcRenderer.on('logging:stream', (_, entry) => callback(entry));
+  },
+  offEvent: (callback) => {
+    ipcRenderer.removeListener('logging:stream', callback);
+  },
+
+  // Level control (changes are persisted by main process)
+  setLevel: (level) => ipcRenderer.invoke('logging:set-level', level),
+  getLevel: () => ipcRenderer.invoke('logging:get-level')
+});
+
+// ---------------------------------------------------------------------------
+// Centralized AI Service Bridge
+// All renderer processes should use window.ai instead of direct API calls.
+// ---------------------------------------------------------------------------
+contextBridge.exposeInMainWorld('ai', {
+  // Chat completion (batch)
+  chat: (opts) => ipcRenderer.invoke('ai:chat', opts),
+
+  // Simple text completion
+  complete: (prompt, opts) => ipcRenderer.invoke('ai:complete', prompt, opts),
+
+  // JSON completion (returns parsed object)
+  json: (prompt, opts) => ipcRenderer.invoke('ai:json', prompt, opts),
+
+  // Vision / image analysis
+  vision: (imageData, prompt, opts) => ipcRenderer.invoke('ai:vision', imageData, prompt, opts),
+
+  // Embeddings
+  embed: (input, opts) => ipcRenderer.invoke('ai:embed', input, opts),
+
+  // Transcription (pass audio as ArrayBuffer)
+  transcribe: (audioBuffer, opts) => ipcRenderer.invoke('ai:transcribe', audioBuffer, opts),
+
+  // Streaming chat - returns { requestId } and streams chunks via events
+  chatStream: (opts) => ipcRenderer.invoke('ai:chatStream', opts),
+
+  // Listen for streaming chunks (call after chatStream)
+  onStreamChunk: (requestId, callback) => {
+    const channel = `ai:stream:${requestId}`;
+    const handler = (_event, chunk) => callback(chunk);
+    ipcRenderer.on(channel, handler);
+    // Return cleanup function
+    return () => ipcRenderer.removeListener(channel, handler);
+  },
+
+  // Cost monitoring
+  getCostSummary: () => ipcRenderer.invoke('ai:getCostSummary'),
+
+  // Service status (circuit breakers, adapters, profiles)
+  getStatus: () => ipcRenderer.invoke('ai:getStatus'),
+
+  // Profile management
+  getProfiles: () => ipcRenderer.invoke('ai:getProfiles'),
+  setProfile: (name, config) => ipcRenderer.invoke('ai:setProfile', name, config),
+
+  // Image generation
+  imageGenerate: (prompt, options) => ipcRenderer.invoke('ai:imageGenerate', prompt, options),
+
+  // Provider management
+  testConnection: (provider) => ipcRenderer.invoke('ai:testConnection', provider),
+  resetCircuit: (provider) => ipcRenderer.invoke('ai:resetCircuit', provider),
+});
+
+// ---------------------------------------------------------------------------
+// Conversion API Bridge
+// All renderer processes should use window.convert for format conversions.
+// ---------------------------------------------------------------------------
+contextBridge.exposeInMainWorld('convert', {
+  convert: (opts) => ipcRenderer.invoke('convert:run', opts),
+  capabilities: () => ipcRenderer.invoke('convert:capabilities'),
+  pipeline: (opts) => ipcRenderer.invoke('convert:pipeline', opts),
+  graph: () => ipcRenderer.invoke('convert:graph'),
+  status: (jobId) => ipcRenderer.invoke('convert:status', jobId),
+  validatePlaybook: (data) => ipcRenderer.invoke('convert:validate-playbook', data),
+  diagnosePlaybook: (data) => ipcRenderer.invoke('convert:diagnose-playbook', data),
+});
+
 // Expose electron API for relaunch functionality
 contextBridge.exposeInMainWorld(
   'electron', {
@@ -547,10 +656,30 @@ contextBridge.exposeInMainWorld(
         'prepare-for-download',
         'check-widget-ready',
         'paste-clipboard-data',
-        'float-card:init'
+        'float-card:init',
+        // Setup wizard: response channels for get-* requests
+        'get-idw-environments',
+        'get-external-bots',
+        'get-image-creators',
+        'get-video-creators',
+        'get-audio-generators',
+        'get-ui-design-tools'
+      ];
+      const dataOnlyChannels = [
+        'get-idw-environments',
+        'get-external-bots',
+        'get-image-creators',
+        'get-video-creators',
+        'get-audio-generators',
+        'get-ui-design-tools'
       ];
       if (validChannels.includes(channel)) {
-        ipcRenderer.on(channel, (event, ...args) => func(event, ...args));
+        if (dataOnlyChannels.includes(channel)) {
+          // Setup wizard expects (data) not (event, data)
+          ipcRenderer.on(channel, (event, ...args) => func(...args));
+        } else {
+          ipcRenderer.on(channel, (event, ...args) => func(event, ...args));
+        }
       }
     },
     ipcRenderer: {
@@ -1447,6 +1576,7 @@ contextBridge.exposeInMainWorld('clipboard', {
   toggleScreenshotCapture: (enabled) => ipcRenderer.invoke('clipboard:toggle-screenshot-capture', enabled),
   
   // PDF methods
+  getPdfData: (itemId) => ipcRenderer.invoke('clipboard:get-pdf-data', itemId),
   getPDFPageThumbnail: (itemId, pageNumber) => ipcRenderer.invoke('clipboard:get-pdf-page-thumbnail', itemId, pageNumber),
   generateSpacePDF: (spaceId, options) => ipcRenderer.invoke('clipboard:generate-space-pdf', spaceId, options),
   exportSpacePDF: (spaceId, options) => ipcRenderer.invoke('clipboard:export-space-pdf', spaceId, options),
@@ -1470,6 +1600,11 @@ contextBridge.exposeInMainWorld('clipboard', {
   pauseWebsiteMonitor: (monitorId) => ipcRenderer.invoke('clipboard:pause-website-monitor', monitorId),
   resumeWebsiteMonitor: (monitorId) => ipcRenderer.invoke('clipboard:resume-website-monitor', monitorId),
   
+  // Data Source methods
+  addDataSource: (data) => ipcRenderer.invoke('clipboard:add-data-source', data),
+  testDataSource: (itemId, credential) => ipcRenderer.invoke('clipboard:test-data-source', itemId, credential),
+  updateDataSourceDocument: (itemId, content, visibility) => ipcRenderer.invoke('clipboard:update-data-source-document', itemId, content, visibility),
+
   // Black hole widget methods
   openBlackHole: () => ipcRenderer.invoke('clipboard:open-black-hole'),
   addText: (data) => ipcRenderer.invoke('black-hole:add-text', data),
@@ -1940,6 +2075,142 @@ contextBridge.exposeInMainWorld('spaces', {
      * @returns {Promise<boolean>} Success status
      */
     delete: (spaceId, filePath) => ipcRenderer.invoke('spaces:files:delete', spaceId, filePath)
+  },
+  
+  // ---- GSX PUSH API ----
+  gsx: {
+    /**
+     * Initialize GSX Push with endpoint and auth
+     * @param {string} endpoint - OmniGraph endpoint URL
+     * @returns {Promise<Object>} { success }
+     */
+    initialize: (endpoint, currentUser) => ipcRenderer.invoke('spaces:gsx:initialize', endpoint, currentUser),
+    
+    /**
+     * Set the current user for provenance tracking
+     * @param {string} user - User email
+     * @returns {Promise<Object>} { success }
+     */
+    setCurrentUser: (user) => ipcRenderer.invoke('spaces:gsx:setCurrentUser', user),
+    
+    /**
+     * Get the current GSX auth token from settings
+     * @returns {Promise<string|null>} Token or null
+     */
+    getToken: () => ipcRenderer.invoke('spaces:gsx:getToken'),
+    
+    /**
+     * Push a single asset to GSX
+     * @param {string} itemId - Item ID
+     * @param {Object} opts - Options { isPublic, force }
+     * @returns {Promise<Object>} { success, fileUrl, graphNodeId, version }
+     */
+    pushAsset: (itemId, opts) => ipcRenderer.invoke('spaces:gsx:pushAsset', itemId, opts),
+    
+    /**
+     * Push multiple assets to GSX
+     * @param {string[]} itemIds - Item IDs
+     * @param {Object} opts - Options { isPublic }
+     * @returns {Promise<Object>} { success, pushed, skipped, failed }
+     */
+    pushAssets: (itemIds, opts) => ipcRenderer.invoke('spaces:gsx:pushAssets', itemIds, opts),
+    
+    /**
+     * Push a space to GSX
+     * @param {string} spaceId - Space ID
+     * @param {Object} opts - Options { isPublic, includeAssets }
+     * @returns {Promise<Object>} { success, graphNodeId, assetsPushed }
+     */
+    pushSpace: (spaceId, opts) => ipcRenderer.invoke('spaces:gsx:pushSpace', spaceId, opts),
+    
+    /**
+     * Unpush an asset from GSX (soft delete)
+     * @param {string} itemId - Item ID
+     * @returns {Promise<Object>} { success, message }
+     */
+    unpushAsset: (itemId) => ipcRenderer.invoke('spaces:gsx:unpushAsset', itemId),
+    
+    /**
+     * Unpush multiple assets
+     * @param {string[]} itemIds - Item IDs
+     * @returns {Promise<Object>} { success, unpushed, failed }
+     */
+    unpushAssets: (itemIds) => ipcRenderer.invoke('spaces:gsx:unpushAssets', itemIds),
+    
+    /**
+     * Unpush a space from GSX
+     * @param {string} spaceId - Space ID
+     * @param {Object} opts - Options { includeAssets }
+     * @returns {Promise<Object>} { success }
+     */
+    unpushSpace: (spaceId, opts) => ipcRenderer.invoke('spaces:gsx:unpushSpace', spaceId, opts),
+    
+    /**
+     * Change visibility of a pushed asset
+     * @param {string} itemId - Item ID
+     * @param {boolean} isPublic - New visibility
+     * @returns {Promise<Object>} { success, newVisibility, fileUrl }
+     */
+    changeVisibility: (itemId, isPublic) => ipcRenderer.invoke('spaces:gsx:changeVisibility', itemId, isPublic),
+    
+    /**
+     * Change visibility for multiple assets
+     * @param {string[]} itemIds - Item IDs
+     * @param {boolean} isPublic - New visibility
+     * @returns {Promise<Object>} { success, changed, failed }
+     */
+    changeVisibilityBulk: (itemIds, isPublic) => ipcRenderer.invoke('spaces:gsx:changeVisibilityBulk', itemIds, isPublic),
+    
+    /**
+     * Get push status for an item
+     * @param {string} itemId - Item ID
+     * @returns {Promise<Object>} { status, fileUrl, graphNodeId, version, hasLocalChanges }
+     */
+    getPushStatus: (itemId) => ipcRenderer.invoke('spaces:gsx:getPushStatus', itemId),
+    
+    /**
+     * Get push statuses for multiple items
+     * @param {string[]} itemIds - Item IDs
+     * @returns {Promise<Object>} Map of itemId -> pushStatus
+     */
+    getPushStatuses: (itemIds) => ipcRenderer.invoke('spaces:gsx:getPushStatuses', itemIds),
+    
+    /**
+     * Update push status (for external sources)
+     * @param {string} itemId - Item ID
+     * @param {Object} pushData - Push metadata
+     * @returns {Promise<Object>} { success }
+     */
+    updatePushStatus: (itemId, pushData) => ipcRenderer.invoke('spaces:gsx:updatePushStatus', itemId, pushData),
+    
+    /**
+     * Check which items have local changes since last push
+     * @param {string[]} itemIds - Item IDs
+     * @returns {Promise<Object>} { changed, unchanged, notPushed }
+     */
+    checkLocalChanges: (itemIds) => ipcRenderer.invoke('spaces:gsx:checkLocalChanges', itemIds),
+    
+    /**
+     * Get all links for a pushed item
+     * @param {string} itemId - Item ID
+     * @returns {Promise<Object>} { fileUrl, graphNodeId, shareLink }
+     */
+    getLinks: (itemId) => ipcRenderer.invoke('spaces:gsx:getLinks', itemId),
+    
+    /**
+     * Get share link for an item
+     * @param {string} itemId - Item ID
+     * @returns {Promise<Object>} { url, requiresAuth }
+     */
+    getShareLink: (itemId) => ipcRenderer.invoke('spaces:gsx:getShareLink', itemId),
+    
+    /**
+     * Get specific link type for an item
+     * @param {string} itemId - Item ID
+     * @param {string} linkType - 'file' | 'graph' | 'share'
+     * @returns {Promise<Object>} { link, type }
+     */
+    getLink: (itemId, linkType) => ipcRenderer.invoke('spaces:gsx:getLink', itemId, linkType)
   },
   
   /**

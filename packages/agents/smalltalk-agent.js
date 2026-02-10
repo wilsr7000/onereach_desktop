@@ -11,6 +11,7 @@
 
 const { getAgentMemory } = require('../../lib/agent-memory-store');
 const { learnFromInteraction, getTimeContext } = require('../../lib/thinking-agent');
+const ai = require('../../lib/ai-service');
 
 const smalltalkAgent = {
   id: 'smalltalk-agent',
@@ -30,15 +31,25 @@ HIGH CONFIDENCE (0.85+) for:
 - Name introductions: "My name is...", "Call me..."
 - Simple reactions: "Cool", "Awesome", "Nice", "Great"
 - Emotional support: "I'm feeling down", "Cheer me up"
+- Fun/casual requests: "Tell me a joke", "Say something funny", "Make me laugh"
+- Compliments: "You're great", "Good job"
+- Chitchat: "What do you think about...", "Do you like..."
 
 LOW CONFIDENCE (0.00-0.20) - DO NOT BID on these:
 - Action requests: "Play music", "What's the weather?"
 - Calendar queries: "What do I have on Tuesday?"
 - Time queries: "What time is it?"
-- Knowledge questions: "Who invented the telephone?"
+- Knowledge questions: "Who invented the telephone?" (search agent)
 - Questions about schedules, events, or tasks
 
-This agent is ONLY for casual social conversation. Any request for information, actions, or tasks should go to other agents.`,
+This agent handles casual social conversation and light entertainment. Any request for factual information, app actions, or tasks should go to other agents.
+
+HALLUCINATION GUARD:
+NEVER state facts that are not in your context window.
+You do NOT know the current time, date, day of week, weather, calendar events, or any real-world data.
+If someone asks a factual question (time, date, weather, schedule, news), do NOT guess.
+Instead bid 0.00 so the correct agent handles it.
+The ONLY facts you may state are those present in the conversation history or user profile provided in your context. Everything else is a guess and will damage user trust.`,
   
   keywords: [
     'hi', 'hello', 'hey', 'howdy', 'greetings',
@@ -56,6 +67,7 @@ This agent is ONLY for casual social conversation. Any request for information, 
     'need encouragement', 'having a bad day', 'rough day', 'tough day',
     'feeling anxious', 'feeling worried', 'feeling overwhelmed'
   ],
+  executionType: 'informational',  // Pure conversation, no side effects -- can fast-path in bid
   
   // Memory instance
   memory: null,
@@ -122,13 +134,8 @@ This agent is ONLY for casual social conversation. Any request for information, 
     return false;
   },
   
-  /**
-   * Bid on a task - uses LLM-based unified bidder
-   */
-  bid(task) {
-    // No fast bidding - let the unified bidder handle all evaluation via LLM
-    return null;
-  },
+  // No bid() method. Routing is 100% LLM-based via unified-bidder.js.
+  // NEVER add keyword/regex bidding here. See .cursorrules.
   
   /**
    * Execute the task
