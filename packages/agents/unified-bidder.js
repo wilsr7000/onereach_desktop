@@ -364,7 +364,10 @@ async function evaluateAgentBid(agent, task) {
       return { confidence: 0, plan: '', reasoning: 'Empty LLM response' };
     }
 
-    const evaluation = JSON.parse(content);
+    // Strip markdown code fences if present (safety net for models that wrap JSON)
+    let raw = content;
+    raw = raw.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+    const evaluation = JSON.parse(raw);
     
     // Validate and normalize
     let confidence = Math.max(0, Math.min(1, parseFloat(evaluation.confidence) || 0));
@@ -597,7 +600,9 @@ Return ONLY valid JSON, no markdown fences.`;
 
     let parsed;
     try {
-      parsed = JSON.parse(result.content);
+      let batchRaw = result.content || '';
+      batchRaw = batchRaw.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+      parsed = JSON.parse(batchRaw);
     } catch (_) {
       log.error('agent', 'Batch evaluation JSON parse failed', { raw: (result.content || '').substring(0, 200) });
       return results;

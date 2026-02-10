@@ -14761,6 +14761,48 @@ function setupOrbIPC() {
     }
   });
   
+  // Flip orb side within window (reposition so orb stays visually anchored)
+  // Tracks which side the orb is on: 'right' (default) or 'left'
+  let currentOrbSide = global.settingsManager?.get('voiceOrbSide') || 'right';
+  ipcMain.handle('orb:flip-side', (event, side) => {
+    if (!orbWindow || orbWindow.isDestroyed()) return;
+    
+    if (side === currentOrbSide) return; // No change needed
+    
+    const [winX, winY] = orbWindow.getPosition();
+    const [winWidth] = orbWindow.getSize();
+    
+    // The orb is 80px with 20px margin from the edge.
+    // When flipping, the window needs to shift so the orb stays in the same screen position.
+    // Offset = windowWidth - orbSize - (2 * margin) = 400 - 80 - 40 = 280
+    const orbSize = 80;
+    const orbMargin = 20;
+    const offset = winWidth - orbSize - (2 * orbMargin);
+    
+    let newX;
+    if (side === 'left') {
+      // Orb moving from bottom-right to bottom-left of window.
+      // Window needs to shift RIGHT so the orb (now at left edge) stays in place.
+      newX = winX + offset;
+    } else {
+      // Orb moving from bottom-left to bottom-right of window.
+      // Window needs to shift LEFT so the orb (now at right edge) stays in place.
+      newX = winX - offset;
+    }
+    
+    currentOrbSide = side;
+    orbWindow.setPosition(Math.round(newX), winY);
+    
+    // Save side and position
+    if (global.settingsManager) {
+      global.settingsManager.update({
+        voiceOrbPosition: { x: Math.round(newX), y: winY },
+        voiceOrbSide: side
+      });
+      console.log(`[VoiceOrb] Flipped to side: ${side}, new window X: ${newX}`);
+    }
+  });
+  
   // Handle orb click (could expand to panel in future)
   ipcMain.on('orb:clicked', () => {
     console.log('[VoiceOrb] Orb clicked');
@@ -14837,10 +14879,11 @@ function createOrbWindow() {
   const windowWidth = 400;
   const windowHeight = 550;
   
-  // Try to restore saved position, otherwise default to bottom-right
+  // Try to restore saved position and side, otherwise default to bottom-right
   let x, y;
   const savedPosition = global.settingsManager?.get('voiceOrbPosition');
   const savedWindowSize = global.settingsManager?.get('voiceOrbWindowSize');
+  const savedSide = global.settingsManager?.get('voiceOrbSide') || 'right';
   
   // Check if window size changed (reset position if so)
   const currentWindowSize = { width: windowWidth, height: windowHeight };
@@ -14871,14 +14914,18 @@ function createOrbWindow() {
   
   if (savedPosition && typeof savedPosition.x === 'number' && typeof savedPosition.y === 'number' && !windowSizeChanged) {
     // Validate position is still on screen
-    // The orb is at bottom-right of window (right: 20px, bottom: 20px, size: 80x80)
-    // Orb's left edge is at windowX + 250, right edge at windowX + 330
-    // Orb's top edge is at windowY + 150, bottom edge at windowY + 230
-    // Allow negative window positions as long as the orb itself is visible
-    const orbLeftEdge = savedPosition.x + 250;
-    const orbRightEdge = savedPosition.x + 330;
-    const orbTopEdge = savedPosition.y + 150;
-    const orbBottomEdge = savedPosition.y + 230;
+    // Orb is 80px with 20px margin, positioned at bottom of window (height 550)
+    // Horizontal position depends on side:
+    //   'right': orb at right edge -> left edge at windowX + (400 - 20 - 80) = windowX + 300
+    //   'left':  orb at left edge  -> left edge at windowX + 20
+    const orbMargin = 20;
+    const orbSize = 80;
+    const orbLeftEdge = savedSide === 'left'
+      ? savedPosition.x + orbMargin
+      : savedPosition.x + (windowWidth - orbMargin - orbSize);
+    const orbRightEdge = orbLeftEdge + orbSize;
+    const orbTopEdge = savedPosition.y + (windowHeight - orbMargin - orbSize);
+    const orbBottomEdge = orbTopEdge + orbSize;
     
     const orbVisible = orbRightEdge > 50 && orbLeftEdge < screenWidth - 50 &&
                        orbBottomEdge > 50 && orbTopEdge < screenHeight - 50;
@@ -14950,6 +14997,15 @@ function createOrbWindow() {
   // Load the orb UI
   orbWindow.loadFile(path.join(__dirname, 'orb.html'));
   
+  // After the page loads, send the initial orb side so the renderer can
+  // apply the correct orb-container class (bottom-left vs bottom-right)
+  orbWindow.webContents.once('did-finish-load', () => {
+    if (orbWindow && !orbWindow.isDestroyed()) {
+      orbWindow.webContents.send('orb:initial-side', savedSide);
+      console.log(`[VoiceOrb] Sent initial side to renderer: ${savedSide}`);
+    }
+  });
+  
   // Save position before closing
   orbWindow.on('close', () => {
     saveOrbPosition();
@@ -15015,8 +15071,9 @@ function saveOrbPosition() {
   if (orbWindow && !orbWindow.isDestroyed() && global.settingsManager) {
     try {
       const [x, y] = orbWindow.getPosition();
-      global.settingsManager.update({ voiceOrbPosition: { x, y } });
-      console.log(`[VoiceOrb] Position saved: ${x}, ${y}`);
+      const side = global.settingsManager.get('voiceOrbSide') || 'right';
+      global.settingsManager.update({ voiceOrbPosition: { x, y }, voiceOrbSide: side });
+      console.log(`[VoiceOrb] Position saved: ${x}, ${y} (side: ${side})`);
     } catch (error) {
       console.error('[VoiceOrb] Error saving position:', error);
     }

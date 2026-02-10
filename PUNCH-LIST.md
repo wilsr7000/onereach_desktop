@@ -300,6 +300,40 @@
 
 ## Recently Completed
 
+- [x] **Daily Brief Time-Awareness: Past vs Upcoming Events** (v3.14.x)
+  - Bug: Daily brief described past events in future tense ("Your first meeting is at 9 AM" when it's 3 PM)
+  - Fix: `generateMorningBrief()` now splits events into completed/in-progress/upcoming with status per event
+  - `renderBriefForSpeech()` uses correct tense (past tense for completed, present for in-progress, future for upcoming)
+  - Added `currentMeeting` (in-progress) and `nextMeeting` (next upcoming) to brief data
+  - Free time now shows remaining free time (not total day) when briefing mid-day
+  - Conflicts filtered to only show upcoming ones
+  - LLM composition prompt updated with explicit time-awareness rules
+  - Files: `lib/calendar-store.js`, `packages/agents/daily-brief-agent.js`
+
+- [x] **Memory Management Agent: Cross-Agent Memory Orchestrator** (v3.14.x)
+  - Overhauled `packages/agents/memory-agent.js` from single-profile manager to full cross-agent memory orchestrator
+  - Uses Claude 4.6 Opus (`powerful` profile with adaptive thinking) for deep reasoning about memory changes
+  - On every request, loads the global user profile AND all agent memory files (~20 agents)
+  - Opus analyzes the full memory context and decides which agents need updates (not just the user profile)
+  - Applies targeted section edits to each relevant agent memory in a single pass
+  - Example: "I moved to Portland" -> updates profile Home City + weather agent Home Location + any other agent with Berkeley reference
+  - Example: "My name is Robb" -> updates profile Name + scans all agents for name references
+  - Example: "Make my daily brief shorter" -> updates daily-brief-agent Briefing Preferences directly
+  - "What do you know about me?" synthesizes info from ALL agent memories, not just the profile
+  - Handles: view, update, delete, clear_all (with cross-agent cleanup)
+  - Audit trail: logs all changes and deletions to agent memory for review
+  - **Passive conversation observation**: watches ALL completed conversations and automatically learns
+    - Hooked into `task:settled` in `exchange-bridge.js` (replaces old profile-only `extractAndSaveUserFacts`)
+    - After every successful agent interaction, `observeConversation()` analyzes the conversation
+    - AI determines if anything is worth remembering and routes facts to the right agent memories
+    - Example: user tells weather-agent "Portland weather, I just moved there" -> auto-updates profile Home City + weather agent Home Location
+    - Rate-limited (45s cooldown) + deduplication buffer to avoid excessive API calls
+    - Skips trivial interactions (<8 chars), failed tasks, and self-observations
+    - Uses `fast` profile for observation (lightweight), `powerful` profile for explicit memory commands
+  - Dependency injection (`_setDeps`) for testability
+  - 32 unit tests covering: context gathering, cross-agent updates, deletion, clear_all, LLM contract, edge cases, passive observation pipeline
+  - Files: `packages/agents/memory-agent.js`, `test/unit/memory-agent-cross-agent.test.js`, `src/voice-task-sdk/exchange-bridge.js`
+
 - [x] **Daily Brief Orchestration: Scalable Multi-Agent Morning Brief** (v3.12.5)
   - Problem: Morning brief was hardcoded in calendar agent, manually calling weather agent. Would not scale to 10+ agents.
   - Solution: Introduced `getBriefing()` protocol -- agents declare briefing capability, orchestrator discovers and calls them in parallel.

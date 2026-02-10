@@ -1,7 +1,7 @@
 {
   "name": "gsx-power-user",
   "productName": "Onereach.ai",
-  "version": "4.0.1",
+  "version": "4.1.0",
   "description": "GSX Power User Desktop Application",
   "main": "main.js",
   "icon": "assets/icon.icns",
@@ -198,7 +198,7 @@
     "@playwright/test": "^1.57.0",
     "@vitest/coverage-v8": "^4.0.16",
     "adm-zip": "^0.5.16",
-    "electron": "39.2.7",
+    "electron": "^39.2.7",
     "electron-builder": "^24.9.1",
     "husky": "^9.1.7",
     "promptfoo": "^0.120.11",

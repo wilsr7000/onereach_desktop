@@ -298,6 +298,16 @@ STYLE RULES:
 - If a section says data is unavailable, acknowledge it briefly ("Weather's offline today") and move on.
 - NEVER invent or guess data. Only use what's provided below.
 
+TIME AWARENESS -- CRITICAL:
+- Pay attention to the current time from the Time & Date section. Use it to distinguish past from future.
+- Calendar events have a "status" field: "completed" means already happened, "in-progress" means happening now, "upcoming" means in the future.
+- For completed events: use past tense ("You had a standup at 9 AM", "Your morning meetings are done").
+- For in-progress events: use present tense ("You're currently in a meeting").
+- For upcoming events: use future tense ("Your next meeting is at 3 PM", "Coming up you have...").
+- NEVER describe a past event as if it's about to happen. If it's 2 PM, don't say "Your first meeting is at 9 AM" -- say "You had a meeting at 9 AM" or just focus on what's ahead.
+- If all meetings are done, say so clearly ("All your meetings are wrapped up for today").
+- Focus the briefing on what's AHEAD, with a brief recap of what already happened if relevant.
+
 RAW DATA FROM AGENTS:
 ${sections}
 

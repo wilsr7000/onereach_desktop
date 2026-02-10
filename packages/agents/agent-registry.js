@@ -61,6 +61,7 @@ const BUILT_IN_AGENT_IDS = [
   // Documentation
   'docs-agent',          // RAG-grounded documentation assistant -- answers from official app docs
   'daily-brief-agent',   // Meta-agent - orchestrates morning briefing from time, weather, calendar, email, etc.
+  'memory-agent',        // Memory manager - lets users view, correct, update, or delete personal facts/preferences
   // Add new agents here:
   // 'your-new-agent',
 ];

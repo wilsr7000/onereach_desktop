@@ -436,6 +436,15 @@ const NORMALIZE_SKIP_PATTERNS = [
   /^play\s/i,
   /^(good )(morning|afternoon|evening|night)/i,
   /^give me (my |the )?(daily|morning) (brief|briefing|rundown)/i,
+  // Memory management -- unambiguous profile commands, always pass through
+  /^my name is\s/i,
+  /^call me\s/i,
+  /^(what do you (know|remember)|tell me what you know) about me/i,
+  /^(show|display) (my |me )?(profile|preferences|memory|facts)/i,
+  /^(forget|remove|delete|clear) (my|all)\s/i,
+  /^(change|update|set|correct) my\s/i,
+  /^remember (that |my )/i,
+  /^who am i/i,
 ];
 
 /**
@@ -2750,9 +2759,44 @@ async function initializeExchangeBridge(config = {}) {
     );
 
     // Pre-load user profile so it's ready for first request
-    getUserProfile().load().then(() => {
-      getUserProfile().updateSessionActivity();
+    getUserProfile().load().then(async () => {
+      const profile = getUserProfile();
+      profile.updateSessionActivity();
       log.info('voice', 'User profile loaded');
+
+      // ── Onboarding: if profile has no personal info, greet and ask the user to introduce themselves ──
+      // We check Identity specifically -- default preferences (Fahrenheit, 12-hour) don't count as "known".
+      const identityFacts = profile.getFacts('Identity') || {};
+      const hasName = identityFacts.Name && !identityFacts.Name.includes('not yet learned');
+      const sessionCtx = profile.getFacts('Session Context') || {};
+      const sessionsToday = parseInt(sessionCtx['Sessions today'] || '0', 10);
+      // Only onboard on the very first session (sessions today == 1 means this is the first)
+      const isNewUser = !hasName && sessionsToday <= 1;
+      if (isNewUser) {
+        log.info('voice', '[Onboarding] Profile is blank -- starting onboarding');
+        // Wait a few seconds for the voice orb and exchange to fully initialize
+        setTimeout(async () => {
+          try {
+            const { getVoiceSpeaker } = require('../../voice-speaker');
+            const speaker = getVoiceSpeaker();
+            const greeting = "Welcome! I don't know anything about you yet. Tell me your name and a little about yourself -- like where you live or how you'd like me to help -- and I'll remember it for next time.";
+            if (speaker) {
+              await speaker.speak(greeting, { voice: 'ash' });
+            }
+            // Also show on the HUD
+            if (global.sendCommandHUDResult) {
+              global.sendCommandHUDResult({
+                success: true,
+                message: greeting,
+                agentId: 'memory-agent',
+              });
+            }
+            log.info('voice', '[Onboarding] Welcome message spoken');
+          } catch (e) {
+            log.warn('voice', '[Onboarding] Could not speak welcome', { data: e.message });
+          }
+        }, 5000);
+      }
     }).catch(e =>
       log.warn('voice', '[ExchangeBridge] User profile load error', { data: e.message })
     );
@@ -3214,12 +3258,21 @@ function setupExchangeEvents() {
       log.warn('voice', 'Master Orchestrator feedback error', { data: e.message });
     }
     
-    // ==================== ACTIVE LEARNING PIPELINE ====================
-    // Extract user facts from successful interactions (non-blocking)
+    // ==================== CROSS-AGENT LEARNING PIPELINE ====================
+    // Memory agent observes all successful conversations and routes facts
+    // to the right agent memories (replaces old profile-only extraction)
     if (result?.success !== false) {
-      extractAndSaveUserFacts(task, result, agentId).catch(e =>
-        log.warn('voice', '[LearningPipeline] Error', { data: e.message })
-      );
+      try {
+        const memoryAgent = require('../../packages/agents/memory-agent');
+        memoryAgent.observeConversation(task, result, agentId).catch(e =>
+          log.warn('voice', '[MemoryObserver] Error', { data: e.message })
+        );
+      } catch (e) {
+        // Fall back to legacy extraction if memory agent fails to load
+        extractAndSaveUserFacts(task, result, agentId).catch(e2 =>
+          log.warn('voice', '[LearningPipeline] Error', { data: e2.message })
+        );
+      }
     }
     
     // Phase 1: Check if this task was cancelled (late result suppression)

@@ -197,6 +197,25 @@ contextBridge.exposeInMainWorld('orbAPI', {
   setPosition: (x, y) => ipcRenderer.invoke('orb:position', x, y),
   
   /**
+   * Flip the orb side within its window so the tooltip can appear on the opposite side.
+   * Repositions the BrowserWindow so the orb stays visually anchored.
+   * @param {'left'|'right'} side - Which side of the screen the orb is on
+   * @returns {Promise<void>}
+   */
+  flipSide: (side) => ipcRenderer.invoke('orb:flip-side', side),
+  
+  /**
+   * Listen for initial orb side from main process (sent after window loads).
+   * @param {function} callback - Called with 'left' or 'right'
+   * @returns {function} Cleanup function to remove the listener
+   */
+  onInitialSide: (callback) => {
+    const handler = (event, side) => callback(side);
+    ipcRenderer.on('orb:initial-side', handler);
+    return () => ipcRenderer.removeListener('orb:initial-side', handler);
+  },
+  
+  /**
    * Expand window for text chat
    * @param {string} anchor - Which corner to anchor: 'bottom-right', 'bottom-left', 'top-right', 'top-left'
    * @returns {Promise<void>}

@@ -313,6 +313,20 @@
             transition: opacity 0.8s ease-out, transform 0.8s ease-out;
         }
         
+        /* Position to the right of orb (slides in from the left toward orb) */
+        .transcript-tooltip.right-of-orb {
+            transform: translateX(-10px);
+        }
+        
+        .transcript-tooltip.right-of-orb.visible {
+            transform: translateX(0);
+        }
+        
+        .transcript-tooltip.right-of-orb.fading {
+            transform: translateX(-10px);
+            transition: opacity 0.8s ease-out, transform 0.8s ease-out;
+        }
+        
         /* ==================== CONTEXT MENU ==================== */
         .orb-context-menu {
             position: fixed;
@@ -1890,11 +1904,13 @@
                 }
             }
             
-            // Reset orb to default position after collapse
+            // Reset orb position after collapse, restoring the side-flip class
             const orbContainer = document.querySelector('.orb-container');
             orbContainer.classList.remove('orb-bottom-right', 'orb-bottom-left', 'orb-top-right', 'orb-top-left');
             textChatPanel.classList.remove('pos-top-left', 'pos-top-right', 'pos-bottom-left', 'pos-bottom-right');
-            currentChatAnchor = 'bottom-right'; // Reset to default
+            // Restore the correct side class (left or right) based on current screen position
+            orbContainer.classList.add(currentOrbSide === 'left' ? 'orb-bottom-left' : 'orb-bottom-right');
+            currentChatAnchor = currentOrbSide === 'left' ? 'bottom-left' : 'bottom-right';
         }
         
         chatCloseBtn.addEventListener('click', closeTextChat);
@@ -2060,7 +2076,7 @@
             }
             
             // Remove fading state if it was fading
-            transcriptEl.classList.remove('fading', 'below', 'left-of-orb');
+            transcriptEl.classList.remove('fading', 'below', 'left-of-orb', 'right-of-orb');
             
             transcriptEl.textContent = text;
             transcriptEl.classList.toggle('interim', isInterim);
@@ -2104,18 +2120,15 @@
                 bottom = 'auto';
             } else {
                 // ── Orb is on the LEFT half of screen ──
-                // Show tooltip to the RIGHT of the orb, above it
-                // (Window has ~300px to the left of the orb but that's off-screen here,
-                //  so position above the orb, aligned to orb's left edge extending right)
-                top = 'auto';
-                bottom = windowHeight - orbRect.top + gap;
-                // Align tooltip starting at the orb's left edge, extending right on screen
-                let screenLeft = Math.max(margin, windowX + orbRect.left);
-                if (screenLeft + tooltipMaxWidth > screenWidth - margin) {
-                    screenLeft = screenWidth - margin - tooltipMaxWidth;
-                }
-                left = Math.max(0, screenLeft - windowX);
-                right = 'auto';
+                // Show tooltip to the RIGHT of the orb, vertically centered
+                // (After flip, orb is at bottom-left of window with space to the right)
+                transcriptEl.classList.add('right-of-orb');
+                left = orbRect.right + gap; // left edge starts after the orb
+                right = margin;
+                // Vertically center on the orb, clamped to window bounds
+                const centerTop = orbRect.top + orbRect.height / 2 - tooltipEstimatedHeight / 2;
+                top = Math.max(margin, Math.min(centerTop, windowHeight - tooltipEstimatedHeight - margin));
+                bottom = 'auto';
             }
             
             // Apply position
@@ -2135,7 +2148,7 @@
             
             // Clean up classes and inline styles after animation completes
             hideTranscriptTimeout = setTimeout(() => {
-                transcriptEl.classList.remove('fading', 'below', 'left-of-orb', 'interim');
+                transcriptEl.classList.remove('fading', 'below', 'left-of-orb', 'right-of-orb', 'interim');
                 // Reset inline styles so CSS defaults take over
                 transcriptEl.style.top = '';
                 transcriptEl.style.bottom = '';
@@ -2699,6 +2712,23 @@
         let windowStartY = 0;
         let hasMoved = false;
         
+        // Track which side of the screen the orb is on
+        // 'right' = orb at bottom-right of window (default), 'left' = orb at bottom-left
+        let currentOrbSide = 'right';
+        
+        // Listen for initial side from main process (restores saved side on launch)
+        if (window.orbAPI?.onInitialSide) {
+            window.orbAPI.onInitialSide((side) => {
+                if (side && side !== currentOrbSide) {
+                    currentOrbSide = side;
+                    const orbContainer = document.querySelector('.orb-container');
+                    orbContainer.classList.remove('orb-bottom-right', 'orb-bottom-left');
+                    orbContainer.classList.add(side === 'left' ? 'orb-bottom-left' : 'orb-bottom-right');
+                    console.log(`[Orb] Initial side set to: ${side}`);
+                }
+            });
+        }
+        
         orb.addEventListener('mousedown', (e) => {
             // Only drag on left-click (button 0), not right-click (button 2)
             if (e.button !== 0) return;
@@ -2737,8 +2767,51 @@
             if (isDragging) {
                 isDragging = false;
                 orb.style.cursor = 'pointer';
+                
+                // After drag ends, check if orb crossed the screen midpoint
+                if (hasMoved) {
+                    const screenWidth = window.screen.availWidth;
+                    const windowX = window.screenX;
+                    const windowWidth = window.innerWidth;
+                    const orbContainer = document.querySelector('.orb-container');
+                    const orbRect = orbContainer.getBoundingClientRect();
+                    
+                    // Orb center in screen coordinates
+                    const orbScreenCenterX = windowX + orbRect.left + orbRect.width / 2;
+                    const isOnLeftHalf = orbScreenCenterX <= screenWidth / 2;
+                    const newSide = isOnLeftHalf ? 'left' : 'right';
+                    
+                    if (newSide !== currentOrbSide) {
+                        currentOrbSide = newSide;
+                        flipOrbToSide(newSide);
+                    }
+                }
             }
         });
+        
+        /**
+         * Flip the orb's position within its window so the tooltip
+         * can appear on the opposite side.
+         * - 'right': orb at bottom-right of window (tooltip goes left)
+         * - 'left':  orb at bottom-left of window (tooltip goes right)
+         */
+        function flipOrbToSide(side) {
+            const orbContainer = document.querySelector('.orb-container');
+            
+            // Remove all position classes
+            orbContainer.classList.remove('orb-bottom-right', 'orb-bottom-left', 'orb-top-right', 'orb-top-left');
+            
+            if (side === 'left') {
+                orbContainer.classList.add('orb-bottom-left');
+            } else {
+                orbContainer.classList.add('orb-bottom-right');
+            }
+            
+            // Tell main process to reposition window so orb stays visually anchored
+            if (window.orbAPI?.flipSide) {
+                window.orbAPI.flipSide(side);
+            }
+        }
         
         // Toggle listening on click (only if we didn't drag)
         orb.addEventListener('click', () => {
